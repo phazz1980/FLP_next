@@ -11,6 +11,8 @@ use crate::ParamValue;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Logic {
+    #[serde(rename = "var", default, skip_serializing_if = "Vec::is_empty")]
+    pub vars: Vec<crate::vars::Var>,
     #[serde(rename = "block", default, skip_serializing_if = "Vec::is_empty")]
     pub blocks: Vec<Block>,
     #[serde(rename = "link", default, skip_serializing_if = "Vec::is_empty")]

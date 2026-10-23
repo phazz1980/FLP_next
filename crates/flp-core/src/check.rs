@@ -91,7 +91,8 @@ impl Report {
 pub fn check(logic: &Logic, lib: &Library, layout: Option<&Layout>) -> Report {
     let mut report = Report::default();
     let defs = check_blocks(logic, lib, &mut report);
-    let edges = check_links(logic, &defs, &mut report);
+    let mut edges = check_links(logic, &defs, &mut report);
+    edges.extend(check_vars(logic, &defs, &mut report));
     check_unconnected_inputs(logic, &defs, &mut report);
     if let Some(layout) = layout {
         check_layout(logic, layout, &mut report);
@@ -124,7 +125,7 @@ fn check_blocks<'a>(
             defs.push(None);
             continue;
         }
-        let Some(lib_block) = lib.get(&block.kind) else {
+        let Some(lib_block) = lib.resolve(logic, block) else {
             report.block_error(id, format!("блок «{id}»: неизвестный тип «{}»", block.kind));
             defs.push(None);
             continue;
@@ -209,7 +210,9 @@ fn check_param(id: &str, p: &ParamDef, value: &ParamValue, report: &mut Report) 
 /// Valid link between two known blocks.
 #[derive(Debug, Clone, Copy)]
 struct Edge {
-    link: usize,
+    /// Index in [`Logic::links`]; `None` for the implicit order of variable writes
+    /// before reads.
+    link: Option<usize>,
     from: usize,
     to: usize,
 }
@@ -304,12 +307,105 @@ fn check_links(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) -
             continue;
         }
         edges.push(Edge {
-            link: li,
+            link: Some(li),
             from: fi,
             to: ti,
         });
     }
     edges
+}
+
+/// Checks variable declarations and the blocks that access them. Returns implicit
+/// edges "write before read" for the execution order.
+fn check_vars(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) -> Vec<Edge> {
+    let mut names = HashMap::new();
+    for var in &logic.vars {
+        let name = var.name.as_str();
+        if !is_valid_ident(name) {
+            report.push(
+                Severity::Error,
+                None,
+                None,
+                format!("недопустимое имя переменной «{name}»"),
+            );
+        }
+        if names.insert(name, ()).is_some() {
+            report.push(
+                Severity::Error,
+                None,
+                None,
+                format!("переменная «{name}» объявлена дважды"),
+            );
+        }
+        if var.init.as_ref().is_some_and(|v| !var.ty.accepts(v)) {
+            report.push(
+                Severity::Error,
+                None,
+                None,
+                format!(
+                    "начальное значение переменной «{name}» не подходит к типу {}",
+                    type_name(var.ty)
+                ),
+            );
+        }
+    }
+
+    let mut writers: HashMap<&str, usize> = HashMap::new();
+    let mut readers: Vec<(&str, usize)> = Vec::new();
+    for (i, block) in logic.blocks.iter().enumerate() {
+        if defs[i].is_none() {
+            continue;
+        }
+        let Some(name) = block.var_name() else {
+            continue;
+        };
+        if logic.var(name).is_none() {
+            report.block_error(
+                &block.id,
+                format!("блок «{}»: нет переменной «{name}»", block.id),
+            );
+            continue;
+        }
+        if block.kind == crate::vars::VAR_SET {
+            if let Some(&prev) = writers.get(name) {
+                report.block_error(
+                    &block.id,
+                    format!(
+                        "переменная «{name}» уже записывается блоком «{}»",
+                        logic.blocks[prev].id
+                    ),
+                );
+            } else {
+                writers.insert(name, i);
+            }
+        } else {
+            readers.push((name, i));
+        }
+    }
+    for var in &logic.vars {
+        let used = logic
+            .blocks
+            .iter()
+            .any(|b| b.var_name() == Some(var.name.as_str()));
+        if !used {
+            report.push(
+                Severity::Warning,
+                None,
+                None,
+                format!("переменная «{}» не используется", var.name),
+            );
+        }
+    }
+    readers
+        .into_iter()
+        .filter_map(|(name, to)| {
+            writers.get(name).map(|&from| Edge {
+                link: None,
+                from,
+                to,
+            })
+        })
+        .collect()
 }
 
 fn type_name(ty: SignalType) -> &'static str {
@@ -372,7 +468,7 @@ fn order_blocks(logic: &Logic, defs: &[Option<&BlockDef>], edges: &[Edge], repor
     let mut active = vec![Vec::new(); n];
     for e in edges {
         if in_loop(e) && has_memory(e.to) {
-            report.feedback.push(e.link);
+            report.feedback.extend(e.link);
         } else {
             active[e.from].push(e.to);
             indegree[e.to] += 1;
@@ -500,6 +596,7 @@ mod tests {
             lib.insert(LibraryBlock {
                 def,
                 dir: Default::default(),
+                inline_templates: Default::default(),
             });
         }
         lib

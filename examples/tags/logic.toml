@@ -1,0 +1,100 @@
+# Переменные: температура с одной платы управляет обогревом на другой, уставка — переменная.
+
+[[var]]
+name = "temp"
+type = "float"
+description = "Температура в помещении, °C"
+
+# Никто не записывает — работает как уставка.
+[[var]]
+name = "setpoint"
+type = "float"
+init = 22.0
+description = "Желаемая температура, °C"
+
+[[var]]
+name = "heating"
+type = "bool"
+description = "Нужен обогрев"
+
+# --- Плата 1: измерение ---
+
+[[block]]
+id = "adc"
+type = "analog_in"
+pin = 34
+
+[[block]]
+id = "to_c"
+type = "scale"
+out_max = 50.0
+
+[[block]]
+id = "temp_w"
+type = "var_set"
+var = "temp"
+
+# --- Плата 2: регулирование ---
+
+[[block]]
+id = "temp_r"
+type = "var_get"
+var = "temp"
+
+[[block]]
+id = "setpoint_r"
+type = "var_get"
+var = "setpoint"
+
+[[block]]
+id = "error"
+type = "sub"
+
+# Обогрев, если холоднее уставки больше чем на 1 °C.
+[[block]]
+id = "cold"
+type = "less"
+b = -1.0
+
+[[block]]
+id = "heating_w"
+type = "var_set"
+var = "heating"
+
+[[block]]
+id = "heating_r"
+type = "var_get"
+var = "heating"
+
+[[block]]
+id = "heater"
+type = "digital_out"
+pin = 26
+
+[[link]]
+from = "adc.out"
+to   = "to_c.in"
+
+[[link]]
+from = "to_c.out"
+to   = "temp_w.in"
+
+[[link]]
+from = "temp_r.out"
+to   = "error.a"
+
+[[link]]
+from = "setpoint_r.out"
+to   = "error.b"
+
+[[link]]
+from = "error.out"
+to   = "cold.a"
+
+[[link]]
+from = "cold.out"
+to   = "heating_w.in"
+
+[[link]]
+from = "heating_r.out"
+to   = "heater.in"

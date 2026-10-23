@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::fs;
+use std::path::PathBuf;
 
 use flp_core::library::ESP32_CPP_TEMPLATE;
 use flp_core::value::parse_duration_ms;
@@ -51,17 +51,22 @@ fn render_block(
     inst: &Instance,
 ) -> Result<Sections, GenError> {
     let kind = &inst.block.kind;
-    let path =
-        inst.lib
-            .template_path(ESP32_CPP_TEMPLATE)
-            .ok_or_else(|| GenError::MissingTemplate {
-                kind: kind.clone(),
-                file: ESP32_CPP_TEMPLATE,
-            })?;
-    let source = fs::read_to_string(&path).map_err(|source| GenError::Io {
-        path: path.clone(),
-        source,
-    })?;
+    // Built-in blocks have no folder; errors then point at the type name.
+    let path = inst
+        .lib
+        .template_path(ESP32_CPP_TEMPLATE)
+        .unwrap_or_else(|| PathBuf::from(format!("{kind}/{ESP32_CPP_TEMPLATE}")));
+    let source = inst
+        .lib
+        .template(ESP32_CPP_TEMPLATE)
+        .ok_or_else(|| GenError::MissingTemplate {
+            kind: kind.clone(),
+            file: ESP32_CPP_TEMPLATE,
+        })?
+        .map_err(|source| GenError::Io {
+            path: path.clone(),
+            source,
+        })?;
 
     let input: BTreeMap<&str, String> = inst
         .inputs
@@ -250,6 +255,24 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)]) -> String {
         out.push_str("\n// Выходы блоков\n");
         for s in &program.signals {
             let _ = writeln!(out, "{} {} = {};", cpp_type(s.ty), s.name, zero(s.ty));
+        }
+    }
+
+    let vars = &program.project.logic.vars;
+    if !vars.is_empty() {
+        out.push_str("\n// Переменные\n");
+        for v in vars {
+            let init = v
+                .init
+                .as_ref()
+                .map_or_else(|| zero(v.ty).to_owned(), |i| constant_literal(v.ty, i));
+            let _ = writeln!(
+                out,
+                "{} {} = {};",
+                cpp_type(v.ty),
+                flp_core::vars::storage_name(&v.name),
+                init
+            );
         }
     }
 

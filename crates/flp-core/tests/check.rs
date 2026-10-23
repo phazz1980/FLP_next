@@ -231,3 +231,111 @@ fn duration_min_is_checked_in_ms() {
     let src = "[[block]]\nid = \"g\"\ntype = \"generator\"\ntime_on = \"0ms\"\n";
     assert_single_error(src, "меньше допустимого 1");
 }
+
+const VARS: &str = r#"
+[[var]]
+name = "t"
+type = "float"
+
+[[var]]
+name = "on"
+type = "bool"
+init = true
+"#;
+
+#[test]
+fn variables_order_writes_before_reads() {
+    let src = format!(
+        "{VARS}\n[[block]]\nid = \"r\"\ntype = \"var_get\"\nvar = \"t\"\n\
+         [[block]]\nid = \"hot\"\ntype = \"greater\"\nb = 30.0\n\
+         [[block]]\nid = \"on_r\"\ntype = \"var_get\"\nvar = \"on\"\n\
+         [[block]]\nid = \"adc\"\ntype = \"analog_in\"\npin = 34\n\
+         [[block]]\nid = \"w\"\ntype = \"var_set\"\nvar = \"t\"\n\
+         [[link]]\nfrom = \"r.out\"\nto = \"hot.a\"\n\
+         [[link]]\nfrom = \"adc.out\"\nto = \"w.in\"\n"
+    );
+    let logic: Logic = toml::from_str(&src).unwrap();
+    let report = check(&logic, &library(), None);
+    assert!(!report.has_errors(), "{:#?}", report.diagnostics);
+    let pos = |id: &str| {
+        let i = logic.blocks.iter().position(|b| b.id == id).unwrap();
+        report.order.iter().position(|&o| o == i).unwrap()
+    };
+    assert!(pos("w") < pos("r"), "write must run before read");
+    assert!(report.diagnostics.is_empty(), "{:#?}", report.diagnostics);
+}
+
+#[test]
+fn variable_errors() {
+    assert_single_error(
+        "[[block]]\nid = \"r\"\ntype = \"var_get\"\nvar = \"nope\"\n",
+        "нет переменной «nope»",
+    );
+    let two_writers = format!(
+        "{VARS}\n[[block]]\nid = \"a\"\ntype = \"digital_in\"\npin = 1\n\
+         [[block]]\nid = \"w1\"\ntype = \"var_set\"\nvar = \"on\"\n\
+         [[block]]\nid = \"w2\"\ntype = \"var_set\"\nvar = \"on\"\n\
+         [[block]]\nid = \"r\"\ntype = \"var_get\"\nvar = \"t\"\n\
+         [[link]]\nfrom = \"a.out\"\nto = \"w1.in\"\n\
+         [[link]]\nfrom = \"a.out\"\nto = \"w2.in\"\n"
+    );
+    assert_single_error(&two_writers, "уже записывается блоком «w1»");
+    // A bool variable cannot be written from an int output.
+    let mismatch = format!(
+        "{VARS}\n[[block]]\nid = \"adc\"\ntype = \"analog_in\"\npin = 34\n\
+         [[block]]\nid = \"w\"\ntype = \"var_set\"\nvar = \"on\"\n\
+         [[block]]\nid = \"r\"\ntype = \"var_get\"\nvar = \"t\"\n\
+         [[link]]\nfrom = \"adc.out\"\nto = \"w.in\"\n"
+    );
+    assert_single_error(&mismatch, "не подходит ко входу bool");
+}
+
+#[test]
+fn unused_variable_is_warning() {
+    let report = check_src(VARS);
+    assert!(!report.has_errors());
+    assert_eq!(report.diagnostics.len(), 2, "{:#?}", report.diagnostics);
+}
+
+#[test]
+fn loop_through_variable_is_allowed() {
+    // n = n + 1 every scan: the read takes the previous value.
+    let src = r#"
+        [[var]]
+        name = "n"
+        type = "float"
+
+        [[block]]
+        id = "r"
+        type = "var_get"
+        var = "n"
+
+        [[block]]
+        id = "one"
+        type = "constant"
+        value = 1.0
+
+        [[block]]
+        id = "inc"
+        type = "add"
+
+        [[block]]
+        id = "w"
+        type = "var_set"
+        var = "n"
+
+        [[link]]
+        from = "r.out"
+        to = "inc.a"
+
+        [[link]]
+        from = "one.out"
+        to = "inc.b"
+
+        [[link]]
+        from = "inc.out"
+        to = "w.in"
+    "#;
+    let report = check_src(src);
+    assert!(!report.has_errors(), "{:#?}", report.diagnostics);
+}

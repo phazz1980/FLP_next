@@ -1,0 +1,48 @@
+# Координаты блоков для редактора.
+
+[block.adc]
+x = 40.0
+y = 40.0
+
+[block.to_c]
+x = 200.0
+y = 40.0
+
+[block.temp_w]
+x = 360.0
+y = 40.0
+
+[block.temp_r]
+sheet = 2
+x = 40.0
+y = 40.0
+
+[block.setpoint_r]
+sheet = 2
+x = 40.0
+y = 120.0
+
+[block.error]
+sheet = 2
+x = 200.0
+y = 60.0
+
+[block.cold]
+sheet = 2
+x = 360.0
+y = 60.0
+
+[block.heating_w]
+sheet = 2
+x = 520.0
+y = 60.0
+
+[block.heating_r]
+sheet = 2
+x = 40.0
+y = 220.0
+
+[block.heater]
+sheet = 2
+x = 200.0
+y = 220.0

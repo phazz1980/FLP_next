@@ -79,7 +79,10 @@ impl<'a> Program<'a> {
         if report.has_errors() {
             return Err(GenError::Schema(report.diagnostics));
         }
-        let lib_block = |b: &Block| lib.get(&b.kind).expect("type checked by flp_core::check");
+        let lib_block = |b: &Block| {
+            lib.resolve(logic, b)
+                .expect("type checked by flp_core::check")
+        };
 
         let mut signals = Vec::new();
         let mut by_port: HashMap<(&str, &str), usize> = HashMap::new();

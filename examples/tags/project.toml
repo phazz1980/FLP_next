@@ -1,0 +1,6 @@
+[project]
+name = "tags"
+description = "Переменные: температура с одной платы управляет обогревом на другой, уставка — переменная"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

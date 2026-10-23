@@ -206,9 +206,19 @@ impl BlockDef {
 pub struct LibraryBlock {
     pub def: BlockDef,
     pub dir: PathBuf,
+    /// Templates of built-in blocks, which have no folder: file name → source.
+    pub inline_templates: BTreeMap<&'static str, &'static str>,
 }
 
 impl LibraryBlock {
+    /// Template source: inline for built-in blocks, otherwise read from the folder.
+    pub fn template(&self, file: &str) -> Option<std::io::Result<String>> {
+        if let Some(src) = self.inline_templates.get(file) {
+            return Some(Ok((*src).to_owned()));
+        }
+        self.template_path(file).map(fs::read_to_string)
+    }
+
     /// Path to a template (e.g. [`ESP32_CPP_TEMPLATE`]) if the block has one.
     pub fn template_path(&self, file: &str) -> Option<PathBuf> {
         let path = self.dir.join(file);
@@ -228,14 +238,26 @@ impl LibraryBlock {
         Ok(Self {
             def,
             dir: dir.to_owned(),
+            inline_templates: BTreeMap::new(),
         })
     }
 }
 
 /// All known block types.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Library {
     blocks: BTreeMap<String, LibraryBlock>,
+    /// Variable access blocks, one per access kind and signal type (`var_get_float`).
+    builtins: BTreeMap<String, LibraryBlock>,
+}
+
+impl Default for Library {
+    fn default() -> Self {
+        Self {
+            blocks: BTreeMap::new(),
+            builtins: crate::vars::builtin_blocks(),
+        }
+    }
 }
 
 impl Library {
@@ -276,8 +298,19 @@ impl Library {
         self.blocks.insert(block.def.info.kind.clone(), block);
     }
 
+    /// Library block by type. Variable blocks (`var_get`, `var_set`) depend on the
+    /// variable they access; use [`Library::resolve`] for blocks of a schema.
     pub fn get(&self, kind: &str) -> Option<&LibraryBlock> {
         self.blocks.get(kind)
+    }
+
+    /// Definition of a schema block, including variable blocks, whose port type comes
+    /// from the variable (float while the variable is unknown).
+    pub fn resolve(&self, logic: &crate::Logic, block: &crate::Block) -> Option<&LibraryBlock> {
+        match crate::vars::builtin_kind(logic, block) {
+            Some(kind) => self.builtins.get(&kind),
+            None => self.get(&block.kind),
+        }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &LibraryBlock> {
