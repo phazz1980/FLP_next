@@ -1,6 +1,7 @@
 [block]
 type = "sub"
 name = "Вычитание"
+symbol = "a − b"
 group = "Числа"
 description = "Выход out = a − b."
 

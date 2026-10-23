@@ -1,6 +1,7 @@
 [block]
 type = "digital_out"
 name = "Цифровой выход"
+symbol = "DO"
 group = "Входы и выходы"
 description = "Выставляет логический уровень на выводе платы."
 

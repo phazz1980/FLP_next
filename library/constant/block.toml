@@ -1,6 +1,7 @@
 [block]
 type = "constant"
 name = "Константа"
+symbol = "CONST"
 group = "Числа"
 description = "Постоянное число на выходе."
 

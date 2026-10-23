@@ -89,6 +89,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
             let def = BlockDef {
                 info: BlockInfo {
                     kind: kind.to_owned(),
+                    symbol: None,
                     name: if get {
                         "Чтение переменной"
                     } else {

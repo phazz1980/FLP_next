@@ -1,6 +1,7 @@
 [block]
 type = "scale"
 name = "Масштабирование"
+symbol = "SCALE"
 group = "Числа"
 description = "Линейно пересчитывает вход из диапазона in_min…in_max в диапазон out_min…out_max."
 

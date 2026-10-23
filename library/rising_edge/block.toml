@@ -1,6 +1,7 @@
 [block]
 type = "rising_edge"
 name = "Передний фронт"
+symbol = "↑"
 group = "Логика"
 description = "Выдаёт true на один цикл программы при переходе false → true входа."
 memory = true

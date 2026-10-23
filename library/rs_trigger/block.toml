@@ -1,6 +1,7 @@
 [block]
 type = "rs_trigger"
 name = "RS-триггер"
+symbol = "RS"
 group = "Логика"
 description = "Запоминает состояние: вход s включает выход, вход r выключает. Сброс важнее установки."
 memory = true

@@ -16,6 +16,7 @@ type = "timer_on"          # совпадает с именем папки
 name = "Задержка включения" # как показывать в редакторе
 group = "Время"            # папка в библиотеке редактора
 description = "..."
+symbol = "TON"             # короткое обозначение на блоке (по умолчанию — name)
 memory = true              # блок хранит состояние между циклами
 includes = ["DHT.h"]       # заголовки для #include в скетче
 libraries = ["DHT sensor library"]  # библиотеки arduino-cli, `flp build` ставит недостающие

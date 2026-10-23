@@ -1,6 +1,7 @@
 [block]
 type = "dht22"
 name = "DHT22"
+symbol = "DHT22"
 group = "Датчики"
 description = "Датчик температуры и влажности DHT22 (AM2302)."
 memory = true

@@ -1,6 +1,7 @@
 [block]
 type = "xor"
 name = "Исключающее ИЛИ"
+symbol = "=1"
 group = "Логика"
 description = "Выход true, если входы различаются."
 

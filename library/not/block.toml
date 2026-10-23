@@ -1,6 +1,7 @@
 [block]
 type = "not"
 name = "НЕ"
+symbol = "NOT"
 group = "Логика"
 description = "Инвертирует вход: true становится false и наоборот."
 

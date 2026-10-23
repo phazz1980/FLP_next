@@ -1,6 +1,7 @@
 [block]
 type = "timer_off"
 name = "Задержка выключения"
+symbol = "TOF"
 group = "Время"
 description = "Таймер TOF: выход включается сразу вместе со входом и выключается через заданное время после того, как вход стал false."
 memory = true

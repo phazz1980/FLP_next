@@ -1,6 +1,7 @@
 [block]
 type = "digital_in"
 name = "Цифровой вход"
+symbol = "DI"
 group = "Входы и выходы"
 description = "Читает логический уровень на выводе платы."
 

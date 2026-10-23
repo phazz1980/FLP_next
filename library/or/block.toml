@@ -1,6 +1,7 @@
 [block]
 type = "or"
 name = "ИЛИ"
+symbol = "≥1"
 group = "Логика"
 description = "Выход true, если хотя бы один вход true."
 

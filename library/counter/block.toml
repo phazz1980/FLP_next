@@ -1,6 +1,7 @@
 [block]
 type = "counter"
 name = "Счётчик"
+symbol = "CTUD"
 group = "Счёт и память"
 description = "Считает передние фронты: up прибавляет 1, down вычитает 1, reset обнуляет."
 memory = true

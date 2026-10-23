@@ -1,6 +1,7 @@
 [block]
 type = "pulse"
 name = "Импульс"
+symbol = "TP"
 group = "Время"
 description = "Таймер TP: по переднему фронту входа выдаёт импульс заданной длительности."
 memory = true

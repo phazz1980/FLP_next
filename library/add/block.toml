@@ -1,6 +1,7 @@
 [block]
 type = "add"
 name = "Сложение"
+symbol = "a + b"
 group = "Числа"
 description = "Выход out = a + b."
 

@@ -1,6 +1,7 @@
 [block]
 type = "and"
 name = "И"
+symbol = "&"
 group = "Логика"
 description = "Выход true, только если оба входа true."
 

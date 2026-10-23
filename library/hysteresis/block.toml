@@ -1,6 +1,7 @@
 [block]
 type = "hysteresis"
 name = "Гистерезис"
+symbol = "HYST"
 group = "Числа"
 description = "Двухпозиционный регулятор: включает выход на пороге on и выключает на пороге off."
 memory = true

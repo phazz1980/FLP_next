@@ -90,6 +90,9 @@ pub struct BlockInfo {
     pub kind: String,
     /// Display name in Russian.
     pub name: String,
+    /// Short label drawn on the block: `TON`, `a + b`, `&`. Defaults to the name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
     /// Library folder in the editor ("Входы и выходы", "Время", ...).
     pub group: String,
     #[serde(default)]

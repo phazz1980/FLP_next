@@ -1,6 +1,7 @@
 [block]
 type = "flash_store"
 name = "Сохранение во флеш"
+symbol = "FLASH"
 group = "Счёт и память"
 description = "Сохраняет число во флеш-память по фронту save и восстанавливает его после перезагрузки."
 memory = true

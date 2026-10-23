@@ -1,6 +1,7 @@
 [block]
 type = "ds18b20"
 name = "DS18B20"
+symbol = "DS18B20"
 group = "Датчики"
 description = "Цифровой датчик температуры DS18B20 на шине 1-Wire."
 memory = true

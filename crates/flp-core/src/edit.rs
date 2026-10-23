@@ -6,6 +6,7 @@
 //! loops) are left to [`crate::check`].
 
 use crate::ident::is_valid_ident;
+use crate::vars::{Var, VAR_GET, VAR_PARAM, VAR_SET};
 use crate::{Block, BlockPos, Library, Link, ParamValue, PortRef, Project};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -28,6 +29,14 @@ pub enum EditError {
     NoParam { block: String, param: String },
     #[error("значение не подходит к параметру «{0}»")]
     BadValue(String),
+    #[error("нет переменной «{0}»")]
+    NoVar(String),
+    #[error("недопустимое имя переменной «{0}»: только латиница, цифры и «_», первой — буква")]
+    InvalidVarName(String),
+    #[error("переменная «{0}» уже есть")]
+    DuplicateVar(String),
+    #[error("начальное значение не подходит к типу переменной «{0}»")]
+    BadInit(String),
 }
 
 impl Project {
@@ -52,6 +61,99 @@ impl Project {
         });
         self.layout.blocks.insert(id.clone(), pos);
         Ok(id)
+    }
+
+    /// Adds a block that reads (`write = false`) or writes a variable; the id is
+    /// derived from the variable name (`setpoint_r1`, `setpoint_w1`).
+    pub fn add_var_block(
+        &mut self,
+        var: &str,
+        write: bool,
+        pos: BlockPos,
+    ) -> Result<String, EditError> {
+        if self.logic.var(var).is_none() {
+            return Err(EditError::NoVar(var.to_owned()));
+        }
+        let (kind, suffix) = if write {
+            (VAR_SET, "w")
+        } else {
+            (VAR_GET, "r")
+        };
+        let id = (1..)
+            .map(|n| format!("{var}_{suffix}{n}"))
+            .find(|id| self.logic.block(id).is_none())
+            .expect("infinite range");
+        self.logic.blocks.push(Block {
+            id: id.clone(),
+            kind: kind.to_owned(),
+            params: [(VAR_PARAM.to_owned(), ParamValue::Text(var.to_owned()))].into(),
+        });
+        self.layout.blocks.insert(id.clone(), pos);
+        Ok(id)
+    }
+
+    /// Declares a new variable.
+    pub fn add_var(&mut self, var: Var) -> Result<(), EditError> {
+        self.validate_var(&var, None)?;
+        self.logic.vars.push(var);
+        Ok(())
+    }
+
+    /// Replaces a variable declaration (name, type, initial value, description).
+    /// Blocks using it follow a rename; links that no longer fit the new type stay
+    /// and are reported by the check.
+    pub fn update_var(&mut self, name: &str, var: Var) -> Result<(), EditError> {
+        let index = self.var_index(name)?;
+        self.validate_var(&var, Some(name))?;
+        if var.name != name {
+            for block in &mut self.logic.blocks {
+                if block.var_name() == Some(name) {
+                    block
+                        .params
+                        .insert(VAR_PARAM.to_owned(), ParamValue::Text(var.name.clone()));
+                }
+            }
+        }
+        self.logic.vars[index] = var;
+        Ok(())
+    }
+
+    /// Removes a variable together with the blocks that read or write it.
+    pub fn remove_var(&mut self, name: &str) -> Result<(), EditError> {
+        let index = self.var_index(name)?;
+        self.logic.vars.remove(index);
+        let users: Vec<String> = self
+            .logic
+            .blocks
+            .iter()
+            .filter(|b| b.var_name() == Some(name))
+            .map(|b| b.id.clone())
+            .collect();
+        for id in users {
+            self.remove_block(&id)?;
+        }
+        Ok(())
+    }
+
+    fn var_index(&self, name: &str) -> Result<usize, EditError> {
+        self.logic
+            .vars
+            .iter()
+            .position(|v| v.name == name)
+            .ok_or_else(|| EditError::NoVar(name.to_owned()))
+    }
+
+    fn validate_var(&self, var: &Var, old_name: Option<&str>) -> Result<(), EditError> {
+        if !is_valid_ident(&var.name) {
+            return Err(EditError::InvalidVarName(var.name.clone()));
+        }
+        if Some(var.name.as_str()) != old_name && self.logic.var(&var.name).is_some() {
+            return Err(EditError::DuplicateVar(var.name.clone()));
+        }
+        if var.init.as_ref().is_some_and(|i| !var.ty.accepts(i)) {
+            return Err(EditError::BadInit(var.name.clone()));
+        }
+        Ok(())
     }
 
     /// Removes a block with its links and position.
@@ -276,6 +378,40 @@ mod tests {
         assert!(p.rename_block("button", "1x").is_err());
         p.remove_block("button").unwrap();
         assert!(p.logic.links.is_empty());
+    }
+
+    #[test]
+    fn variables() {
+        use crate::SignalType;
+        let mut p = project();
+        let var = |name: &str| Var {
+            name: name.into(),
+            ty: SignalType::Float,
+            init: Some(ParamValue::Float(1.5)),
+            description: String::new(),
+        };
+        p.add_var(var("t")).unwrap();
+        assert_eq!(
+            p.add_var(var("t")),
+            Err(EditError::DuplicateVar("t".into()))
+        );
+        assert!(p.add_var(var("1t")).is_err());
+        let r = p.add_var_block("t", false, POS).unwrap();
+        let w = p.add_var_block("t", true, POS).unwrap();
+        assert_eq!((r.as_str(), w.as_str()), ("t_r1", "t_w1"));
+        assert!(p.add_var_block("nope", false, POS).is_err());
+
+        p.update_var("t", var("temp")).unwrap();
+        assert!(p.logic.blocks.iter().all(|b| b.var_name() == Some("temp")));
+        let mut bad = var("temp");
+        bad.ty = SignalType::Bool;
+        assert_eq!(
+            p.update_var("temp", bad),
+            Err(EditError::BadInit("temp".into()))
+        );
+
+        p.remove_var("temp").unwrap();
+        assert!(p.logic.vars.is_empty() && p.logic.blocks.is_empty());
     }
 
     #[test]

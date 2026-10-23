@@ -1,6 +1,7 @@
 [block]
 type = "less"
 name = "Меньше"
+symbol = "a < b"
 group = "Числа"
 description = "Сравнивает вход с порогом: выход true, если a < b."
 

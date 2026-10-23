@@ -1,6 +1,7 @@
 [block]
 type = "div"
 name = "Деление"
+symbol = "a ÷ b"
 group = "Числа"
 description = "Выход out = a ÷ b; при b = 0 выход 0."
 
