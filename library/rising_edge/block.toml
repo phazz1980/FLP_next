@@ -1,0 +1,15 @@
+[block]
+type = "rising_edge"
+name = "Передний фронт"
+group = "Логика"
+description = "Выдаёт true на один цикл программы при переходе false → true входа."
+memory = true
+
+[[input]]
+name = "in"
+type = "bool"
+
+[[output]]
+name = "out"
+type = "bool"
+description = "true ровно на один цикл после переходе false → true"

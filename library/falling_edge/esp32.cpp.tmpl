@@ -1,0 +1,5 @@
+// @global
+bool {{ id }}_prev = false;
+// @loop
+{{ output.out }} = !{{ input.in }} && {{ id }}_prev;
+{{ id }}_prev = {{ input.in }};

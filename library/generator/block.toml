@@ -1,0 +1,30 @@
+[block]
+type = "generator"
+name = "Генератор"
+group = "Время"
+description = "Мигает выходом: time_on включён, time_off выключен, пока разрешён входом en."
+memory = true
+
+[[input]]
+name = "en"
+type = "bool"
+default = true
+description = "Разрешение работы; если не подключён — генератор работает всегда"
+
+[[output]]
+name = "out"
+type = "bool"
+
+[[param]]
+name = "time_on"
+type = "duration"
+default = "500ms"
+min = 1
+description = "Время включённого состояния"
+
+[[param]]
+name = "time_off"
+type = "duration"
+default = "500ms"
+min = 1
+description = "Время выключенного состояния"

@@ -1,0 +1,17 @@
+[block]
+type = "xor"
+name = "Исключающее ИЛИ"
+group = "Логика"
+description = "Выход true, если входы различаются."
+
+[[input]]
+name = "a"
+type = "bool"
+
+[[input]]
+name = "b"
+type = "bool"
+
+[[output]]
+name = "out"
+type = "bool"

@@ -1,0 +1,41 @@
+# Координаты блоков для редактора.
+
+[block.a]
+x = 40.0
+y = 80.0
+
+[block.both]
+x = 220.0
+y = 80.0
+
+[block.led_and]
+x = 400.0
+y = 80.0
+
+[block.b]
+x = 40.0
+y = 200.0
+
+[block.any]
+x = 220.0
+y = 200.0
+
+[block.led_or]
+x = 400.0
+y = 200.0
+
+[block.differ]
+x = 40.0
+y = 320.0
+
+[block.led_xor]
+x = 220.0
+y = 320.0
+
+[block.not_a]
+x = 40.0
+y = 440.0
+
+[block.led_not]
+x = 220.0
+y = 440.0

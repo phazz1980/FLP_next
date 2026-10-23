@@ -1,0 +1,17 @@
+[block]
+type = "div"
+name = "Деление"
+group = "Числа"
+description = "Выход out = a ÷ b; при b = 0 выход 0."
+
+[[input]]
+name = "a"
+type = "float"
+
+[[input]]
+name = "b"
+type = "float"
+
+[[output]]
+name = "out"
+type = "float"

@@ -1,0 +1,9 @@
+// @loop
+{{ output.out }} = {{ param.out_min }} + ({{ input.in }} - {{ param.in_min }}) * ({{ param.out_max }} - {{ param.out_min }}) / ({{ param.in_max }} - {{ param.in_min }});
+{% if param.clamp %}
+{% if value.out_min <= value.out_max %}
+{{ output.out }} = constrain({{ output.out }}, {{ param.out_min }}, {{ param.out_max }});
+{% else %}
+{{ output.out }} = constrain({{ output.out }}, {{ param.out_max }}, {{ param.out_min }});
+{% endif %}
+{% endif %}

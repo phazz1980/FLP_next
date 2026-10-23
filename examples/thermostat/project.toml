@@ -1,0 +1,6 @@
+[project]
+name = "thermostat"
+description = "Термостат: средняя температура двух датчиков, обогрев с гистерезисом, вентилятор по ШИМ и мигающая авария"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

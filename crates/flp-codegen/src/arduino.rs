@@ -9,7 +9,7 @@ use flp_core::value::parse_duration_ms;
 use flp_core::{ParamKind, ParamValue, SignalType};
 use minijinja::{context, AutoEscape, Environment, UndefinedBehavior, Value};
 
-use crate::{Backend, GenError, Instance, Program};
+use crate::{Backend, GenError, Instance, Program, Source};
 
 /// Arduino C++ for ESP32, built by arduino-cli.
 pub struct ArduinoCpp;
@@ -67,11 +67,16 @@ fn render_block(
         .inputs
         .iter()
         .map(|(&port, i)| {
-            let signal = &program.signals[i.signal];
-            let expr = if signal.ty == i.ty {
-                signal.name.clone()
-            } else {
-                format!("({}){}", cpp_type(i.ty), signal.name)
+            let expr = match &i.source {
+                Source::Signal(s) => {
+                    let signal = &program.signals[*s];
+                    if signal.ty == i.ty {
+                        signal.name.clone()
+                    } else {
+                        format!("({}){}", cpp_type(i.ty), signal.name)
+                    }
+                }
+                Source::Default(value) => constant_literal(i.ty, value),
             };
             (port, expr)
         })
@@ -81,17 +86,16 @@ fn render_block(
         .iter()
         .map(|(&port, &s)| (port, program.signals[s].name.as_str()))
         .collect();
-    let param: BTreeMap<&str, Value> = inst
-        .params
-        .iter()
-        .map(|(&name, value)| {
-            let kind = inst.lib.def.param(name).expect("param from def").kind;
-            (name, param_value(kind, value))
-        })
-        .collect();
+    let mut param = BTreeMap::new();
+    let mut value = BTreeMap::new();
+    for (&name, v) in &inst.params {
+        let kind = inst.lib.def.param(name).expect("param from def").kind;
+        param.insert(name, param_value(kind, v));
+        value.insert(name, raw_value(kind, v));
+    }
 
     let name = format!("{kind}/{ESP32_CPP_TEMPLATE}");
-    let ctx = context! { id => inst.block.id, input, output, param };
+    let ctx = context! { id => inst.block.id, input, output, param, value };
     let text = env
         .render_named_str(&name, &source, ctx)
         .map_err(|source| GenError::Render {
@@ -114,6 +118,33 @@ fn param_value(kind: ParamKind, value: &ParamValue) -> Value {
             Value::from(ms.to_string())
         }
         (_, ParamValue::Text(s)) => Value::from(string_literal(s)),
+    }
+}
+
+/// Parameter as a plain value for comparisons in templates (`{% if value.on > value.off %}`);
+/// durations are milliseconds.
+fn raw_value(kind: ParamKind, value: &ParamValue) -> Value {
+    match value {
+        ParamValue::Bool(b) => Value::from(*b),
+        ParamValue::Int(v) => Value::from(*v),
+        ParamValue::Float(v) => Value::from(*v),
+        ParamValue::Text(s) if kind == ParamKind::Duration => {
+            Value::from(parse_duration_ms(s).expect("duration checked"))
+        }
+        ParamValue::Text(s) => Value::from(s.as_str()),
+    }
+}
+
+/// Literal for the default value of an unconnected input.
+fn constant_literal(ty: SignalType, value: &ParamValue) -> String {
+    match (ty, value) {
+        (_, ParamValue::Bool(b)) => b.to_string(),
+        (SignalType::Float, ParamValue::Int(v)) => float_literal(*v as f64),
+        (_, ParamValue::Int(v)) => v.to_string(),
+        (_, ParamValue::Float(v)) => float_literal(*v),
+        (_, ParamValue::Text(_)) => {
+            unreachable!("input defaults are checked against the port type")
+        }
     }
 }
 

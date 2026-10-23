@@ -1,0 +1,16 @@
+// @global
+bool {{ id }}_up_prev = false;
+bool {{ id }}_down_prev = false;
+// @loop
+if ({{ input.reset }}) {
+  {{ output.count }} = 0;
+} else {
+  if ({{ input.up }} && !{{ id }}_up_prev) {
+    {{ output.count }}++;
+  }
+  if ({{ input.down }} && !{{ id }}_down_prev) {
+    {{ output.count }}--;
+  }
+}
+{{ id }}_up_prev = {{ input.up }};
+{{ id }}_down_prev = {{ input.down }};

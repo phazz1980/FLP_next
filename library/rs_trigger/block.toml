@@ -1,0 +1,21 @@
+[block]
+type = "rs_trigger"
+name = "RS-триггер"
+group = "Логика"
+description = "Запоминает состояние: вход s включает выход, вход r выключает. Сброс важнее установки."
+memory = true
+
+[[input]]
+name = "s"
+type = "bool"
+description = "Установка: включить выход"
+
+[[input]]
+name = "r"
+type = "bool"
+description = "Сброс: выключить выход (приоритетнее s)"
+
+[[output]]
+name = "q"
+type = "bool"
+description = "Запомненное состояние"

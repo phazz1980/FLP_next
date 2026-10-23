@@ -1,0 +1,15 @@
+[block]
+type = "constant"
+name = "Константа"
+group = "Числа"
+description = "Постоянное число на выходе."
+
+[[output]]
+name = "out"
+type = "float"
+
+[[param]]
+name = "value"
+type = "float"
+default = 0.0
+description = "Значение"

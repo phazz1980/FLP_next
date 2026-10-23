@@ -1,0 +1,6 @@
+[project]
+name = "logic_gates"
+description = "Две кнопки и четыре светодиода: И, ИЛИ, исключающее ИЛИ и НЕ"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

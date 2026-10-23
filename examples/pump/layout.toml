@@ -1,17 +1,21 @@
 # Координаты блоков для редактора.
 
-[block.pressure]
+[block.sensor]
 x = 40.0
 y = 80.0
 
-[block.low]
+[block.pressure]
 x = 220.0
 y = 80.0
 
-[block.delay]
+[block.low]
 x = 400.0
 y = 80.0
 
-[block.pump]
+[block.delay]
 x = 580.0
+y = 80.0
+
+[block.pump]
+x = 760.0
 y = 80.0

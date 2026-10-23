@@ -1,0 +1,69 @@
+# Координаты блоков для редактора.
+
+[block.adc1]
+x = 40.0
+y = 80.0
+
+[block.t1]
+x = 220.0
+y = 80.0
+
+[block.sum]
+x = 400.0
+y = 80.0
+
+[block.temp]
+x = 580.0
+y = 80.0
+
+[block.heat]
+x = 760.0
+y = 80.0
+
+[block.heater]
+x = 940.0
+y = 80.0
+
+[block.adc2]
+x = 40.0
+y = 200.0
+
+[block.t2]
+x = 220.0
+y = 200.0
+
+[block.two]
+x = 400.0
+y = 200.0
+
+[block.setpoint]
+x = 40.0
+y = 320.0
+
+[block.excess]
+x = 220.0
+y = 320.0
+
+[block.gain]
+x = 400.0
+y = 320.0
+
+[block.duty]
+x = 580.0
+y = 320.0
+
+[block.fan]
+x = 760.0
+y = 320.0
+
+[block.hot]
+x = 40.0
+y = 440.0
+
+[block.blink]
+x = 220.0
+y = 440.0
+
+[block.alarm]
+x = 400.0
+y = 440.0

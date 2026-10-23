@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 pub use arduino::ArduinoCpp;
 pub use error::GenError;
-pub use program::{Input, Instance, Program, Signal};
+pub use program::{Input, Instance, Program, Signal, Source};
 
 use flp_core::{Library, Project};
 

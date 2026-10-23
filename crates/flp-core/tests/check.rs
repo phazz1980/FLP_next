@@ -55,7 +55,7 @@ fn pump_example_is_valid() {
         .iter()
         .map(|&i| p.logic.blocks[i].id.as_str())
         .collect();
-    assert_eq!(order, ["pressure", "low", "delay", "pump"]);
+    assert_eq!(order, ["sensor", "pressure", "low", "delay", "pump"]);
 }
 
 #[test]
@@ -204,4 +204,30 @@ fn layout_with_unknown_block_is_warning() {
     assert!(!report.has_errors());
     assert_eq!(report.diagnostics.len(), 1);
     assert!(report.diagnostics[0].message.contains("«ghost»"));
+}
+
+#[test]
+fn optional_inputs_may_stay_unconnected() {
+    // generator.en defaults to true, counter.down and counter.reset to false.
+    let src = r#"
+        [[block]]
+        id = "blink"
+        type = "generator"
+
+        [[block]]
+        id = "n"
+        type = "counter"
+
+        [[link]]
+        from = "blink.out"
+        to = "n.up"
+    "#;
+    let report = check_src(src);
+    assert!(!report.has_errors(), "{:#?}", report.diagnostics);
+}
+
+#[test]
+fn duration_min_is_checked_in_ms() {
+    let src = "[[block]]\nid = \"g\"\ntype = \"generator\"\ntime_on = \"0ms\"\n";
+    assert_single_error(src, "меньше допустимого 1");
 }

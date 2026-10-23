@@ -1,10 +1,11 @@
 // Сгенерировано FLP_next из проекта «pump». Ручные правки будут перезаписаны.
-// Порядок выполнения: pressure → low → delay → pump
+// Порядок выполнения: sensor → pressure → low → delay → pump
 
 #include <Arduino.h>
 
 // Выходы блоков
-int32_t pressure_out = 0;
+int32_t sensor_out = 0;
+float pressure_out = 0.0f;
 bool low_out = false;
 bool delay_out = false;
 
@@ -18,11 +19,15 @@ void setup() {
 }
 
 void loop() {
-  // pressure: analog_in
-  pressure_out = analogRead(34);
+  // sensor: analog_in
+  sensor_out = analogRead(34);
+
+  // pressure: scale
+  pressure_out = 0.0f + ((float)sensor_out - 0.0f) * (10.0f - 0.0f) / (4095.0f - 0.0f);
+  pressure_out = constrain(pressure_out, 0.0f, 10.0f);
 
   // low: less
-  low_out = (float)pressure_out < 2.0f;
+  low_out = pressure_out < 2.0f;
 
   // delay: timer_on
   if (low_out) {

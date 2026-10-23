@@ -1,0 +1,6 @@
+[project]
+name = "start_stop"
+description = "Мотор с кнопками Пуск и Стоп, вентилятор с выбегом, звонок при остановке и счётчик пусков"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

@@ -1,0 +1,21 @@
+[block]
+type = "timer_off"
+name = "Задержка выключения"
+group = "Время"
+description = "Таймер TOF: выход включается сразу вместе со входом и выключается через заданное время после того, как вход стал false."
+memory = true
+
+[[input]]
+name = "in"
+type = "bool"
+
+[[output]]
+name = "out"
+type = "bool"
+description = "true, пока вход включён, и ещё time после его выключения"
+
+[[param]]
+name = "time"
+type = "duration"
+default = "1s"
+description = "Время задержки: 500ms, 5s, 2m, 1h"

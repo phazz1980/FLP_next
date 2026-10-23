@@ -1,0 +1,41 @@
+[block]
+type = "scale"
+name = "Масштабирование"
+group = "Числа"
+description = "Линейно пересчитывает вход из диапазона in_min…in_max в диапазон out_min…out_max."
+
+[[input]]
+name = "in"
+type = "float"
+
+[[output]]
+name = "out"
+type = "float"
+
+[[param]]
+name = "in_min"
+type = "float"
+default = 0.0
+description = "Вход, соответствующий out_min"
+
+[[param]]
+name = "in_max"
+type = "float"
+default = 4095.0
+description = "Вход, соответствующий out_max (не равен in_min)"
+
+[[param]]
+name = "out_min"
+type = "float"
+default = 0.0
+
+[[param]]
+name = "out_max"
+type = "float"
+default = 100.0
+
+[[param]]
+name = "clamp"
+type = "bool"
+default = true
+description = "Ограничить выход диапазоном out_min…out_max"

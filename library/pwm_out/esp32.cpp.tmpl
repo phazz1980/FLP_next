@@ -1,0 +1,2 @@
+// @loop
+analogWrite({{ param.pin }}, (int)(constrain({{ input.in }}, 0.0f, 100.0f) * 2.55f + 0.5f));

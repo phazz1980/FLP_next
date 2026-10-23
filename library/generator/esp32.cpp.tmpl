@@ -1,0 +1,10 @@
+// @global
+unsigned long {{ id }}_start = 0;
+// @loop
+if ({{ input.en }}) {
+  unsigned long phase = (millis() - {{ id }}_start) % ({{ value.time_on + value.time_off }}UL);
+  {{ output.out }} = phase < {{ param.time_on }}UL;
+} else {
+  {{ id }}_start = millis();
+  {{ output.out }} = false;
+}

@@ -1,0 +1,14 @@
+// @loop
+{% if value.on >= value.off %}
+if ({{ input.in }} >= {{ param.on }}) {
+  {{ output.out }} = true;
+} else if ({{ input.in }} <= {{ param.off }}) {
+  {{ output.out }} = false;
+}
+{% else %}
+if ({{ input.in }} <= {{ param.on }}) {
+  {{ output.out }} = true;
+} else if ({{ input.in }} >= {{ param.off }}) {
+  {{ output.out }} = false;
+}
+{% endif %}

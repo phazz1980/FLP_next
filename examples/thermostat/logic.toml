@@ -1,0 +1,154 @@
+# Термостат: средняя температура двух датчиков, обогрев с гистерезисом, вентилятор по ШИМ и мигающая авария
+
+# Аналоговые датчики 0…50 °C на АЦП1.
+
+[[block]]
+id = "adc1"
+type = "analog_in"
+pin = 34
+
+[[block]]
+id = "adc2"
+type = "analog_in"
+pin = 35
+
+[[block]]
+id = "t1"
+type = "scale"
+out_max = 50.0
+
+[[block]]
+id = "t2"
+type = "scale"
+out_max = 50.0
+
+[[block]]
+id = "sum"
+type = "add"
+
+[[block]]
+id = "two"
+type = "constant"
+value = 2.0
+
+[[block]]
+id = "temp"
+type = "div"
+
+[[block]]
+id = "heat"
+type = "hysteresis"
+on = 18.0
+off = 21.0
+
+[[block]]
+id = "heater"
+type = "digital_out"
+pin = 26
+
+# Вентилятор: 10 % на каждый градус выше 22 °C.
+
+[[block]]
+id = "setpoint"
+type = "constant"
+value = 22.0
+
+[[block]]
+id = "excess"
+type = "sub"
+
+[[block]]
+id = "gain"
+type = "constant"
+value = 10.0
+
+[[block]]
+id = "duty"
+type = "mul"
+
+[[block]]
+id = "fan"
+type = "pwm_out"
+pin = 25
+
+# Авария выше 30 °C: светодиод мигает.
+
+[[block]]
+id = "hot"
+type = "greater"
+b = 30.0
+
+[[block]]
+id = "blink"
+type = "generator"
+time_on = "200ms"
+time_off = "300ms"
+
+[[block]]
+id = "alarm"
+type = "digital_out"
+pin = 27
+
+[[link]]
+from = "adc1.out"
+to   = "t1.in"
+
+[[link]]
+from = "adc2.out"
+to   = "t2.in"
+
+[[link]]
+from = "t1.out"
+to   = "sum.a"
+
+[[link]]
+from = "t2.out"
+to   = "sum.b"
+
+[[link]]
+from = "sum.out"
+to   = "temp.a"
+
+[[link]]
+from = "two.out"
+to   = "temp.b"
+
+[[link]]
+from = "temp.out"
+to   = "heat.in"
+
+[[link]]
+from = "heat.out"
+to   = "heater.in"
+
+[[link]]
+from = "temp.out"
+to   = "excess.a"
+
+[[link]]
+from = "setpoint.out"
+to   = "excess.b"
+
+[[link]]
+from = "excess.out"
+to   = "duty.a"
+
+[[link]]
+from = "gain.out"
+to   = "duty.b"
+
+[[link]]
+from = "duty.out"
+to   = "fan.in"
+
+[[link]]
+from = "temp.out"
+to   = "hot.a"
+
+[[link]]
+from = "hot.out"
+to   = "blink.en"
+
+[[link]]
+from = "blink.out"
+to   = "alarm.in"

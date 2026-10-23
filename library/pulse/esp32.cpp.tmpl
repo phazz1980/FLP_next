@@ -1,0 +1,14 @@
+// @global
+bool {{ id }}_prev = false;
+bool {{ id }}_active = false;
+unsigned long {{ id }}_start = 0;
+// @loop
+if ({{ input.in }} && !{{ id }}_prev && !{{ id }}_active) {
+  {{ id }}_active = true;
+  {{ id }}_start = millis();
+}
+{{ id }}_prev = {{ input.in }};
+if ({{ id }}_active && millis() - {{ id }}_start >= {{ param.time }}UL) {
+  {{ id }}_active = false;
+}
+{{ output.out }} = {{ id }}_active;

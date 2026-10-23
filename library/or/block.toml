@@ -1,0 +1,17 @@
+[block]
+type = "or"
+name = "ИЛИ"
+group = "Логика"
+description = "Выход true, если хотя бы один вход true."
+
+[[input]]
+name = "a"
+type = "bool"
+
+[[input]]
+name = "b"
+type = "bool"
+
+[[output]]
+name = "out"
+type = "bool"

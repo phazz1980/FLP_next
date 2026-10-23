@@ -14,13 +14,13 @@ fn load_pump_example() {
     let p = Project::load(repo_path("examples/pump")).unwrap();
     assert_eq!(p.config.project.name, "pump");
     assert_eq!(p.config.board.fqbn, "esp32:esp32:esp32");
-    assert_eq!(p.logic.blocks.len(), 4);
-    assert_eq!(p.logic.links.len(), 3);
+    assert_eq!(p.logic.blocks.len(), 5);
+    assert_eq!(p.logic.links.len(), 4);
     assert_eq!(
         p.logic.block("low").unwrap().params["b"],
         ParamValue::Float(2.0)
     );
-    assert_eq!(p.logic.links[0].from, PortRef::new("pressure", "out"));
+    assert_eq!(p.logic.links[0].from, PortRef::new("sensor", "out"));
     assert_eq!(p.layout.blocks["pump"].sheet, 1);
 }
 

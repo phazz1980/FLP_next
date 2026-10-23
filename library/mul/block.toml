@@ -1,0 +1,17 @@
+[block]
+type = "mul"
+name = "Умножение"
+group = "Числа"
+description = "Выход out = a × b."
+
+[[input]]
+name = "a"
+type = "float"
+
+[[input]]
+name = "b"
+type = "float"
+
+[[output]]
+name = "out"
+type = "float"

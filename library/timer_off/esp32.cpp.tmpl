@@ -1,0 +1,14 @@
+// @global
+bool {{ id }}_on = false;
+unsigned long {{ id }}_off_at = 0;
+// @loop
+if ({{ input.in }}) {
+  {{ id }}_on = true;
+  {{ output.out }} = true;
+} else {
+  if ({{ id }}_on) {
+    {{ id }}_on = false;
+    {{ id }}_off_at = millis();
+  }
+  {{ output.out }} = {{ output.out }} && millis() - {{ id }}_off_at < {{ param.time }}UL;
+}

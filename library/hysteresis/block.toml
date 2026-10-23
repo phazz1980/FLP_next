@@ -1,0 +1,24 @@
+[block]
+type = "hysteresis"
+name = "Гистерезис"
+group = "Числа"
+description = "Двухпозиционный регулятор: включает выход на пороге on и выключает на пороге off."
+memory = true
+
+[[input]]
+name = "in"
+type = "float"
+
+[[output]]
+name = "out"
+type = "bool"
+
+[[param]]
+name = "on"
+type = "float"
+description = "Порог включения"
+
+[[param]]
+name = "off"
+type = "float"
+description = "Порог выключения"

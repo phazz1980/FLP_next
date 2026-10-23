@@ -1,0 +1,28 @@
+[block]
+type = "counter"
+name = "Счётчик"
+group = "Счёт и память"
+description = "Считает передние фронты: up прибавляет 1, down вычитает 1, reset обнуляет."
+memory = true
+
+[[input]]
+name = "up"
+type = "bool"
+default = false
+description = "Счёт вверх по переходу false → true"
+
+[[input]]
+name = "down"
+type = "bool"
+default = false
+description = "Счёт вниз по переходу false → true"
+
+[[input]]
+name = "reset"
+type = "bool"
+default = false
+description = "Пока true — счётчик равен 0"
+
+[[output]]
+name = "count"
+type = "int"

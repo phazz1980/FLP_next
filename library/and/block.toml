@@ -1,0 +1,17 @@
+[block]
+type = "and"
+name = "И"
+group = "Логика"
+description = "Выход true, только если оба входа true."
+
+[[input]]
+name = "a"
+type = "bool"
+
+[[input]]
+name = "b"
+type = "bool"
+
+[[output]]
+name = "out"
+type = "bool"

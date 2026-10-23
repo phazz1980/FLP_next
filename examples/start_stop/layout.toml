@@ -1,0 +1,45 @@
+# Координаты блоков для редактора.
+
+[block.start]
+x = 40.0
+y = 80.0
+
+[block.run]
+x = 220.0
+y = 80.0
+
+[block.motor]
+x = 400.0
+y = 80.0
+
+[block.stop]
+x = 40.0
+y = 200.0
+
+[block.fan_delay]
+x = 220.0
+y = 200.0
+
+[block.fan]
+x = 400.0
+y = 200.0
+
+[block.stopped]
+x = 40.0
+y = 320.0
+
+[block.bell]
+x = 220.0
+y = 320.0
+
+[block.buzzer]
+x = 400.0
+y = 320.0
+
+[block.started]
+x = 40.0
+y = 440.0
+
+[block.starts]
+x = 220.0
+y = 440.0

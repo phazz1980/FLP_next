@@ -323,7 +323,7 @@ fn type_name(ty: SignalType) -> &'static str {
 fn check_unconnected_inputs(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) {
     for (bi, block) in logic.blocks.iter().enumerate() {
         let Some(def) = defs[bi] else { continue };
-        for input in &def.inputs {
+        for input in def.inputs.iter().filter(|i| i.default.is_none()) {
             // Any link counts: an invalid one was already reported, don't pile up.
             let fed = logic
                 .links

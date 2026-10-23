@@ -1,0 +1,97 @@
+# Две кнопки и четыре светодиода: И, ИЛИ, исключающее ИЛИ и НЕ
+
+# Кнопки замыкают выводы на землю.
+
+[[block]]
+id = "a"
+type = "digital_in"
+pin = 12
+pullup = true
+inverted = true
+
+[[block]]
+id = "b"
+type = "digital_in"
+pin = 14
+pullup = true
+inverted = true
+
+[[block]]
+id = "both"
+type = "and"
+
+[[block]]
+id = "any"
+type = "or"
+
+[[block]]
+id = "differ"
+type = "xor"
+
+[[block]]
+id = "not_a"
+type = "not"
+
+[[block]]
+id = "led_and"
+type = "digital_out"
+pin = 25
+
+[[block]]
+id = "led_or"
+type = "digital_out"
+pin = 26
+
+[[block]]
+id = "led_xor"
+type = "digital_out"
+pin = 27
+
+[[block]]
+id = "led_not"
+type = "digital_out"
+pin = 33
+
+[[link]]
+from = "a.out"
+to   = "both.a"
+
+[[link]]
+from = "b.out"
+to   = "both.b"
+
+[[link]]
+from = "a.out"
+to   = "any.a"
+
+[[link]]
+from = "b.out"
+to   = "any.b"
+
+[[link]]
+from = "a.out"
+to   = "differ.a"
+
+[[link]]
+from = "b.out"
+to   = "differ.b"
+
+[[link]]
+from = "a.out"
+to   = "not_a.in"
+
+[[link]]
+from = "both.out"
+to   = "led_and.in"
+
+[[link]]
+from = "any.out"
+to   = "led_or.in"
+
+[[link]]
+from = "differ.out"
+to   = "led_xor.in"
+
+[[link]]
+from = "not_a.out"
+to   = "led_not.in"

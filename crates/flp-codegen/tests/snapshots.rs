@@ -104,10 +104,7 @@ fn defaults_are_applied() {
         b.params.remove("b");
     }
     let code = generate(&project, &library(), &ArduinoCpp).unwrap();
-    assert!(
-        code.contains("low_out = (float)pressure_out < 0.0f;"),
-        "{code}"
-    );
+    assert!(code.contains("low_out = pressure_out < 0.0f;"), "{code}");
     assert!(
         code.contains("digitalWrite(26, (delay_out) ? HIGH : LOW);"),
         "{code}"

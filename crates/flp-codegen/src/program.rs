@@ -28,7 +28,7 @@ pub struct Signal {
 pub struct Instance<'a> {
     pub block: &'a Block,
     pub lib: &'a LibraryBlock,
-    /// Input port → source.
+    /// Every input port → its source (a link or the port default).
     pub inputs: BTreeMap<&'a str, Input>,
     /// Output port → index in [`Program::signals`].
     pub outputs: BTreeMap<&'a str, usize>,
@@ -36,12 +36,19 @@ pub struct Instance<'a> {
     pub params: BTreeMap<&'a str, ParamValue>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Input {
-    /// Index in [`Program::signals`].
-    pub signal: usize,
+    pub source: Source,
     /// Type of the input port (may differ from the signal type by `int` → `float`).
     pub ty: SignalType,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Source {
+    /// Index in [`Program::signals`].
+    Signal(usize),
+    /// Default value of an unconnected input.
+    Default(ParamValue),
 }
 
 impl<'a> Program<'a> {
@@ -76,13 +83,22 @@ impl<'a> Program<'a> {
             let lib = lib_block(block);
             let def = &lib.def;
             let mut inputs = BTreeMap::new();
-            for link in logic.links.iter().filter(|l| l.to.block == block.id) {
-                let port = def.input(&link.to.port).expect("port checked");
-                let signal = by_port[&(link.from.block.as_str(), link.from.port.as_str())];
+            for port in &def.inputs {
+                let link = logic
+                    .links
+                    .iter()
+                    .find(|l| l.to.block == block.id && l.to.port == port.name);
+                let source = match (link, &port.default) {
+                    (Some(l), _) => {
+                        Source::Signal(by_port[&(l.from.block.as_str(), l.from.port.as_str())])
+                    }
+                    (None, Some(value)) => Source::Default(value.clone()),
+                    (None, None) => unreachable!("unconnected inputs checked"),
+                };
                 inputs.insert(
                     port.name.as_str(),
                     Input {
-                        signal,
+                        source,
                         ty: port.ty,
                     },
                 );

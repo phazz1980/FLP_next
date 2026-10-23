@@ -30,6 +30,16 @@ impl SignalType {
     pub fn can_feed(self, to: SignalType) -> bool {
         self == to || (self == SignalType::Int && to == SignalType::Float)
     }
+
+    /// Whether a constant may stand for a signal of this type.
+    pub fn accepts(self, value: &ParamValue) -> bool {
+        matches!(
+            (self, value),
+            (SignalType::Bool, ParamValue::Bool(_))
+                | (SignalType::Int, ParamValue::Int(_))
+                | (SignalType::Float, ParamValue::Float(_) | ParamValue::Int(_))
+        )
+    }
 }
 
 /// Kind of a block parameter; defines how its value is checked and rendered into code.
@@ -94,6 +104,10 @@ pub struct PortDef {
     pub name: String,
     #[serde(rename = "type")]
     pub ty: SignalType,
+    /// Value of an unconnected input. Only inputs may have it; without it
+    /// the input must be connected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<ParamValue>,
     #[serde(default)]
     pub description: String,
 }
@@ -151,6 +165,20 @@ impl BlockDef {
             if !names.insert(name.as_str()) {
                 return Err(format!("имя «{name}» встречается дважды"));
             }
+        }
+        for p in &self.inputs {
+            if p.default.as_ref().is_some_and(|d| !p.ty.accepts(d)) {
+                return Err(format!(
+                    "значение по умолчанию входа «{}» не подходит к его типу",
+                    p.name
+                ));
+            }
+        }
+        if let Some(p) = self.outputs.iter().find(|p| p.default.is_some()) {
+            return Err(format!(
+                "у выхода «{}» не может быть значения по умолчанию",
+                p.name
+            ));
         }
         for p in &self.params {
             if let Some(default) = &p.default {
@@ -301,5 +329,22 @@ mod tests {
             "{HEADER}[[param]]\nname = \"id\"\ntype = \"int\"\n"
         ));
         assert!(reserved.validate("x").is_err());
+    }
+
+    #[test]
+    fn port_defaults() {
+        let ok = def(&format!(
+            "{HEADER}[[input]]\nname = \"en\"\ntype = \"bool\"\ndefault = true\n\
+             [[input]]\nname = \"k\"\ntype = \"float\"\ndefault = 2\n"
+        ));
+        assert_eq!(ok.validate("x"), Ok(()));
+        let wrong_type = def(&format!(
+            "{HEADER}[[input]]\nname = \"en\"\ntype = \"bool\"\ndefault = 1\n"
+        ));
+        assert!(wrong_type.validate("x").is_err());
+        let on_output = def(&format!(
+            "{HEADER}[[output]]\nname = \"q\"\ntype = \"bool\"\ndefault = false\n"
+        ));
+        assert!(on_output.validate("x").is_err());
     }
 }

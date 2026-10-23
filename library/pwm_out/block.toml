@@ -1,0 +1,15 @@
+[block]
+type = "pwm_out"
+name = "ШИМ-выход"
+group = "Входы и выходы"
+description = "Выдаёт ШИМ на вывод: 0 % — всегда выключен, 100 % — всегда включён."
+
+[[input]]
+name = "in"
+type = "float"
+description = "Заполнение, % (0…100; значения вне диапазона ограничиваются)"
+
+[[param]]
+name = "pin"
+type = "pin"
+description = "Номер вывода GPIO"

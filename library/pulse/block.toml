@@ -1,0 +1,22 @@
+[block]
+type = "pulse"
+name = "Импульс"
+group = "Время"
+description = "Таймер TP: по переднему фронту входа выдаёт импульс заданной длительности."
+memory = true
+
+[[input]]
+name = "in"
+type = "bool"
+description = "Запуск по переходу false → true"
+
+[[output]]
+name = "out"
+type = "bool"
+description = "true на время time после запуска"
+
+[[param]]
+name = "time"
+type = "duration"
+default = "1s"
+description = "Длительность импульса: 500ms, 5s, 2m, 1h"

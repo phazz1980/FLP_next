@@ -1,0 +1,102 @@
+# Мотор с кнопками Пуск и Стоп, вентилятор с выбегом, звонок при остановке и счётчик пусков
+
+[[block]]
+id = "start"
+type = "digital_in"
+pin = 12
+pullup = true
+inverted = true
+
+[[block]]
+id = "stop"
+type = "digital_in"
+pin = 14
+pullup = true
+inverted = true
+
+[[block]]
+id = "run"
+type = "rs_trigger"
+
+[[block]]
+id = "motor"
+type = "digital_out"
+pin = 26
+
+# Вентилятор работает ещё 30 секунд после остановки мотора.
+
+[[block]]
+id = "fan_delay"
+type = "timer_off"
+time = "30s"
+
+[[block]]
+id = "fan"
+type = "digital_out"
+pin = 25
+
+# Звонок на 2 секунды при остановке.
+
+[[block]]
+id = "stopped"
+type = "falling_edge"
+
+[[block]]
+id = "bell"
+type = "pulse"
+time = "2s"
+
+[[block]]
+id = "buzzer"
+type = "digital_out"
+pin = 27
+
+# Счётчик пусков (пока только для онлайн-отладки).
+
+[[block]]
+id = "started"
+type = "rising_edge"
+
+[[block]]
+id = "starts"
+type = "counter"
+
+[[link]]
+from = "start.out"
+to   = "run.s"
+
+[[link]]
+from = "stop.out"
+to   = "run.r"
+
+[[link]]
+from = "run.q"
+to   = "motor.in"
+
+[[link]]
+from = "run.q"
+to   = "fan_delay.in"
+
+[[link]]
+from = "fan_delay.out"
+to   = "fan.in"
+
+[[link]]
+from = "run.q"
+to   = "stopped.in"
+
+[[link]]
+from = "stopped.out"
+to   = "bell.in"
+
+[[link]]
+from = "bell.out"
+to   = "buzzer.in"
+
+[[link]]
+from = "run.q"
+to   = "started.in"
+
+[[link]]
+from = "started.out"
+to   = "starts.up"
