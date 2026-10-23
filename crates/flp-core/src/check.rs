@@ -1,0 +1,583 @@
+//! Schema check: block types, parameters, links, and execution order.
+//!
+//! The check never stops at the first problem: it collects all diagnostics so the
+//! editor and the AI can show everything at once.
+
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
+use std::fmt;
+
+use crate::ident::is_valid_ident;
+use crate::library::{BlockDef, ParamDef, ParamKind, PortDef, SignalType};
+use crate::value::parse_duration_ms;
+use crate::{Layout, Library, Link, Logic, ParamValue, PortRef};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Severity {
+    Error,
+    Warning,
+}
+
+/// One problem found in the schema. Messages are user-facing, in Russian.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Diagnostic {
+    pub severity: Severity,
+    /// Block the problem belongs to, for highlighting in the editor.
+    pub block: Option<String>,
+    /// Index of the link in [`Logic::links`].
+    pub link: Option<usize>,
+    pub message: String,
+}
+
+impl fmt::Display for Diagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let level = match self.severity {
+            Severity::Error => "ошибка",
+            Severity::Warning => "предупреждение",
+        };
+        write!(f, "{level}: {}", self.message)
+    }
+}
+
+/// Result of [`check`].
+#[derive(Debug, Clone, Default)]
+pub struct Report {
+    pub diagnostics: Vec<Diagnostic>,
+    /// Execution order as indices into [`Logic::blocks`]. Complete only without errors.
+    pub order: Vec<usize>,
+    /// Links that close a feedback loop through a block with memory: their value
+    /// comes from the previous scan. Indices into [`Logic::links`].
+    pub feedback: Vec<usize>,
+}
+
+impl Report {
+    pub fn has_errors(&self) -> bool {
+        self.diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error)
+    }
+
+    pub fn errors(&self) -> impl Iterator<Item = &Diagnostic> {
+        self.diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+    }
+
+    fn block_error(&mut self, block: &str, message: String) {
+        self.push(Severity::Error, Some(block), None, message);
+    }
+
+    fn link_error(&mut self, link: usize, message: String) {
+        self.push(Severity::Error, None, Some(link), message);
+    }
+
+    fn push(
+        &mut self,
+        severity: Severity,
+        block: Option<&str>,
+        link: Option<usize>,
+        message: String,
+    ) {
+        self.diagnostics.push(Diagnostic {
+            severity,
+            block: block.map(str::to_owned),
+            link,
+            message,
+        });
+    }
+}
+
+/// Checks the schema against the library. `layout` is optional and only produces warnings.
+pub fn check(logic: &Logic, lib: &Library, layout: Option<&Layout>) -> Report {
+    let mut report = Report::default();
+    let defs = check_blocks(logic, lib, &mut report);
+    let edges = check_links(logic, &defs, &mut report);
+    check_unconnected_inputs(logic, &defs, &mut report);
+    if let Some(layout) = layout {
+        check_layout(logic, layout, &mut report);
+    }
+    order_blocks(logic, &defs, &edges, &mut report);
+    report
+}
+
+/// Checks ids, types and parameters. Returns the definition of each block
+/// (`None` for unknown types and duplicates).
+fn check_blocks<'a>(
+    logic: &Logic,
+    lib: &'a Library,
+    report: &mut Report,
+) -> Vec<Option<&'a BlockDef>> {
+    let mut seen = HashMap::new();
+    let mut defs = Vec::with_capacity(logic.blocks.len());
+    for (i, block) in logic.blocks.iter().enumerate() {
+        let id = block.id.as_str();
+        if !is_valid_ident(id) {
+            report.block_error(
+                id,
+                format!(
+                    "недопустимый id блока «{id}»: только латиница, цифры и «_», первой — буква"
+                ),
+            );
+        }
+        if seen.insert(id, i).is_some() {
+            report.block_error(id, format!("id «{id}» встречается дважды"));
+            defs.push(None);
+            continue;
+        }
+        let Some(lib_block) = lib.get(&block.kind) else {
+            report.block_error(id, format!("блок «{id}»: неизвестный тип «{}»", block.kind));
+            defs.push(None);
+            continue;
+        };
+        let def = &lib_block.def;
+        for (name, value) in &block.params {
+            match def.param(name) {
+                Some(p) => check_param(id, p, value, report),
+                None => report.block_error(
+                    id,
+                    format!(
+                        "блок «{id}»: у типа «{}» нет параметра «{name}»",
+                        block.kind
+                    ),
+                ),
+            }
+        }
+        for p in &def.params {
+            if p.default.is_none() && !block.params.contains_key(&p.name) {
+                report.block_error(id, format!("блок «{id}»: не задан параметр «{}»", p.name));
+            }
+        }
+        defs.push(Some(def));
+    }
+    defs
+}
+
+fn check_param(id: &str, p: &ParamDef, value: &ParamValue, report: &mut Report) {
+    if !p.kind.accepts(value) {
+        let expected = match p.kind {
+            ParamKind::Bool => "true или false",
+            ParamKind::Int => "целое число",
+            ParamKind::Float => "число",
+            ParamKind::Text => "строка в кавычках",
+            ParamKind::Duration => "время вида \"500ms\", \"5s\", \"2m\", \"1h\"",
+            ParamKind::Pin => "номер вывода",
+        };
+        report.block_error(
+            id,
+            format!("блок «{id}»: параметр «{}» — ожидается {expected}", p.name),
+        );
+        return;
+    }
+    let number = match value {
+        ParamValue::Int(v) => Some(*v as f64),
+        ParamValue::Float(v) => Some(*v),
+        ParamValue::Text(s) if p.kind == ParamKind::Duration => {
+            parse_duration_ms(s).map(|ms| ms as f64)
+        }
+        _ => None,
+    };
+    let Some(number) = number else { return };
+    if p.kind == ParamKind::Pin && number < 0.0 {
+        report.block_error(
+            id,
+            format!(
+                "блок «{id}»: номер вывода «{}» не может быть отрицательным",
+                p.name
+            ),
+        );
+    }
+    if let Some(min) = p.min.filter(|&min| number < min) {
+        report.block_error(
+            id,
+            format!(
+                "блок «{id}»: параметр «{}» меньше допустимого {min}",
+                p.name
+            ),
+        );
+    }
+    if let Some(max) = p.max.filter(|&max| number > max) {
+        report.block_error(
+            id,
+            format!(
+                "блок «{id}»: параметр «{}» больше допустимого {max}",
+                p.name
+            ),
+        );
+    }
+}
+
+/// Valid link between two known blocks.
+#[derive(Debug, Clone, Copy)]
+struct Edge {
+    link: usize,
+    from: usize,
+    to: usize,
+}
+
+/// Resolves link ends to blocks and ports.
+struct Resolver<'a, 'l> {
+    logic: &'l Logic,
+    defs: &'l [Option<&'a BlockDef>],
+    /// Ids of blocks with a known definition.
+    index: HashMap<&'l str, usize>,
+}
+
+impl<'a> Resolver<'a, '_> {
+    /// Returns the block index and port of one link end, or reports why it is invalid.
+    fn end(
+        &self,
+        r: &PortRef,
+        is_input: bool,
+        link: usize,
+        what: &str,
+        report: &mut Report,
+    ) -> Option<(usize, &'a PortDef)> {
+        let Some(&bi) = self.index.get(r.block.as_str()) else {
+            // A known id with an unknown type was already reported with the block.
+            if self.logic.block(&r.block).is_none() {
+                report.link_error(link, format!("{what}: нет блока «{}»", r.block));
+            }
+            return None;
+        };
+        let def = self.defs[bi]?;
+        let (port, wrong) = if is_input {
+            (def.input(&r.port), def.output(&r.port))
+        } else {
+            (def.output(&r.port), def.input(&r.port))
+        };
+        let msg = match (port, wrong) {
+            (Some(p), _) => return Some((bi, p)),
+            (None, Some(_)) if is_input => {
+                format!("{what}: «{r}» — это выход, а связь должна вести во вход")
+            }
+            (None, Some(_)) => {
+                format!("{what}: «{r}» — это вход, а связь должна начинаться с выхода")
+            }
+            (None, None) => format!(
+                "{what}: у блока «{}» ({}) нет порта «{}»",
+                r.block, def.info.kind, r.port
+            ),
+        };
+        report.link_error(link, msg);
+        None
+    }
+}
+
+/// Checks link ends, directions, types and duplicate sources. Returns valid edges.
+fn check_links(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) -> Vec<Edge> {
+    let index = logic
+        .blocks
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| defs[*i].is_some())
+        .map(|(i, b)| (b.id.as_str(), i))
+        .collect();
+    let resolver = Resolver { logic, defs, index };
+    let mut sources: HashMap<(usize, &str), usize> = HashMap::new();
+    let mut edges = Vec::new();
+
+    for (li, link) in logic.links.iter().enumerate() {
+        let Link { from, to } = link;
+        let what = format!("связь {from} → {to}");
+        let src = resolver.end(from, false, li, &what, report);
+        let dst = resolver.end(to, true, li, &what, report);
+        let (Some((fi, fp)), Some((ti, tp))) = (src, dst) else {
+            continue;
+        };
+        if !fp.ty.can_feed(tp.ty) {
+            report.link_error(
+                li,
+                format!(
+                    "{what}: тип выхода {} не подходит ко входу {}",
+                    type_name(fp.ty),
+                    type_name(tp.ty)
+                ),
+            );
+            continue;
+        }
+        if let Some(prev) = sources.insert((ti, to.port.as_str()), li) {
+            let prev_from = &logic.links[prev].from;
+            report.link_error(
+                li,
+                format!("{what}: на вход «{to}» уже подан «{prev_from}»"),
+            );
+            continue;
+        }
+        edges.push(Edge {
+            link: li,
+            from: fi,
+            to: ti,
+        });
+    }
+    edges
+}
+
+fn type_name(ty: SignalType) -> &'static str {
+    match ty {
+        SignalType::Bool => "bool (логический)",
+        SignalType::Int => "int (целый)",
+        SignalType::Float => "float (дробный)",
+    }
+}
+
+fn check_unconnected_inputs(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) {
+    for (bi, block) in logic.blocks.iter().enumerate() {
+        let Some(def) = defs[bi] else { continue };
+        for input in &def.inputs {
+            // Any link counts: an invalid one was already reported, don't pile up.
+            let fed = logic
+                .links
+                .iter()
+                .any(|l| l.to.block == block.id && l.to.port == input.name);
+            if !fed {
+                report.block_error(
+                    &block.id,
+                    format!(
+                        "блок «{}»: на вход «{}» ничего не подано",
+                        block.id, input.name
+                    ),
+                );
+            }
+        }
+    }
+}
+
+fn check_layout(logic: &Logic, layout: &Layout, report: &mut Report) {
+    for id in layout.blocks.keys() {
+        if logic.block(id).is_none() {
+            report.push(
+                Severity::Warning,
+                None,
+                None,
+                format!("в layout.toml есть координаты несуществующего блока «{id}»"),
+            );
+        }
+    }
+}
+
+/// Builds the execution order. Feedback loops are allowed only through a block with
+/// memory: links into such blocks inside a loop take the previous scan's value.
+fn order_blocks(logic: &Logic, defs: &[Option<&BlockDef>], edges: &[Edge], report: &mut Report) {
+    let n = logic.blocks.len();
+    let has_memory = |i: usize| defs[i].is_some_and(|d| d.info.memory);
+
+    let mut succ = vec![Vec::new(); n];
+    for e in edges {
+        succ[e.from].push(e.to);
+    }
+    let scc = strongly_connected(&succ);
+    let in_loop = |e: &Edge| scc[e.from] == scc[e.to];
+
+    let mut indegree = vec![0usize; n];
+    let mut active = vec![Vec::new(); n];
+    for e in edges {
+        if in_loop(e) && has_memory(e.to) {
+            report.feedback.push(e.link);
+        } else {
+            active[e.from].push(e.to);
+            indegree[e.to] += 1;
+        }
+    }
+
+    // Kahn's algorithm; ties are broken by declaration order for stable output.
+    let mut ready: BinaryHeap<Reverse<usize>> =
+        (0..n).filter(|&i| indegree[i] == 0).map(Reverse).collect();
+    while let Some(Reverse(i)) = ready.pop() {
+        report.order.push(i);
+        for &j in &active[i] {
+            indegree[j] -= 1;
+            if indegree[j] == 0 {
+                ready.push(Reverse(j));
+            }
+        }
+    }
+
+    if report.order.len() < n {
+        // Report only the loops themselves; blocks downstream of a loop are stuck too,
+        // but that is a consequence, not a separate problem.
+        let mut stuck: Vec<usize> = (0..n)
+            .filter(|&i| indegree[i] > 0 && succ[i].iter().any(|&j| scc[j] == scc[i]))
+            .collect();
+        stuck.sort_by_key(|&i| (scc[i], i));
+        for group in stuck.chunk_by(|&a, &b| scc[a] == scc[b]) {
+            let ids: Vec<&str> = group.iter().map(|&i| logic.blocks[i].id.as_str()).collect();
+            report.block_error(
+                ids[0],
+                format!(
+                    "цикл без блока с памятью: {} — разорвите его триггером или таймером",
+                    ids.join(", ")
+                ),
+            );
+        }
+    }
+}
+
+/// Tarjan's algorithm. Returns the component number of each node.
+fn strongly_connected(succ: &[Vec<usize>]) -> Vec<usize> {
+    struct State<'a> {
+        succ: &'a [Vec<usize>],
+        index: Vec<Option<usize>>,
+        low: Vec<usize>,
+        on_stack: Vec<bool>,
+        stack: Vec<usize>,
+        comp: Vec<usize>,
+        next_index: usize,
+        next_comp: usize,
+    }
+
+    fn visit(s: &mut State, v: usize) {
+        s.index[v] = Some(s.next_index);
+        s.low[v] = s.next_index;
+        s.next_index += 1;
+        s.stack.push(v);
+        s.on_stack[v] = true;
+        for k in 0..s.succ[v].len() {
+            let w = s.succ[v][k];
+            match s.index[w] {
+                None => {
+                    visit(s, w);
+                    s.low[v] = s.low[v].min(s.low[w]);
+                }
+                Some(wi) if s.on_stack[w] => s.low[v] = s.low[v].min(wi),
+                Some(_) => {}
+            }
+        }
+        if Some(s.low[v]) == s.index[v] {
+            while let Some(w) = s.stack.pop() {
+                s.on_stack[w] = false;
+                s.comp[w] = s.next_comp;
+                if w == v {
+                    break;
+                }
+            }
+            s.next_comp += 1;
+        }
+    }
+
+    let n = succ.len();
+    let mut s = State {
+        succ,
+        index: vec![None; n],
+        low: vec![0; n],
+        on_stack: vec![false; n],
+        stack: Vec::new(),
+        comp: vec![0; n],
+        next_index: 0,
+        next_comp: 0,
+    };
+    for v in 0..n {
+        if s.index[v].is_none() {
+            visit(&mut s, v);
+        }
+    }
+    s.comp
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{BlockDef, LibraryBlock};
+
+    /// Library with `src` (output only), `not` (bool → bool) and `latch`
+    /// (bool → bool with memory).
+    fn library() -> Library {
+        let mut lib = Library::default();
+        for (kind, inputs, memory) in [
+            ("src", "", false),
+            ("not", "in", false),
+            ("latch", "in", true),
+        ] {
+            let input = if inputs.is_empty() {
+                String::new()
+            } else {
+                format!("[[input]]\nname = \"{inputs}\"\ntype = \"bool\"\n")
+            };
+            let def: BlockDef = toml::from_str(&format!(
+                "[block]\ntype = \"{kind}\"\nname = \"{kind}\"\ngroup = \"Тест\"\nmemory = {memory}\n\
+                 {input}[[output]]\nname = \"out\"\ntype = \"bool\"\n"
+            ))
+            .unwrap();
+            lib.insert(LibraryBlock {
+                def,
+                dir: Default::default(),
+            });
+        }
+        lib
+    }
+
+    fn run(blocks: &[(&str, &str)], links: &[(&str, &str)]) -> (Logic, Report) {
+        let mut src = String::new();
+        for (id, kind) in blocks {
+            src += &format!("[[block]]\nid = \"{id}\"\ntype = \"{kind}\"\n");
+        }
+        for (from, to) in links {
+            src += &format!("[[link]]\nfrom = \"{from}\"\nto = \"{to}\"\n");
+        }
+        let logic: Logic = toml::from_str(&src).unwrap();
+        let report = check(&logic, &library(), None);
+        (logic, report)
+    }
+
+    fn ids(logic: &Logic, order: &[usize]) -> Vec<String> {
+        order.iter().map(|&i| logic.blocks[i].id.clone()).collect()
+    }
+
+    #[test]
+    fn chain_order() {
+        let (logic, r) = run(
+            &[("c", "not"), ("b", "not"), ("a", "src")],
+            &[("a.out", "b.in"), ("b.out", "c.in")],
+        );
+        assert!(!r.has_errors(), "{:#?}", r.diagnostics);
+        assert_eq!(ids(&logic, &r.order), ["a", "b", "c"]);
+        assert!(r.feedback.is_empty());
+    }
+
+    #[test]
+    fn loop_without_memory_is_error() {
+        let (_, r) = run(
+            &[("x", "not"), ("y", "not")],
+            &[("x.out", "y.in"), ("y.out", "x.in")],
+        );
+        let errors: Vec<_> = r.errors().map(|d| d.message.as_str()).collect();
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(
+            errors[0].contains("цикл без блока с памятью: x, y"),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn self_loop_without_memory_is_error() {
+        let (_, r) = run(&[("x", "not")], &[("x.out", "x.in")]);
+        assert_eq!(r.errors().count(), 1, "{:#?}", r.diagnostics);
+    }
+
+    #[test]
+    fn downstream_of_loop_is_not_reported_separately() {
+        let (_, r) = run(
+            &[("x", "not"), ("y", "not"), ("z", "not")],
+            &[("x.out", "y.in"), ("y.out", "x.in"), ("y.out", "z.in")],
+        );
+        assert_eq!(r.errors().count(), 1, "{:#?}", r.diagnostics);
+    }
+
+    #[test]
+    fn loop_through_memory_is_allowed() {
+        // x → m → x: the link into the memory block takes the previous scan's value.
+        let (logic, r) = run(
+            &[("x", "not"), ("m", "latch")],
+            &[("x.out", "m.in"), ("m.out", "x.in")],
+        );
+        assert!(!r.has_errors(), "{:#?}", r.diagnostics);
+        assert_eq!(r.feedback, [0]);
+        assert_eq!(ids(&logic, &r.order), ["m", "x"]);
+    }
+
+    #[test]
+    fn memory_block_outside_loop_is_not_feedback() {
+        let (_, r) = run(&[("a", "src"), ("m", "latch")], &[("a.out", "m.in")]);
+        assert!(!r.has_errors(), "{:#?}", r.diagnostics);
+        assert!(r.feedback.is_empty());
+    }
+}

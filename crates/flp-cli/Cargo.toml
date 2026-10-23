@@ -1,0 +1,13 @@
+[package]
+name = "flp-cli"
+description = "Command line of FLP_next: check / gen / build / upload"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "flp"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+flp-core = { path = "../flp-core" }

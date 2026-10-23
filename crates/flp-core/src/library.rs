@@ -236,6 +236,11 @@ impl Library {
         Ok(errors)
     }
 
+    /// Adds or replaces a block (e.g. one created by AI before it is written to disk).
+    pub fn insert(&mut self, block: LibraryBlock) {
+        self.blocks.insert(block.def.info.kind.clone(), block);
+    }
+
     pub fn get(&self, kind: &str) -> Option<&LibraryBlock> {
         self.blocks.get(kind)
     }

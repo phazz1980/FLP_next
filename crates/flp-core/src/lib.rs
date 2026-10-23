@@ -2,6 +2,7 @@
 //!
 //! The core knows nothing about GUI, AI or arduino-cli.
 
+pub mod check;
 pub mod error;
 pub mod ident;
 pub mod layout;
@@ -12,6 +13,7 @@ pub mod value;
 
 mod toml_io;
 
+pub use check::{check, Diagnostic, Report, Severity};
 pub use error::{Error, Result};
 pub use layout::{BlockPos, Layout};
 pub use library::{BlockDef, Library, LibraryBlock, ParamDef, ParamKind, PortDef, SignalType};
