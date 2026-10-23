@@ -105,10 +105,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 
 [[package]]
+name = "flp-build"
+version = "0.1.0"
+dependencies = [
+ "flp-codegen",
+ "flp-core",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "flp-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "flp-build",
  "flp-codegen",
  "flp-core",
 ]

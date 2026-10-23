@@ -1,0 +1,444 @@
+//! Building and uploading firmware with arduino-cli.
+//!
+//! Each project keeps a persistent build folder `<project>/.flp/build`, so
+//! repeated builds only recompile the changed sketch.
+
+use std::env;
+use std::ffi::OsString;
+use std::io::{BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::mpsc;
+use std::thread;
+
+use flp_codegen::{sketch_dir, WORK_DIR};
+use flp_core::BoardConfig;
+use serde::Deserialize;
+
+#[derive(Debug, thiserror::Error)]
+pub enum BuildError {
+    #[error(
+        "arduino-cli не найден. Установите его (`winget install ArduinoSA.CLI`) \
+         или укажите путь в переменной FLP_ARDUINO_CLI"
+    )]
+    NotFound,
+
+    #[error("не удалось запустить {}: {}", .exe.display(), .source)]
+    Spawn {
+        exe: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("{what}: arduino-cli завершился с ошибкой ({status})")]
+    Failed {
+        what: &'static str,
+        status: ExitStatus,
+    },
+
+    #[error("непонятный ответ arduino-cli: {0}")]
+    BadOutput(String),
+
+    #[error(
+        "плата не найдена: нет ни одного последовательного порта. \
+         Подключите плату по USB или укажите порт через --port"
+    )]
+    NoPort,
+
+    #[error(
+        "найдено несколько портов ({}); укажите нужный через --port \
+         или в project.toml ([board] port = \"COM3\")",
+        .0.join(", ")
+    )]
+    AmbiguousPort(Vec<String>),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BuildMode {
+    /// Working firmware with normal optimization.
+    #[default]
+    Release,
+    /// Build for online debugging, without heavy optimization.
+    Debug,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CompileOptions {
+    pub mode: BuildMode,
+    /// Run the compiler with below-normal priority (background builds).
+    pub low_priority: bool,
+    /// Parallel compile jobs; `None` lets arduino-cli use all cores.
+    pub jobs: Option<u32>,
+}
+
+/// Serial port found by `arduino-cli board list`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SerialPort {
+    pub address: String,
+    /// Board names recognized by arduino-cli, or the port label.
+    pub description: String,
+}
+
+/// Persistent build folder of a project.
+pub fn build_dir(project_root: &Path) -> PathBuf {
+    project_root.join(WORK_DIR).join("build")
+}
+
+/// Handle to the arduino-cli executable.
+#[derive(Debug, Clone)]
+pub struct ArduinoCli {
+    exe: PathBuf,
+}
+
+impl ArduinoCli {
+    pub fn new(exe: impl Into<PathBuf>) -> Self {
+        Self { exe: exe.into() }
+    }
+
+    /// Finds arduino-cli: `FLP_ARDUINO_CLI`, then `PATH`, then the default
+    /// install folder (a terminal opened before installation has an old `PATH`).
+    pub fn locate() -> Result<Self, BuildError> {
+        if let Some(exe) = env::var_os("FLP_ARDUINO_CLI") {
+            return Ok(Self::new(exe));
+        }
+        let name = if cfg!(windows) {
+            "arduino-cli.exe"
+        } else {
+            "arduino-cli"
+        };
+        let mut candidates: Vec<PathBuf> = env::var_os("PATH")
+            .map(|paths| env::split_paths(&paths).map(|d| d.join(name)).collect())
+            .unwrap_or_default();
+        if let Some(pf) = env::var_os("ProgramFiles") {
+            candidates.push(Path::new(&pf).join("Arduino CLI").join(name));
+        }
+        candidates
+            .into_iter()
+            .find(|p| p.is_file())
+            .map(Self::new)
+            .ok_or(BuildError::NotFound)
+    }
+
+    pub fn exe(&self) -> &Path {
+        &self.exe
+    }
+
+    /// Compiles the generated sketch of the project. Output lines go to `on_line`.
+    pub fn compile(
+        &self,
+        project_root: &Path,
+        board: &BoardConfig,
+        opts: &CompileOptions,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<(), BuildError> {
+        let args = compile_args(project_root, board, opts);
+        let status = self.run(&args, opts.low_priority, on_line)?;
+        check_status("сборка", status)
+    }
+
+    /// Uploads the last build to the board on `port`.
+    pub fn upload(
+        &self,
+        project_root: &Path,
+        board: &BoardConfig,
+        port: &str,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<(), BuildError> {
+        let args = upload_args(project_root, board, port);
+        let status = self.run(&args, false, on_line)?;
+        check_status("заливка", status)
+    }
+
+    /// Lists serial ports with boards that may be connected to them.
+    pub fn serial_ports(&self) -> Result<Vec<SerialPort>, BuildError> {
+        let output = Command::new(&self.exe)
+            .args(["board", "list", "--format", "json"])
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|source| self.spawn_error(source))?;
+        check_status("поиск плат", output.status)?;
+        parse_board_list(&String::from_utf8_lossy(&output.stdout))
+    }
+
+    /// Port for upload: explicit, from `project.toml`, or the only serial port found.
+    pub fn choose_port(
+        &self,
+        explicit: Option<&str>,
+        board: &BoardConfig,
+    ) -> Result<String, BuildError> {
+        if let Some(port) = explicit.or(board.port.as_deref()) {
+            return Ok(port.to_owned());
+        }
+        let mut ports = self.serial_ports()?;
+        match ports.len() {
+            0 => Err(BuildError::NoPort),
+            1 => Ok(ports.remove(0).address),
+            _ => Err(BuildError::AmbiguousPort(
+                ports.into_iter().map(|p| p.address).collect(),
+            )),
+        }
+    }
+
+    fn spawn_error(&self, source: std::io::Error) -> BuildError {
+        BuildError::Spawn {
+            exe: self.exe.clone(),
+            source,
+        }
+    }
+
+    /// Runs arduino-cli, passing stdout and stderr lines to `on_line` as they come.
+    fn run(
+        &self,
+        args: &[OsString],
+        low_priority: bool,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<ExitStatus, BuildError> {
+        let mut cmd = Command::new(&self.exe);
+        cmd.args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        set_low_priority(&mut cmd, low_priority);
+        let mut child = cmd.spawn().map_err(|source| self.spawn_error(source))?;
+
+        let (tx, rx) = mpsc::channel::<String>();
+        let streams: [Option<Box<dyn Read + Send>>; 2] = [
+            child.stdout.take().map(|s| Box::new(s) as _),
+            child.stderr.take().map(|s| Box::new(s) as _),
+        ];
+        for stream in streams.into_iter().flatten() {
+            let tx = tx.clone();
+            thread::spawn(move || {
+                let mut reader = BufReader::new(stream);
+                let mut buf = Vec::new();
+                // Compiler output is not guaranteed to be valid UTF-8.
+                while reader.read_until(b'\n', &mut buf).is_ok_and(|n| n > 0) {
+                    let line = String::from_utf8_lossy(&buf).trim_end().to_owned();
+                    if tx.send(line).is_err() {
+                        break;
+                    }
+                    buf.clear();
+                }
+            });
+        }
+        drop(tx);
+        for line in rx {
+            on_line(&line);
+        }
+        child.wait().map_err(|source| self.spawn_error(source))
+    }
+}
+
+#[cfg(windows)]
+fn set_low_priority(cmd: &mut Command, low: bool) {
+    use std::os::windows::process::CommandExt;
+    const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+    if low {
+        cmd.creation_flags(BELOW_NORMAL_PRIORITY_CLASS);
+    }
+}
+
+#[cfg(not(windows))]
+fn set_low_priority(_cmd: &mut Command, _low: bool) {}
+
+fn check_status(what: &'static str, status: ExitStatus) -> Result<(), BuildError> {
+    if status.success() {
+        Ok(())
+    } else {
+        Err(BuildError::Failed { what, status })
+    }
+}
+
+fn board_args(board: &BoardConfig) -> Vec<OsString> {
+    let mut args = vec!["--fqbn".into(), board.fqbn.clone().into()];
+    if !board.options.is_empty() {
+        let opts: Vec<String> = board
+            .options
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+        args.push("--board-options".into());
+        args.push(opts.join(",").into());
+    }
+    args
+}
+
+fn compile_args(project_root: &Path, board: &BoardConfig, opts: &CompileOptions) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec!["compile".into()];
+    args.extend(board_args(board));
+    args.push("--build-path".into());
+    args.push(build_dir(project_root).into());
+    if opts.mode == BuildMode::Debug {
+        args.push("--optimize-for-debug".into());
+    }
+    args.push("--jobs".into());
+    args.push(opts.jobs.unwrap_or(0).to_string().into());
+    args.push(sketch_dir(project_root).into());
+    args
+}
+
+fn upload_args(project_root: &Path, board: &BoardConfig, port: &str) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec!["upload".into()];
+    args.extend(board_args(board));
+    args.push("--port".into());
+    args.push(port.into());
+    args.push("--input-dir".into());
+    args.push(build_dir(project_root).into());
+    args.push(sketch_dir(project_root).into());
+    args
+}
+
+fn parse_board_list(json: &str) -> Result<Vec<SerialPort>, BuildError> {
+    #[derive(Deserialize)]
+    struct BoardList {
+        #[serde(default)]
+        detected_ports: Vec<DetectedPort>,
+    }
+    #[derive(Deserialize)]
+    struct DetectedPort {
+        port: PortInfo,
+        #[serde(default)]
+        matching_boards: Vec<MatchingBoard>,
+    }
+    #[derive(Deserialize)]
+    struct PortInfo {
+        address: String,
+        protocol: String,
+        #[serde(default)]
+        label: String,
+    }
+    #[derive(Deserialize)]
+    struct MatchingBoard {
+        name: String,
+    }
+
+    let list: BoardList =
+        serde_json::from_str(json).map_err(|e| BuildError::BadOutput(e.to_string()))?;
+    Ok(list
+        .detected_ports
+        .into_iter()
+        .filter(|d| d.port.protocol == "serial")
+        .map(|d| {
+            let names: Vec<String> = d.matching_boards.into_iter().map(|b| b.name).collect();
+            SerialPort {
+                description: if names.is_empty() {
+                    d.port.label
+                } else {
+                    names.join(", ")
+                },
+                address: d.port.address,
+            }
+        })
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn board() -> BoardConfig {
+        BoardConfig {
+            fqbn: "esp32:esp32:esp32".into(),
+            port: None,
+            options: [("CPUFreq".to_owned(), "240".to_owned())].into(),
+        }
+    }
+
+    fn strings(args: &[OsString]) -> Vec<String> {
+        args.iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn compile_command_line() {
+        let root = Path::new("proj");
+        let opts = CompileOptions {
+            mode: BuildMode::Debug,
+            ..Default::default()
+        };
+        let args = strings(&compile_args(root, &board(), &opts));
+        let build = build_dir(root).to_string_lossy().into_owned();
+        let sketch = sketch_dir(root).to_string_lossy().into_owned();
+        assert_eq!(
+            args,
+            [
+                "compile",
+                "--fqbn",
+                "esp32:esp32:esp32",
+                "--board-options",
+                "CPUFreq=240",
+                "--build-path",
+                &build,
+                "--optimize-for-debug",
+                "--jobs",
+                "0",
+                &sketch,
+            ]
+        );
+    }
+
+    #[test]
+    fn upload_command_line() {
+        let mut board = board();
+        board.options.clear();
+        let args = strings(&upload_args(Path::new("proj"), &board, "COM5"));
+        assert_eq!(
+            args[..6],
+            [
+                "upload",
+                "--fqbn",
+                "esp32:esp32:esp32",
+                "--port",
+                "COM5",
+                "--input-dir"
+            ]
+        );
+    }
+
+    #[test]
+    fn board_list_json() {
+        let json = r#"{
+          "detected_ports": [
+            {"port": {"address": "COM1", "label": "COM1", "protocol": "serial",
+                      "protocol_label": "Serial Port"}},
+            {"port": {"address": "COM5", "label": "COM5", "protocol": "serial",
+                      "protocol_label": "Serial Port (USB)",
+                      "properties": {"pid": "0xEA60", "vid": "0x10C4"}},
+             "matching_boards": [{"name": "ESP32 Dev Module", "fqbn": "esp32:esp32:esp32"}]},
+            {"port": {"address": "192.168.1.7", "label": "esp", "protocol": "network"}}
+          ]
+        }"#;
+        let ports = parse_board_list(json).unwrap();
+        assert_eq!(
+            ports,
+            [
+                SerialPort {
+                    address: "COM1".into(),
+                    description: "COM1".into()
+                },
+                SerialPort {
+                    address: "COM5".into(),
+                    description: "ESP32 Dev Module".into()
+                },
+            ]
+        );
+        assert_eq!(parse_board_list("{}").unwrap(), []);
+        assert!(parse_board_list("not json").is_err());
+    }
+
+    #[test]
+    fn explicit_port_wins() {
+        // A missing executable proves no board scan is attempted.
+        let cli = ArduinoCli::new("no-such-arduino-cli");
+        let mut b = board();
+        assert_eq!(cli.choose_port(Some("COM7"), &b).unwrap(), "COM7");
+        b.port = Some("COM3".into());
+        assert_eq!(cli.choose_port(None, &b).unwrap(), "COM3");
+        b.port = None;
+        assert!(matches!(
+            cli.choose_port(None, &b),
+            Err(BuildError::Spawn { .. })
+        ));
+    }
+}

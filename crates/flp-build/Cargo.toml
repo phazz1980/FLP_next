@@ -1,0 +1,12 @@
+[package]
+name = "flp-build"
+description = "Building and uploading FLP_next firmware with arduino-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+flp-codegen = { path = "../flp-codegen" }
+flp-core = { path = "../flp-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use flp_build::{ArduinoCli, BuildMode, CompileOptions};
 use flp_codegen::{ArduinoCpp, GenError};
 use flp_core::{check, Diagnostic, Library, Project, Severity};
 
@@ -13,6 +14,8 @@ const EXIT_SCHEMA_ERRORS: u8 = 1;
 const EXIT_LOAD_FAILED: u8 = 2;
 /// Exit code when code generation fails for another reason (templates, files).
 const EXIT_GEN_FAILED: u8 = 3;
+/// Exit code when arduino-cli fails to build or upload.
+const EXIT_BUILD_FAILED: u8 = 4;
 
 #[derive(Parser)]
 #[command(
@@ -45,6 +48,25 @@ enum Command {
         #[arg(long)]
         stdout: bool,
     },
+    /// Сгенерировать скетч и собрать прошивку через arduino-cli
+    Build {
+        /// Папка проекта
+        project: PathBuf,
+        /// Отладочная сборка (без сильной оптимизации)
+        #[arg(long)]
+        debug: bool,
+    },
+    /// Собрать прошивку и залить её на плату
+    Upload {
+        /// Папка проекта
+        project: PathBuf,
+        /// Порт платы, например COM3 (по умолчанию из project.toml или единственный найденный)
+        #[arg(long, short)]
+        port: Option<String>,
+        /// Отладочная сборка (без сильной оптимизации)
+        #[arg(long)]
+        debug: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -52,6 +74,14 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Check { project } => run_check(&project, cli.library.as_deref()),
         Command::Gen { project, stdout } => run_gen(&project, cli.library.as_deref(), stdout),
+        Command::Build { project, debug } => {
+            run_build(&project, cli.library.as_deref(), debug, None)
+        }
+        Command::Upload {
+            project,
+            port,
+            debug,
+        } => run_build(&project, cli.library.as_deref(), debug, Some(port)),
     }
 }
 
@@ -98,31 +128,103 @@ fn run_gen(project_dir: &Path, library: Option<&Path>, stdout: bool) -> ExitCode
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
-    let code = match flp_codegen::generate(&project, &lib, &ArduinoCpp) {
+    let code = match generate(&project, &lib) {
         Ok(code) => code,
-        Err(GenError::Schema(diagnostics)) => {
-            print_diagnostics(&diagnostics);
-            eprintln!("Генерация отменена: в схеме есть ошибки (подробнее — flp check)");
-            return ExitCode::from(EXIT_SCHEMA_ERRORS);
-        }
-        Err(e) => {
-            eprintln!("ошибка: {e}");
-            return ExitCode::from(EXIT_GEN_FAILED);
-        }
+        Err(exit) => return exit,
     };
     if stdout {
         print!("{code}");
         return ExitCode::SUCCESS;
     }
-    match flp_codegen::write_sketch(&project.root, &code) {
+    match write_sketch(&project, &code) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(exit) => exit,
+    }
+}
+
+/// Generates, writes and compiles the sketch; with `upload = Some(port)` also uploads it.
+fn run_build(
+    project_dir: &Path,
+    library: Option<&Path>,
+    debug: bool,
+    upload: Option<Option<String>>,
+) -> ExitCode {
+    let (project, lib) = match load(project_dir, library) {
+        Ok(loaded) => loaded,
+        Err(code) => return code,
+    };
+    let result = generate(&project, &lib).and_then(|code| write_sketch(&project, &code));
+    if let Err(exit) = result {
+        return exit;
+    }
+    let build_failed = |e: flp_build::BuildError| {
+        eprintln!("ошибка: {e}");
+        ExitCode::from(EXIT_BUILD_FAILED)
+    };
+    let cli = match ArduinoCli::locate() {
+        Ok(cli) => cli,
+        Err(e) => return build_failed(e),
+    };
+    let board = &project.config.board;
+    let opts = CompileOptions {
+        mode: if debug {
+            BuildMode::Debug
+        } else {
+            BuildMode::Release
+        },
+        ..Default::default()
+    };
+    let mut print = |line: &str| println!("{line}");
+
+    println!("Сборка для {}...", board.fqbn);
+    if let Err(e) = cli.compile(&project.root, board, &opts, &mut print) {
+        return build_failed(e);
+    }
+    let Some(port) = upload else {
+        println!(
+            "Сборка готова: {}",
+            flp_build::build_dir(&project.root).display()
+        );
+        return ExitCode::SUCCESS;
+    };
+    let port = match cli.choose_port(port.as_deref(), board) {
+        Ok(port) => port,
+        Err(e) => return build_failed(e),
+    };
+    println!("Заливка на {port}...");
+    if let Err(e) = cli.upload(&project.root, board, &port, &mut print) {
+        return build_failed(e);
+    }
+    println!("Прошивка залита на {port}");
+    ExitCode::SUCCESS
+}
+
+/// Generates the sketch, printing schema errors.
+fn generate(project: &Project, lib: &Library) -> Result<String, ExitCode> {
+    match flp_codegen::generate(project, lib, &ArduinoCpp) {
+        Ok(code) => Ok(code),
+        Err(GenError::Schema(diagnostics)) => {
+            print_diagnostics(&diagnostics);
+            eprintln!("Генерация отменена: в схеме есть ошибки (подробнее — flp check)");
+            Err(ExitCode::from(EXIT_SCHEMA_ERRORS))
+        }
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            Err(ExitCode::from(EXIT_GEN_FAILED))
+        }
+    }
+}
+
+fn write_sketch(project: &Project, code: &str) -> Result<(), ExitCode> {
+    match flp_codegen::write_sketch(&project.root, code) {
         Ok((path, true)) => println!("Скетч записан: {}", path.display()),
         Ok((path, false)) => println!("Скетч не изменился: {}", path.display()),
         Err(e) => {
             eprintln!("ошибка: {e}");
-            return ExitCode::from(EXIT_GEN_FAILED);
+            return Err(ExitCode::from(EXIT_GEN_FAILED));
         }
     }
-    ExitCode::SUCCESS
+    Ok(())
 }
 
 fn print_diagnostics(diagnostics: &[Diagnostic]) {
