@@ -1,0 +1,36 @@
+# Насос включается, если давление ниже порога дольше 5 секунд.
+
+# Датчик давления на АЦП. Пока без масштабирования (блок появится на этапе 2),
+# поэтому порог ниже сравнивается с сырым отсчётом АЦП 0…4095.
+[[block]]
+id = "pressure"
+type = "analog_in"
+pin = 34
+
+[[block]]
+id = "low"
+type = "less"
+b = 2.0
+
+[[block]]
+id = "delay"
+type = "timer_on"
+time = "5s"
+
+# Реле насоса.
+[[block]]
+id = "pump"
+type = "digital_out"
+pin = 26
+
+[[link]]
+from = "pressure.out"
+to   = "low.a"
+
+[[link]]
+from = "low.out"
+to   = "delay.in"
+
+[[link]]
+from = "delay.out"
+to   = "pump.in"

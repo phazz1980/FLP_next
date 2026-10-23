@@ -1,0 +1,27 @@
+[block]
+type = "digital_in"
+name = "Цифровой вход"
+group = "Входы и выходы"
+description = "Читает логический уровень на выводе платы."
+
+[[output]]
+name = "out"
+type = "bool"
+description = "Состояние входа: true — высокий уровень (или низкий при инверсии)"
+
+[[param]]
+name = "pin"
+type = "pin"
+description = "Номер вывода GPIO"
+
+[[param]]
+name = "pullup"
+type = "bool"
+default = false
+description = "Включить встроенный подтягивающий резистор к питанию"
+
+[[param]]
+name = "inverted"
+type = "bool"
+default = false
+description = "Инвертировать значение (удобно для кнопки на землю с подтяжкой)"

@@ -1,0 +1,22 @@
+[block]
+type = "timer_on"
+name = "Задержка включения"
+group = "Время"
+description = "Таймер TON: выход включается, если вход держится true дольше заданного времени; выключается сразу вместе со входом."
+memory = true
+
+[[input]]
+name = "in"
+type = "bool"
+description = "Запуск отсчёта"
+
+[[output]]
+name = "out"
+type = "bool"
+description = "true, когда вход непрерывно включён не меньше time"
+
+[[param]]
+name = "time"
+type = "duration"
+default = "1s"
+description = "Время задержки: 500ms, 5s, 2m, 1h"

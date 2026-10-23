@@ -1,0 +1,3 @@
+/target
+# Per-project build cache (persistent build folder of arduino-cli)
+.flp/

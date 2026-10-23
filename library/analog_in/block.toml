@@ -1,0 +1,15 @@
+[block]
+type = "analog_in"
+name = "Аналоговый вход"
+group = "Входы и выходы"
+description = "Читает напряжение на выводе через АЦП, выдаёт отсчёт 0…4095."
+
+[[output]]
+name = "out"
+type = "int"
+description = "Отсчёт АЦП, 0…4095 (12 бит)"
+
+[[param]]
+name = "pin"
+type = "pin"
+description = "Номер вывода с АЦП (на ESP32 при работе Wi-Fi — только 32…39)"

@@ -1,0 +1,4 @@
+// @setup
+pinMode({{ param.pin }}, {% if param.pullup %}INPUT_PULLUP{% else %}INPUT{% endif %});
+// @loop
+{{ output.out }} = {% if param.inverted %}!{% endif %}digitalRead({{ param.pin }});

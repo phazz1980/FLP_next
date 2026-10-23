@@ -1,0 +1,7 @@
+[project]
+name = "pump"
+description = "Насос включается, если давление ниже порога дольше 5 секунд"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit
+# port = "COM3"

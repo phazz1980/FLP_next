@@ -1,0 +1,21 @@
+[block]
+type = "less"
+name = "Меньше"
+group = "Числа"
+description = "Сравнивает вход с порогом: выход true, если a < b."
+
+[[input]]
+name = "a"
+type = "float"
+description = "Сравниваемое значение"
+
+[[output]]
+name = "out"
+type = "bool"
+description = "true, если a < b"
+
+[[param]]
+name = "b"
+type = "float"
+default = 0.0
+description = "Порог"

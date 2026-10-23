@@ -1,0 +1,21 @@
+[block]
+type = "digital_out"
+name = "Цифровой выход"
+group = "Входы и выходы"
+description = "Выставляет логический уровень на выводе платы."
+
+[[input]]
+name = "in"
+type = "bool"
+description = "true — высокий уровень (или низкий при инверсии)"
+
+[[param]]
+name = "pin"
+type = "pin"
+description = "Номер вывода GPIO"
+
+[[param]]
+name = "inverted"
+type = "bool"
+default = false
+description = "Инвертировать выход (для реле, включаемых низким уровнем)"

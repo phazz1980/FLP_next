@@ -1,0 +1,13 @@
+[package]
+name = "flp-core"
+description = "Project model, block library and schema checks of FLP_next"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

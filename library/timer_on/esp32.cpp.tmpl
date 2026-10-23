@@ -1,0 +1,14 @@
+// @global
+bool {{ id }}_running = false;
+unsigned long {{ id }}_start = 0;
+// @loop
+if ({{ input.in }}) {
+  if (!{{ id }}_running) {
+    {{ id }}_running = true;
+    {{ id }}_start = millis();
+  }
+  {{ output.out }} = millis() - {{ id }}_start >= {{ param.time }}UL;
+} else {
+  {{ id }}_running = false;
+  {{ output.out }} = false;
+}
