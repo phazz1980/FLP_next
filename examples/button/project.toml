@@ -1,0 +1,6 @@
+[project]
+name = "button"
+description = "Светодиод горит, пока нажата кнопка"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

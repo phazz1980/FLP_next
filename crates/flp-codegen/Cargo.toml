@@ -1,0 +1,10 @@
+[package]
+name = "flp-codegen"
+description = "Firmware code generation from FLP_next schemas"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+flp-core = { path = "../flp-core" }
+minijinja = "2"
+thiserror.workspace = true

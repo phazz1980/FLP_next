@@ -1,0 +1,20 @@
+# Светодиод горит, пока нажата кнопка.
+
+# Кнопка замыкает GPIO13 на землю: подтяжка к питанию и инверсия,
+# чтобы нажатие давало true.
+[[block]]
+id = "button"
+type = "digital_in"
+pin = 13
+pullup = true
+inverted = true
+
+# Встроенный светодиод DevKit.
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[link]]
+from = "button.out"
+to   = "led.in"

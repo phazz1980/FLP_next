@@ -4,12 +4,15 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use flp_core::{check, Library, Project, Severity};
+use flp_codegen::{ArduinoCpp, GenError};
+use flp_core::{check, Diagnostic, Library, Project, Severity};
 
 /// Exit code when the schema has errors.
 const EXIT_SCHEMA_ERRORS: u8 = 1;
 /// Exit code when the project or library cannot be loaded.
 const EXIT_LOAD_FAILED: u8 = 2;
+/// Exit code when code generation fails for another reason (templates, files).
+const EXIT_GEN_FAILED: u8 = 3;
 
 #[derive(Parser)]
 #[command(
@@ -34,34 +37,32 @@ enum Command {
         /// Папка проекта
         project: PathBuf,
     },
+    /// Сгенерировать скетч Arduino в <проект>/.flp/sketch/sketch.ino
+    Gen {
+        /// Папка проекта
+        project: PathBuf,
+        /// Вывести скетч в консоль вместо записи в файл
+        #[arg(long)]
+        stdout: bool,
+    },
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Command::Check { project } => run_check(&project, cli.library.as_deref()),
+        Command::Gen { project, stdout } => run_gen(&project, cli.library.as_deref(), stdout),
     }
 }
 
 fn run_check(project_dir: &Path, library: Option<&Path>) -> ExitCode {
-    let project = match Project::load(project_dir) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("ошибка: {e}");
-            return ExitCode::from(EXIT_LOAD_FAILED);
-        }
-    };
-    let Some(lib) = load_library(project_dir, library) else {
-        return ExitCode::from(EXIT_LOAD_FAILED);
+    let (project, lib) = match load(project_dir, library) {
+        Ok(loaded) => loaded,
+        Err(code) => return code,
     };
 
     let report = check(&project.logic, &lib, Some(&project.layout));
-    for d in &report.diagnostics {
-        match d.severity {
-            Severity::Error => eprintln!("{d}"),
-            Severity::Warning => println!("{d}"),
-        }
-    }
+    print_diagnostics(&report.diagnostics);
 
     let errors = report.errors().count();
     if errors > 0 {
@@ -90,6 +91,57 @@ fn run_check(project_dir: &Path, library: Option<&Path>) -> ExitCode {
         );
     }
     ExitCode::SUCCESS
+}
+
+fn run_gen(project_dir: &Path, library: Option<&Path>, stdout: bool) -> ExitCode {
+    let (project, lib) = match load(project_dir, library) {
+        Ok(loaded) => loaded,
+        Err(code) => return code,
+    };
+    let code = match flp_codegen::generate(&project, &lib, &ArduinoCpp) {
+        Ok(code) => code,
+        Err(GenError::Schema(diagnostics)) => {
+            print_diagnostics(&diagnostics);
+            eprintln!("Генерация отменена: в схеме есть ошибки (подробнее — flp check)");
+            return ExitCode::from(EXIT_SCHEMA_ERRORS);
+        }
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            return ExitCode::from(EXIT_GEN_FAILED);
+        }
+    };
+    if stdout {
+        print!("{code}");
+        return ExitCode::SUCCESS;
+    }
+    match flp_codegen::write_sketch(&project.root, &code) {
+        Ok((path, true)) => println!("Скетч записан: {}", path.display()),
+        Ok((path, false)) => println!("Скетч не изменился: {}", path.display()),
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            return ExitCode::from(EXIT_GEN_FAILED);
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+fn print_diagnostics(diagnostics: &[Diagnostic]) {
+    for d in diagnostics {
+        match d.severity {
+            Severity::Error => eprintln!("{d}"),
+            Severity::Warning => println!("{d}"),
+        }
+    }
+}
+
+/// Loads the project and the block library, printing errors.
+fn load(project_dir: &Path, library: Option<&Path>) -> Result<(Project, Library), ExitCode> {
+    let project = Project::load(project_dir).map_err(|e| {
+        eprintln!("ошибка: {e}");
+        ExitCode::from(EXIT_LOAD_FAILED)
+    })?;
+    let lib = load_library(project_dir, library).ok_or(ExitCode::from(EXIT_LOAD_FAILED))?;
+    Ok((project, lib))
 }
 
 /// Loads the block library; library problems are printed as warnings.
