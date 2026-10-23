@@ -156,6 +156,16 @@ impl Project {
         Ok(())
     }
 
+    /// Sets the name and comment of a sheet; an empty pair removes the entry.
+    pub fn set_sheet_info(&mut self, info: crate::SheetInfo) {
+        let sheets = &mut self.layout.sheets;
+        sheets.retain(|s| s.number != info.number);
+        if !info.name.is_empty() || !info.comment.is_empty() {
+            sheets.push(info);
+            sheets.sort_by_key(|s| s.number);
+        }
+    }
+
     /// Removes a block with its links and position.
     pub fn remove_block(&mut self, id: &str) -> Result<(), EditError> {
         let index = self.block_index(id)?;

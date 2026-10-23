@@ -1,0 +1,16 @@
+[package]
+name = "flp-editor"
+description = "Graphical FBD editor of FLP_next"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "flp-editor"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.37"
+flp-build = { path = "../flp-build" }
+flp-codegen = { path = "../flp-codegen" }
+flp-core = { path = "../flp-core" }
+rfd = "0.17"
