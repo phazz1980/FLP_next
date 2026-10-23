@@ -17,6 +17,8 @@ name = "Задержка включения" # как показывать в р
 group = "Время"            # папка в библиотеке редактора
 description = "..."
 memory = true              # блок хранит состояние между циклами
+includes = ["DHT.h"]       # заголовки для #include в скетче
+libraries = ["DHT sensor library"]  # библиотеки arduino-cli, `flp build` ставит недостающие
 
 [[input]]
 name = "in"
@@ -79,10 +81,11 @@ description = "..."
 | Группа | Блоки |
 | --- | --- |
 | Входы и выходы | `digital_in`, `digital_out`, `analog_in`, `pwm_out` |
+| Датчики | `ds18b20`, `dht22` |
 | Логика | `and`, `or`, `xor`, `not`, `rs_trigger`, `rising_edge`, `falling_edge` |
 | Время | `timer_on`, `timer_off`, `pulse`, `generator` |
 | Числа | `less`, `greater`, `add`, `sub`, `mul`, `div`, `constant`, `scale`, `hysteresis` |
-| Счёт и память | `counter` |
+| Счёт и память | `counter`, `flash_store` |
 
 Каждый блок встречается хотя бы в одном примере из `examples/`; это проверяет
 тест `every_block_has_an_example`, а снимки кода лежат в

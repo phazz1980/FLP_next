@@ -1,0 +1,105 @@
+# Вытяжка по влажности, датчик воды и запоминание температуры воды во флеше.
+
+# Воздух: DHT22 на GPIO15.
+[[block]]
+id = "air"
+type = "dht22"
+pin = 15
+
+# Вытяжка: включить при 70 %, выключить при 60 %.
+[[block]]
+id = "humid"
+type = "hysteresis"
+on = 70.0
+off = 60.0
+
+[[block]]
+id = "fan"
+type = "digital_out"
+pin = 26
+
+# Вода: DS18B20 на GPIO4.
+[[block]]
+id = "water"
+type = "ds18b20"
+pin = 4
+
+# Раз в 10 минут запоминаем температуру воды, чтобы видеть её после перезагрузки.
+# Генератор начинает с включённой фазы, поэтому импульс сохранения берём
+# с его инверсии: первый — через 10 минут после старта, а не сразу при загрузке,
+# пока датчик ещё не измерил. Сохраняем только удачное измерение.
+[[block]]
+id = "period"
+type = "generator"
+time_on = "10m"
+time_off = "1s"
+
+[[block]]
+id = "tick"
+type = "not"
+
+[[block]]
+id = "save_now"
+type = "and"
+
+[[block]]
+id = "last_water"
+type = "flash_store"
+
+# Светодиод горит, если хотя бы один датчик не отвечает.
+[[block]]
+id = "all_ok"
+type = "and"
+
+[[block]]
+id = "fault"
+type = "not"
+
+[[block]]
+id = "fault_led"
+type = "digital_out"
+pin = 2
+
+[[link]]
+from = "air.humidity"
+to   = "humid.in"
+
+[[link]]
+from = "humid.out"
+to   = "fan.in"
+
+[[link]]
+from = "water.temp"
+to   = "last_water.in"
+
+[[link]]
+from = "period.out"
+to   = "tick.in"
+
+[[link]]
+from = "tick.out"
+to   = "save_now.a"
+
+[[link]]
+from = "water.ok"
+to   = "save_now.b"
+
+[[link]]
+from = "save_now.out"
+to   = "last_water.save"
+
+[[link]]
+from = "air.ok"
+to   = "all_ok.a"
+
+[[link]]
+from = "water.ok"
+to   = "all_ok.b"
+
+[[link]]
+from = "all_ok.out"
+to   = "fault.in"
+
+[[link]]
+from = "fault.out"
+to   = "fault_led.in"

@@ -1,0 +1,35 @@
+[block]
+type = "dht22"
+name = "DHT22"
+group = "Датчики"
+description = "Датчик температуры и влажности DHT22 (AM2302)."
+memory = true
+includes = ["DHT.h"]
+libraries = ["DHT sensor library", "Adafruit Unified Sensor"]
+
+[[output]]
+name = "temp"
+type = "float"
+description = "Температура, °C"
+
+[[output]]
+name = "humidity"
+type = "float"
+description = "Относительная влажность, %"
+
+[[output]]
+name = "ok"
+type = "bool"
+description = "true, если последнее чтение удалось"
+
+[[param]]
+name = "pin"
+type = "pin"
+description = "Вывод данных датчика"
+
+[[param]]
+name = "period"
+type = "duration"
+default = "2s"
+min = 2000
+description = "Период опроса; DHT22 нельзя опрашивать чаще раза в 2 секунды"

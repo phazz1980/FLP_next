@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use flp_build::{ArduinoCli, BuildMode, CompileOptions};
-use flp_codegen::{ArduinoCpp, GenError};
+use flp_codegen::{ArduinoCpp, Backend, GenError, Program};
 use flp_core::{check, Diagnostic, Library, Project, Severity};
 
 /// Exit code when the schema has errors.
@@ -129,7 +129,7 @@ fn run_gen(project_dir: &Path, library: Option<&Path>, stdout: bool) -> ExitCode
         Err(code) => return code,
     };
     let code = match generate(&project, &lib) {
-        Ok(code) => code,
+        Ok((code, _)) => code,
         Err(exit) => return exit,
     };
     if stdout {
@@ -153,10 +153,13 @@ fn run_build(
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
-    let result = generate(&project, &lib).and_then(|code| write_sketch(&project, &code));
-    if let Err(exit) = result {
-        return exit;
-    }
+    let libraries = match generate(&project, &lib) {
+        Ok((code, libraries)) => match write_sketch(&project, &code) {
+            Ok(()) => libraries,
+            Err(exit) => return exit,
+        },
+        Err(exit) => return exit,
+    };
     let build_failed = |e: flp_build::BuildError| {
         eprintln!("ошибка: {e}");
         ExitCode::from(EXIT_BUILD_FAILED)
@@ -176,6 +179,14 @@ fn run_build(
     };
     let mut print = |line: &str| println!("{line}");
 
+    let required: Vec<&str> = libraries.iter().map(String::as_str).collect();
+    match cli.ensure_libraries(&required, &mut print) {
+        Ok(installed) if !installed.is_empty() => {
+            println!("Установлены библиотеки: {}", installed.join(", "));
+        }
+        Ok(_) => {}
+        Err(e) => return build_failed(e),
+    }
     println!("Сборка для {}...", board.fqbn);
     if let Err(e) = cli.compile(&project.root, board, &opts, &mut print) {
         return build_failed(e);
@@ -199,10 +210,15 @@ fn run_build(
     ExitCode::SUCCESS
 }
 
-/// Generates the sketch, printing schema errors.
-fn generate(project: &Project, lib: &Library) -> Result<String, ExitCode> {
-    match flp_codegen::generate(project, lib, &ArduinoCpp) {
-        Ok(code) => Ok(code),
+/// Generates the sketch, printing schema errors. Also returns the Arduino libraries it needs.
+fn generate(project: &Project, lib: &Library) -> Result<(String, Vec<String>), ExitCode> {
+    let result = Program::build(project, lib).and_then(|program| {
+        let code = ArduinoCpp.generate(&program)?;
+        let libraries = program.libraries().into_iter().map(String::from).collect();
+        Ok((code, libraries))
+    });
+    match result {
+        Ok(generated) => Ok(generated),
         Err(GenError::Schema(diagnostics)) => {
             print_diagnostics(&diagnostics);
             eprintln!("Генерация отменена: в схеме есть ошибки (подробнее — flp check)");

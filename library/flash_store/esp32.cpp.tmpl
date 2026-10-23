@@ -1,0 +1,12 @@
+// @global
+Preferences {{ id }}_prefs;
+bool {{ id }}_prev = false;
+// @setup
+{{ id }}_prefs.begin("flp", false);
+{{ output.out }} = {{ id }}_prefs.getFloat("{{ id[:15] }}", {{ param.initial }});
+// @loop
+if ({{ input.save }} && !{{ id }}_prev) {
+  {{ output.out }} = {{ input.in }};
+  {{ id }}_prefs.putFloat("{{ id[:15] }}", {{ output.out }});
+}
+{{ id }}_prev = {{ input.save }};

@@ -1,0 +1,28 @@
+[block]
+type = "flash_store"
+name = "Сохранение во флеш"
+group = "Счёт и память"
+description = "Сохраняет число во флеш-память по фронту save и восстанавливает его после перезагрузки."
+memory = true
+includes = ["Preferences.h"]
+
+[[input]]
+name = "in"
+type = "float"
+description = "Значение для сохранения"
+
+[[input]]
+name = "save"
+type = "bool"
+description = "Сохранить in по переходу false → true"
+
+[[output]]
+name = "out"
+type = "float"
+description = "Сохранённое значение (после перезагрузки — из флеша)"
+
+[[param]]
+name = "initial"
+type = "float"
+default = 0.0
+description = "Значение, пока во флеше ничего не сохранено"

@@ -1,0 +1,45 @@
+# Координаты блоков для редактора.
+
+[block.air]
+x = 40.0
+y = 80.0
+
+[block.humid]
+x = 220.0
+y = 80.0
+
+[block.fan]
+x = 400.0
+y = 80.0
+
+[block.water]
+x = 40.0
+y = 200.0
+
+[block.last_water]
+x = 220.0
+y = 200.0
+
+[block.period]
+x = 40.0
+y = 320.0
+
+[block.tick]
+x = 220.0
+y = 320.0
+
+[block.save_now]
+x = 400.0
+y = 320.0
+
+[block.all_ok]
+x = 40.0
+y = 440.0
+
+[block.fault]
+x = 220.0
+y = 440.0
+
+[block.fault_led]
+x = 400.0
+y = 440.0

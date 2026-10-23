@@ -1,0 +1,6 @@
+[project]
+name = "weather"
+description = "Вытяжка по влажности, датчик воды и запоминание температуры воды во флеше"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

@@ -1,0 +1,16 @@
+// @global
+DHT {{ id }}_dht({{ param.pin }}, DHT22);
+unsigned long {{ id }}_last = 0;
+// @setup
+{{ id }}_dht.begin();
+// @loop
+if (millis() - {{ id }}_last >= {{ param.period }}UL) {
+  {{ id }}_last = millis();
+  float t = {{ id }}_dht.readTemperature();
+  float h = {{ id }}_dht.readHumidity();
+  {{ output.ok }} = !isnan(t) && !isnan(h);
+  if ({{ output.ok }}) {
+    {{ output.temp }} = t;
+    {{ output.humidity }} = h;
+  }
+}

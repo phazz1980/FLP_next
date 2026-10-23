@@ -1,0 +1,20 @@
+// @global
+OneWire {{ id }}_wire({{ param.pin }});
+DallasTemperature {{ id }}_bus(&{{ id }}_wire);
+unsigned long {{ id }}_requested = 0;
+// @setup
+{{ id }}_bus.begin();
+// Do not block the scan for 750 ms: request now, read on a later scan.
+{{ id }}_bus.setWaitForConversion(false);
+{{ id }}_bus.requestTemperatures();
+{{ id }}_requested = millis();
+// @loop
+if (millis() - {{ id }}_requested >= {{ param.period }}UL) {
+  float t = {{ id }}_bus.getTempCByIndex({{ param.index }});
+  {{ output.ok }} = t != DEVICE_DISCONNECTED_C;
+  if ({{ output.ok }}) {
+    {{ output.temp }} = t;
+  }
+  {{ id }}_bus.requestTemperatures();
+  {{ id }}_requested = millis();
+}

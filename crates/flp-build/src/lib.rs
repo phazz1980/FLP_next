@@ -149,6 +149,38 @@ impl ArduinoCli {
         check_status("заливка", status)
     }
 
+    /// Installs the Arduino libraries from `required` that are not installed yet.
+    /// Returns the libraries that were installed.
+    pub fn ensure_libraries(
+        &self,
+        required: &[&str],
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<Vec<String>, BuildError> {
+        if required.is_empty() {
+            return Ok(Vec::new());
+        }
+        let output = Command::new(&self.exe)
+            .args(["lib", "list", "--format", "json"])
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|source| self.spawn_error(source))?;
+        check_status("список библиотек", output.status)?;
+        let installed = parse_lib_list(&String::from_utf8_lossy(&output.stdout))?;
+        let missing: Vec<String> = required
+            .iter()
+            .filter(|spec| !is_installed(spec, &installed))
+            .map(|spec| spec.to_string())
+            .collect();
+        if missing.is_empty() {
+            return Ok(missing);
+        }
+        let mut args: Vec<OsString> = vec!["lib".into(), "install".into()];
+        args.extend(missing.iter().map(OsString::from));
+        let status = self.run(&args, false, on_line)?;
+        check_status("установка библиотек", status)?;
+        Ok(missing)
+    }
+
     /// Lists serial ports with boards that may be connected to them.
     pub fn serial_ports(&self) -> Result<Vec<SerialPort>, BuildError> {
         let output = Command::new(&self.exe)
@@ -288,6 +320,46 @@ fn upload_args(project_root: &Path, board: &BoardConfig, port: &str) -> Vec<OsSt
     args
 }
 
+/// Installed library: name and version.
+type InstalledLib = (String, String);
+
+fn parse_lib_list(json: &str) -> Result<Vec<InstalledLib>, BuildError> {
+    #[derive(Deserialize)]
+    struct LibList {
+        #[serde(default)]
+        installed_libraries: Vec<Installed>,
+    }
+    #[derive(Deserialize)]
+    struct Installed {
+        library: Lib,
+    }
+    #[derive(Deserialize)]
+    struct Lib {
+        name: String,
+        #[serde(default)]
+        version: String,
+    }
+
+    let list: LibList =
+        serde_json::from_str(json).map_err(|e| BuildError::BadOutput(e.to_string()))?;
+    Ok(list
+        .installed_libraries
+        .into_iter()
+        .map(|i| (i.library.name, i.library.version))
+        .collect())
+}
+
+/// `spec` is `Name` or `Name@version`.
+fn is_installed(spec: &str, installed: &[InstalledLib]) -> bool {
+    let (name, version) = match spec.split_once('@') {
+        Some((n, v)) => (n, Some(v)),
+        None => (spec, None),
+    };
+    installed
+        .iter()
+        .any(|(n, v)| n == name && version.is_none_or(|want| want == v))
+}
+
 fn parse_board_list(json: &str) -> Result<Vec<SerialPort>, BuildError> {
     #[derive(Deserialize)]
     struct BoardList {
@@ -425,6 +497,21 @@ mod tests {
         );
         assert_eq!(parse_board_list("{}").unwrap(), []);
         assert!(parse_board_list("not json").is_err());
+    }
+
+    #[test]
+    fn lib_list_json() {
+        let json = r#"{"installed_libraries": [
+            {"library": {"name": "OneWire", "version": "2.3.8", "location": "user"},
+             "release": {"version": "2.3.8"}},
+            {"library": {"name": "DallasTemperature", "version": "4.0.4"}}
+        ]}"#;
+        let installed = parse_lib_list(json).unwrap();
+        assert!(is_installed("OneWire", &installed));
+        assert!(is_installed("OneWire@2.3.8", &installed));
+        assert!(!is_installed("OneWire@2.3.7", &installed));
+        assert!(!is_installed("DHT sensor library", &installed));
+        assert_eq!(parse_lib_list("{}").unwrap(), []);
     }
 
     #[test]

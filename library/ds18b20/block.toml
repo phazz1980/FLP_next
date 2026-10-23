@@ -1,0 +1,37 @@
+[block]
+type = "ds18b20"
+name = "DS18B20"
+group = "Датчики"
+description = "Цифровой датчик температуры DS18B20 на шине 1-Wire."
+memory = true
+includes = ["OneWire.h", "DallasTemperature.h"]
+libraries = ["OneWire", "DallasTemperature"]
+
+[[output]]
+name = "temp"
+type = "float"
+description = "Температура, °C (при обрыве остаётся последнее удачное значение)"
+
+[[output]]
+name = "ok"
+type = "bool"
+description = "true, если последнее чтение удалось"
+
+[[param]]
+name = "pin"
+type = "pin"
+description = "Вывод шины 1-Wire (нужен резистор 4,7 кОм на питание)"
+
+[[param]]
+name = "index"
+type = "int"
+default = 0
+min = 0
+description = "Номер датчика на шине, если их несколько"
+
+[[param]]
+name = "period"
+type = "duration"
+default = "1s"
+min = 750
+description = "Период опроса; преобразование 12 бит занимает 750 мс"

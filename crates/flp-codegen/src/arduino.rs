@@ -242,6 +242,9 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)]) -> String {
     );
     let _ = writeln!(out, "// Порядок выполнения: {}", order.join(" → "));
     out.push_str("\n#include <Arduino.h>\n");
+    for header in program.includes() {
+        let _ = writeln!(out, "#include <{header}>");
+    }
 
     if !program.signals.is_empty() {
         out.push_str("\n// Выходы блоков\n");

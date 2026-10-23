@@ -36,6 +36,16 @@ pub struct Instance<'a> {
     pub params: BTreeMap<&'a str, ParamValue>,
 }
 
+fn unique<'a>(items: impl Iterator<Item = &'a String>) -> Vec<&'a str> {
+    let mut out: Vec<&str> = Vec::new();
+    for item in items {
+        if !out.contains(&item.as_str()) {
+            out.push(item);
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Input {
     pub source: Source,
@@ -52,6 +62,16 @@ pub enum Source {
 }
 
 impl<'a> Program<'a> {
+    /// Headers needed by the blocks, without duplicates, in order of first use.
+    pub fn includes(&self) -> Vec<&'a str> {
+        unique(self.blocks.iter().flat_map(|b| &b.lib.def.info.includes))
+    }
+
+    /// Arduino libraries needed by the blocks, without duplicates.
+    pub fn libraries(&self) -> Vec<&'a str> {
+        unique(self.blocks.iter().flat_map(|b| &b.lib.def.info.libraries))
+    }
+
     /// Checks the schema and resolves it. Fails with [`GenError::Schema`] on check errors.
     pub fn build(project: &'a Project, lib: &'a Library) -> Result<Self, GenError> {
         let logic = &project.logic;

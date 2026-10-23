@@ -97,6 +97,13 @@ pub struct BlockInfo {
     /// The block keeps state between scans (timers, triggers, counters).
     #[serde(default)]
     pub memory: bool,
+    /// Headers the generated code needs, e.g. `DallasTemperature.h`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub includes: Vec<String>,
+    /// Arduino libraries to install before building, as arduino-cli names them
+    /// (`DallasTemperature`, optionally with a version: `OneWire@2.3.8`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub libraries: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
