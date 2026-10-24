@@ -1,0 +1,6 @@
+[project]
+name = "retain"
+description = "Переменные с русскими именами, сохраняемые во флеш"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

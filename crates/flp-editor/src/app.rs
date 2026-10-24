@@ -97,6 +97,8 @@ pub struct EditorApp {
     pub extra_sheets: BTreeSet<u32>,
     pub canvas: CanvasState,
     pub right_tab: RightTab,
+    /// Panel sizes and which side panels are expanded; saved in the editor settings.
+    pub panels: theme::PanelSizes,
     pub log: Vec<LogLine>,
     /// Open pop-up window (block properties, variable, sheet).
     pub dialog: Option<Dialog>,
@@ -145,6 +147,7 @@ impl EditorApp {
             extra_sheets: BTreeSet::new(),
             canvas: CanvasState::default(),
             right_tab: RightTab::Library,
+            panels: theme::saved_panels(),
             log: Vec::new(),
             dialog: None,
             theme: theme::light(),
@@ -973,6 +976,10 @@ impl EditorApp {
                         RichText::new(format!("Отладка {}: {}", d.port, d.live.status))
                             .color(color),
                     );
+                    if let Some(s) = d.live.stats.as_ref().filter(|_| d.online()) {
+                        ui.separator();
+                        ui.label(format!("Цикл {} мкс, макс {} мкс", s.last_us, s.max_us));
+                    }
                 }
             }
             None => {
@@ -1066,25 +1073,45 @@ impl eframe::App for EditorApp {
             panels::toolbar(self, ui);
         });
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
-        egui::Panel::bottom("log")
+        let mut sizes = self.panels;
+        sizes.log_height = egui::Panel::bottom("log")
             .resizable(true)
-            .default_size(150.0)
-            .show(ui, |ui| panels::log(self, ui));
-        egui::Panel::left("tree")
-            .resizable(true)
-            .default_size(220.0)
-            .show(ui, |ui| panels::left(self, ui));
-        egui::Panel::right("library")
-            .resizable(true)
-            .default_size(280.0)
-            .show(ui, |ui| panels::right(self, ui));
+            .default_size(sizes.log_height)
+            .show(ui, |ui| panels::log(self, ui))
+            .response
+            .rect
+            .height();
+        panels::side_panel(
+            ui,
+            "tree",
+            true,
+            &mut sizes.left_open,
+            &mut sizes.left_width,
+            |ui| panels::left(self, ui),
+        );
+        panels::side_panel(
+            ui,
+            "library",
+            false,
+            &mut sizes.right_open,
+            &mut sizes.right_width,
+            |ui| panels::right(self, ui),
+        );
+        // Save once a resize drag is over, not on every frame of it.
+        if sizes != self.panels && !ui.input(|i| i.pointer.any_down()) {
+            self.panels = sizes;
+            theme::save_panels(sizes);
+        }
         egui::CentralPanel::default_margins().show(ui, |ui| canvas::show(self, ui));
 
         dialogs::show(self, &ctx);
         crate::themeedit::show(self, &ctx);
         let pal = self.theme.palette;
         if let Some(d) = &mut self.debug {
+            debugview::values_window(d, &pal, &ctx);
             debugview::chart_window(d, &pal, &ctx);
+            let layout = self.doc.as_ref().map(|doc| &doc.project.layout);
+            debugview::diagnostics_window(d, layout, &ctx);
         }
         self.unsaved_dialog(&ctx);
     }

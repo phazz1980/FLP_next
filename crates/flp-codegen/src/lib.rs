@@ -8,6 +8,8 @@ pub mod arduino;
 pub mod debug;
 pub mod error;
 pub mod program;
+pub mod retain;
+pub mod stats;
 
 use std::fs;
 use std::path::{Path, PathBuf};

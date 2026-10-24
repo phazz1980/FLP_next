@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::protocol::{self, Event, Parser};
+use crate::protocol::{self, Event, Parser, Stats};
 use crate::table::{DebugTable, Value};
 use crate::transport::{Connector, Transport};
 
@@ -28,6 +28,8 @@ pub struct Live {
     /// Problems to show to the user (connection lost, wrong schema).
     pub status: String,
     pub frames: u64,
+    /// Latest cycle time report of the board.
+    pub stats: Option<Stats>,
 }
 
 const HISTORY: usize = 600;
@@ -35,9 +37,17 @@ const CONSOLE: usize = 500;
 
 #[derive(Debug, Clone)]
 pub enum Command {
-    Force { index: usize, value: Option<Value> },
-    Set { index: usize, value: Value },
+    Force {
+        index: usize,
+        value: Option<Value>,
+    },
+    Set {
+        index: usize,
+        value: Value,
+    },
     ReleaseAll,
+    /// Reset the cycle time maxima on the board.
+    ResetStats,
     Stop,
 }
 
@@ -214,6 +224,11 @@ fn serve(
                             changed = true;
                             continue;
                         }
+                        protocol::STATS => {
+                            if l.schema_matches == Some(true) {
+                                l.stats = Stats::decode(&payload);
+                            }
+                        }
                         protocol::VALUES if payload.len() >= 5 => {
                             if l.schema_matches != Some(true) {
                                 // Layout unknown or foreign: values would be misread.
@@ -285,6 +300,7 @@ fn apply_command(
                 .for_each(|f| *f = None);
             port.write_all(&protocol::encode(protocol::RELEASE_ALL, &[]))
         }
+        Command::ResetStats => port.write_all(&protocol::encode(protocol::RESET_STATS, &[])),
         Command::Stop => Ok(()),
     }
 }
@@ -302,6 +318,7 @@ fn set_status(live: &Arc<Mutex<Live>>, connected: bool, status: String) {
     l.status = status;
     if !connected {
         l.schema_matches = None;
+        l.stats = None;
     }
 }
 

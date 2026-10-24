@@ -17,6 +17,34 @@ pub const LAYOUT_FILE: &str = "layout.toml";
 pub struct ProjectConfig {
     pub project: ProjectInfo,
     pub board: BoardConfig,
+    #[serde(default, skip_serializing_if = "Diagnostics::is_default")]
+    pub diagnostics: Diagnostics,
+}
+
+/// `[diagnostics]`: cycle time measurement in normal (non-debug) firmware.
+/// Debug builds always measure and send the numbers to the editor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Diagnostics {
+    /// Measure cycle time and print it to the serial port as text.
+    pub enabled: bool,
+    /// How often the text report is printed, in milliseconds.
+    pub interval_ms: u32,
+}
+
+impl Default for Diagnostics {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_ms: 5000,
+        }
+    }
+}
+
+impl Diagnostics {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

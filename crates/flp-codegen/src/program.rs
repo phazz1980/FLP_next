@@ -36,6 +36,9 @@ pub struct Instance<'a> {
     pub params: BTreeMap<&'a str, ParamValue>,
 }
 
+/// Header of the flash storage used by variables with `retain`.
+const RETAIN_HEADER: &str = "Preferences.h";
+
 fn unique<'a>(items: impl Iterator<Item = &'a String>) -> Vec<&'a str> {
     let mut out: Vec<&str> = Vec::new();
     for item in items {
@@ -64,7 +67,11 @@ pub enum Source {
 impl<'a> Program<'a> {
     /// Headers needed by the blocks, without duplicates, in order of first use.
     pub fn includes(&self) -> Vec<&'a str> {
-        unique(self.blocks.iter().flat_map(|b| &b.lib.def.info.includes))
+        let mut out = unique(self.blocks.iter().flat_map(|b| &b.lib.def.info.includes));
+        if self.project.logic.vars.iter().any(|v| v.retain) && !out.contains(&RETAIN_HEADER) {
+            out.push(RETAIN_HEADER);
+        }
+        out
     }
 
     /// Arduino libraries needed by the blocks, without duplicates.

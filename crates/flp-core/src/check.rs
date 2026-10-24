@@ -349,9 +349,10 @@ fn check_links(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) -
 /// edges "write before read" for the execution order.
 fn check_vars(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) -> Vec<Edge> {
     let mut names = HashMap::new();
+    let mut storages = HashMap::new();
     for var in &logic.vars {
         let name = var.name.as_str();
-        if !is_valid_ident(name) {
+        if !crate::vars::is_valid_var_name(name) {
             report.push(
                 Severity::Error,
                 None,
@@ -365,6 +366,18 @@ fn check_vars(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) ->
                 None,
                 None,
                 format!("переменная «{name}» объявлена дважды"),
+            );
+        }
+        let storage = crate::vars::storage_name(name);
+        if let Some(other) = storages
+            .insert(storage.clone(), name)
+            .filter(|&o| o != name)
+        {
+            report.push(
+                Severity::Error,
+                None,
+                None,
+                format!("у переменных «{other}» и «{name}» совпало имя в скетче {storage}: переименуйте одну"),
             );
         }
         if var.init.as_ref().is_some_and(|v| !var.ty.accepts(v)) {

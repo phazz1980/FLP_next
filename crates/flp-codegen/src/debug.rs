@@ -55,7 +55,8 @@ fn type_code(e: &Entry) -> u8 {
     }
 }
 
-/// The firmware side of the protocol, placed after all globals of the sketch.
+/// The firmware side of the protocol, placed after all globals of the sketch
+/// and after the cycle time module of [`crate::stats`].
 pub fn runtime(table: &DebugTable) -> String {
     let n = table.entries.len();
     let ptrs: Vec<String> = table
@@ -87,6 +88,7 @@ uint8_t flp_dbg_rx[4 + 255 + 2];
 uint16_t flp_dbg_rx_len = 0;
 uint16_t flp_dbg_seq = 0;
 unsigned long flp_dbg_last = 0;
+uint8_t flp_dbg_ticks = 0;
 
 uint16_t flp_dbg_crc(uint16_t crc, uint8_t b) {{
   crc ^= (uint16_t)b << 8;
@@ -177,9 +179,29 @@ void flp_dbg_values() {{
   }}
 }}
 
+void flp_dbg_stats() {{
+  uint8_t p[25 + 10 * FLP_ST_SHEETS];
+  uint32_t head[6] = {{flp_st_cycles, flp_st_last, flp_st_max, 0, flp_st_period_max, flp_st_free_heap()}};
+  head[3] = flp_st_take_avg();
+  memcpy(p, head, 24);
+  p[24] = FLP_ST_SHEETS;
+  for (uint8_t k = 0; k < FLP_ST_SHEETS; k++) {{
+    uint8_t* q = p + 25 + 10 * k;
+    q[0] = flp_st_sheet_no[k] & 0xFF;
+    q[1] = flp_st_sheet_no[k] >> 8;
+    memcpy(q + 2, &flp_st_sheet_last[k], 4);
+    memcpy(q + 6, &flp_st_sheet_max[k], 4);
+  }}
+  flp_dbg_frame(0x{stats:02X}, p, 25 + 10 * FLP_ST_SHEETS);
+}}
+
 void flp_dbg_command(uint8_t type, const uint8_t* p, uint8_t len) {{
   if (type == 0x{hello_req:02X}) {{
     flp_dbg_hello();
+    return;
+  }}
+  if (type == 0x{reset_stats:02X}) {{
+    flp_st_reset();
     return;
   }}
   if (type == 0x{release_all:02X}) {{
@@ -242,6 +264,10 @@ void flp_dbg_loop() {{
   if (millis() - flp_dbg_last >= 100) {{
     flp_dbg_last = millis();
     flp_dbg_values();
+    if (++flp_dbg_ticks >= 5) {{
+      flp_dbg_ticks = 0;
+      flp_dbg_stats();
+    }}
   }}
 }}
 "#,
@@ -257,6 +283,8 @@ void flp_dbg_loop() {{
         force = protocol::FORCE,
         set = protocol::SET,
         release_all = protocol::RELEASE_ALL,
+        stats = protocol::STATS,
+        reset_stats = protocol::RESET_STATS,
         per_frame = protocol::VALUES_PER_FRAME,
         baud = BAUD,
     );

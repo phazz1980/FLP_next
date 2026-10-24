@@ -109,7 +109,8 @@ void loop() {
   save_now_out = tick_out && water_ok;
 
   // last_water: flash_store
-  if (save_now_out && !last_water_prev) {
+  // Flash wears out: write only a value that differs from the saved one.
+  if (save_now_out && !last_water_prev && water_temp != last_water_out) {
     last_water_out = water_temp;
     last_water_prefs.putFloat("last_water", last_water_out);
   }

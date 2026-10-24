@@ -1,0 +1,104 @@
+# Число нажатий кнопки переживает перезагрузку: переменная сохраняется во флеш.
+# Имена переменных — любой текст, имя в скетче получается автоматически.
+
+[[var]]
+name = "Нажатий всего"
+type = "float"
+retain = true
+description = "Сколько раз нажата кнопка за всё время"
+
+# Никто не записывает — уставка; её можно поменять на лету при отладке и она сохранится.
+[[var]]
+name = "Порог"
+type = "float"
+init = 10.0
+retain = true
+description = "После скольких нажатий зажечь светодиод"
+
+[[block]]
+id = "button"
+type = "digital_in"
+pin = 13
+pullup = true
+inverted = true
+
+[[block]]
+id = "press"
+type = "rising_edge"
+
+[[block]]
+id = "total_r"
+type = "var_get"
+var = "Нажатий всего"
+
+[[block]]
+id = "one"
+type = "constant"
+value = 1.0
+
+[[block]]
+id = "next"
+type = "add"
+
+# Записывает «Нажатий всего + 1» только по нажатию (вход En).
+[[block]]
+id = "total_w"
+type = "var_set"
+var = "Нажатий всего"
+write_enable = true
+
+[[block]]
+id = "limit_r"
+type = "var_get"
+var = "Порог"
+
+[[block]]
+id = "rest"
+type = "sub"
+
+# total − limit > −0.5, то есть нажатий не меньше порога.
+[[block]]
+id = "reached"
+type = "greater"
+b = -0.5
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[link]]
+from = "button.out"
+to   = "press.in"
+
+[[link]]
+from = "total_r.out"
+to   = "next.a"
+
+[[link]]
+from = "one.out"
+to   = "next.b"
+
+[[link]]
+from = "next.out"
+to   = "total_w.in"
+
+[[link]]
+from = "press.out"
+to   = "total_w.en"
+
+[[link]]
+from = "total_r.out"
+to   = "rest.a"
+
+[[link]]
+from = "limit_r.out"
+to   = "rest.b"
+
+[[link]]
+from = "rest.out"
+to   = "reached.a"
+
+[[link]]
+from = "reached.out"
+to   = "led.in"

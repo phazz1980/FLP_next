@@ -6,7 +6,7 @@
 //! loops) are left to [`crate::check`].
 
 use crate::ident::is_valid_ident;
-use crate::vars::{Var, VAR_GET, VAR_PARAM, VAR_SET};
+use crate::vars::{Var, VAR_GET, VAR_PARAM, VAR_SET, WRITE_ENABLE};
 use crate::{Block, BlockPos, Library, Link, ParamValue, PortRef, Project};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -33,7 +33,11 @@ pub enum EditError {
     NoVar(String),
     #[error("блок переменной «{0}» уже подключён с другой стороны: переменную в одном блоке можно либо читать, либо записывать")]
     VarBothSides(String),
-    #[error("недопустимое имя переменной «{0}»: только латиница, цифры и «_», первой — буква")]
+    #[error(
+        "у блока переменной «{0}» включён вход разрешения записи: он только записывает, выхода нет"
+    )]
+    VarWriteOnly(String),
+    #[error("недопустимое имя переменной «{0}»: пустое, с пробелами по краям или с управляющими символами")]
     InvalidVarName(String),
     #[error("переменная «{0}» уже есть")]
     DuplicateVar(String),
@@ -146,7 +150,7 @@ impl Project {
     }
 
     fn validate_var(&self, var: &Var, old_name: Option<&str>) -> Result<(), EditError> {
-        if !is_valid_ident(&var.name) {
+        if !crate::vars::is_valid_var_name(&var.name) {
             return Err(EditError::InvalidVarName(var.name.clone()));
         }
         if Some(var.name.as_str()) != old_name && self.logic.var(&var.name).is_some() {
@@ -263,6 +267,42 @@ impl Project {
         Ok(())
     }
 
+    /// Switches the write enable input `en` of one variable block. Turning it on
+    /// makes an unconnected read a write; a read with links cannot get it.
+    pub fn set_var_write_enable(&mut self, id: &str, on: bool) -> Result<(), EditError> {
+        let linked = self
+            .logic
+            .links
+            .iter()
+            .any(|l| l.from.block == id || l.to.block == id);
+        let block = self
+            .logic
+            .blocks
+            .iter_mut()
+            .find(|b| b.id == id)
+            .ok_or_else(|| EditError::NoBlock(id.to_owned()))?;
+        if block.var_name().is_none() {
+            return Err(EditError::NoBlock(id.to_owned()));
+        }
+        if on {
+            if block.kind == VAR_GET {
+                if linked {
+                    return Err(EditError::VarBothSides(id.to_owned()));
+                }
+                block.kind = VAR_SET.to_owned();
+            }
+            block
+                .params
+                .insert(WRITE_ENABLE.to_owned(), ParamValue::Bool(true));
+        } else {
+            block.params.remove(WRITE_ENABLE);
+            self.logic
+                .links
+                .retain(|l| !(l.to.block == id && l.to.port == "en"));
+        }
+        Ok(())
+    }
+
     /// Turns a variable block into a reader or a writer before a link is attached;
     /// allowed only while the block has no links.
     fn adapt_var_block(&mut self, id: &str, write: bool) -> Result<(), EditError> {
@@ -272,6 +312,10 @@ impl Project {
         };
         if (block.kind != VAR_GET && block.kind != VAR_SET) || block.kind == want {
             return Ok(());
+        }
+        // A write with the enable input stays a write.
+        if matches!(block.params.get(WRITE_ENABLE), Some(ParamValue::Bool(true))) {
+            return Err(EditError::VarWriteOnly(id.to_owned()));
         }
         if self
             .logic
@@ -283,6 +327,9 @@ impl Project {
         }
         if let Some(b) = self.logic.blocks.iter_mut().find(|b| b.id == id) {
             b.kind = want.to_owned();
+            if !write {
+                b.params.remove(WRITE_ENABLE);
+            }
         }
         Ok(())
     }
@@ -602,16 +649,16 @@ mod tests {
         let var = |name: &str| Var {
             name: name.into(),
             ty: crate::VarType::Float,
-            write_enable: false,
             init: Some(ParamValue::Float(1.5)),
             description: String::new(),
+            retain: false,
         };
         p.add_var(var("t")).unwrap();
         assert_eq!(
             p.add_var(var("t")),
             Err(EditError::DuplicateVar("t".into()))
         );
-        assert!(p.add_var(var("1t")).is_err());
+        assert!(p.add_var(var(" t")).is_err());
         let r = p.add_var_block("t", false, POS).unwrap();
         let w = p.add_var_block("t", true, POS).unwrap();
         assert_eq!((r.as_str(), w.as_str()), ("t_r1", "t_w1"));
@@ -637,9 +684,9 @@ mod tests {
         p.add_var(Var {
             name: "on".into(),
             ty: crate::VarType::Bool,
-            write_enable: false,
             init: None,
             description: String::new(),
+            retain: false,
         })
         .unwrap();
         let src = p.add_block(&lib, "src", POS).unwrap();
@@ -658,6 +705,32 @@ mod tests {
         p.connect(&lib, PortRef::new(&tag, "out"), PortRef::new(&sink, "in"))
             .unwrap();
         assert_eq!(p.logic.block(&tag).unwrap().kind, VAR_GET);
+    }
+
+    #[test]
+    fn write_enable_per_block() {
+        let lib = library();
+        let mut p = project();
+        p.add_var(Var {
+            name: "on".into(),
+            ty: crate::VarType::Bool,
+            init: None,
+            description: String::new(),
+            retain: false,
+        })
+        .unwrap();
+        let tag = p.add_var_block("on", false, POS).unwrap();
+        let other = p.add_var_block("on", false, POS).unwrap();
+        let inputs = |p: &Project, id: &str| {
+            let b = p.logic.block(id).unwrap();
+            lib.resolve(&p.logic, b).unwrap().def.inputs.len()
+        };
+        p.set_var_write_enable(&tag, true).unwrap();
+        assert_eq!(p.logic.block(&tag).unwrap().kind, VAR_SET);
+        assert_eq!(inputs(&p, &tag), 2);
+        assert_eq!(p.logic.block(&other).unwrap().kind, VAR_GET);
+        p.set_var_write_enable(&tag, false).unwrap();
+        assert_eq!(inputs(&p, &tag), 1);
     }
 
     #[test]

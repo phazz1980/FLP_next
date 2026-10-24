@@ -1,0 +1,41 @@
+# Координаты блоков для редактора.
+
+[block.button]
+x = 40.0
+y = 40.0
+
+[block.press]
+x = 200.0
+y = 40.0
+
+[block.total_r]
+x = 40.0
+y = 160.0
+
+[block.one]
+x = 40.0
+y = 240.0
+
+[block.next]
+x = 200.0
+y = 180.0
+
+[block.total_w]
+x = 360.0
+y = 120.0
+
+[block.limit_r]
+x = 40.0
+y = 340.0
+
+[block.rest]
+x = 200.0
+y = 320.0
+
+[block.reached]
+x = 360.0
+y = 320.0
+
+[block.led]
+x = 520.0
+y = 320.0

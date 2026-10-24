@@ -21,6 +21,6 @@ pub use error::{Error, Result};
 pub use layout::{BlockPos, Layout, SheetInfo};
 pub use library::{BlockDef, Library, LibraryBlock, ParamDef, ParamKind, PortDef, SignalType};
 pub use logic::{Block, Link, Logic, PortRef, PortRefError};
-pub use project::{BoardConfig, Project, ProjectConfig, ProjectInfo};
+pub use project::{BoardConfig, Diagnostics, Project, ProjectConfig, ProjectInfo};
 pub use value::ParamValue;
 pub use vars::{Var, VarType};

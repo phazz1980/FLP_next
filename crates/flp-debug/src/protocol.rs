@@ -10,7 +10,7 @@
 //! int as `int32_t`, float as IEEE-754 `float`.
 
 /// Protocol version reported in `HELLO`.
-pub const VERSION: u8 = 1;
+pub const VERSION: u8 = 2;
 pub const SYNC: [u8; 2] = [0xAA, 0x55];
 pub const MAX_PAYLOAD: usize = 255;
 /// Values per `VALUES` frame: header 5 bytes + 4 bytes per value fits in 255.
@@ -20,6 +20,12 @@ pub const VALUES_PER_FRAME: usize = 60;
 pub const HELLO: u8 = 0x01;
 /// Board → host: `seq u16, start u16, n u8, n × value u32` (one scan, in chunks).
 pub const VALUES: u8 = 0x02;
+/// Board → host, every 500 ms: `cycles u32, last u32, max u32, avg u32,
+/// period_max u32, free_heap u32, n u8, n × (sheet u16, last u32, max u32)`.
+/// Times in microseconds; `cycles` counts scans since the last report.
+pub const STATS: u8 = 0x03;
+/// Sheets measured separately; `STATS` with this many still fits in 255 bytes.
+pub const MAX_STAT_SHEETS: usize = 23;
 /// Host → board: ask for `HELLO`.
 pub const HELLO_REQ: u8 = 0x10;
 /// Host → board: `index u16, on u8, value u32` — force (or release) a value.
@@ -28,6 +34,63 @@ pub const FORCE: u8 = 0x11;
 pub const SET: u8 = 0x12;
 /// Host → board: release all forced values.
 pub const RELEASE_ALL: u8 = 0x13;
+
+/// Host → board: reset the maxima of `STATS`.
+pub const RESET_STATS: u8 = 0x14;
+
+/// Cycle time figures of the board, decoded from `STATS`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Stats {
+    /// Scans since the previous report.
+    pub cycles: u32,
+    /// Time of the logic in the last scan, µs.
+    pub last_us: u32,
+    /// Longest logic time since start or reset, µs.
+    pub max_us: u32,
+    /// Average logic time since the previous report, µs.
+    pub avg_us: u32,
+    /// Longest time between two `loop()` starts (logic + debugging + system), µs.
+    pub period_max_us: u32,
+    pub free_heap: u32,
+    pub sheets: Vec<SheetStats>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SheetStats {
+    pub sheet: u32,
+    pub last_us: u32,
+    pub max_us: u32,
+}
+
+impl Stats {
+    pub fn decode(p: &[u8]) -> Option<Self> {
+        let u32_at = |i: usize| {
+            p.get(i..i + 4)
+                .map(|b| u32::from_le_bytes(b.try_into().expect("4 bytes")))
+        };
+        let n = usize::from(*p.get(24)?);
+        let sheets = (0..n)
+            .map(|k| {
+                let at = 25 + 10 * k;
+                let sheet = u16::from_le_bytes([*p.get(at)?, *p.get(at + 1)?]);
+                Some(SheetStats {
+                    sheet: u32::from(sheet),
+                    last_us: u32_at(at + 2)?,
+                    max_us: u32_at(at + 6)?,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(Self {
+            cycles: u32_at(0)?,
+            last_us: u32_at(4)?,
+            max_us: u32_at(8)?,
+            avg_us: u32_at(12)?,
+            period_max_us: u32_at(16)?,
+            free_heap: u32_at(20)?,
+            sheets,
+        })
+    }
+}
 
 /// CRC-16/CCITT-FALSE: poly 0x1021, init 0xFFFF, no reflection.
 pub fn crc16(data: &[u8]) -> u16 {
@@ -139,6 +202,30 @@ fn find_sync(buf: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stats_decode() {
+        let mut p = Vec::new();
+        for v in [10u32, 120, 900, 130, 2000, 200_000] {
+            p.extend(v.to_le_bytes());
+        }
+        p.push(1);
+        p.extend(2u16.to_le_bytes());
+        p.extend(40u32.to_le_bytes());
+        p.extend(300u32.to_le_bytes());
+        let s = Stats::decode(&p).unwrap();
+        assert_eq!(s.max_us, 900);
+        assert_eq!(s.free_heap, 200_000);
+        assert_eq!(
+            s.sheets,
+            [SheetStats {
+                sheet: 2,
+                last_us: 40,
+                max_us: 300
+            }]
+        );
+        assert_eq!(Stats::decode(&p[..30]), None);
+    }
 
     #[test]
     fn crc_check_value() {

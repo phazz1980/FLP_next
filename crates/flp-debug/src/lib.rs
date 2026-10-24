@@ -7,6 +7,7 @@ pub mod session;
 pub mod table;
 pub mod transport;
 
+pub use protocol::{SheetStats, Stats};
 pub use session::{Command, Live, Session};
 pub use table::{DebugTable, Entry, Source, Value};
 pub use transport::{Connector, Transport};

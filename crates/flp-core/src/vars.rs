@@ -17,6 +17,9 @@ pub const VAR_GET: &str = "var_get";
 pub const VAR_SET: &str = "var_set";
 /// Parameter of variable blocks naming the variable.
 pub const VAR_PARAM: &str = "var";
+/// Parameter of a `var_set` block adding the bool input `en`: the value is written
+/// only while it is true ("разрешение записи"). Set per block, not per variable.
+pub const WRITE_ENABLE: &str = "write_enable";
 
 /// Arduino storage type of a variable. On the sheets it carries the signal of
 /// [`VarType::signal`]; the sketch stores it in the declared C++ type.
@@ -166,15 +169,15 @@ pub struct Var {
     pub name: String,
     #[serde(rename = "type")]
     pub ty: VarType,
-    /// The writing block gets a bool input `en`: the value is written only while it
-    /// is true ("разрешение записи").
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub write_enable: bool,
     /// Value after power-on; false / 0 when omitted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub init: Option<ParamValue>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+    /// Kept in flash (EEPROM on ESP32 is emulated in NVS the same way): restored
+    /// after power-on, saved when the value changes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retain: bool,
 }
 
 impl Logic {
@@ -204,7 +207,8 @@ pub(crate) fn builtin_kind(logic: &Logic, block: &Block) -> Option<String> {
     }
     let var = block.var_name().and_then(|name| logic.var(name));
     let ty = var.map_or(SignalType::Float, |v| v.ty.signal());
-    let en = block.kind == VAR_SET && var.is_some_and(|v| v.write_enable);
+    let en = block.kind == VAR_SET
+        && matches!(block.params.get(WRITE_ENABLE), Some(ParamValue::Bool(true)));
     Some(format!(
         "{}_{}{}",
         block.kind,
@@ -221,9 +225,54 @@ fn type_suffix(ty: SignalType) -> &'static str {
     }
 }
 
-/// C++-safe name of the variable storage.
+/// A variable name is free text (`Давление в баке`): not empty, without control
+/// characters and leading or trailing spaces. The sketch uses [`storage_name`].
+pub fn is_valid_var_name(name: &str) -> bool {
+    !name.is_empty() && name.trim() == name && !name.chars().any(char::is_control)
+}
+
+/// C++ name of the variable storage. A C identifier keeps its name (`var_t`);
+/// any other name is transliterated and gets a hash of the full name, so
+/// different names never meet (`var_Davlenie_v_bake_1a2b3c`).
 pub fn storage_name(var: &str) -> String {
-    format!("var_{var}")
+    if crate::ident::is_valid_ident(var) {
+        return format!("var_{var}");
+    }
+    let mut out = String::from("var_");
+    for c in var.chars() {
+        match translit(c) {
+            Some(t) => out.push_str(t),
+            None if c.is_ascii_alphanumeric() => out.push(c),
+            None if !out.ends_with('_') => out.push('_'),
+            None => {}
+        }
+    }
+    if !out.ends_with('_') {
+        out.push('_');
+    }
+    let mut hash: u32 = 0x811c_9dc5;
+    for b in var.bytes() {
+        hash = (hash ^ u32::from(b)).wrapping_mul(0x0100_0193);
+    }
+    format!("{out}{:06x}", hash & 0x00ff_ffff)
+}
+
+fn translit(c: char) -> Option<&'static str> {
+    const LOWER: [&str; 32] = [
+        "a", "b", "v", "g", "d", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r", "s",
+        "t", "u", "f", "kh", "ts", "ch", "sh", "shch", "", "y", "", "e", "yu", "ya",
+    ];
+    const UPPER: [&str; 32] = [
+        "A", "B", "V", "G", "D", "E", "Zh", "Z", "I", "Y", "K", "L", "M", "N", "O", "P", "R", "S",
+        "T", "U", "F", "Kh", "Ts", "Ch", "Sh", "Shch", "", "Y", "", "E", "Yu", "Ya",
+    ];
+    match c {
+        'а'..='я' => Some(LOWER[c as usize - 'а' as usize]),
+        'А'..='Я' => Some(UPPER[c as usize - 'А' as usize]),
+        'ё' => Some("e"),
+        'Ё' => Some("E"),
+        _ => None,
+    }
 }
 
 pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
@@ -277,23 +326,39 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                     ],
                 },
                 outputs: if get { vec![port] } else { Vec::new() },
-                params: vec![ParamDef {
-                    name: VAR_PARAM.to_owned(),
-                    kind: ParamKind::Text,
-                    default: None,
-                    min: None,
-                    max: None,
-                    when: None,
-                    description: "Имя переменной".to_owned(),
-                }],
+                params: {
+                    let mut params = vec![ParamDef {
+                        name: VAR_PARAM.to_owned(),
+                        kind: ParamKind::Text,
+                        default: None,
+                        min: None,
+                        max: None,
+                        when: None,
+                        description: "Имя переменной".to_owned(),
+                    }];
+                    if !get {
+                        params.push(ParamDef {
+                            name: WRITE_ENABLE.to_owned(),
+                            kind: ParamKind::Bool,
+                            default: Some(ParamValue::Bool(false)),
+                            min: None,
+                            max: None,
+                            when: None,
+                            description: "Вход разрешения записи (en)".to_owned(),
+                        });
+                    }
+                    params
+                },
             };
-            let template = if get {
-                "// @loop\n{{ output.out }} = var_{{ value.var }};\n"
-            } else {
-                "// @loop\nvar_{{ value.var }} = {{ input.in }};\n"
+            let template = match (get, en) {
+                (true, _) => "// @loop\n{{ output.out }} = {{ var }};\n",
+                (false, false) => "// @loop\n{{ var }} = {{ input.in }};\n",
+                (false, true) => {
+                    "// @loop\nif ({{ input.en }}) {\n  {{ var }} = {{ input.in }};\n}\n"
+                }
             };
             blocks.insert(
-                format!("{kind}_{}", type_suffix(ty)),
+                format!("{kind}_{}{}", type_suffix(ty), if en { "_en" } else { "" }),
                 LibraryBlock {
                     def,
                     dir: Default::default(),
@@ -303,4 +368,31 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
         }
     }
     blocks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn any_text_is_a_var_name() {
+        assert!(is_valid_var_name("Давление в баке"));
+        assert!(is_valid_var_name("t"));
+        assert!(!is_valid_var_name(""));
+        assert!(!is_valid_var_name(" t"));
+        assert!(!is_valid_var_name("a\nb"));
+    }
+
+    #[test]
+    fn storage_names_are_c_identifiers() {
+        assert_eq!(storage_name("temp"), "var_temp");
+        for name in ["Давление в баке", "Ёж", "1-й насос", "%", "давление в баке"]
+        {
+            let s = storage_name(name);
+            assert!(crate::ident::is_valid_ident(&s), "{name} → {s}");
+        }
+        assert!(storage_name("Давление в баке").starts_with("var_Davlenie_v_bake_"));
+        // Names differing only in symbols the transliteration drops stay apart.
+        assert_ne!(storage_name("a b"), storage_name("a-b"));
+    }
 }

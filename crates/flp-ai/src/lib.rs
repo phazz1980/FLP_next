@@ -116,9 +116,9 @@ pub fn tools() -> Vec<Tool> {
             input_schema: json!({"type": "object", "properties": {
                 "name": {"type": "string"},
                 "type": {"type": "string", "description": "тип Arduino: bool, char, byte, short, word, int, unsigned int, long, unsigned long, long long, unsigned long long, int8_t…uint64_t, float, double"},
-                "write_enable": {"type": "boolean", "description": "добавить блоку записи вход en «Разрешение записи»"},
                 "init": {"description": "начальное значение"},
                 "description": {"type": "string"},
+                "retain": {"type": "boolean", "description": "сохранять во флеш (EEPROM): восстанавливается после перезагрузки"},
                 "rename_to": {"type": "string"}
             }, "required": ["name", "type"]}),
         },
@@ -333,20 +333,23 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
                     .unwrap_or(&name)
                     .to_owned(),
                 ty,
-                write_enable: args
-                    .get("write_enable")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
                 init,
                 description: args
                     .get("description")
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_owned(),
+                retain: args.get("retain").and_then(Value::as_bool).unwrap_or(false),
             };
+            let retain = args.get("retain").and_then(Value::as_bool);
             ctx.edit(&mut |p| {
-                let result = if p.logic.var(&name).is_some() {
-                    p.update_var(&name, var.clone())
+                let result = if let Some(old) = p.logic.var(&name) {
+                    // Omitted `retain` keeps the current setting.
+                    let var = Var {
+                        retain: retain.unwrap_or(old.retain),
+                        ..var.clone()
+                    };
+                    p.update_var(&name, var)
                 } else {
                     p.add_var(var.clone())
                 };

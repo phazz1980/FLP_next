@@ -281,7 +281,7 @@ pub fn show(chat: &mut AiChat, pal: &Palette, ui: &mut Ui, has_project: bool) ->
         });
     });
     ScrollArea::vertical()
-        .auto_shrink(false)
+        .auto_shrink([ui.is_sizing_pass(), false])
         .stick_to_bottom(true)
         .show(ui, |ui| {
             if chat.entries.is_empty() {

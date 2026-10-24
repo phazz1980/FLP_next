@@ -7,6 +7,7 @@ use flp_core::{BlockPos, ParamKind};
 
 use crate::app::{EditorApp, LogLevel, RightTab};
 use crate::canvas::DragItem;
+use crate::debugview::{self, DebugState};
 use crate::dialogs::{value_text, Dialog};
 use crate::job::JobKind;
 
@@ -128,6 +129,12 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
                     d.send(flp_debug::Command::ReleaseAll);
                 }
             }
+            if let Some(d) = &mut app.debug {
+                ui.toggle_value(&mut d.values, "Значения")
+                    .on_hover_text("Входы и переменные: смотреть, записывать и форсировать");
+                ui.toggle_value(&mut d.diagnostics, "Диагностика")
+                    .on_hover_text("Время цикла программы и листов, максимум с начала работы");
+            }
         }
     });
 }
@@ -171,12 +178,134 @@ pub fn log(app: &mut EditorApp, ui: &mut Ui) {
     }
 }
 
+/// Shows side panel contents without letting them widen the panel: long text is
+/// truncated and anything wider than the panel is clipped, so the user can drag
+/// the panel narrower than its contents.
+pub fn fit_width<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+    let rect = ui.available_rect_before_wrap();
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    child.shrink_clip_rect(rect);
+    child.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+    let result = add_contents(&mut child);
+    // The panel keeps exactly the width the user gave it.
+    ui.expand_to_include_rect(rect);
+    result
+}
+
+/// Runs panel contents invisibly with unwrapped text and returns their natural width
+/// (at most `max_width`).
+fn measure_width(ui: &mut Ui, max_width: f32, add_contents: impl FnOnce(&mut Ui)) -> f32 {
+    let rect = ui.available_rect_before_wrap();
+    let wide = egui::Rect::from_min_size(rect.min, egui::vec2(max_width, rect.height()));
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(wide)
+            .sizing_pass()
+            .invisible(),
+    );
+    child.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+    add_contents(&mut child);
+    ui.expand_to_include_rect(rect);
+    child.min_rect().width().min(max_width)
+}
+
+/// Expanding a side panel happens in two frames: measure the contents, then apply the width.
+#[derive(Clone, Copy)]
+enum Fit {
+    Measure,
+    Apply(f32),
+}
+
+/// Resizable side panel with a button that collapses it to a narrow strip and back.
+/// On expanding, the panel takes the width of its contents. `width` is the starting
+/// width and receives the current one.
+pub fn side_panel(
+    ui: &mut Ui,
+    id: &str,
+    left: bool,
+    open: &mut bool,
+    width: &mut f32,
+    add_contents: impl FnOnce(&mut Ui),
+) {
+    let panel = |id: String| {
+        if left {
+            egui::Panel::left(id)
+        } else {
+            egui::Panel::right(id)
+        }
+    };
+    // Arrow pointing where the panel goes on click.
+    let (hide, show) = if left { ("«", "»") } else { ("»", "«") };
+    let fit_id = Id::unique(id).with("fit");
+    let fit = ui.data_mut(|d| {
+        let fit = d.get_temp::<Fit>(fit_id);
+        d.remove::<Fit>(fit_id);
+        fit
+    });
+    if *open {
+        let max_width = ui.ctx().content_rect().width() * 0.6;
+        let mut builder = panel(id.to_owned())
+            .resizable(true)
+            // A saved width from a larger window must not swallow the canvas.
+            .default_size(width.min(max_width))
+            .size_range(80.0..=f32::INFINITY);
+        if let Some(Fit::Apply(width)) = fit {
+            builder = builder.exact_size(width);
+        }
+        let mut measured = None;
+        let response = builder.show(ui, |ui| {
+            let corner = ui.max_rect();
+            let inner = corner.width();
+            if matches!(fit, Some(Fit::Measure)) {
+                measured = Some((measure_width(ui, max_width, add_contents), inner));
+            } else {
+                fit_width(ui, add_contents);
+            }
+            // A child ui, so the button never widens the panel.
+            let mut child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(corner)
+                    .layout(egui::Layout::right_to_left(egui::Align::Min)),
+            );
+            if child
+                .add(egui::Button::new(hide).small())
+                .on_hover_text("Свернуть панель")
+                .clicked()
+            {
+                *open = false;
+            }
+        });
+        *width = response.response.rect.width();
+        if let Some((content, inner)) = measured {
+            // Outer width = contents + frame margins + room for the collapse button.
+            let margins = response.response.rect.width() - inner;
+            let fitted = (content + margins + 24.0).max(80.0);
+            ui.data_mut(|d| d.insert_temp(fit_id, Fit::Apply(fitted)));
+            ui.ctx().request_repaint();
+        }
+    } else {
+        panel(format!("{id}_collapsed"))
+            .resizable(false)
+            .exact_size(28.0)
+            .show(ui, |ui| {
+                if ui.button(show).on_hover_text("Развернуть панель").clicked() {
+                    *open = true;
+                    ui.data_mut(|d| d.insert_temp(fit_id, Fit::Measure));
+                    ui.ctx().request_repaint();
+                }
+            });
+    }
+}
+
 /// Project tree as in FLProg: controller → tags (inputs, outputs, variables) → sheets.
 pub fn left(app: &mut EditorApp, ui: &mut Ui) {
     let pal = app.theme.palette;
     ui.strong("Дерево проекта");
     ui.separator();
+    // Online: tags show live values and offer writing and forcing.
+    let mut debug = app.debug.take();
     let Some(doc) = &app.doc else {
+        app.debug = debug;
         ui.weak("Проект не открыт");
         return;
     };
@@ -206,7 +335,7 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
         }
     }
 
-    ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+    ScrollArea::vertical().auto_shrink([ui.is_sizing_pass(), false]).show(ui, |ui| {
         let title = format!(
             "Контроллер: {} ({})",
             doc.project.config.project.name, doc.project.config.board.fqbn
@@ -223,8 +352,15 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
                                 .show(ui, |ui| {
                                     for (id, text) in items {
                                         let sel = app.selection.as_ref().is_some_and(|s| s.has_block(id));
-                                        if ui.selectable_label(sel, text).clicked() {
+                                        let index = debug.as_ref().and_then(|d| {
+                                            d.inputs.iter().find(|(p, _)| p.block == *id).map(|&(_, i)| i)
+                                        });
+                                        let resp = ui.selectable_label(sel, live_text(text, debug.as_ref(), index));
+                                        if resp.clicked() {
                                             focus = Some(id.clone());
+                                        }
+                                        if let (Some(d), Some(index)) = (&mut debug, index) {
+                                            resp.context_menu(|ui| debugview::value_menu(ui, d, index));
                                         }
                                     }
                                     if items.is_empty() {
@@ -243,15 +379,17 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
                                         .blocks
                                         .iter()
                                         .any(|b| b.var_name() == Some(var.name.as_str()));
+                                    let index = debug.as_ref().and_then(|d| d.table.var_index(&var.name));
+                                    let plain = live_text(
+                                        &format!("{} <{}>", var.name, var.ty.name()),
+                                        debug.as_ref(),
+                                        index,
+                                    );
                                     let text = if used {
-                                        RichText::new(format!("{} <{}>", var.name, var.ty.name()))
+                                        RichText::new(plain)
                                     } else {
-                                        RichText::new(format!(
-                                            "{} <{}>  (не используется)",
-                                            var.name,
-                                            var.ty.name()
-                                        ))
-                                        .color(pal.warning)
+                                        RichText::new(format!("{plain}  (не используется)"))
+                                            .color(pal.warning)
                                     };
                                     let resp = ui
                                         .dnd_drag_source(
@@ -268,6 +406,10 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
                                         edit_var = Some(var.name.clone());
                                     }
                                     resp.context_menu(|ui| {
+                                        if let (Some(d), Some(index)) = (&mut debug, index) {
+                                            ui.menu_button("Отладка", |ui| debugview::value_menu(ui, d, index));
+                                            ui.separator();
+                                        }
                                         if ui.button("Поставить чтение на плату").clicked() {
                                             place_var = Some((var.name.clone(), false));
                                         }
@@ -316,6 +458,7 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
             });
     });
 
+    app.debug = debug;
     if let Some(s) = sheet_click {
         app.sheet = s;
     }
@@ -383,29 +526,31 @@ fn library(app: &mut EditorApp, ui: &mut Ui) {
         }
     }
     let mut add = None;
-    ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-        for (group, blocks) in &groups {
-            egui::CollapsingHeader::new(*group)
-                .default_open(!needle.is_empty())
-                .show(ui, |ui| {
-                    for (kind, text, description) in blocks {
-                        let resp = ui
-                            .dnd_drag_source(
-                                Id::unique(("lib", *kind)),
-                                DragItem::Block(kind.to_string()),
-                                |ui| ui.label(text),
-                            )
-                            .response;
-                        if resp.on_hover_text(*description).double_clicked() {
-                            add = Some(kind.to_string());
+    ScrollArea::vertical()
+        .auto_shrink([ui.is_sizing_pass(), false])
+        .show(ui, |ui| {
+            for (group, blocks) in &groups {
+                egui::CollapsingHeader::new(*group)
+                    .default_open(!needle.is_empty())
+                    .show(ui, |ui| {
+                        for (kind, text, description) in blocks {
+                            let resp = ui
+                                .dnd_drag_source(
+                                    Id::unique(("lib", *kind)),
+                                    DragItem::Block(kind.to_string()),
+                                    |ui| ui.label(text),
+                                )
+                                .response;
+                            if resp.on_hover_text(*description).double_clicked() {
+                                add = Some(kind.to_string());
+                            }
                         }
-                    }
-                });
-        }
-        if groups.is_empty() {
-            ui.weak("Ничего не найдено");
-        }
-    });
+                    });
+            }
+            if groups.is_empty() {
+                ui.weak("Ничего не найдено");
+            }
+        });
     if let Some(kind) = add {
         let lib = app.lib.clone();
         let pos = free_spot(app);
@@ -452,5 +597,17 @@ pub fn theme_menu(app: &mut EditorApp, ui: &mut Ui) {
     if ui.button("Настройка темы…").clicked() {
         app.theme_editor = Some(crate::themeedit::ThemeEditor::new(&app.theme));
         ui.close();
+    }
+}
+
+/// Tag text with its live value appended while debugging (`F` when forced).
+fn live_text(text: &str, dbg: Option<&DebugState>, index: Option<usize>) -> String {
+    let Some((d, i)) = dbg.zip(index).filter(|(d, _)| d.online()) else {
+        return text.to_owned();
+    };
+    match (d.live.values[i], d.live.forced[i].is_some()) {
+        (Some(v), true) => format!("{text} = {v} F"),
+        (Some(v), false) => format!("{text} = {v}"),
+        (None, _) => text.to_owned(),
     }
 }

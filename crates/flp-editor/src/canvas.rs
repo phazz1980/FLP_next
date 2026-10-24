@@ -15,7 +15,7 @@ use flp_core::{
 };
 
 use crate::app::{EditorApp, LogLevel, Selection};
-use crate::debugview;
+use crate::debugview::{self, Place};
 use crate::dialogs::Dialog;
 use crate::theme::Palette;
 
@@ -118,7 +118,11 @@ impl Band {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Kind {
     Box,
-    Tag { write: bool },
+    /// `en`: a write with the enable input, drawn twice as tall with «En» below.
+    Tag {
+        write: bool,
+        en: bool,
+    },
 }
 
 /// Approximate text width; exact layout is not needed for box sizing.
@@ -136,10 +140,16 @@ fn label(block: &Block, def: Option<&BlockDef>) -> String {
     )
 }
 
-fn kind_of(block: &Block) -> Kind {
+fn kind_of(block: &Block, def: Option<&BlockDef>) -> Kind {
     match block.kind.as_str() {
-        VAR_GET => Kind::Tag { write: false },
-        VAR_SET => Kind::Tag { write: true },
+        VAR_GET => Kind::Tag {
+            write: false,
+            en: false,
+        },
+        VAR_SET => Kind::Tag {
+            write: true,
+            en: def.is_some_and(|d| d.inputs.len() > 1),
+        },
         _ => Kind::Box,
     }
 }
@@ -147,8 +157,11 @@ fn kind_of(block: &Block) -> Kind {
 /// Size of a block in world units.
 fn size(block: &Block, def: Option<&BlockDef>) -> Vec2 {
     let text = label(block, def);
-    match kind_of(block) {
-        Kind::Tag { .. } => Vec2::new(text_w(&text, 11.0) + 18.0, TAG_H),
+    match kind_of(block, def) {
+        Kind::Tag { en, .. } => Vec2::new(
+            text_w(&text, 11.0) + 18.0,
+            if en { TAG_H * 2.0 } else { TAG_H },
+        ),
         Kind::Box => {
             let (ins, outs) = def.map_or((Vec::new(), Vec::new()), |d| {
                 (
@@ -180,12 +193,18 @@ fn tag_linked(logic: &Logic, id: &str) -> bool {
 
 fn port_pos(rect: Rect, kind: Kind, index: usize, output: bool) -> Pos2 {
     match kind {
-        Kind::Tag { .. } => {
+        Kind::Tag { en: false, .. } => {
             if output {
                 rect.right_center()
             } else {
                 rect.left_center()
             }
+        }
+        // Value on the upper half, `en` on the lower one.
+        Kind::Tag { en: true, .. } => {
+            let x = if output { rect.max.x } else { rect.min.x };
+            let row = if output { 0.0 } else { index as f32 };
+            Pos2::new(x, rect.min.y + rect.height() * (0.25 + 0.5 * row))
         }
         Kind::Box => {
             let x = if output { rect.max.x } else { rect.min.x };
@@ -474,7 +493,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         };
         let i = ports.iter().position(|q| q.name == r.port)?;
         Some((
-            port_pos(screen_rect(&r.block)?, kind_of(block), i, output),
+            port_pos(screen_rect(&r.block)?, kind_of(block, Some(def)), i, output),
             ports[i].ty,
         ))
     };
@@ -484,13 +503,27 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let dbg = app.debug.as_ref();
     let click_pos = bg.clicked().then(|| bg.interact_pointer_pos()).flatten();
     let mut clicked_link = None;
+    // Live values above the input end of each wire; drawn after the blocks to stay on top.
+    let mut wire_labels = Vec::new();
     for link in &logic.links {
         let (Some((a, ty)), Some((b, _))) =
             (port_screen(&link.from, true), port_screen(&link.to, false))
         else {
             continue;
         };
-        let pts = rounded(&route(a, b, 12.0 * z), 6.0 * z);
+        let sheet_of = |id: &str| project.layout.blocks.get(id).map(|p| p.sheet);
+        let (from_sheet, to_sheet) = (sheet_of(&link.from.block), sheet_of(&link.to.block));
+        // Links between sheets are broken into two labelled stubs, as in FLProg.
+        let cross = from_sheet != to_sheet;
+        let stub = 24.0 * z;
+        let lines: Vec<Vec<Pos2>> = if cross {
+            vec![
+                vec![a, a + Vec2::new(stub, 0.0)],
+                vec![b - Vec2::new(stub, 0.0), b],
+            ]
+        } else {
+            vec![rounded(&route(a, b, 12.0 * z), 6.0 * z)]
+        };
         let is_sel = selected.as_ref() == Some(&Selection::Link(link.to.clone()));
         let color = signal_color(&pal, ty);
         // Online: logical lines light up when true and fade when false.
@@ -500,10 +533,37 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             Some((flp_debug::Value::Bool(false), _)) => (1.4, color.gamma_multiply(0.45)),
             _ => (1.6, color),
         };
+        if let Some((v, forced)) = live {
+            wire_labels.push((b, v, forced));
+        }
         let stroke = Stroke::new(if is_sel { width + 1.4 } else { width }, color);
-        painter.line(pts.clone(), stroke);
-        if click_pos.is_some_and(|p| near_polyline(&pts, p, 5.0)) {
-            clicked_link = Some(link.to.clone());
+        for pts in &lines {
+            painter.line(pts.clone(), stroke);
+            if click_pos.is_some_and(|p| near_polyline(pts, p, 5.0)) {
+                clicked_link = Some(link.to.clone());
+            }
+        }
+        if cross {
+            let sheet = |s: Option<u32>| s.map_or("?".to_owned(), |s| s.to_string());
+            painter.text(
+                a + Vec2::new(stub + 3.0 * z, 0.0),
+                Align2::LEFT_CENTER,
+                format!("→ П{}: {}.{}", sheet(to_sheet), link.to.block, link.to.port),
+                font(10.0),
+                color,
+            );
+            painter.text(
+                b - Vec2::new(stub + 3.0 * z, 0.0),
+                Align2::RIGHT_CENTER,
+                format!(
+                    "П{}: {}.{} →",
+                    sheet(from_sheet),
+                    link.from.block,
+                    link.from.port
+                ),
+                font(10.0),
+                color,
+            );
         }
     }
 
@@ -517,7 +577,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         let id = block.id.as_str();
         let Some(r) = screen_rect(id) else { continue };
         let def = defs[id];
-        let kind = kind_of(block);
+        let kind = kind_of(block, def);
         let resp = ui.interact(r, Id::unique(("block", id)), Sense::click_and_drag());
         let in_sel = selected.as_ref().is_some_and(|s| s.has_block(id));
         if resp.clicked() && ctrl {
@@ -565,7 +625,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             Stroke::new(1.0, pal.block_border)
         };
         match kind {
-            Kind::Tag { write } => {
+            Kind::Tag { write, en } => {
                 let fill = if write {
                     pal.block_header
                 } else {
@@ -578,13 +638,37 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                     border,
                     StrokeKind::Inside,
                 );
-                let live = block.var_name().and_then(|v| dbg.and_then(|d| d.var(v)));
+                // A write already shows the value on its incoming link.
+                let live = block
+                    .var_name()
+                    .filter(|_| !write)
+                    .and_then(|v| dbg.and_then(|d| d.var(v)));
                 let (text, color) = match live {
                     Some((v, true)) => (format!("{} = {v} F", label(block, def)), pal.warning),
                     Some((v, false)) => (format!("{} = {v}", label(block, def)), pal.text),
                     None => (label(block, def), pal.text),
                 };
-                painter.text(r.center(), Align2::CENTER_CENTER, text, font(11.0), color);
+                let center = if en {
+                    Pos2::new(r.center().x, r.min.y + r.height() * 0.25)
+                } else {
+                    r.center()
+                };
+                painter.text(center, Align2::CENTER_CENTER, text, font(11.0), color);
+                if en {
+                    let p = port_pos(r, kind, 1, false);
+                    painter.text(
+                        p + Vec2::new(6.0 * z, 0.0),
+                        Align2::LEFT_CENTER,
+                        "En",
+                        font(9.5),
+                        pal.text,
+                    );
+                    painter.circle_filled(
+                        p,
+                        PORT_R * z.sqrt(),
+                        signal_color(&pal, SignalType::Bool),
+                    );
+                }
                 if let Some(port) = def.and_then(|d| d.inputs.first().or(d.outputs.first())) {
                     let color = signal_color(&pal, port.ty);
                     painter.circle_filled(port_pos(r, kind, 0, !write), PORT_R * z.sqrt(), color);
@@ -717,21 +801,31 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         let (Some(r), Some(def)) = (screen_rect(&block.id), defs[block.id.as_str()]) else {
             continue;
         };
-        let kind = kind_of(block);
+        let kind = kind_of(block, Some(def));
         // An unconnected variable block offers both sides; the link decides
         // whether it reads (output `out`) or writes (input `in`).
-        let tag_port = match kind {
-            Kind::Tag { write } if !tag_linked(logic, &block.id) => def
-                .inputs
-                .first()
-                .or(def.outputs.first())
-                .map(|q| PortDef {
-                    name: if write { "out" } else { "in" }.to_owned(),
-                    ..q.clone()
-                })
-                .map(|q| (q, write)),
-            _ => None,
-        };
+        let write = block.kind == VAR_SET;
+        // With the write enable input the block only writes: no output side.
+        let tag_port = (block.var_name().is_some()
+            && !tag_linked(logic, &block.id)
+            && kind
+                != (Kind::Tag {
+                    write: true,
+                    en: true,
+                }))
+        .then(|| def.inputs.first().or(def.outputs.first()))
+        .flatten()
+        .map(|q| {
+            let q = PortDef {
+                name: if write { "out" } else { "in" }.to_owned(),
+                ..q.clone()
+            };
+            (q, write)
+        });
+        if let Some((q, output)) = &tag_port {
+            let pos = port_pos(r, kind, 0, *output);
+            painter.circle_filled(pos, PORT_R * xf.view.zoom.sqrt(), signal_color(&pal, q.ty));
+        }
         let ports = def
             .active_inputs(&block.params)
             .enumerate()
@@ -753,7 +847,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             if output && kind == Kind::Box {
                 let port = PortRef::new(&block.id, &q.name);
                 if let Some((v, forced)) = dbg.and_then(|d| d.output(&port)) {
-                    debugview::value_label(&painter, &pal, pos, v, forced, z, true);
+                    debugview::value_label(&painter, &pal, pos, v, forced, z, Place::Right);
                 }
                 if dbg.is_some() {
                     port_menus.push((port, resp.clone()));
@@ -780,6 +874,10 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 pos,
             });
         }
+    }
+
+    for (anchor, v, forced) in wire_labels {
+        debugview::value_label(&painter, &pal, anchor, v, forced, z, Place::Left);
     }
 
     // Wire being drawn.
@@ -896,6 +994,13 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             view.pan += scroll;
         }
     }
+    // Keep the sheets on screen: no empty space beyond their edges.
+    let height = bands.last().map_or(0.0, |b| b.top + b.height);
+    let content = Vec2::new(width, height) * view.zoom;
+    let margin = Vec2::new(16.0, 12.0);
+    let lo = rect.size() - margin - content;
+    view.pan.x = view.pan.x.min(margin.x).max(lo.x.min(margin.x));
+    view.pan.y = view.pan.y.min(margin.y).max(lo.y.min(margin.y));
     app.canvas.view = view;
 
     // Apply changes (the document was borrowed for drawing above).

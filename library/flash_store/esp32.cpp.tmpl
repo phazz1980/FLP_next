@@ -5,7 +5,8 @@ bool {{ id }}_prev = false;
 {{ id }}_prefs.begin("flp", false);
 {{ output.out }} = {{ id }}_prefs.getFloat("{{ id[:15] }}", {{ param.initial }});
 // @loop
-if ({{ input.save }} && !{{ id }}_prev) {
+// Flash wears out: write only a value that differs from the saved one.
+if ({{ input.save }} && !{{ id }}_prev && {{ input.in }} != {{ output.out }}) {
   {{ output.out }} = {{ input.in }};
   {{ id }}_prefs.putFloat("{{ id[:15] }}", {{ output.out }});
 }

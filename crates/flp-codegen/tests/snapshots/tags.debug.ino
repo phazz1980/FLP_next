@@ -17,7 +17,88 @@ float var_temp = 0.0f;
 float var_setpoint = 22.0f;
 bool var_heating = false;
 
-// ---- Онлайн-отладка FLP_next (протокол v1) ----
+// ---- Диагностика: время цикла (мкс), всего и по листам ----
+const uint8_t FLP_ST_SHEETS = 2;
+const uint16_t flp_st_sheet_no[FLP_ST_SHEETS + 1] = { 1, 2, 0 };
+uint32_t flp_st_acc[FLP_ST_SHEETS + 1];
+uint32_t flp_st_sheet_last[FLP_ST_SHEETS + 1];
+uint32_t flp_st_sheet_max[FLP_ST_SHEETS + 1];
+uint8_t flp_st_cur = FLP_ST_SHEETS;
+bool flp_st_started = false;
+uint32_t flp_st_begin_us = 0;
+uint32_t flp_st_mark_us = 0;
+uint32_t flp_st_prev_start = 0;
+uint32_t flp_st_cycles = 0;
+uint32_t flp_st_sum = 0;
+uint32_t flp_st_last = 0;
+uint32_t flp_st_max = 0;
+uint32_t flp_st_period_max = 0;
+
+void flp_st_begin() {
+  uint32_t now = micros();
+  if (flp_st_started && now - flp_st_prev_start > flp_st_period_max) {
+    flp_st_period_max = now - flp_st_prev_start;
+  }
+  flp_st_started = true;
+  flp_st_prev_start = now;
+  flp_st_begin_us = now;
+  flp_st_mark_us = now;
+  flp_st_cur = FLP_ST_SHEETS;
+}
+
+// Execution moves to blocks of sheet k (index in flp_st_sheet_no).
+void flp_st_sheet(uint8_t k) {
+  uint32_t now = micros();
+  if (flp_st_cur < FLP_ST_SHEETS) {
+    flp_st_acc[flp_st_cur] += now - flp_st_mark_us;
+  }
+  flp_st_cur = k;
+  flp_st_mark_us = now;
+}
+
+void flp_st_end() {
+  flp_st_sheet(FLP_ST_SHEETS);
+  uint32_t t = flp_st_mark_us - flp_st_begin_us;
+  flp_st_last = t;
+  if (t > flp_st_max) {
+    flp_st_max = t;
+  }
+  flp_st_sum += t;
+  flp_st_cycles++;
+  for (uint8_t k = 0; k < FLP_ST_SHEETS; k++) {
+    flp_st_sheet_last[k] = flp_st_acc[k];
+    if (flp_st_acc[k] > flp_st_sheet_max[k]) {
+      flp_st_sheet_max[k] = flp_st_acc[k];
+    }
+    flp_st_acc[k] = 0;
+  }
+}
+
+void flp_st_reset() {
+  flp_st_max = 0;
+  flp_st_period_max = 0;
+  for (uint8_t k = 0; k < FLP_ST_SHEETS; k++) {
+    flp_st_sheet_max[k] = 0;
+  }
+}
+
+// Average since the previous call; starts a new averaging interval.
+uint32_t flp_st_take_avg() {
+  uint32_t avg = flp_st_cycles ? flp_st_sum / flp_st_cycles : 0;
+  flp_st_sum = 0;
+  flp_st_cycles = 0;
+  return avg;
+}
+
+uint32_t flp_st_free_heap() {
+#ifdef ESP32
+  return ESP.getFreeHeap();
+#else
+  return 0;
+#endif
+}
+
+// ---- Онлайн-отладка FLP_next (протокол v2) ----
 // Кадры: 0xAA 0x55, тип, длина, данные, CRC-16/CCITT. Обычный Serial.print не мешает.
 const uint32_t FLP_DBG_FINGERPRINT = 0x84B418D3UL;
 const uint16_t FLP_DBG_COUNT = 10;
@@ -30,6 +111,7 @@ uint8_t flp_dbg_rx[4 + 255 + 2];
 uint16_t flp_dbg_rx_len = 0;
 uint16_t flp_dbg_seq = 0;
 unsigned long flp_dbg_last = 0;
+uint8_t flp_dbg_ticks = 0;
 
 uint16_t flp_dbg_crc(uint16_t crc, uint8_t b) {
   crc ^= (uint16_t)b << 8;
@@ -98,7 +180,7 @@ void flp_dbg_hello() {
   memcpy(p, &FLP_DBG_FINGERPRINT, 4);
   p[4] = FLP_DBG_COUNT & 0xFF;
   p[5] = FLP_DBG_COUNT >> 8;
-  p[6] = 1;
+  p[6] = 2;
   flp_dbg_frame(0x01, p, 7);
 }
 
@@ -120,9 +202,29 @@ void flp_dbg_values() {
   }
 }
 
+void flp_dbg_stats() {
+  uint8_t p[25 + 10 * FLP_ST_SHEETS];
+  uint32_t head[6] = {flp_st_cycles, flp_st_last, flp_st_max, 0, flp_st_period_max, flp_st_free_heap()};
+  head[3] = flp_st_take_avg();
+  memcpy(p, head, 24);
+  p[24] = FLP_ST_SHEETS;
+  for (uint8_t k = 0; k < FLP_ST_SHEETS; k++) {
+    uint8_t* q = p + 25 + 10 * k;
+    q[0] = flp_st_sheet_no[k] & 0xFF;
+    q[1] = flp_st_sheet_no[k] >> 8;
+    memcpy(q + 2, &flp_st_sheet_last[k], 4);
+    memcpy(q + 6, &flp_st_sheet_max[k], 4);
+  }
+  flp_dbg_frame(0x03, p, 25 + 10 * FLP_ST_SHEETS);
+}
+
 void flp_dbg_command(uint8_t type, const uint8_t* p, uint8_t len) {
   if (type == 0x10) {
     flp_dbg_hello();
+    return;
+  }
+  if (type == 0x14) {
+    flp_st_reset();
     return;
   }
   if (type == 0x13) {
@@ -185,6 +287,10 @@ void flp_dbg_loop() {
   if (millis() - flp_dbg_last >= 100) {
     flp_dbg_last = millis();
     flp_dbg_values();
+    if (++flp_dbg_ticks >= 5) {
+      flp_dbg_ticks = 0;
+      flp_dbg_stats();
+    }
   }
 }
 
@@ -196,9 +302,12 @@ void setup() {
 }
 
 void loop() {
+  flp_st_begin();
+
   // Forced variables
   flp_dbg_force(7); flp_dbg_force(8); flp_dbg_force(9);
 
+  flp_st_sheet(0);  // лист 1
   // adc: analog_in
   adc_out = analogRead(34);
   flp_dbg_force(0);
@@ -212,6 +321,7 @@ void loop() {
   var_temp = to_c_out;
   flp_dbg_force(7);
 
+  flp_st_sheet(1);  // лист 2
   // temp_r: var_get
   temp_r_out = var_temp;
   flp_dbg_force(2);
@@ -239,5 +349,6 @@ void loop() {
   // heater: digital_out
   digitalWrite(26, (heating_r_out) ? HIGH : LOW);
 
+  flp_st_end();
   flp_dbg_loop();
 }

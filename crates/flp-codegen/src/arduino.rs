@@ -118,7 +118,9 @@ fn render_block(
     }
 
     let name = format!("{kind}/{ESP32_CPP_TEMPLATE}");
-    let ctx = context! { id => inst.block.id, input, output, param, value };
+    // Storage of the variable a `var_get` / `var_set` block accesses.
+    let var = inst.block.var_name().map(flp_core::vars::storage_name);
+    let ctx = context! { id => inst.block.id, input, output, param, value, var };
     let text = env
         .render_named_str(&name, &source, ctx)
         .map_err(|source| GenError::Render {
@@ -313,6 +315,7 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
             );
         }
     }
+    out.push_str(&crate::retain::globals(vars));
 
     for (kind, code) in shared(rendered, |s| &s.once_global) {
         let _ = writeln!(out, "\n{}\n{code}", shared_comment(kind));
@@ -333,6 +336,19 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
         }
     }
 
+    let diagnostics = &program.project.config.diagnostics;
+    let stats = debug || diagnostics.enabled;
+    let looped = rendered
+        .iter()
+        .filter(|(_, sec)| !sec.looped.is_empty())
+        .map(|(inst, _)| *inst);
+    let sheets = crate::stats::measured_sheets(program, looped);
+    if stats {
+        out.push_str(&crate::stats::runtime(&sheets));
+        if !debug {
+            out.push_str(&crate::stats::text_report(diagnostics.interval_ms));
+        }
+    }
     let table = debug.then(|| crate::debug::debug_table(program));
     if let Some(table) = &table {
         out.push_str(&crate::debug::runtime(table));
@@ -356,23 +372,54 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
         lines
     };
 
+    // Cycle time: a mark where execution moves to blocks of another sheet.
+    let mut marks: BTreeMap<&str, usize> = BTreeMap::new();
+    if stats {
+        let mut current = None;
+        for (inst, sec) in rendered {
+            if sec.looped.is_empty() && forces(inst).is_empty() {
+                continue;
+            }
+            let sheet = crate::stats::sheet_of(program, inst);
+            let k = sheets.iter().position(|&s| s == sheet);
+            if let Some(k) = k.filter(|_| k != current) {
+                marks.insert(&inst.block.id, k);
+                current = Some(k);
+            }
+        }
+    }
+    let mark = |inst: &Instance| -> Vec<String> {
+        marks
+            .get(inst.block.id.as_str())
+            .map(|&k| vec![format!("flp_st_sheet({k});  // лист {}", sheets[k])])
+            .unwrap_or_default()
+    };
+
     out.push_str("\nvoid setup() {\n");
     if debug {
         out.push_str("  flp_dbg_setup();\n\n");
+    } else if stats {
+        let _ = writeln!(out, "  Serial.begin({});\n", flp_debug::transport::BAUD);
     }
+    // Retained variables are restored before any block uses them.
+    let restore = crate::retain::setup(vars);
+    let after_restore = !restore.is_empty();
+    push_indented(&mut out, restore.into_iter());
     let once_setup = shared(rendered, |s| &s.once_setup);
     for (i, (kind, code)) in once_setup.iter().enumerate() {
-        if i > 0 {
+        if i > 0 || after_restore {
             out.push('\n');
         }
         let _ = writeln!(out, "  {}", shared_comment(kind));
         push_indented(&mut out, code.lines().map(str::to_owned));
     }
-    let after_shared = !once_setup.is_empty();
-    push_function_body(&mut out, rendered, after_shared, |s| &s.setup, &|_| {
-        Vec::new()
-    });
+    let after_shared = after_restore || !once_setup.is_empty();
+    let none = |_: &Instance| Vec::new();
+    push_function_body(&mut out, rendered, after_shared, |s| &s.setup, &none, &none);
     out.push_str("}\n\nvoid loop() {\n");
+    if stats {
+        out.push_str("  flp_st_begin();\n\n");
+    }
     if let Some(table) = &table {
         let vars: Vec<String> = (0..table.entries.len())
             .filter(|&i| matches!(table.entries[i].source, flp_debug::Source::Var(_)))
@@ -382,9 +429,19 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
             let _ = writeln!(out, "  // Forced variables\n  {}\n", vars.join(" "));
         }
     }
-    push_function_body(&mut out, rendered, false, |s| &s.looped, &forces);
+    push_function_body(&mut out, rendered, false, |s| &s.looped, &mark, &forces);
+    let save = crate::retain::save(vars);
+    if !save.is_empty() {
+        out.push('\n');
+        push_indented(&mut out, save.into_iter());
+    }
+    if stats {
+        out.push_str("\n  flp_st_end();\n");
+    }
     if debug {
-        out.push_str("\n  flp_dbg_loop();\n");
+        out.push_str("  flp_dbg_loop();\n");
+    } else if stats {
+        out.push_str("  flp_st_report();\n");
     }
     out.push_str("}\n");
     out
@@ -392,11 +449,13 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
 
 /// Writes the code of each block into a function body; `after` means the body
 /// already has code, so the first block is separated by a blank line too.
+/// `before` and `extra` add lines in front of and after the block code.
 fn push_function_body(
     out: &mut String,
     rendered: &[(&Instance, Sections)],
     after: bool,
     section: fn(&Sections) -> &String,
+    before: &dyn Fn(&Instance) -> Vec<String>,
     extra: &dyn Fn(&Instance) -> Vec<String>,
 ) {
     let mut first = !after;
@@ -410,6 +469,9 @@ fn push_function_body(
             out.push('\n');
         }
         first = false;
+        for line in before(inst) {
+            let _ = writeln!(out, "  {line}");
+        }
         let _ = writeln!(out, "  {}", block_comment(inst));
         push_indented(out, code.lines().map(str::to_owned).chain(extra));
     }

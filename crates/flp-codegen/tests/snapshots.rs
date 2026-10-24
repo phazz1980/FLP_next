@@ -120,6 +120,27 @@ fn debug_module_snapshot() {
     assert_snapshot(&snapshot, &code);
     assert!(code.contains("flp_dbg_setup();"));
     assert!(code.contains("flp_dbg_loop();"));
+    assert!(code.contains("flp_st_begin();"));
+    assert!(code.contains("flp_st_end();"));
+}
+
+/// Normal firmware measures cycle time only with `[diagnostics] enabled`.
+#[test]
+fn diagnostics_in_normal_build() {
+    let mut project = Project::load(repo_path("examples/tags")).unwrap();
+    let plain = generate(&project, &library(), &ArduinoCpp::RELEASE).unwrap();
+    assert!(!plain.contains("flp_st_"), "{plain}");
+    project.config.diagnostics.enabled = true;
+    project.config.diagnostics.interval_ms = 2000;
+    let code = generate(&project, &library(), &ArduinoCpp::RELEASE).unwrap();
+    let snapshot =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/tags.diagnostics.ino");
+    assert_snapshot(&snapshot, &code);
+    assert!(code.contains("Serial.begin(115200);"), "{code}");
+    assert!(code.contains("flp_st_sheet(0);"), "{code}");
+    assert!(code.contains("flp_st_report();"), "{code}");
+    assert!(code.contains("2000UL"), "{code}");
+    assert!(!code.contains("flp_dbg_"), "{code}");
 }
 
 /// Block format features on a test block (`tests/fixtures/library/probe`):

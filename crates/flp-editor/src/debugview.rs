@@ -1,9 +1,9 @@
 //! Online debugging in the editor: live values on the sheets, forcing,
-//! setpoints and a simple chart window.
+//! setpoints, a window with inputs and variables and a simple chart window.
 
 use eframe::egui::{self, Color32, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use flp_codegen::Program;
-use flp_core::{Library, PortRef, Project, SignalType};
+use flp_core::{Layout, Library, ParamKind, PortRef, Project, SignalType};
 use flp_debug::{Command, DebugTable, Live, Session, Source, Value};
 
 use crate::theme::Palette;
@@ -18,6 +18,12 @@ pub struct DebugState {
     pub chart: Vec<usize>,
     /// Console lines already copied into the message panel.
     pub console_seen: usize,
+    /// The cycle time window is open.
+    pub diagnostics: bool,
+    /// The window with inputs and variables is open.
+    pub values: bool,
+    /// Outputs of input tags (blocks with a pin that produce values), in schema order.
+    pub inputs: Vec<(PortRef, usize)>,
 }
 
 impl DebugState {
@@ -29,6 +35,7 @@ impl DebugState {
     ) -> Result<Self, String> {
         let program = Program::build(project, lib).map_err(|e| e.to_string())?;
         let table = flp_codegen::debug::debug_table(&program);
+        let inputs = input_ports(project, lib, &table);
         let ctx = ctx.clone();
         let session = Session::start(
             table.clone(),
@@ -42,6 +49,9 @@ impl DebugState {
             port: port.to_owned(),
             chart: Vec::new(),
             console_seen: 0,
+            diagnostics: false,
+            values: false,
+            inputs,
         })
     }
 
@@ -87,6 +97,55 @@ impl DebugState {
     }
 }
 
+/// Outputs of blocks with a pin parameter: hardware inputs and sensors.
+fn input_ports(project: &Project, lib: &Library, table: &DebugTable) -> Vec<(PortRef, usize)> {
+    let logic = &project.logic;
+    let mut out = Vec::new();
+    for b in &logic.blocks {
+        let Some(def) = lib.resolve(logic, b).map(|l| &l.def) else {
+            continue;
+        };
+        if !def.params.iter().any(|p| p.kind == ParamKind::Pin) {
+            continue;
+        }
+        for port in def.active_outputs(&b.params) {
+            let port = PortRef::new(&b.id, &port.name);
+            if let Some(i) = table.output_index(&port) {
+                out.push((port, i));
+            }
+        }
+    }
+    out
+}
+
+fn as_f64(v: Value) -> f64 {
+    match v {
+        Value::Bool(b) => f64::from(u8::from(b)),
+        Value::Int(i) => f64::from(i),
+        Value::Float(f) => f64::from(f),
+    }
+}
+
+/// Number field for a new value of entry `index`; remembered between frames,
+/// starts from the forced (or current) value.
+fn number_edit(ui: &mut Ui, dbg: &DebugState, index: usize, salt: &str) -> Value {
+    let ty = dbg.table.entries[index].ty;
+    let id = Id::unique(("debug_new_value", salt, index));
+    let current = dbg.live.forced[index]
+        .or(dbg.live.values[index])
+        .map_or(0.0, as_f64);
+    let mut v: f64 = ui.data_mut(|d| *d.get_temp_mut_or_insert_with(id, || current));
+    let speed = if ty == SignalType::Int { 1.0 } else { 0.1 };
+    ui.add(egui::DragValue::new(&mut v).speed(speed))
+        .on_hover_text("Перетащите или щёлкните дважды, чтобы ввести число");
+    ui.data_mut(|d| d.insert_temp(id, v));
+    if ty == SignalType::Int {
+        Value::Int(v.round() as i32)
+    } else {
+        Value::Float(v as f32)
+    }
+}
+
 /// Context menu items for one observed value (block output or variable).
 pub fn value_menu(ui: &mut Ui, dbg: &mut DebugState, index: usize) {
     let entry = &dbg.table.entries[index];
@@ -96,38 +155,36 @@ pub fn value_menu(ui: &mut Ui, dbg: &mut DebugState, index: usize) {
     ui.label(egui::RichText::new(dbg.name(index)).strong());
     match ty {
         SignalType::Bool => {
-            if ui.button("Форсировать 1").clicked() {
-                dbg.send(Command::Force {
-                    index,
-                    value: Some(Value::Bool(true)),
-                });
+            for b in [true, false] {
+                if ui.button(format!("Форсировать {}", u8::from(b))).clicked() {
+                    dbg.send(Command::Force {
+                        index,
+                        value: Some(Value::Bool(b)),
+                    });
+                }
             }
-            if ui.button("Форсировать 0").clicked() {
-                dbg.send(Command::Force {
-                    index,
-                    value: Some(Value::Bool(false)),
-                });
+            if is_var {
+                for b in [true, false] {
+                    if ui
+                        .button(format!("Записать {}", u8::from(b)))
+                        .on_hover_text("Значение остаётся, пока его не перезапишет схема")
+                        .clicked()
+                    {
+                        dbg.send(Command::Set {
+                            index,
+                            value: Value::Bool(b),
+                        });
+                    }
+                }
             }
         }
         SignalType::Int | SignalType::Float => {
-            let id = Id::unique(("force_value", index));
-            let current = dbg.live.values[index].map_or(0.0, |v| match v {
-                Value::Bool(b) => f64::from(u8::from(b)),
-                Value::Int(i) => f64::from(i),
-                Value::Float(f) => f64::from(f),
-            });
-            let mut v: f64 = ui.data_mut(|d| *d.get_temp_mut_or_insert_with(id, || current));
-            ui.horizontal(|ui| {
-                ui.label("Значение");
-                let speed = if ty == SignalType::Int { 1.0 } else { 0.1 };
-                ui.add(egui::DragValue::new(&mut v).speed(speed));
-            });
-            ui.data_mut(|d| d.insert_temp(id, v));
-            let value = if ty == SignalType::Int {
-                Value::Int(v.round() as i32)
-            } else {
-                Value::Float(v as f32)
-            };
+            let value = ui
+                .horizontal(|ui| {
+                    ui.label("Значение");
+                    number_edit(ui, dbg, index, "menu")
+                })
+                .inner;
             if ui.button("Форсировать").clicked() {
                 dbg.send(Command::Force {
                     index,
@@ -157,6 +214,139 @@ pub fn value_menu(ui: &mut Ui, dbg: &mut DebugState, index: usize) {
     }
 }
 
+/// Window with all inputs and variables: live values, writing and forcing.
+pub fn values_window(dbg: &mut DebugState, pal: &Palette, ctx: &egui::Context) {
+    if !dbg.values {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new("Входы и переменные")
+        .open(&mut open)
+        .default_width(440.0)
+        .show(ctx, |ui| {
+            if !dbg.online() {
+                ui.label("Нет данных: плата не на связи или прошивка для другой схемы");
+                return;
+            }
+            let vars: Vec<usize> = (0..dbg.table.entries.len())
+                .filter(|&i| matches!(dbg.table.entries[i].source, Source::Var(_)))
+                .collect();
+            let inputs: Vec<usize> = dbg.inputs.iter().map(|&(_, i)| i).collect();
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for (title, rows) in [("Входы", inputs), ("Переменные", vars)] {
+                    ui.strong(title);
+                    if rows.is_empty() {
+                        ui.weak("нет");
+                    }
+                    egui::Grid::new(("debug_values", title))
+                        .num_columns(3)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for index in rows {
+                                value_row(ui, dbg, pal, index);
+                                ui.end_row();
+                            }
+                        });
+                    ui.add_space(6.0);
+                }
+            });
+            ui.separator();
+            ui.weak(
+                "«Записать» меняет переменную один раз — дальше её может перезаписать схема. \
+                 «Форс.» держит значение, пока форсировку не снимут; форсированный вход \
+                 не зависит от сигнала на выводе платы.",
+            );
+        });
+    if !open {
+        dbg.values = false;
+    }
+}
+
+/// Name, live value and controls of one entry, as three grid cells.
+fn value_row(ui: &mut Ui, dbg: &mut DebugState, pal: &Palette, index: usize) {
+    let entry = &dbg.table.entries[index];
+    let ty = entry.ty;
+    let is_var = matches!(entry.source, Source::Var(_));
+    let forced = dbg.live.forced[index];
+    let current = dbg.live.values[index];
+    ui.label(dbg.name(index))
+        .context_menu(|ui| value_menu(ui, dbg, index));
+    let text = current.map_or("—".to_owned(), |v| v.to_string());
+    if forced.is_some() {
+        ui.label(
+            egui::RichText::new(format!("{text} F"))
+                .monospace()
+                .color(pal.warning),
+        )
+        .on_hover_text("Значение форсировано");
+    } else {
+        ui.monospace(text);
+    }
+    ui.horizontal(|ui| {
+        match ty {
+            SignalType::Bool => {
+                let on = current == Some(Value::Bool(true));
+                if is_var
+                    && ui
+                        .button(if on {
+                            "Записать 0"
+                        } else {
+                            "Записать 1"
+                        })
+                        .on_hover_text("Переключить переменную один раз")
+                        .clicked()
+                {
+                    dbg.send(Command::Set {
+                        index,
+                        value: Value::Bool(!on),
+                    });
+                }
+                for b in [true, false] {
+                    let selected = forced == Some(Value::Bool(b));
+                    if ui
+                        .selectable_label(selected, format!("Форс. {}", u8::from(b)))
+                        .clicked()
+                    {
+                        dbg.send(Command::Force {
+                            index,
+                            value: Some(Value::Bool(b)),
+                        });
+                    }
+                }
+            }
+            SignalType::Int | SignalType::Float => {
+                let value = number_edit(ui, dbg, index, "window");
+                if is_var && ui.button("Записать").clicked() {
+                    dbg.send(Command::Set { index, value });
+                }
+                if ui.button("Форс.").clicked() {
+                    dbg.send(Command::Force {
+                        index,
+                        value: Some(value),
+                    });
+                }
+            }
+        }
+        if forced.is_some()
+            && ui
+                .small_button("Снять")
+                .on_hover_text("Снять форсировку")
+                .clicked()
+        {
+            dbg.send(Command::Force { index, value: None });
+        }
+    });
+}
+
+/// Where a value label goes relative to its anchor point.
+#[derive(Clone, Copy)]
+pub enum Place {
+    /// Above and to the right of a port.
+    Right,
+    /// Above and to the left of a port (the input end of a wire).
+    Left,
+}
+
 /// Small label with a live value next to a port.
 pub fn value_label(
     painter: &egui::Painter,
@@ -165,7 +355,7 @@ pub fn value_label(
     value: Value,
     forced: bool,
     zoom: f32,
-    to_right: bool,
+    place: Place,
 ) {
     let text = if forced {
         format!("{value} F")
@@ -175,10 +365,9 @@ pub fn value_label(
     let font = egui::FontId::monospace(9.5 * zoom.clamp(0.6, 1.6));
     let galley = painter.layout_no_wrap(text, font, if forced { Color32::WHITE } else { pal.text });
     let size = galley.size() + Vec2::new(6.0, 2.0);
-    let min = if to_right {
-        anchor + Vec2::new(4.0, -size.y - 1.0)
-    } else {
-        anchor + Vec2::new(-size.x - 4.0, -size.y - 1.0)
+    let min = match place {
+        Place::Right => anchor + Vec2::new(4.0, -size.y - 1.0),
+        Place::Left => anchor + Vec2::new(-size.x - 4.0, -size.y - 1.0),
     };
     let rect = Rect::from_min_size(min, size);
     let fill = if forced {
@@ -225,6 +414,86 @@ pub fn chart_window(dbg: &mut DebugState, pal: &Palette, ctx: &egui::Context) {
     }
     if let Some(i) = remove {
         dbg.chart.retain(|&c| c != i);
+    }
+}
+
+/// Window with cycle time of the whole program and of each sheet.
+pub fn diagnostics_window(dbg: &mut DebugState, layout: Option<&Layout>, ctx: &egui::Context) {
+    if !dbg.diagnostics {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new("Диагностика")
+        .open(&mut open)
+        .default_width(360.0)
+        .show(ctx, |ui| {
+            let Some(s) = dbg.live.stats.clone().filter(|_| dbg.online()) else {
+                ui.label("Нет данных: плата не на связи или прошивка без диагностики");
+                return;
+            };
+            let us = |v: u32| format!("{v} мкс");
+            egui::Grid::new("diag_total")
+                .num_columns(2)
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.label("Цикл, последний");
+                    ui.monospace(us(s.last_us));
+                    ui.end_row();
+                    ui.label("Цикл, средний");
+                    ui.monospace(us(s.avg_us));
+                    ui.end_row();
+                    ui.label("Цикл, максимальный");
+                    ui.strong(us(s.max_us));
+                    ui.end_row();
+                    ui.label("Период loop(), макс")
+                        .on_hover_text("Время между запусками loop(): схема, отладка и система");
+                    ui.monospace(us(s.period_max_us));
+                    ui.end_row();
+                    ui.label("Циклов за 0,5 с");
+                    ui.monospace(s.cycles.to_string());
+                    ui.end_row();
+                    if s.free_heap > 0 {
+                        ui.label("Свободная память");
+                        ui.monospace(format!("{} КБ", s.free_heap / 1024));
+                        ui.end_row();
+                    }
+                });
+            if !s.sheets.is_empty() {
+                ui.separator();
+                egui::Grid::new("diag_sheets")
+                    .num_columns(3)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.strong("Лист");
+                        ui.strong("Последний");
+                        ui.strong("Макс");
+                        ui.end_row();
+                        for sh in &s.sheets {
+                            let name = layout
+                                .and_then(|l| l.sheet(sh.sheet))
+                                .filter(|i| !i.name.is_empty())
+                                .map_or_else(
+                                    || sh.sheet.to_string(),
+                                    |i| format!("{} {}", sh.sheet, i.name),
+                                );
+                            ui.label(name);
+                            ui.monospace(us(sh.last_us));
+                            ui.monospace(us(sh.max_us));
+                            ui.end_row();
+                        }
+                    });
+            }
+            ui.separator();
+            if ui
+                .button("Сбросить максимумы")
+                .on_hover_text("Начать фиксацию максимального времени заново")
+                .clicked()
+            {
+                dbg.send(Command::ResetStats);
+            }
+        });
+    if !open {
+        dbg.diagnostics = false;
     }
 }
 

@@ -265,6 +265,38 @@ struct Settings {
     last_project: Option<PathBuf>,
     /// Autosave period in minutes; 0 turns autosave off.
     autosave_minutes: Option<u32>,
+    panels: Option<PanelSizes>,
+}
+
+/// Sizes of the editor panels, kept between runs.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
+#[serde(default)]
+pub struct PanelSizes {
+    pub left_width: f32,
+    pub right_width: f32,
+    pub log_height: f32,
+    pub left_open: bool,
+    pub right_open: bool,
+}
+
+impl Default for PanelSizes {
+    fn default() -> Self {
+        Self {
+            left_width: 220.0,
+            right_width: 280.0,
+            log_height: 150.0,
+            left_open: true,
+            right_open: true,
+        }
+    }
+}
+
+pub fn saved_panels() -> PanelSizes {
+    load_settings().panels.unwrap_or_default()
+}
+
+pub fn save_panels(sizes: PanelSizes) {
+    update_settings(|s| s.panels = Some(sizes));
 }
 
 fn load_settings() -> Settings {

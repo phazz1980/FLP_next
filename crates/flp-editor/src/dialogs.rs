@@ -32,9 +32,11 @@ pub struct VarDialog {
     original: Option<String>,
     name: String,
     ty: VarType,
-    write_enable: bool,
+    /// Block the dialog was opened from and its write enable input (per block).
+    block: Option<(String, bool)>,
     init: String,
     description: String,
+    retain: bool,
 }
 
 pub struct SheetDialog {
@@ -55,7 +57,15 @@ impl Dialog {
         let doc = app.doc.as_ref()?;
         let block = doc.project.logic.block(id)?;
         if let Some(var) = block.var_name() {
-            return Self::for_var(app, Some(var));
+            let en = matches!(
+                block.params.get(flp_core::vars::WRITE_ENABLE),
+                Some(ParamValue::Bool(true))
+            );
+            let mut dialog = Self::for_var(app, Some(var))?;
+            if let Self::Var(d) = &mut dialog {
+                d.block = Some((id.to_owned(), en));
+            }
+            return Some(dialog);
         }
         let def = &app.lib.resolve(&doc.project.logic, block)?.def;
         let values = def
@@ -90,9 +100,9 @@ impl Dialog {
             None => Var {
                 name: String::new(),
                 ty: VarType::Float,
-                write_enable: false,
                 init: None,
                 description: String::new(),
+                retain: false,
             },
         };
         Some(Self::Var(VarDialog {
@@ -100,8 +110,9 @@ impl Dialog {
             init: var.init.as_ref().map(value_text).unwrap_or_default(),
             name: var.name,
             ty: var.ty,
-            write_enable: var.write_enable,
+            block: None,
             description: var.description,
+            retain: var.retain,
         }))
     }
 
@@ -407,9 +418,17 @@ fn var_body(ui: &mut Ui, d: &mut VarDialog) {
             ui.text_edit_singleline(&mut d.description);
             ui.end_row();
             ui.label("");
-            ui.checkbox(&mut d.write_enable, "Вход «Разрешение записи» (en)")
-                .on_hover_text("Блок записи получает логический вход en: значение записывается, только пока он true.");
+            ui.checkbox(&mut d.retain, "Сохранять в EEPROM").on_hover_text(
+                "Значение хранится во флеш-памяти (NVS) и восстанавливается после перезагрузки.                  Запись — только когда значение изменилось, не чаще раза в секунду.",
+            );
             ui.end_row();
+            if let Some((_, en)) = &mut d.block {
+                ui.label("");
+                ui.checkbox(en, "Вход разрешения записи (En)").on_hover_text(
+                    "Только для этого блока: у него появляется логический вход En,                      значение записывается в переменную, только пока En = true.",
+                );
+                ui.end_row();
+            }
         });
     ui.add_space(4.0);
     ui.weak("Переменную можно читать на любой плате сколько угодно раз, а записывать — в одном месте. Если её никто не записывает, она работает как уставка.");
@@ -466,15 +485,19 @@ fn apply(app: &mut EditorApp, dialog: &Dialog) -> Result<(), String> {
             let var = Var {
                 name: d.name.trim().to_owned(),
                 ty: d.ty,
-                write_enable: d.write_enable,
                 init: parse_init(d.ty, &d.init)?,
                 description: d.description.trim().to_owned(),
+                retain: d.retain,
             };
             match &d.original {
                 Some(name) => doc.edit(&lib, None, |p| p.update_var(name, var)),
                 None => doc.edit(&lib, None, |p| p.add_var(var)),
             }
             .map_err(|e| e.to_string())?;
+            if let Some((id, en)) = &d.block {
+                doc.edit(&lib, None, |p| p.set_var_write_enable(id, *en))
+                    .map_err(|e| e.to_string())?;
+            }
         }
         Dialog::Sheet(d) => {
             let info = SheetInfo {
