@@ -362,7 +362,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                 LibraryBlock {
                     def,
                     dir: Default::default(),
-                    inline_templates: [(ESP32_CPP_TEMPLATE, template)].into(),
+                    inline_templates: [(ESP32_CPP_TEMPLATE, template.to_owned())].into(),
                 },
             );
         }

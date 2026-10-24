@@ -95,10 +95,10 @@ pub struct BlockInfo {
     pub symbol: Option<String>,
     /// Library folder in the editor ("Входы и выходы", "Время", ...).
     pub group: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
     /// The block keeps state between scans (timers, triggers, counters).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub memory: bool,
     /// Headers the generated code needs, e.g. `DallasTemperature.h`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -129,7 +129,7 @@ pub struct PortDef {
     /// while it holds. See [`BlockDef::enabled`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
 }
 
@@ -149,7 +149,7 @@ pub struct ParamDef {
     /// only while it holds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
 }
 
@@ -343,15 +343,16 @@ fn condition_value(kind: ParamKind, value: &ParamValue) -> minijinja::Value {
 pub struct LibraryBlock {
     pub def: BlockDef,
     pub dir: PathBuf,
-    /// Templates of built-in blocks, which have no folder: file name → source.
-    pub inline_templates: BTreeMap<&'static str, &'static str>,
+    /// Templates kept in memory: built-in blocks, which have no folder, and blocks
+    /// being edited before they are saved. File name → source.
+    pub inline_templates: BTreeMap<&'static str, String>,
 }
 
 impl LibraryBlock {
     /// Template source: inline for built-in blocks, otherwise read from the folder.
     pub fn template(&self, file: &str) -> Option<std::io::Result<String>> {
         if let Some(src) = self.inline_templates.get(file) {
-            return Some(Ok((*src).to_owned()));
+            return Some(Ok(src.clone()));
         }
         self.template_path(file).map(fs::read_to_string)
     }
@@ -378,6 +379,43 @@ impl LibraryBlock {
             inline_templates: BTreeMap::new(),
         })
     }
+}
+
+/// Writes a block folder `<lib_dir>/<type>/`: `block.toml`, the ESP32 template and
+/// `docs.md`. The definition is validated first, so a broken block never lands in
+/// the library. Only files whose contents changed are rewritten (hand-written
+/// comments in an unchanged `block.toml` survive); empty docs create no file.
+pub fn save_block(lib_dir: &Path, def: &BlockDef, template: &str, docs: &str) -> Result<PathBuf> {
+    let dir = lib_dir.join(&def.info.kind);
+    def.validate(&def.info.kind)
+        .map_err(|message| Error::InvalidBlockDef {
+            path: dir.join(BLOCK_FILE),
+            message,
+        })?;
+    let write_err = |path: &Path| {
+        let path = path.to_owned();
+        move |source| Error::Write { path, source }
+    };
+    fs::create_dir_all(&dir).map_err(write_err(&dir))?;
+
+    let toml_path = dir.join(BLOCK_FILE);
+    let same_def = read_toml::<BlockDef>(&toml_path).is_ok_and(|old| old == *def);
+    if !same_def {
+        let text = toml::to_string_pretty(def).map_err(|source| Error::Serialize {
+            path: toml_path.clone(),
+            source,
+        })?;
+        fs::write(&toml_path, text).map_err(write_err(&toml_path))?;
+    }
+    for (file, text) in [(ESP32_CPP_TEMPLATE, template), (DOCS_FILE, docs)] {
+        let path = dir.join(file);
+        let old = fs::read_to_string(&path).ok();
+        if old.as_deref() == Some(text) || (old.is_none() && text.trim().is_empty()) {
+            continue;
+        }
+        fs::write(&path, text).map_err(write_err(&path))?;
+    }
+    Ok(dir)
 }
 
 /// All known block types.
@@ -579,6 +617,63 @@ mod tests {
             "{HEADER}[[param]]\nname = \"m\"\ntype = \"int\"\nwhen = \"m > 0\"\n"
         ));
         assert!(itself.validate("x").is_err());
+    }
+
+    #[test]
+    fn save_block_writes_only_changes() {
+        let lib = std::env::temp_dir().join(format!("flp_save_block_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&lib);
+        let mut d = def(&format!(
+            "{HEADER}[[input]]
+name = \"in\"
+type = \"bool\"
+"
+        ));
+        let dir = save_block(
+            &lib,
+            &d,
+            "// @loop
+",
+            "",
+        )
+        .unwrap();
+        assert!(!dir.join(DOCS_FILE).exists());
+        let loaded = LibraryBlock::load(&dir).unwrap();
+        assert_eq!(loaded.def, d);
+
+        // A hand-written comment survives a save with the same definition.
+        let toml_path = dir.join(BLOCK_FILE);
+        let commented = format!(
+            "# hand-written
+{}",
+            fs::read_to_string(&toml_path).unwrap()
+        );
+        fs::write(&toml_path, &commented).unwrap();
+        save_block(
+            &lib,
+            &d,
+            "// @loop
+",
+            "Описание",
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(&toml_path).unwrap(), commented);
+        assert!(dir.join(DOCS_FILE).exists());
+
+        d.info.name = "Другое".into();
+        save_block(
+            &lib,
+            &d,
+            "// @loop
+",
+            "",
+        )
+        .unwrap();
+        assert_eq!(LibraryBlock::load(&dir).unwrap().def.info.name, "Другое");
+
+        d.inputs[0].name = "id".into();
+        assert!(save_block(&lib, &d, "", "").is_err());
+        fs::remove_dir_all(&lib).unwrap();
     }
 
     #[test]

@@ -1238,6 +1238,7 @@ dependencies = [
  "flp-debug",
  "minijinja",
  "thiserror 2.0.21",
+ "toml",
 ]
 
 [[package]]

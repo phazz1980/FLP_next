@@ -183,6 +183,142 @@ fn size(block: &Block, def: Option<&BlockDef>) -> Vec2 {
     }
 }
 
+/// Draws a block box: header with the label, id above, ports with their names,
+/// defaults of unconnected inputs and parameter values below.
+#[allow(clippy::too_many_arguments)]
+fn paint_box(
+    painter: &egui::Painter,
+    r: Rect,
+    z: f32,
+    block: &Block,
+    def: Option<&BlockDef>,
+    pal: &Palette,
+    border: Stroke,
+    fed: impl Fn(&str) -> bool,
+) {
+    let kind = Kind::Box;
+    let font = |size: f32| FontId::proportional(size * z.clamp(0.5, 2.0));
+    painter.rect(
+        r,
+        CornerRadius::same(2),
+        pal.block_fill,
+        border,
+        StrokeKind::Inside,
+    );
+    let head = Rect::from_min_size(r.min, Vec2::new(r.width(), HEAD_H * z)).shrink(1.0);
+    painter.rect_filled(
+        head,
+        CornerRadius {
+            nw: 2,
+            ne: 2,
+            sw: 0,
+            se: 0,
+        },
+        pal.block_header,
+    );
+    painter.text(
+        head.center(),
+        Align2::CENTER_CENTER,
+        label(block, def),
+        font(10.5),
+        pal.text,
+    );
+    // Block label (id) above the box.
+    painter.text(
+        r.left_top() - Vec2::new(0.0, 2.0),
+        Align2::LEFT_BOTTOM,
+        &block.id,
+        font(9.5),
+        pal.weak,
+    );
+    if let Some(def) = def {
+        for (i, port) in def.active_inputs(&block.params).enumerate() {
+            let p = port_pos(r, kind, i, false);
+            painter.circle_filled(p, PORT_R * z.sqrt(), signal_color(pal, port.ty));
+            painter.text(
+                p + Vec2::new(5.0 * z, 0.0),
+                Align2::LEFT_CENTER,
+                &port.name,
+                font(9.0),
+                pal.weak,
+            );
+            if !fed(&port.name) {
+                if let Some(d) = &port.default {
+                    painter.text(
+                        p - Vec2::new(5.0 * z, 0.0),
+                        Align2::RIGHT_CENTER,
+                        value_text(d),
+                        font(9.0),
+                        pal.weak,
+                    );
+                }
+            }
+        }
+        for (i, port) in def.active_outputs(&block.params).enumerate() {
+            let p = port_pos(r, kind, i, true);
+            painter.circle_filled(p, PORT_R * z.sqrt(), signal_color(pal, port.ty));
+            painter.text(
+                p - Vec2::new(5.0 * z, 0.0),
+                Align2::RIGHT_CENTER,
+                &port.name,
+                font(9.0),
+                pal.weak,
+            );
+        }
+        // Parameter values under the box, like constants in FLProg.
+        let summary: Vec<String> = def
+            .params
+            .iter()
+            .filter_map(|p| {
+                block
+                    .params
+                    .get(&p.name)
+                    .map(|v| format!("{}={}", p.name, value_text(v)))
+            })
+            .collect();
+        if !summary.is_empty() {
+            painter.text(
+                r.left_bottom() + Vec2::new(0.0, 2.0),
+                Align2::LEFT_TOP,
+                summary.join(" "),
+                font(9.0),
+                pal.weak,
+            );
+        }
+    } else {
+        painter.text(
+            r.center() + Vec2::new(0.0, 6.0 * z),
+            Align2::CENTER_CENTER,
+            "?",
+            font(12.0),
+            pal.error,
+        );
+    }
+}
+
+/// Block as it will look on a sheet, for the block editor: an instance with default
+/// parameters and nothing connected.
+pub fn block_preview(ui: &mut Ui, def: &BlockDef, pal: &Palette) {
+    let params = def
+        .params
+        .iter()
+        .filter_map(|p| Some((p.name.clone(), p.default.clone()?)))
+        .collect();
+    let block = Block {
+        id: flp_codegen::preview_id(def),
+        kind: def.info.kind.clone(),
+        params,
+    };
+    let body = size(&block, Some(def));
+    let margin = Vec2::new(48.0, 20.0);
+    let (rect, _) = ui.allocate_exact_size(body + margin * 2.0, Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 2.0, pal.sheet);
+    let r = Rect::from_min_size(rect.min + margin, body);
+    let border = Stroke::new(1.0, pal.block_border);
+    paint_box(&painter, r, 1.0, &block, Some(def), pal, border, |_| false);
+}
+
 /// Whether a variable block already has a link on either side.
 fn tag_linked(logic: &Logic, id: &str) -> bool {
     logic
@@ -683,106 +819,13 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 }
             }
             Kind::Box => {
-                painter.rect(
-                    r,
-                    CornerRadius::same(2),
-                    pal.block_fill,
-                    border,
-                    StrokeKind::Inside,
-                );
-                let head = Rect::from_min_size(r.min, Vec2::new(r.width(), HEAD_H * z)).shrink(1.0);
-                painter.rect_filled(
-                    head,
-                    CornerRadius {
-                        nw: 2,
-                        ne: 2,
-                        sw: 0,
-                        se: 0,
-                    },
-                    pal.block_header,
-                );
-                painter.text(
-                    head.center(),
-                    Align2::CENTER_CENTER,
-                    label(block, def),
-                    font(10.5),
-                    pal.text,
-                );
-                // Block label (id) above the box.
-                painter.text(
-                    r.left_top() - Vec2::new(0.0, 2.0),
-                    Align2::LEFT_BOTTOM,
-                    id,
-                    font(9.5),
-                    pal.weak,
-                );
-                if let Some(def) = def {
-                    for (i, port) in def.active_inputs(&block.params).enumerate() {
-                        let p = port_pos(r, kind, i, false);
-                        painter.circle_filled(p, PORT_R * z.sqrt(), signal_color(&pal, port.ty));
-                        painter.text(
-                            p + Vec2::new(5.0 * z, 0.0),
-                            Align2::LEFT_CENTER,
-                            &port.name,
-                            font(9.0),
-                            pal.weak,
-                        );
-                        let fed = logic
-                            .links
-                            .iter()
-                            .any(|l| l.to.block == id && l.to.port == port.name);
-                        if !fed {
-                            if let Some(d) = &port.default {
-                                painter.text(
-                                    p - Vec2::new(5.0 * z, 0.0),
-                                    Align2::RIGHT_CENTER,
-                                    value_text(d),
-                                    font(9.0),
-                                    pal.weak,
-                                );
-                            }
-                        }
-                    }
-                    for (i, port) in def.active_outputs(&block.params).enumerate() {
-                        let p = port_pos(r, kind, i, true);
-                        painter.circle_filled(p, PORT_R * z.sqrt(), signal_color(&pal, port.ty));
-                        painter.text(
-                            p - Vec2::new(5.0 * z, 0.0),
-                            Align2::RIGHT_CENTER,
-                            &port.name,
-                            font(9.0),
-                            pal.weak,
-                        );
-                    }
-                    // Parameter values under the box, like constants in FLProg.
-                    let summary: Vec<String> = def
-                        .params
+                let fed = |port: &str| {
+                    logic
+                        .links
                         .iter()
-                        .filter_map(|p| {
-                            block
-                                .params
-                                .get(&p.name)
-                                .map(|v| format!("{}={}", p.name, value_text(v)))
-                        })
-                        .collect();
-                    if !summary.is_empty() {
-                        painter.text(
-                            r.left_bottom() + Vec2::new(0.0, 2.0),
-                            Align2::LEFT_TOP,
-                            summary.join(" "),
-                            font(9.0),
-                            pal.weak,
-                        );
-                    }
-                } else {
-                    painter.text(
-                        r.center() + Vec2::new(0.0, 6.0 * z),
-                        Align2::CENTER_CENTER,
-                        "?",
-                        font(12.0),
-                        pal.error,
-                    );
-                }
+                        .any(|l| l.to.block == id && l.to.port == port)
+                };
+                paint_box(&painter, r, z, block, def, &pal, border, fed);
             }
         }
         responses.push((id.to_owned(), resp));
@@ -1137,6 +1180,14 @@ fn block_context_menu(app: &mut EditorApp, id: &str, resp: &egui::Response) {
     let mut delete = false;
     let mut props = false;
     let mut edit_var = false;
+    let mut edit_type = false;
+    let library_kind = app
+        .doc
+        .as_ref()
+        .and_then(|d| d.project.logic.block(id))
+        .filter(|b| b.var_name().is_none())
+        .and_then(|b| app.lib.get(&b.kind))
+        .cloned();
     let debug_index = var
         .as_deref()
         .and_then(|v| app.debug.as_ref().and_then(|d| d.table.var_index(v)));
@@ -1151,6 +1202,9 @@ fn block_context_menu(app: &mut EditorApp, id: &str, resp: &egui::Response) {
         }
         if var.is_some() && ui.button("Изменить переменную...").clicked() {
             edit_var = true;
+        }
+        if library_kind.is_some() && ui.button("Изменить тип блока...").clicked() {
+            edit_type = true;
         }
         ui.menu_button("Перенести на плату", |ui| {
             let new = sheets.last().copied().unwrap_or(1) + 1;
@@ -1173,6 +1227,9 @@ fn block_context_menu(app: &mut EditorApp, id: &str, resp: &egui::Response) {
         if let Some(name) = &var {
             app.dialog = Dialog::for_var(app, Some(name));
         }
+    }
+    if let (true, Some(block)) = (edit_type, &library_kind) {
+        app.block_editor = Some(crate::blockedit::BlockEditor::edit(block));
     }
     if let Some(sheet) = move_to {
         let lib = app.lib.clone();

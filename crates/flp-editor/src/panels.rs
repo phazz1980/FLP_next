@@ -526,6 +526,7 @@ fn library(app: &mut EditorApp, ui: &mut Ui) {
         }
     }
     let mut add = None;
+    let mut edit: Option<(String, bool)> = None;
     ScrollArea::vertical()
         .auto_shrink([ui.is_sizing_pass(), false])
         .show(ui, |ui| {
@@ -541,9 +542,19 @@ fn library(app: &mut EditorApp, ui: &mut Ui) {
                                     |ui| ui.label(text),
                                 )
                                 .response;
-                            if resp.on_hover_text(*description).double_clicked() {
+                            let resp = resp.on_hover_text(*description);
+                            if resp.double_clicked() {
                                 add = Some(kind.to_string());
                             }
+                            resp.context_menu(|ui| {
+                                if ui.button("Изменить блок...").clicked() {
+                                    edit = Some((kind.to_string(), false));
+                                }
+                                if ui.button("Новый блок на основе этого...").clicked()
+                                {
+                                    edit = Some((kind.to_string(), true));
+                                }
+                            });
                         }
                     });
             }
@@ -551,6 +562,15 @@ fn library(app: &mut EditorApp, ui: &mut Ui) {
                 ui.weak("Ничего не найдено");
             }
         });
+    if let Some((kind, copy)) = edit {
+        if let Some(block) = app.lib.get(&kind).cloned() {
+            app.block_editor = Some(if copy {
+                crate::blockedit::BlockEditor::copy_of(app, &block)
+            } else {
+                crate::blockedit::BlockEditor::edit(&block)
+            });
+        }
+    }
     if let Some(kind) = add {
         let lib = app.lib.clone();
         let pos = free_spot(app);

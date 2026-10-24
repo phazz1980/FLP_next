@@ -106,6 +106,8 @@ pub struct EditorApp {
     /// Built-in and user themes.
     pub themes: Vec<Theme>,
     pub theme_editor: Option<crate::themeedit::ThemeEditor>,
+    /// Open "Block editor" window.
+    pub block_editor: Option<crate::blockedit::BlockEditor>,
     /// Selected upload port; empty means automatic.
     pub port: String,
     pub ports: Vec<SerialPort>,
@@ -153,6 +155,7 @@ impl EditorApp {
             theme: theme::light(),
             themes: theme::load_all(),
             theme_editor: None,
+            block_editor: None,
             port: String::new(),
             ports: Vec::new(),
             port_scan: None,
@@ -234,7 +237,7 @@ impl EditorApp {
         });
     }
 
-    fn reload_library(&mut self) {
+    pub fn reload_library(&mut self) {
         let Some(dir) = self.lib_dir.clone() else {
             self.info(
                 LogLevel::Error,
@@ -917,6 +920,11 @@ impl EditorApp {
                 }
             });
             ui.menu_button("Библиотека", |ui| {
+                if ui.button("Новый блок...").clicked() {
+                    self.block_editor = Some(crate::blockedit::BlockEditor::new_block(self));
+                }
+                ui.weak("Изменить блок — правой кнопкой в библиотеке");
+                ui.separator();
                 if ui.button("Перечитать блоки").clicked() {
                     self.reload_library();
                 }
@@ -1106,6 +1114,7 @@ impl eframe::App for EditorApp {
 
         dialogs::show(self, &ctx);
         crate::themeedit::show(self, &ctx);
+        crate::blockedit::show(self, &ctx);
         let pal = self.theme.palette;
         if let Some(d) = &mut self.debug {
             debugview::values_window(d, &pal, &ctx);

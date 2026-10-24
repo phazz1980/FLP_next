@@ -6,6 +6,7 @@
 
 mod ai;
 mod app;
+mod blockedit;
 mod boardcfg;
 mod canvas;
 mod debugview;

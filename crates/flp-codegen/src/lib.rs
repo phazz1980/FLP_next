@@ -7,6 +7,7 @@
 pub mod arduino;
 pub mod debug;
 pub mod error;
+pub mod preview;
 pub mod program;
 pub mod retain;
 pub mod stats;
@@ -16,6 +17,7 @@ use std::path::{Path, PathBuf};
 
 pub use arduino::ArduinoCpp;
 pub use error::GenError;
+pub use preview::{preview_block, preview_id};
 pub use program::{Input, Instance, Program, Signal, Source};
 
 use flp_core::{Library, Project};

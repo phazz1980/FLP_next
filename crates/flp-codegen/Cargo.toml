@@ -9,3 +9,6 @@ flp-core = { path = "../flp-core" }
 flp-debug = { path = "../flp-debug" }
 minijinja = "2"
 thiserror.workspace = true
+
+[dev-dependencies]
+toml.workspace = true
