@@ -12,6 +12,7 @@ use flp_build::{ArduinoCli, SerialPort};
 use flp_core::{Library, PortRef, Severity};
 
 use crate::canvas::{self, CanvasState};
+use crate::debugview::{self, DebugState};
 use crate::dialogs::{self, Dialog};
 use crate::doc::Doc;
 use crate::job::{Job, JobEvent, JobKind};
@@ -75,6 +76,8 @@ pub struct EditorApp {
     pub port: String,
     pub ports: Vec<SerialPort>,
     port_scan: Option<Receiver<Result<Vec<SerialPort>, String>>>,
+    /// Online debugging session, when running.
+    pub debug: Option<DebugState>,
     job: Option<Job>,
     pending: Option<Pending>,
     allow_close: bool,
@@ -99,6 +102,7 @@ impl EditorApp {
             port: String::new(),
             ports: Vec::new(),
             port_scan: None,
+            debug: None,
             job: None,
             pending: None,
             allow_close: false,
@@ -211,6 +215,8 @@ impl EditorApp {
             self.lib_dir = find_library(Some(path));
             self.reload_library();
         }
+        // Debugging belongs to the previous project's firmware.
+        self.stop_debug();
         match Doc::open(path, &self.lib) {
             Ok(doc) => {
                 self.info(LogLevel::Info, format!("Открыт проект {}", path.display()));
@@ -340,6 +346,10 @@ impl EditorApp {
         if self.job.is_some() {
             return;
         }
+        // The upload needs the serial port that debugging holds.
+        if matches!(kind, JobKind::Upload { .. }) {
+            self.stop_debug();
+        }
         let Some(doc) = &self.doc else { return };
         if doc.report.has_errors() {
             self.run_check();
@@ -358,14 +368,18 @@ impl EditorApp {
         self.job.is_some()
     }
 
-    fn poll_job(&mut self) {
+    fn poll_job(&mut self, ctx: &egui::Context) {
         let Some(job) = &self.job else { return };
         let mut done = false;
+        let mut connect = None;
         for event in job.poll() {
             match event {
                 JobEvent::Line(text) => self.info(LogLevel::Info, text),
-                JobEvent::Done(Ok(text)) => {
-                    self.info(LogLevel::Ok, text);
+                JobEvent::Done(Ok(result)) => {
+                    self.info(LogLevel::Ok, result.message);
+                    if let (true, Some(port)) = (result.debug, result.port) {
+                        connect = Some(port);
+                    }
                     done = true;
                 }
                 JobEvent::Done(Err(text)) => {
@@ -376,6 +390,62 @@ impl EditorApp {
         }
         if done {
             self.job = None;
+        }
+        if let Some(port) = connect {
+            self.connect_debug(Some(port), ctx);
+        }
+    }
+
+    /// Builds and uploads firmware with the debugging module, then connects.
+    pub fn start_debug(&mut self, ctx: &egui::Context) {
+        let port = self.port_choice();
+        self.start_job(JobKind::Upload { port, debug: true }, ctx);
+    }
+
+    /// Connects to a board that already runs debugging firmware.
+    pub fn connect_debug(&mut self, port: Option<String>, ctx: &egui::Context) {
+        self.stop_debug();
+        let Some(doc) = &self.doc else { return };
+        let port = port
+            .or_else(|| self.port_choice())
+            .or_else(|| doc.project.config.board.port.clone())
+            .or_else(|| (self.ports.len() == 1).then(|| self.ports[0].address.clone()));
+        let Some(port) = port else {
+            self.info(
+                LogLevel::Error,
+                "Выберите порт платы на панели инструментов",
+            );
+            return;
+        };
+        match DebugState::start(&doc.project, &self.lib, &port, ctx) {
+            Ok(state) => {
+                self.info(LogLevel::Info, format!("Отладка: подключение к {port}"));
+                self.debug = Some(state);
+            }
+            Err(e) => self.info(LogLevel::Error, e),
+        }
+    }
+
+    pub fn stop_debug(&mut self) {
+        if let Some(d) = self.debug.take() {
+            d.stop();
+            self.info(LogLevel::Info, "Отладка остановлена");
+        }
+    }
+
+    fn poll_debug(&mut self) {
+        let Some(d) = &mut self.debug else { return };
+        d.refresh();
+        let fresh: Vec<String> = d
+            .live
+            .console
+            .iter()
+            .skip(d.console_seen)
+            .cloned()
+            .collect();
+        d.console_seen = d.live.console.len();
+        for line in fresh {
+            self.info(LogLevel::Info, format!("> {line}"));
         }
     }
 
@@ -525,7 +595,7 @@ impl EditorApp {
                     .clicked()
                 {
                     let port = self.port_choice();
-                    self.start_job(JobKind::Upload { port }, ui.ctx());
+                    self.start_job(JobKind::Upload { port, debug: false }, ui.ctx());
                 }
             });
             ui.menu_button("Библиотека", |ui| {
@@ -569,6 +639,18 @@ impl EditorApp {
                     ui.separator();
                     ui.spinner();
                     ui.label(job.title);
+                }
+                if let Some(d) = &self.debug {
+                    ui.separator();
+                    let color = if d.online() {
+                        palette(self.theme).ok
+                    } else {
+                        palette(self.theme).warning
+                    };
+                    ui.label(
+                        RichText::new(format!("Отладка {}: {}", d.port, d.live.status))
+                            .color(color),
+                    );
                 }
             }
             None => {
@@ -640,7 +722,8 @@ impl EditorApp {
 impl eframe::App for EditorApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        self.poll_job();
+        self.poll_job(&ctx);
+        self.poll_debug();
         self.poll_ports();
         self.watch_library();
         self.shortcuts(&ctx);
@@ -673,6 +756,10 @@ impl eframe::App for EditorApp {
         egui::CentralPanel::default_margins().show(ui, |ui| canvas::show(self, ui));
 
         dialogs::show(self, &ctx);
+        let pal = palette(self.theme);
+        if let Some(d) = &mut self.debug {
+            debugview::chart_window(d, &pal, &ctx);
+        }
         self.unsaved_dialog(&ctx);
     }
 }

@@ -3,18 +3,29 @@
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
-use flp_build::{ArduinoCli, CompileOptions};
+use flp_build::{ArduinoCli, BuildMode, CompileOptions};
 use flp_codegen::{ArduinoCpp, Backend, Program};
 use flp_core::{Library, Project};
 
 pub enum JobKind {
     Build,
-    Upload { port: Option<String> },
+    Upload {
+        port: Option<String>,
+        /// Firmware with the online debugging module; the editor connects afterwards.
+        debug: bool,
+    },
+}
+
+pub struct Done {
+    pub message: String,
+    /// Port the firmware was uploaded to.
+    pub port: Option<String>,
+    pub debug: bool,
 }
 
 pub enum JobEvent {
     Line(String),
-    Done(Result<String, String>),
+    Done(Result<Done, String>),
 }
 
 pub struct Job {
@@ -33,7 +44,8 @@ impl Job {
     ) -> Self {
         let title = match kind {
             JobKind::Build => "Сборка",
-            JobKind::Upload { .. } => "Заливка",
+            JobKind::Upload { debug: false, .. } => "Заливка",
+            JobKind::Upload { debug: true, .. } => "Заливка отладочной прошивки",
         };
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
@@ -60,9 +72,10 @@ fn run(
     project: &Project,
     lib: &Library,
     log: &mut dyn FnMut(&str),
-) -> Result<String, String> {
+) -> Result<Done, String> {
+    let debug = matches!(kind, JobKind::Upload { debug: true, .. });
     let program = Program::build(project, lib).map_err(|e| e.to_string())?;
-    let code = ArduinoCpp::RELEASE
+    let code = ArduinoCpp { debug }
         .generate(&program)
         .map_err(|e| e.to_string())?;
     let (path, _) = flp_codegen::write_sketch(&project.root, &code).map_err(|e| e.to_string())?;
@@ -77,19 +90,35 @@ fn run(
         log(&format!("Установлены библиотеки: {}", installed.join(", ")));
     }
     log(&format!("Сборка для {}...", board.fqbn));
-    cli.compile(&project.root, board, &CompileOptions::default(), log)
+    let opts = CompileOptions {
+        mode: if debug {
+            BuildMode::Debug
+        } else {
+            BuildMode::Release
+        },
+        ..Default::default()
+    };
+    cli.compile(&project.root, board, &opts, log)
         .map_err(|e| e.to_string())?;
 
     match kind {
-        JobKind::Build => Ok("Сборка готова".into()),
-        JobKind::Upload { port } => {
+        JobKind::Build => Ok(Done {
+            message: "Сборка готова".into(),
+            port: None,
+            debug,
+        }),
+        JobKind::Upload { port, .. } => {
             let port = cli
                 .choose_port(port.as_deref(), board)
                 .map_err(|e| e.to_string())?;
             log(&format!("Заливка на {port}..."));
             cli.upload(&project.root, board, &port, log)
                 .map_err(|e| e.to_string())?;
-            Ok(format!("Прошивка залита на {port}"))
+            Ok(Done {
+                message: format!("Прошивка залита на {port}"),
+                port: Some(port),
+                debug,
+            })
         }
     }
 }

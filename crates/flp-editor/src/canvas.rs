@@ -13,6 +13,7 @@ use flp_core::vars::{VAR_GET, VAR_SET};
 use flp_core::{Block, BlockDef, BlockPos, ParamValue, PortRef, Severity, SignalType};
 
 use crate::app::{EditorApp, LogLevel, Selection};
+use crate::debugview;
 use crate::dialogs::Dialog;
 use crate::theme::{palette, Palette};
 
@@ -450,6 +451,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
 
     // Links.
     let selected = app.selection.clone();
+    let dbg = app.debug.as_ref();
     let click_pos = bg.clicked().then(|| bg.interact_pointer_pos()).flatten();
     let mut clicked_link = None;
     for link in &logic.links {
@@ -461,7 +463,14 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         let pts = rounded(&route(a, b, 12.0 * z), 6.0 * z);
         let is_sel = selected.as_ref() == Some(&Selection::Link(link.to.clone()));
         let color = signal_color(&pal, ty);
-        let stroke = Stroke::new(if is_sel { 3.0 } else { 1.6 }, color);
+        // Online: logical lines light up when true and fade when false.
+        let live = dbg.and_then(|d| d.output(&link.from));
+        let (width, color) = match live {
+            Some((flp_debug::Value::Bool(true), _)) => (2.6, pal.ok),
+            Some((flp_debug::Value::Bool(false), _)) => (1.4, color.gamma_multiply(0.45)),
+            _ => (1.6, color),
+        };
+        let stroke = Stroke::new(if is_sel { width + 1.4 } else { width }, color);
         painter.line(pts.clone(), stroke);
         if click_pos.is_some_and(|p| near_polyline(&pts, p, 5.0)) {
             clicked_link = Some(link.to.clone());
@@ -518,13 +527,13 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                     border,
                     StrokeKind::Inside,
                 );
-                painter.text(
-                    r.center(),
-                    Align2::CENTER_CENTER,
-                    label(block, def),
-                    font(11.0),
-                    pal.text,
-                );
+                let live = block.var_name().and_then(|v| dbg.and_then(|d| d.var(v)));
+                let (text, color) = match live {
+                    Some((v, true)) => (format!("{} = {v} F", label(block, def)), pal.warning),
+                    Some((v, false)) => (format!("{} = {v}", label(block, def)), pal.text),
+                    None => (label(block, def), pal.text),
+                };
+                painter.text(r.center(), Align2::CENTER_CENTER, text, font(11.0), color);
                 if let Some(port) = def.and_then(|d| d.inputs.first().or(d.outputs.first())) {
                     let p = port_pos(r, kind, 0, !write);
                     painter.circle_filled(p, PORT_R * z.sqrt(), signal_color(&pal, port.ty));
@@ -644,6 +653,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         pos: Pos2,
     }
     let mut hits: Vec<Hit> = Vec::new();
+    let mut port_menus: Vec<(PortRef, egui::Response)> = Vec::new();
     for block in &logic.blocks {
         let (Some(r), Some(def)) = (screen_rect(&block.id), defs[block.id.as_str()]) else {
             continue;
@@ -661,8 +671,17 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             let resp = ui.interact(
                 area,
                 Id::unique(("port", &block.id, &q.name)),
-                Sense::drag(),
+                Sense::click_and_drag(),
             );
+            if output && kind == Kind::Box {
+                let port = PortRef::new(&block.id, &q.name);
+                if let Some((v, forced)) = dbg.and_then(|d| d.output(&port)) {
+                    debugview::value_label(&painter, &pal, pos, v, forced, z, true);
+                }
+                if dbg.is_some() {
+                    port_menus.push((port, resp.clone()));
+                }
+            }
             if resp.hovered() || resp.dragged() {
                 painter.circle_stroke(
                     pos,
@@ -850,6 +869,14 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     for (id, resp) in responses {
         block_context_menu(app, &id, &resp);
     }
+    // Online: right click on an output forces it or puts it on the chart.
+    for (port, resp) in port_menus {
+        let Some(d) = &mut app.debug else { break };
+        let Some(index) = d.table.output_index(&port) else {
+            continue;
+        };
+        resp.context_menu(|ui| debugview::value_menu(ui, d, index));
+    }
 }
 
 fn block_context_menu(app: &mut EditorApp, id: &str, resp: &egui::Response) {
@@ -868,7 +895,15 @@ fn block_context_menu(app: &mut EditorApp, id: &str, resp: &egui::Response) {
     let mut delete = false;
     let mut props = false;
     let mut edit_var = false;
+    let debug_index = var
+        .as_deref()
+        .and_then(|v| app.debug.as_ref().and_then(|d| d.table.var_index(v)));
+    let mut debug = app.debug.take();
     resp.context_menu(|ui| {
+        if let (Some(d), Some(index)) = (&mut debug, debug_index) {
+            ui.menu_button("Отладка", |ui| debugview::value_menu(ui, d, index));
+            ui.separator();
+        }
         if ui.button("Свойства...").clicked() {
             props = true;
         }
@@ -888,6 +923,7 @@ fn block_context_menu(app: &mut EditorApp, id: &str, resp: &egui::Response) {
             delete = true;
         }
     });
+    app.debug = debug;
     if props {
         app.dialog = Dialog::for_block(app, id);
     }

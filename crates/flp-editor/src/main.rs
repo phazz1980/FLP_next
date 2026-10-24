@@ -6,6 +6,7 @@
 
 mod app;
 mod canvas;
+mod debugview;
 mod dialogs;
 mod doc;
 mod job;

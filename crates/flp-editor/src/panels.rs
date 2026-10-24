@@ -61,7 +61,7 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
             .clicked()
         {
             let port = app.port_choice();
-            app.start_job(JobKind::Upload { port }, ui.ctx());
+            app.start_job(JobKind::Upload { port, debug: false }, ui.ctx());
         }
         ui.separator();
         ui.label("Порт:");
@@ -98,8 +98,35 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
             app.scan_ports(ui.ctx());
         }
         ui.separator();
-        ui.add_enabled(false, egui::Button::new("Отладка"))
-            .on_disabled_hover_text("Онлайн-отладка появится на этапе 4");
+        if app.debug.is_none() {
+            if ui
+                .add_enabled(has_doc && idle, egui::Button::new("Отладка"))
+                .on_hover_text("Залить прошивку с модулем отладки и подключиться")
+                .clicked()
+            {
+                app.start_debug(ui.ctx());
+            }
+            if ui
+                .add_enabled(has_doc && idle, egui::Button::new("Подключиться"))
+                .on_hover_text("Плата уже прошита отладочной прошивкой этой схемы")
+                .clicked()
+            {
+                app.connect_debug(None, ui.ctx());
+            }
+        } else {
+            if ui.button("Стоп отладки").clicked() {
+                app.stop_debug();
+            }
+            if ui
+                .button("Снять форсировки")
+                .on_hover_text("Вернуть все форсированные значения схеме")
+                .clicked()
+            {
+                if let Some(d) = &app.debug {
+                    d.send(flp_debug::Command::ReleaseAll);
+                }
+            }
+        }
     });
 }
 

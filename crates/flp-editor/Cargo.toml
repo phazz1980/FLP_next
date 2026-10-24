@@ -13,4 +13,5 @@ eframe = "0.37"
 flp-build = { path = "../flp-build" }
 flp-codegen = { path = "../flp-codegen" }
 flp-core = { path = "../flp-core" }
+flp-debug = { path = "../flp-debug", features = ["serial"] }
 rfd = "0.17"
