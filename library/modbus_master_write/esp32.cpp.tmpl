@@ -1,0 +1,6 @@
+// @loop
+{% set tables = {"holding": "FLPROG_HOLDING_REGISTR", "coil": "FLPROG_COIL"} %}
+{% if value.kind == "float" %}flpMaster.saveFloat({{ param.slave }}, {{ input.in_f }}, {{ tables[value.table] }}, {{ param.reg }});
+{% elif value.kind == "bool" %}flpMaster.saveBool({{ param.slave }}, {{ input.in_b }}, {{ tables[value.table] }}, {{ param.reg }});
+{% else %}flpMaster.saveInteger({{ param.slave }}, (int16_t)({{ input.in }}), {{ tables[value.table] }}, {{ param.reg }});
+{% endif %}

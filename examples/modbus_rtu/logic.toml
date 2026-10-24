@@ -1,0 +1,87 @@
+# Шлюз Modbus RTU.
+# Мастер (UART2, RX 16, TX 17, DE 4) опрашивает два ведомых: у датчика (адрес 10)
+# читает температуру float из input 0..1, а у модуля реле (адрес 11) включает coil 0.
+# Slave (UART1, RX 25, TX 27, DE 14, адрес 1) отдаёт панели оператора:
+# input 0..1 — температура, discrete 0 — датчик на связи; coil 0 панели включает реле.
+
+[[block]]
+id = "master"
+type = "modbus_rtu_master"
+uart = 2
+rx = 16
+tx = 17
+de = 4
+count = 2
+slave1 = 10
+slave2 = 11
+period = "500ms"
+holding = 0
+input = 2
+coils = 1
+discrete = 0
+
+[[block]]
+id = "panel"
+type = "modbus_rtu_slave"
+uart = 1
+speed = 19200
+rx = 25
+tx = 27
+de = 14
+address = 1
+holding = 0
+input = 2
+coils = 1
+discrete = 1
+
+[[block]]
+id = "temp"
+type = "modbus_master_read"
+slave = 10
+table = "input"
+kind = "float"
+reg = 0
+
+[[block]]
+id = "temp_out"
+type = "modbus_write"
+slave = "rtu"
+table = "input"
+kind = "float"
+reg = 0
+
+[[block]]
+id = "sensor_ok"
+type = "modbus_write"
+slave = "rtu"
+table = "discrete"
+kind = "bool"
+reg = 0
+
+[[block]]
+id = "relay_cmd"
+type = "modbus_read"
+slave = "rtu"
+table = "coil"
+kind = "bool"
+reg = 0
+
+[[block]]
+id = "relay"
+type = "modbus_master_write"
+slave = 11
+table = "coil"
+kind = "bool"
+reg = 0
+
+[[link]]
+from = "temp.out_f"
+to   = "temp_out.in_f"
+
+[[link]]
+from = "temp.ok"
+to   = "sensor_ok.in_b"
+
+[[link]]
+from = "relay_cmd.out_b"
+to   = "relay.in_b"

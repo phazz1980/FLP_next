@@ -1,0 +1,92 @@
+[block]
+type = "modbus_rtu_slave"
+name = "Modbus RTU Slave"
+symbol = "MB RTU"
+group = "Сеть"
+description = "Ведомое устройство Modbus RTU на UART (RS-485): таблицы регистров для мастера."
+single = true
+includes = ["flprogModbusRTU.h", "flprogUart.h"]
+
+[[output]]
+name = "error"
+type = "int"
+description = "Код последней ошибки Modbus (0 — нет ошибки)"
+
+[[param]]
+name = "uart"
+type = "int"
+default = 2
+min = 0
+max = 2
+description = "Номер UART: 0 — USB (занят отладкой), 1 или 2"
+
+[[param]]
+name = "speed"
+type = "int"
+default = 9600
+description = "Скорость, бод"
+
+[[param]]
+name = "parity"
+type = "int"
+default = 0
+min = 0
+max = 2
+description = "Чётность: 0 — нет, 1 — чёт (EVEN), 2 — нечет (ODD)"
+
+[[param]]
+name = "rx"
+type = "int"
+default = 16
+min = -1
+description = "Вывод RX (-1 — вывод UART по умолчанию)"
+
+[[param]]
+name = "tx"
+type = "int"
+default = 17
+min = -1
+description = "Вывод TX (-1 — вывод UART по умолчанию)"
+
+[[param]]
+name = "de"
+type = "int"
+default = -1
+min = -1
+description = "Вывод DE/RE переключения приёма и передачи RS-485 (-1 — не нужен)"
+
+[[param]]
+name = "address"
+type = "int"
+default = 1
+min = 1
+max = 247
+description = "Адрес устройства"
+
+[[param]]
+name = "holding"
+type = "int"
+default = 10
+min = 0
+description = "Число регистров хранения (Holding, 4x), с адреса 0"
+
+[[param]]
+name = "input"
+type = "int"
+default = 10
+min = 0
+description = "Число входных регистров (Input, 3x), с адреса 0"
+
+[[param]]
+name = "coils"
+type = "int"
+default = 10
+min = 0
+description = "Число катушек (Coils, 0x), с адреса 0"
+
+[[param]]
+name = "discrete"
+type = "int"
+default = 10
+min = 0
+description = "Число дискретных входов (Discrete Inputs, 1x), с адреса 0"

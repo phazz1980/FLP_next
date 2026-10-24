@@ -1,0 +1,25 @@
+// @global
+// Shared network interface: Modbus TCP and other network blocks use it.
+FLProgOnBoardWifiInterface flpWifi;
+// @setup
+flpWifi.clientOn();
+flpWifi.setClientSsid({{ param.ssid }});
+flpWifi.setClientPassword({{ param.password }});
+{% if value.dhcp %}
+flpWifi.setDhcp();
+{% else %}
+{
+  IPAddress addr;
+  addr.fromString({{ param.ip }});
+  flpWifi.localIP(addr);
+  addr.fromString({{ param.gateway }});
+  flpWifi.gateway(addr);
+  flpWifi.dns(addr);
+  addr.fromString({{ param.subnet }});
+  flpWifi.subnet(addr);
+  flpWifi.resetDhcp();
+}
+{% endif %}
+// @loop
+flpWifi.pool();
+{{ output.ready }} = flpWifi.clientIsReady();

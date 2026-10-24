@@ -69,6 +69,9 @@ pub struct CompileOptions {
     pub low_priority: bool,
     /// Parallel compile jobs; `None` lets arduino-cli use all cores.
     pub jobs: Option<u32>,
+    /// Extra folders with Arduino libraries (`--libraries`), in addition to
+    /// the bundled ones found by [`bundled_libraries`].
+    pub libraries: Vec<PathBuf>,
 }
 
 /// Serial port found by `arduino-cli board list`.
@@ -77,6 +80,34 @@ pub struct SerialPort {
     pub address: String,
     /// Board names recognized by arduino-cli, or the port label.
     pub description: String,
+}
+
+/// Folder with Arduino libraries shipped with FLP_next (FLProg_Network, Modbus...).
+const BUNDLED_LIBRARIES: &str = "Flprog_Network/Библиотека";
+
+/// Bundled Arduino library folders: `FLP_ARDUINO_LIBS` (separated like `PATH`),
+/// otherwise `Flprog_Network/Библиотека` next to the project (or its parents)
+/// or next to the executable (or its parents).
+pub fn bundled_libraries(project_root: &Path) -> Vec<PathBuf> {
+    if let Some(dirs) = env::var_os("FLP_ARDUINO_LIBS") {
+        return env::split_paths(&dirs).filter(|d| d.is_dir()).collect();
+    }
+    let exe_dir = env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    // Not `canonicalize`: arduino-cli does not accept `\\?\` paths.
+    let project = std::path::absolute(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+    [Some(project), exe_dir]
+        .into_iter()
+        .flatten()
+        .find_map(|start| {
+            start
+                .ancestors()
+                .map(|d| d.join(BUNDLED_LIBRARIES))
+                .find(|d| d.is_dir())
+        })
+        .into_iter()
+        .collect()
 }
 
 /// Persistent build folder of a project.
@@ -131,7 +162,13 @@ impl ArduinoCli {
         opts: &CompileOptions,
         on_line: &mut dyn FnMut(&str),
     ) -> Result<(), BuildError> {
-        let args = compile_args(project_root, board, opts);
+        let mut opts = opts.clone();
+        for dir in bundled_libraries(project_root) {
+            if !opts.libraries.contains(&dir) {
+                opts.libraries.push(dir);
+            }
+        }
+        let args = compile_args(project_root, board, &opts);
         let status = self.run(&args, opts.low_priority, on_line)?;
         check_status("сборка", status)
     }
@@ -190,6 +227,17 @@ impl ArduinoCli {
             .map_err(|source| self.spawn_error(source))?;
         check_status("поиск плат", output.status)?;
         parse_board_list(&String::from_utf8_lossy(&output.stdout))
+    }
+
+    /// Board menu options (CPU frequency, flash size, partitions...) for `fqbn`.
+    pub fn board_menus(&self, fqbn: &str) -> Result<Vec<BoardMenu>, BuildError> {
+        let output = Command::new(&self.exe)
+            .args(["board", "details", "--fqbn", fqbn, "--format", "json"])
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|source| self.spawn_error(source))?;
+        check_status("описание платы", output.status)?;
+        parse_board_details(&String::from_utf8_lossy(&output.stdout))
     }
 
     /// Port for upload: explicit, from `project.toml`, or the only serial port found.
@@ -303,6 +351,10 @@ fn compile_args(project_root: &Path, board: &BoardConfig, opts: &CompileOptions)
     if opts.mode == BuildMode::Debug {
         args.push("--optimize-for-debug".into());
     }
+    for dir in &opts.libraries {
+        args.push("--libraries".into());
+        args.push(dir.into());
+    }
     args.push("--jobs".into());
     args.push(opts.jobs.unwrap_or(0).to_string().into());
     args.push(sketch_dir(project_root).into());
@@ -318,6 +370,48 @@ fn upload_args(project_root: &Path, board: &BoardConfig, port: &str) -> Vec<OsSt
     args.push(build_dir(project_root).into());
     args.push(sketch_dir(project_root).into());
     args
+}
+
+/// One board menu from `arduino-cli board details`, e.g. `FlashSize`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct BoardMenu {
+    /// Key for `--board-options`, e.g. `FlashSize`.
+    #[serde(rename = "option")]
+    pub key: String,
+    #[serde(rename = "option_label", default)]
+    pub label: String,
+    pub values: Vec<BoardMenuValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct BoardMenuValue {
+    pub value: String,
+    #[serde(rename = "value_label", default)]
+    pub label: String,
+    /// Default value of the menu.
+    #[serde(default)]
+    pub selected: bool,
+}
+
+impl BoardMenu {
+    pub fn default_value(&self) -> Option<&str> {
+        self.values
+            .iter()
+            .find(|v| v.selected)
+            .or(self.values.first())
+            .map(|v| v.value.as_str())
+    }
+}
+
+fn parse_board_details(json: &str) -> Result<Vec<BoardMenu>, BuildError> {
+    #[derive(Deserialize)]
+    struct Details {
+        #[serde(default)]
+        config_options: Vec<BoardMenu>,
+    }
+    let d: Details =
+        serde_json::from_str(json).map_err(|e| BuildError::BadOutput(e.to_string()))?;
+    Ok(d.config_options)
 }
 
 /// Installed library: name and version.
@@ -423,6 +517,17 @@ mod tests {
     }
 
     #[test]
+    fn compile_passes_library_folders() {
+        let opts = CompileOptions {
+            libraries: vec![PathBuf::from("libs")],
+            ..Default::default()
+        };
+        let args = strings(&compile_args(Path::new("proj"), &board(), &opts));
+        let i = args.iter().position(|a| a == "--libraries").unwrap();
+        assert_eq!(args[i + 1], "libs");
+    }
+
+    #[test]
     fn compile_command_line() {
         let root = Path::new("proj");
         let opts = CompileOptions {
@@ -448,6 +553,19 @@ mod tests {
                 &sketch,
             ]
         );
+    }
+
+    #[test]
+    fn board_details_menus() {
+        let json = r#"{"fqbn": "esp32:esp32:esp32", "config_options": [
+            {"option": "FlashSize", "option_label": "Flash Size", "values": [
+                {"value": "4M", "value_label": "4MB (32Mb)", "selected": true},
+                {"value": "8M", "value_label": "8MB (64Mb)"}]}]}"#;
+        let menus = parse_board_details(json).unwrap();
+        assert_eq!(menus.len(), 1);
+        assert_eq!(menus[0].key, "FlashSize");
+        assert_eq!(menus[0].values[1].label, "8MB (64Mb)");
+        assert_eq!(menus[0].default_value(), Some("4M"));
     }
 
     #[test]

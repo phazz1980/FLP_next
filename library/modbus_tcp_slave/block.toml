@@ -1,0 +1,63 @@
+[block]
+type = "modbus_tcp_slave"
+name = "Modbus TCP Slave"
+symbol = "MB TCP"
+group = "Сеть"
+description = "Ведомое устройство Modbus TCP через Wi-Fi или Ethernet: таблицы регистров для SCADA и панелей."
+single = true
+includes = ["flprogModbusTCP.h"]
+
+[[output]]
+name = "error"
+type = "int"
+description = "Код последней ошибки Modbus (0 — нет ошибки)"
+
+[[param]]
+name = "net"
+type = "string"
+default = "wifi"
+description = "Сеть: wifi (блок «Wi-Fi клиент») или ethernet (блок «Ethernet W5500»)"
+
+[[param]]
+name = "address"
+type = "int"
+default = 1
+min = 1
+max = 247
+description = "Адрес устройства (Unit ID)"
+
+[[param]]
+name = "port"
+type = "int"
+default = 502
+min = 1
+max = 65535
+description = "TCP-порт"
+
+[[param]]
+name = "holding"
+type = "int"
+default = 10
+min = 0
+description = "Число регистров хранения (Holding, 4x), с адреса 0"
+
+[[param]]
+name = "input"
+type = "int"
+default = 10
+min = 0
+description = "Число входных регистров (Input, 3x), с адреса 0"
+
+[[param]]
+name = "coils"
+type = "int"
+default = 10
+min = 0
+description = "Число катушек (Coils, 0x), с адреса 0"
+
+[[param]]
+name = "discrete"
+type = "int"
+default = 10
+min = 0
+description = "Число дискретных входов (Discrete Inputs, 1x), с адреса 0"

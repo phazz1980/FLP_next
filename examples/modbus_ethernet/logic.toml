@@ -1,0 +1,75 @@
+# Modbus TCP Slave через Ethernet W5500 (CS — GPIO5) с постоянным адресом.
+# Discrete 0 — кнопка, input 0 — связь с сетью (0/1), coil 0 — реле.
+
+[[block]]
+id = "eth"
+type = "ethernet"
+cs = 5
+dhcp = false
+ip = "192.168.1.50"
+gateway = "192.168.1.1"
+
+[[block]]
+id = "slave"
+type = "modbus_tcp_slave"
+net = "ethernet"
+holding = 0
+input = 2
+coils = 2
+discrete = 2
+
+[[block]]
+id = "button"
+type = "digital_in"
+pin = 13
+pullup = true
+inverted = true
+
+[[block]]
+id = "button_reg"
+type = "modbus_write"
+table = "discrete"
+kind = "bool"
+reg = 0
+
+[[block]]
+id = "online_reg"
+type = "modbus_write"
+table = "discrete"
+kind = "bool"
+reg = 1
+
+[[block]]
+id = "error_reg"
+type = "modbus_write"
+table = "input"
+kind = "int"
+reg = 0
+
+[[block]]
+id = "relay_reg"
+type = "modbus_read"
+table = "coil"
+kind = "bool"
+reg = 0
+
+[[block]]
+id = "relay"
+type = "digital_out"
+pin = 26
+
+[[link]]
+from = "button.out"
+to   = "button_reg.in_b"
+
+[[link]]
+from = "eth.ready"
+to   = "online_reg.in_b"
+
+[[link]]
+from = "slave.error"
+to   = "error_reg.in"
+
+[[link]]
+from = "relay_reg.out_b"
+to   = "relay.in"

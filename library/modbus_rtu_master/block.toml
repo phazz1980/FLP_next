@@ -1,0 +1,136 @@
+[block]
+type = "modbus_rtu_master"
+name = "Modbus RTU Master"
+symbol = "MB MASTER"
+group = "Сеть"
+description = "Ведущее устройство Modbus RTU на UART (RS-485): опрашивает до четырёх ведомых."
+single = true
+includes = ["flprogModbusRTU.h", "flprogUart.h"]
+
+[[param]]
+name = "uart"
+type = "int"
+default = 2
+min = 0
+max = 2
+description = "Номер UART: 0 — USB (занят отладкой), 1 или 2"
+
+[[param]]
+name = "speed"
+type = "int"
+default = 9600
+description = "Скорость, бод"
+
+[[param]]
+name = "parity"
+type = "int"
+default = 0
+min = 0
+max = 2
+description = "Чётность: 0 — нет, 1 — чёт (EVEN), 2 — нечет (ODD)"
+
+[[param]]
+name = "rx"
+type = "int"
+default = 16
+min = -1
+description = "Вывод RX (-1 — вывод UART по умолчанию)"
+
+[[param]]
+name = "tx"
+type = "int"
+default = 17
+min = -1
+description = "Вывод TX (-1 — вывод UART по умолчанию)"
+
+[[param]]
+name = "de"
+type = "int"
+default = -1
+min = -1
+description = "Вывод DE/RE переключения приёма и передачи RS-485 (-1 — не нужен)"
+
+[[param]]
+name = "count"
+type = "int"
+default = 1
+min = 1
+max = 4
+description = "Число ведомых устройств"
+
+[[param]]
+name = "slave1"
+type = "int"
+default = 1
+min = 1
+max = 247
+description = "Адрес ведомого 1"
+
+[[param]]
+name = "slave2"
+type = "int"
+default = 2
+min = 1
+max = 247
+when = "count >= 2"
+description = "Адрес ведомого 2"
+
+[[param]]
+name = "slave3"
+type = "int"
+default = 3
+min = 1
+max = 247
+when = "count >= 3"
+description = "Адрес ведомого 3"
+
+[[param]]
+name = "slave4"
+type = "int"
+default = 4
+min = 1
+max = 247
+when = "count >= 4"
+description = "Адрес ведомого 4"
+
+[[param]]
+name = "period"
+type = "duration"
+default = "1s"
+min = 10
+description = "Период опроса каждого ведомого"
+
+[[param]]
+name = "timeout"
+type = "duration"
+default = "1s"
+min = 10
+description = "Время ожидания ответа"
+
+[[param]]
+name = "holding"
+type = "int"
+default = 10
+min = 0
+description = "Сколько регистров хранения (4x) опрашивать у каждого ведомого, с адреса 0"
+
+[[param]]
+name = "input"
+type = "int"
+default = 10
+min = 0
+description = "Сколько входных регистров (3x) опрашивать, с адреса 0"
+
+[[param]]
+name = "coils"
+type = "int"
+default = 10
+min = 0
+description = "Сколько катушек (0x) опрашивать, с адреса 0"
+
+[[param]]
+name = "discrete"
+type = "int"
+default = 10
+min = 0
+description = "Сколько дискретных входов (1x) опрашивать, с адреса 0"

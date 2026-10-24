@@ -1,0 +1,31 @@
+// @global once
+// Hardware UART access shared by Modbus RTU blocks; the guard keeps one copy
+// when both the slave and the master are used (`once` works per block type).
+#ifndef FLP_UART_EXECUTOR
+#define FLP_UART_EXECUTOR
+FlprogUartExecutor flpUart;
+#endif
+// @global
+// Shared master: modbus_master_read / modbus_master_write blocks access its slaves.
+ModbusMasterRTU flpMaster({{ param.uart }}, {{ param.count }}, &flpUart);
+// @setup
+flpMaster.setSpeedUart({{ param.speed }});
+flpMaster.setParityUart({{ param.parity }});
+{% if value.rx >= 0 %}flpMaster.setPinRxUart({{ param.rx }});
+{% endif %}{% if value.tx >= 0 %}flpMaster.setPinTxUart({{ param.tx }});
+{% endif %}{% if value.de >= 0 %}flpMaster.setPinPeDe({{ param.de }});
+{% endif %}
+{% for n in range(1, value.count + 1) %}
+{% set addr = value["slave" ~ n] %}
+flpMaster.setSlaveAddress({{ n - 1 }}, {{ addr }});
+flpMaster.setPollingPeriod({{ addr }}, {{ param.period }}UL);
+flpMaster.setTimeOutTime({{ addr }}, {{ param.timeout }}UL);
+{% if value.holding > 0 %}flpMaster.configDataTable({{ addr }}, FLPROG_HOLDING_REGISTR, {{ param.holding }});
+{% endif %}{% if value.input > 0 %}flpMaster.configDataTable({{ addr }}, FLPROG_INPUT_REGISTR, {{ param.input }});
+{% endif %}{% if value.coils > 0 %}flpMaster.configDataTable({{ addr }}, FLPROG_COIL, {{ param.coils }});
+{% endif %}{% if value.discrete > 0 %}flpMaster.configDataTable({{ addr }}, FLPROG_DISCRETE_INPUT, {{ param.discrete }});
+{% endif %}
+{% endfor %}
+flpMaster.begin();
+// @loop
+flpMaster.pool();

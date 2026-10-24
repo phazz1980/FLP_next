@@ -1,0 +1,6 @@
+[project]
+name = "modbus_rtu"
+description = "Шлюз RS-485: мастер на UART2 опрашивает датчик, slave на UART1 отдаёт данные панели"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

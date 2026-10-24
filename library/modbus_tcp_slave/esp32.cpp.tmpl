@@ -1,0 +1,14 @@
+// @global
+// Shared slave: modbus_read / modbus_write blocks access its tables.
+ModbusSlaveTCP flpModbus(&{% if value.net == "ethernet" %}flpEth{% else %}flpWifi{% endif %});
+// @setup
+flpModbus.setSlaveAddress({{ param.address }});
+flpModbus.setTcpPort({{ param.port }});
+{% if value.holding > 0 %}flpModbus.configDataTable(FLPROG_HOLDING_REGISTR, {{ param.holding }});
+{% endif %}{% if value.input > 0 %}flpModbus.configDataTable(FLPROG_INPUT_REGISTR, {{ param.input }});
+{% endif %}{% if value.coils > 0 %}flpModbus.configDataTable(FLPROG_COIL, {{ param.coils }});
+{% endif %}{% if value.discrete > 0 %}flpModbus.configDataTable(FLPROG_DISCRETE_INPUT, {{ param.discrete }});
+{% endif %}
+// @loop
+flpModbus.pool();
+{{ output.error }} = flpModbus.getLastError();

@@ -1,0 +1,54 @@
+[block]
+type = "ethernet"
+name = "Ethernet W5500"
+symbol = "ETH"
+group = "Сеть"
+description = "Проводная сеть на модуле W5500 (W5100, W5200) по SPI (библиотека FLProg_Network)."
+single = true
+includes = ["flprogNetwork.h"]
+
+[[output]]
+name = "ready"
+type = "bool"
+description = "true, пока кабель подключён и адрес получен"
+
+[[param]]
+name = "cs"
+type = "pin"
+default = 5
+description = "Вывод CS модуля (SPI по умолчанию: SCK 18, MISO 19, MOSI 23)"
+
+[[param]]
+name = "mac"
+type = "int"
+default = 40
+min = 0
+max = 255
+description = "Последний байт MAC-адреса 78:AC:C0:2C:3E:xx — разный у устройств в одной сети"
+
+[[param]]
+name = "dhcp"
+type = "bool"
+default = true
+description = "Получать адрес автоматически (DHCP)"
+
+[[param]]
+name = "ip"
+type = "string"
+default = "192.168.1.177"
+when = "not dhcp"
+description = "Постоянный IP-адрес"
+
+[[param]]
+name = "gateway"
+type = "string"
+default = "192.168.1.1"
+when = "not dhcp"
+description = "Шлюз (он же DNS)"
+
+[[param]]
+name = "subnet"
+type = "string"
+default = "255.255.255.0"
+when = "not dhcp"
+description = "Маска подсети"

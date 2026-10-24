@@ -1,0 +1,49 @@
+[block]
+type = "modbus_write"
+name = "Запись Modbus"
+symbol = "MB →"
+group = "Сеть"
+description = "Записывает значение в таблицу Modbus TCP Slave, чтобы его прочитал мастер."
+
+[[input]]
+name = "in"
+type = "int"
+when = 'kind == "int"'
+description = "Значение регистра"
+
+[[input]]
+name = "in_f"
+type = "float"
+when = 'kind == "float"'
+description = "Значение float (займёт два регистра)"
+
+[[input]]
+name = "in_b"
+type = "bool"
+when = 'kind == "bool"'
+description = "Состояние бита"
+
+[[param]]
+name = "slave"
+type = "string"
+default = "tcp"
+description = "Чьи таблицы: tcp (Modbus TCP Slave) или rtu (Modbus RTU Slave)"
+
+[[param]]
+name = "table"
+type = "string"
+default = "input"
+description = "Таблица: holding, input, coil или discrete"
+
+[[param]]
+name = "kind"
+type = "string"
+default = "int"
+description = "Тип значения: int (1 регистр), float (2 регистра) или bool (катушка, вход)"
+
+[[param]]
+name = "reg"
+type = "int"
+default = 0
+min = 0
+description = "Адрес в таблице"

@@ -1,0 +1,6 @@
+[project]
+name = "modbus_ethernet"
+description = "Кнопка и счётчик нажатий по Modbus TCP через Ethernet W5500, реле включает мастер"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

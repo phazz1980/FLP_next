@@ -1,0 +1,25 @@
+// @global once
+// Hardware UART access shared by Modbus RTU blocks; the guard keeps one copy
+// when both the slave and the master are used (`once` works per block type).
+#ifndef FLP_UART_EXECUTOR
+#define FLP_UART_EXECUTOR
+FlprogUartExecutor flpUart;
+#endif
+// @global
+// Shared slave: modbus_read / modbus_write blocks with slave = "rtu" access its tables.
+ModbusSlaveRTU flpModbusRtu({{ param.uart }}, &flpUart);
+// @setup
+flpModbusRtu.setSpeedUart({{ param.speed }});
+flpModbusRtu.setParityUart({{ param.parity }});
+{% if value.rx >= 0 %}flpModbusRtu.setPinRxUart({{ param.rx }});
+{% endif %}{% if value.tx >= 0 %}flpModbusRtu.setPinTxUart({{ param.tx }});
+{% endif %}{% if value.de >= 0 %}flpModbusRtu.setPinPeDe({{ param.de }});
+{% endif %}flpModbusRtu.setSlaveAddress({{ param.address }});
+{% if value.holding > 0 %}flpModbusRtu.configDataTable(FLPROG_HOLDING_REGISTR, {{ param.holding }});
+{% endif %}{% if value.input > 0 %}flpModbusRtu.configDataTable(FLPROG_INPUT_REGISTR, {{ param.input }});
+{% endif %}{% if value.coils > 0 %}flpModbusRtu.configDataTable(FLPROG_COIL, {{ param.coils }});
+{% endif %}{% if value.discrete > 0 %}flpModbusRtu.configDataTable(FLPROG_DISCRETE_INPUT, {{ param.discrete }});
+{% endif %}flpModbusRtu.begin();
+// @loop
+flpModbusRtu.pool();
+{{ output.error }} = flpModbusRtu.getLastError();

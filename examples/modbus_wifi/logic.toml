@@ -1,0 +1,74 @@
+# Modbus TCP Slave через Wi-Fi.
+# Input 0..1 — температура (float), discrete 0 — кнопка,
+# discrete 1 — связь с сетью, coil 0 — светодиод.
+
+[[block]]
+id = "wifi"
+type = "wifi"
+ssid = "MyNetwork"
+password = "12345678"
+
+[[block]]
+id = "slave"
+type = "modbus_tcp_slave"
+
+[[block]]
+id = "sensor"
+type = "ds18b20"
+pin = 4
+
+[[block]]
+id = "temp_reg"
+type = "modbus_write"
+table = "input"
+kind = "float"
+reg = 0
+
+[[block]]
+id = "button"
+type = "digital_in"
+pin = 13
+pullup = true
+inverted = true
+
+[[block]]
+id = "button_reg"
+type = "modbus_write"
+table = "discrete"
+kind = "bool"
+reg = 0
+
+[[block]]
+id = "online_reg"
+type = "modbus_write"
+table = "discrete"
+kind = "bool"
+reg = 1
+
+[[block]]
+id = "led_reg"
+type = "modbus_read"
+table = "coil"
+kind = "bool"
+reg = 0
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[link]]
+from = "sensor.temp"
+to   = "temp_reg.in_f"
+
+[[link]]
+from = "button.out"
+to   = "button_reg.in_b"
+
+[[link]]
+from = "wifi.ready"
+to   = "online_reg.in_b"
+
+[[link]]
+from = "led_reg.out_b"
+to   = "led.in"

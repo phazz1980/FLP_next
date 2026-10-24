@@ -1,0 +1,23 @@
+// @global
+// Shared network interface: Modbus TCP and other network blocks use it.
+FLProgWiznetInterface flpEth({{ param.cs }});
+// @setup
+flpEth.mac(0x78, 0xAC, 0xC0, 0x2C, 0x3E, {{ param.mac }});
+{% if value.dhcp %}
+flpEth.setDhcp();
+{% else %}
+{
+  IPAddress addr;
+  addr.fromString({{ param.ip }});
+  flpEth.localIP(addr);
+  addr.fromString({{ param.gateway }});
+  flpEth.gateway(addr);
+  flpEth.dns(addr);
+  addr.fromString({{ param.subnet }});
+  flpEth.subnet(addr);
+  flpEth.resetDhcp();
+}
+{% endif %}
+// @loop
+flpEth.pool();
+{{ output.ready }} = flpEth.ethernetIsReady();

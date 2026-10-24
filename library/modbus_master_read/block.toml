@@ -1,0 +1,56 @@
+[block]
+type = "modbus_master_read"
+name = "Чтение Modbus Master"
+symbol = "MM ←"
+group = "Сеть"
+description = "Читает значение ведомого устройства, опрошенного блоком «Modbus RTU Master»."
+
+[[output]]
+name = "out"
+type = "int"
+when = 'kind == "int"'
+description = "Значение регистра"
+
+[[output]]
+name = "out_f"
+type = "float"
+when = 'kind == "float"'
+description = "Значение двух регистров как float"
+
+[[output]]
+name = "out_b"
+type = "bool"
+when = 'kind == "bool"'
+description = "Состояние бита"
+
+[[output]]
+name = "ok"
+type = "bool"
+description = "true, пока ведомый отвечает"
+
+[[param]]
+name = "slave"
+type = "int"
+default = 1
+min = 1
+max = 247
+description = "Адрес ведомого (один из адресов в «Modbus RTU Master»)"
+
+[[param]]
+name = "table"
+type = "string"
+default = "input"
+description = "Таблица: holding, input, coil или discrete"
+
+[[param]]
+name = "kind"
+type = "string"
+default = "int"
+description = "Тип значения: int (1 регистр), float (2 регистра) или bool (катушка, вход)"
+
+[[param]]
+name = "reg"
+type = "int"
+default = 0
+min = 0
+description = "Адрес в таблице"

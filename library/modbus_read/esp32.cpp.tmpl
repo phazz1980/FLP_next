@@ -1,0 +1,7 @@
+// @loop
+{% set obj = "flpModbusRtu" if value.slave == "rtu" else "flpModbus" %}
+{% set tables = {"holding": "FLPROG_HOLDING_REGISTR", "input": "FLPROG_INPUT_REGISTR", "coil": "FLPROG_COIL", "discrete": "FLPROG_DISCRETE_INPUT"} %}
+{% if value.kind == "float" %}{{ output.out_f }} = {{ obj }}.readFloat({{ tables[value.table] }}, {{ param.reg }});
+{% elif value.kind == "bool" %}{{ output.out_b }} = {{ obj }}.readBool({{ tables[value.table] }}, {{ param.reg }});
+{% else %}{{ output.out }} = (int16_t){{ obj }}.readInteger({{ tables[value.table] }}, {{ param.reg }});
+{% endif %}

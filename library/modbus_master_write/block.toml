@@ -1,0 +1,51 @@
+[block]
+type = "modbus_master_write"
+name = "Запись Modbus Master"
+symbol = "MM →"
+group = "Сеть"
+description = "Записывает значение в ведомое устройство через блок «Modbus RTU Master»."
+
+[[input]]
+name = "in"
+type = "int"
+when = 'kind == "int"'
+description = "Значение регистра"
+
+[[input]]
+name = "in_f"
+type = "float"
+when = 'kind == "float"'
+description = "Значение float (займёт два регистра)"
+
+[[input]]
+name = "in_b"
+type = "bool"
+when = 'kind == "bool"'
+description = "Состояние бита"
+
+[[param]]
+name = "slave"
+type = "int"
+default = 1
+min = 1
+max = 247
+description = "Адрес ведомого (один из адресов в «Modbus RTU Master»)"
+
+[[param]]
+name = "table"
+type = "string"
+default = "holding"
+description = "Таблица: holding или coil (только их мастер может записать)"
+
+[[param]]
+name = "kind"
+type = "string"
+default = "int"
+description = "Тип значения: int (1 регистр), float (2 регистра) или bool (катушка)"
+
+[[param]]
+name = "reg"
+type = "int"
+default = 0
+min = 0
+description = "Адрес в таблице"
