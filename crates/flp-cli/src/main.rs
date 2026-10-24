@@ -364,7 +364,7 @@ fn load_library(project_dir: &Path, explicit: Option<&Path>) -> Option<Library> 
 
 /// Looks for `library/` in the project folder and its parents, then next to the executable.
 fn find_library(project_dir: &Path) -> Option<PathBuf> {
-    let project_dir = project_dir.canonicalize().ok();
+    let project_dir = std::path::absolute(project_dir).ok();
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf));

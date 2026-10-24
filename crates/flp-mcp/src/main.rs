@@ -176,7 +176,7 @@ fn error(id: Value, code: i64, message: &str) -> Value {
 /// `library/` in the project folder or its parents, then next to the executable.
 fn find_library(project: &Path) -> Option<PathBuf> {
     let starts = [
-        project.canonicalize().ok(),
+        std::path::absolute(project).ok(),
         std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(Path::to_path_buf)),

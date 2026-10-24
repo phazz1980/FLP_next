@@ -1123,7 +1123,7 @@ fn find_library(project: Option<&Path>) -> Option<PathBuf> {
         return Some(PathBuf::from(dir));
     }
     let starts = [
-        project.and_then(|p| p.canonicalize().ok()),
+        project.and_then(|p| std::path::absolute(p).ok()),
         std::env::current_dir().ok(),
         std::env::current_exe()
             .ok()

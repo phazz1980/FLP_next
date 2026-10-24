@@ -329,12 +329,25 @@ pub fn save_choice(name: &str) {
 
 /// Project folder opened last time.
 pub fn last_project() -> Option<PathBuf> {
-    load_settings().last_project
+    load_settings().last_project.map(|p| plain_path(&p))
 }
 
 pub fn save_last_project(path: &Path) {
-    let path = path.canonicalize().unwrap_or_else(|_| path.to_owned());
-    update_settings(|s| s.last_project = Some(path));
+    // Not `canonicalize`: on Windows it adds the `\\?\` prefix.
+    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_owned());
+    update_settings(|s| s.last_project = Some(plain_path(&path)));
+}
+
+/// Strips the Windows verbatim prefix (`\\?\`), e.g. left in older settings files.
+fn plain_path(path: &Path) -> PathBuf {
+    let s = path.as_os_str().to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
 }
 
 pub const DEFAULT_AUTOSAVE_MINUTES: u32 = 2;
