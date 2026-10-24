@@ -17,7 +17,7 @@ use crate::dialogs::{self, Dialog};
 use crate::doc::Doc;
 use crate::job::{Job, JobEvent, JobKind};
 use crate::panels;
-use crate::theme::{self, palette, ThemeKind};
+use crate::theme::{self, Theme};
 
 /// What is selected on the canvas.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,7 +71,10 @@ pub struct EditorApp {
     pub log: Vec<LogLine>,
     /// Open pop-up window (block properties, variable, sheet).
     pub dialog: Option<Dialog>,
-    pub theme: ThemeKind,
+    pub theme: Theme,
+    /// Built-in and user themes.
+    pub themes: Vec<Theme>,
+    pub theme_editor: Option<crate::themeedit::ThemeEditor>,
     /// Selected upload port; empty means automatic.
     pub port: String,
     pub ports: Vec<SerialPort>,
@@ -102,7 +105,9 @@ impl EditorApp {
             right_tab: RightTab::Library,
             log: Vec::new(),
             dialog: None,
-            theme: ThemeKind::Light,
+            theme: theme::light(),
+            themes: theme::load_all(),
+            theme_editor: None,
             port: String::new(),
             ports: Vec::new(),
             port_scan: None,
@@ -113,7 +118,12 @@ impl EditorApp {
             pending: None,
             allow_close: false,
         };
-        theme::apply(&cc.egui_ctx, app.theme);
+        if let Some(t) =
+            theme::saved_choice().and_then(|n| app.themes.iter().find(|t| t.name == n).cloned())
+        {
+            app.theme = t;
+        }
+        theme::apply(&cc.egui_ctx, &app.theme);
         app.scan_ports(&cc.egui_ctx);
         app.lib_dir = find_library(project.as_deref());
         app.reload_library();
@@ -123,9 +133,10 @@ impl EditorApp {
         app
     }
 
-    pub fn set_theme(&mut self, ctx: &egui::Context, theme: ThemeKind) {
+    pub fn set_theme(&mut self, ctx: &egui::Context, theme: Theme) {
+        theme::save_choice(&theme.name);
+        theme::apply(ctx, &theme);
         self.theme = theme;
-        theme::apply(ctx, theme);
     }
 
     /// Looks for serial ports with arduino-cli on a worker thread.
@@ -625,6 +636,13 @@ impl EditorApp {
                 let has_doc = self.doc.is_some();
                 let idle = !self.job_running();
                 if ui
+                    .add_enabled(has_doc, egui::Button::new("Настройки МК..."))
+                    .clicked()
+                {
+                    self.open_board_settings(ui.ctx());
+                }
+                ui.separator();
+                if ui
                     .add_enabled(has_doc, egui::Button::new("Проверить").shortcut_text("F7"))
                     .clicked()
                 {
@@ -655,6 +673,13 @@ impl EditorApp {
         });
     }
 
+    pub fn open_board_settings(&mut self, ctx: &egui::Context) {
+        let Some(doc) = &self.doc else { return };
+        let dialog = crate::boardcfg::BoardDialog::new(&doc.project.config.board, ctx);
+        self.dialog = Some(Dialog::Board(dialog));
+        self.scan_ports(ctx);
+    }
+
     /// Port typed in the toolbar, or `None` to use project.toml / autodetect.
     pub fn port_choice(&self) -> Option<String> {
         let port = self.port.trim();
@@ -673,11 +698,11 @@ impl EditorApp {
                 ui.separator();
                 let errors = doc.report.errors().count();
                 if errors == 0 {
-                    ui.label(RichText::new("Схема без ошибок").color(palette(self.theme).ok));
+                    ui.label(RichText::new("Схема без ошибок").color(self.theme.palette.ok));
                 } else {
                     ui.label(
                         RichText::new(format!("Ошибок в схеме: {errors}"))
-                            .color(palette(self.theme).error),
+                            .color(self.theme.palette.error),
                     );
                 }
                 if doc.dirty {
@@ -692,9 +717,9 @@ impl EditorApp {
                 if let Some(d) = &self.debug {
                     ui.separator();
                     let color = if d.online() {
-                        palette(self.theme).ok
+                        self.theme.palette.ok
                     } else {
-                        palette(self.theme).warning
+                        self.theme.palette.warning
                     };
                     ui.label(
                         RichText::new(format!("Отладка {}: {}", d.port, d.live.status))
@@ -806,7 +831,8 @@ impl eframe::App for EditorApp {
         egui::CentralPanel::default_margins().show(ui, |ui| canvas::show(self, ui));
 
         dialogs::show(self, &ctx);
-        let pal = palette(self.theme);
+        crate::themeedit::show(self, &ctx);
+        let pal = self.theme.palette;
         if let Some(d) = &mut self.debug {
             debugview::chart_window(d, &pal, &ctx);
         }

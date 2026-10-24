@@ -1270,7 +1270,9 @@ dependencies = [
  "flp-core",
  "flp-debug",
  "rfd",
+ "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

@@ -15,7 +15,7 @@ use flp_core::{Block, BlockDef, BlockPos, ParamValue, PortDef, PortRef, Severity
 use crate::app::{EditorApp, LogLevel, Selection};
 use crate::debugview;
 use crate::dialogs::Dialog;
-use crate::theme::{palette, Palette};
+use crate::theme::Palette;
 
 const HEAD_H: f32 = 16.0;
 const ROW_H: f32 = 14.0;
@@ -281,7 +281,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         });
         return;
     };
-    let pal = palette(app.theme);
+    let pal = app.theme.palette;
     let project = &doc.project;
     let logic = &project.logic;
 

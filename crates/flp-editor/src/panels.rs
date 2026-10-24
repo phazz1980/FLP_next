@@ -9,7 +9,6 @@ use crate::app::{EditorApp, LogLevel, RightTab, Selection};
 use crate::canvas::DragItem;
 use crate::dialogs::{type_name, value_text, Dialog};
 use crate::job::JobKind;
-use crate::theme::{palette, ThemeKind};
 
 pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
@@ -131,7 +130,7 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
 }
 
 pub fn log(app: &mut EditorApp, ui: &mut Ui) {
-    let pal = palette(app.theme);
+    let pal = app.theme.palette;
     ui.horizontal(|ui| {
         ui.strong("Сообщения");
         if ui.small_button("Очистить").clicked() {
@@ -171,7 +170,7 @@ pub fn log(app: &mut EditorApp, ui: &mut Ui) {
 
 /// Project tree as in FLProg: controller → tags (inputs, outputs, variables) → sheets.
 pub fn left(app: &mut EditorApp, ui: &mut Ui) {
-    let pal = palette(app.theme);
+    let pal = app.theme.palette;
     ui.strong("Дерево проекта");
     ui.separator();
     let Some(doc) = &app.doc else {
@@ -347,7 +346,7 @@ pub fn right(app: &mut EditorApp, ui: &mut Ui) {
     match app.right_tab {
         RightTab::Library => library(app, ui),
         RightTab::Ai => {
-            let pal = palette(app.theme);
+            let pal = app.theme.palette;
             let has_project = app.doc.is_some();
             if crate::ai::show(&mut app.ai, &pal, ui, has_project) {
                 app.send_ai(ui.ctx());
@@ -436,10 +435,19 @@ fn free_spot(app: &EditorApp) -> BlockPos {
 }
 
 pub fn theme_menu(app: &mut EditorApp, ui: &mut Ui) {
-    let mut theme = app.theme;
-    ui.radio_value(&mut theme, ThemeKind::Light, "Светлая тема");
-    ui.radio_value(&mut theme, ThemeKind::Dark, "Тёмная тема");
-    if theme != app.theme {
-        app.set_theme(ui.ctx(), theme);
+    let mut chosen = None;
+    for t in &app.themes {
+        if ui.radio(t.name == app.theme.name, &t.name).clicked() {
+            chosen = Some(t.clone());
+        }
+    }
+    if let Some(t) = chosen {
+        app.set_theme(ui.ctx(), t);
+        app.theme_editor = None;
+    }
+    ui.separator();
+    if ui.button("Настройка темы…").clicked() {
+        app.theme_editor = Some(crate::themeedit::ThemeEditor::new(&app.theme));
+        ui.close();
     }
 }

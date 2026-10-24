@@ -6,6 +6,7 @@
 
 mod ai;
 mod app;
+mod boardcfg;
 mod canvas;
 mod debugview;
 mod dialogs;
@@ -13,6 +14,7 @@ mod doc;
 mod job;
 mod panels;
 mod theme;
+mod themeedit;
 
 use std::path::PathBuf;
 

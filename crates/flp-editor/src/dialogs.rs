@@ -15,6 +15,7 @@ pub enum Dialog {
     Block(BlockDialog),
     Var(VarDialog),
     Sheet(SheetDialog),
+    Board(crate::boardcfg::BoardDialog),
 }
 
 pub struct BlockDialog {
@@ -128,6 +129,7 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
             None => "Новая переменная".to_owned(),
         },
         Dialog::Sheet(d) => format!("Плата {}", d.number),
+        Dialog::Board(_) => "Настройки МК".to_owned(),
     };
     let mut open = true;
     let mut outcome = Outcome::Open;
@@ -146,6 +148,7 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
                 Dialog::Block(d) => block_body(app, ui, d),
                 Dialog::Var(d) => var_body(ui, d),
                 Dialog::Sheet(d) => sheet_body(ui, d),
+                Dialog::Board(d) => d.body(ui, &app.ports),
             }
         });
     if !open || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -420,6 +423,14 @@ fn apply(app: &mut EditorApp, dialog: &Dialog) -> Result<(), String> {
     let lib = app.lib.clone();
     let doc = app.doc.as_mut().ok_or("проект не открыт")?;
     match dialog {
+        Dialog::Board(d) => {
+            let board = d.config()?;
+            if doc.project.config.board != board {
+                app.port = board.port.clone().unwrap_or_default();
+                doc.project.config.board = board;
+                doc.dirty = true;
+            }
+        }
         Dialog::Block(d) => {
             let original = doc
                 .project
