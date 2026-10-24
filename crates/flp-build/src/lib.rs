@@ -115,6 +115,18 @@ pub fn bundled_libraries(project_root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Strips the Windows verbatim prefix (`\\?\`), which arduino-cli does not accept.
+fn plain_path(path: &Path) -> PathBuf {
+    let s = path.as_os_str().to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
+}
+
 /// Persistent build folder of a project.
 pub fn build_dir(project_root: &Path) -> PathBuf {
     project_root.join(WORK_DIR).join("build")
@@ -167,6 +179,7 @@ impl ArduinoCli {
         opts: &CompileOptions,
         on_line: &mut dyn FnMut(&str),
     ) -> Result<(), BuildError> {
+        let project_root = &plain_path(project_root);
         let mut opts = opts.clone();
         for dir in bundled_libraries(project_root) {
             if !opts.libraries.contains(&dir) {
@@ -186,7 +199,7 @@ impl ArduinoCli {
         port: &str,
         on_line: &mut dyn FnMut(&str),
     ) -> Result<(), BuildError> {
-        let args = upload_args(project_root, board, port);
+        let args = upload_args(&plain_path(project_root), board, port);
         let status = self.run(&args, false, on_line)?;
         check_status("заливка", status)
     }
@@ -528,6 +541,16 @@ mod tests {
         args.iter()
             .map(|a| a.to_string_lossy().into_owned())
             .collect()
+    }
+
+    #[test]
+    fn verbatim_prefix_is_stripped() {
+        assert_eq!(plain_path(Path::new(r"\\?\C:\p")), PathBuf::from(r"C:\p"));
+        assert_eq!(
+            plain_path(Path::new(r"\\?\UNC\srv\share")),
+            PathBuf::from(r"\\srv\share")
+        );
+        assert_eq!(plain_path(Path::new("rel/p")), PathBuf::from("rel/p"));
     }
 
     #[test]
