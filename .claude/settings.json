@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./target/**)",
+      "Read(./.flp/**)",
+      "Read(./**/.flp/**)"
+    ]
+  }
+}
