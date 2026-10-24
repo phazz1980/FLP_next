@@ -62,39 +62,7 @@ impl Context for FolderContext {
     }
 
     fn build(&mut self, upload: bool, port: Option<String>, debug: bool) -> Result<String, String> {
-        let program = Program::build(&self.project, &self.lib).map_err(|e| e.to_string())?;
-        let code = ArduinoCpp { debug }
-            .generate(&program)
-            .map_err(|e| e.to_string())?;
-        flp_codegen::write_sketch(&self.root, &code).map_err(|e| e.to_string())?;
-        let cli = ArduinoCli::locate().map_err(|e| e.to_string())?;
-        let mut log = Vec::new();
-        let mut collect = |line: &str| log.push(line.to_owned());
-        let board = &self.project.config.board;
-        cli.ensure_libraries(&program.libraries(), &mut collect)
-            .map_err(|e| e.to_string())?;
-        let opts = CompileOptions {
-            mode: if debug {
-                BuildMode::Debug
-            } else {
-                BuildMode::Release
-            },
-            ..Default::default()
-        };
-        let tail = |log: &[String]| log[log.len().saturating_sub(15)..].join("\n");
-        if let Err(e) = cli.compile(&self.root, board, &opts, &mut collect) {
-            return Err(format!("{e}\n{}", tail(&log)));
-        }
-        if !upload {
-            return Ok(tail(&log));
-        }
-        let port = cli
-            .choose_port(port.as_deref(), board)
-            .map_err(|e| e.to_string())?;
-        if let Err(e) = cli.upload(&self.root, board, &port, &mut collect) {
-            return Err(format!("{e}\n{}", tail(&log)));
-        }
-        Ok(format!("Прошивка залита на {port}\n{}", tail(&log)))
+        build_project(&self.project, &self.lib, upload, port, debug)
     }
 
     fn live_values(&mut self) -> Result<Vec<(String, String, bool)>, String> {
@@ -148,4 +116,48 @@ impl Context for FolderContext {
             None => Ok(()),
         }
     }
+}
+
+/// Generates, builds and optionally uploads the firmware of `project` (synchronously);
+/// returns the tail of the arduino-cli output.
+pub fn build_project(
+    project: &Project,
+    lib: &Library,
+    upload: bool,
+    port: Option<String>,
+    debug: bool,
+) -> Result<String, String> {
+    let program = Program::build(project, lib).map_err(|e| e.to_string())?;
+    let code = ArduinoCpp { debug }
+        .generate(&program)
+        .map_err(|e| e.to_string())?;
+    flp_codegen::write_sketch(&project.root, &code).map_err(|e| e.to_string())?;
+    let cli = ArduinoCli::locate().map_err(|e| e.to_string())?;
+    let mut log = Vec::new();
+    let mut collect = |line: &str| log.push(line.to_owned());
+    let board = &project.config.board;
+    cli.ensure_libraries(&program.libraries(), &mut collect)
+        .map_err(|e| e.to_string())?;
+    let opts = CompileOptions {
+        mode: if debug {
+            BuildMode::Debug
+        } else {
+            BuildMode::Release
+        },
+        ..Default::default()
+    };
+    let tail = |log: &[String]| log[log.len().saturating_sub(15)..].join("\n");
+    if let Err(e) = cli.compile(&project.root, board, &opts, &mut collect) {
+        return Err(format!("{e}\n{}", tail(&log)));
+    }
+    if !upload {
+        return Ok(tail(&log));
+    }
+    let port = cli
+        .choose_port(port.as_deref(), board)
+        .map_err(|e| e.to_string())?;
+    if let Err(e) = cli.upload(&project.root, board, &port, &mut collect) {
+        return Err(format!("{e}\n{}", tail(&log)));
+    }
+    Ok(format!("Прошивка залита на {port}\n{}", tail(&log)))
 }

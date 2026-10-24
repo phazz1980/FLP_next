@@ -347,7 +347,11 @@ pub fn right(app: &mut EditorApp, ui: &mut Ui) {
     match app.right_tab {
         RightTab::Library => library(app, ui),
         RightTab::Ai => {
-            ui.weak("ИИ-помощник появится на этапе 5: он будет читать и править схему, собирать и прошивать, объяснять поведение по живым значениям.");
+            let pal = palette(app.theme);
+            let has_project = app.doc.is_some();
+            if crate::ai::show(&mut app.ai, &pal, ui, has_project) {
+                app.send_ai(ui.ctx());
+            }
         }
     }
 }

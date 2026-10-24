@@ -5,7 +5,9 @@
 //! on the project folder and saves after each edit, the editor works on the open
 //! document with undo.
 
+pub mod agent;
 pub mod folder;
+pub mod provider;
 
 use std::fs;
 

@@ -4,6 +4,7 @@
 //! block library and the AI tab on the right, numbered sheets in the centre,
 //! messages at the bottom.
 
+mod ai;
 mod app;
 mod canvas;
 mod debugview;

@@ -12,3 +12,4 @@ flp-debug = { path = "../flp-debug", features = ["serial"] }
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
+ureq = { version = "2", features = ["json"] }

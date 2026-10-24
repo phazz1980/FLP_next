@@ -57,7 +57,7 @@ enum Pending {
 
 pub struct EditorApp {
     pub lib: Library,
-    lib_dir: Option<PathBuf>,
+    pub lib_dir: Option<PathBuf>,
     lib_stamp: Option<SystemTime>,
     lib_checked: Instant,
     pub doc: Option<Doc>,
@@ -78,6 +78,10 @@ pub struct EditorApp {
     port_scan: Option<Receiver<Result<Vec<SerialPort>, String>>>,
     /// Online debugging session, when running.
     pub debug: Option<DebugState>,
+    /// Chat with the AI assistant.
+    pub ai: crate::ai::AiChat,
+    /// Live values published for the AI while debugging.
+    ai_live: crate::ai::SharedLive,
     job: Option<Job>,
     pending: Option<Pending>,
     allow_close: bool,
@@ -103,6 +107,8 @@ impl EditorApp {
             ports: Vec::new(),
             port_scan: None,
             debug: None,
+            ai: Default::default(),
+            ai_live: Default::default(),
             job: None,
             pending: None,
             allow_close: false,
@@ -433,9 +439,52 @@ impl EditorApp {
         }
     }
 
+    pub fn send_ai(&mut self, ctx: &egui::Context) {
+        let Some(doc) = &self.doc else { return };
+        self.ai.send(
+            &doc.project,
+            &self.lib,
+            self.lib_dir.clone(),
+            self.ai_live.clone(),
+            ctx,
+        );
+    }
+
+    fn poll_ai(&mut self) {
+        for request in self.ai.poll() {
+            match request {
+                crate::ai::Request::Apply(logic, layout) => {
+                    let lib = self.lib.clone();
+                    if let Some(doc) = &mut self.doc {
+                        let _ = doc.edit(&lib, None, |p| {
+                            p.logic = logic;
+                            p.layout = layout;
+                            Ok::<_, String>(())
+                        });
+                    }
+                }
+                crate::ai::Request::StopDebug => self.stop_debug(),
+                crate::ai::Request::ReloadLibrary => self.reload_library(),
+            }
+        }
+    }
+
     fn poll_debug(&mut self) {
-        let Some(d) = &mut self.debug else { return };
+        let Some(d) = &mut self.debug else {
+            *self.ai_live.lock().expect("live values") = None;
+            return;
+        };
         d.refresh();
+        // Publish values for the AI assistant.
+        let published = d.online().then(|| {
+            (0..d.table.entries.len())
+                .map(|i| {
+                    let v = d.live.values[i].map_or("—".to_owned(), |v| v.to_string());
+                    (d.name(i), v, d.live.forced[i].is_some())
+                })
+                .collect()
+        });
+        *self.ai_live.lock().expect("live values") = published;
         let fresh: Vec<String> = d
             .live
             .console
@@ -724,6 +773,7 @@ impl eframe::App for EditorApp {
         let ctx = ui.ctx().clone();
         self.poll_job(&ctx);
         self.poll_debug();
+        self.poll_ai();
         self.poll_ports();
         self.watch_library();
         self.shortcuts(&ctx);
