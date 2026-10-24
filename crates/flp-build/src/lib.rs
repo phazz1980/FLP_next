@@ -15,6 +15,9 @@ use flp_codegen::{sketch_dir, WORK_DIR};
 use flp_core::BoardConfig;
 use serde::Deserialize;
 
+mod output;
+pub use output::{classify, OutputLine};
+
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
     #[error(
@@ -72,6 +75,8 @@ pub struct CompileOptions {
     /// Extra folders with Arduino libraries (`--libraries`), in addition to
     /// the bundled ones found by [`bundled_libraries`].
     pub libraries: Vec<PathBuf>,
+    /// Verbose output (`-v`) with compiler warnings; see [`classify`].
+    pub verbose: bool,
 }
 
 /// Serial port found by `arduino-cli board list`.
@@ -279,6 +284,10 @@ impl ArduinoCli {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         set_low_priority(&mut cmd, low_priority);
+        if args.iter().any(|a| a == "-v") {
+            // `classify` matches the English stage messages.
+            cmd.env("ARDUINO_LOCALE", "en");
+        }
         let mut child = cmd.spawn().map_err(|source| self.spawn_error(source))?;
 
         let (tx, rx) = mpsc::channel::<String>();
@@ -354,6 +363,11 @@ fn compile_args(project_root: &Path, board: &BoardConfig, opts: &CompileOptions)
     for dir in &opts.libraries {
         args.push("--libraries".into());
         args.push(dir.into());
+    }
+    if opts.verbose {
+        args.push("-v".into());
+        args.push("--warnings".into());
+        args.push("default".into());
     }
     args.push("--jobs".into());
     args.push(opts.jobs.unwrap_or(0).to_string().into());

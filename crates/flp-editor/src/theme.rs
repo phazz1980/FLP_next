@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Color32, Stroke, ThemePreference};
 use serde::{Deserialize, Serialize};
@@ -261,27 +261,69 @@ pub fn remove(name: &str) -> Result<(), String> {
 #[derive(Serialize, Deserialize, Default)]
 struct Settings {
     theme: Option<String>,
+    /// Project folder opened last time.
+    last_project: Option<PathBuf>,
+    /// Autosave period in minutes; 0 turns autosave off.
+    autosave_minutes: Option<u32>,
 }
 
-/// Name of the theme chosen last time.
-pub fn saved_choice() -> Option<String> {
-    let path = config_dir()?.join("editor.toml");
-    toml::from_str::<Settings>(&fs::read_to_string(path).ok()?)
-        .ok()?
-        .theme
+fn load_settings() -> Settings {
+    config_dir()
+        .and_then(|d| fs::read_to_string(d.join("editor.toml")).ok())
+        .and_then(|text| toml::from_str(&text).ok())
+        .unwrap_or_default()
 }
 
-pub fn save_choice(name: &str) {
+fn update_settings(change: impl FnOnce(&mut Settings)) {
     let Some(dir) = config_dir() else { return };
-    let settings = Settings {
-        theme: Some(name.to_owned()),
-    };
+    let mut settings = load_settings();
+    change(&mut settings);
     if fs::create_dir_all(&dir).is_ok() {
         let _ = fs::write(
             dir.join("editor.toml"),
             toml::to_string(&settings).unwrap_or_default(),
         );
     }
+}
+
+/// Name of the theme chosen last time.
+pub fn saved_choice() -> Option<String> {
+    load_settings().theme
+}
+
+pub fn save_choice(name: &str) {
+    update_settings(|s| s.theme = Some(name.to_owned()));
+}
+
+/// Project folder opened last time.
+pub fn last_project() -> Option<PathBuf> {
+    load_settings().last_project
+}
+
+pub fn save_last_project(path: &Path) {
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_owned());
+    update_settings(|s| s.last_project = Some(path));
+}
+
+pub const DEFAULT_AUTOSAVE_MINUTES: u32 = 2;
+
+/// Autosave period in minutes; 0 means off.
+pub fn autosave_minutes() -> u32 {
+    load_settings()
+        .autosave_minutes
+        .unwrap_or(DEFAULT_AUTOSAVE_MINUTES)
+}
+
+pub fn save_autosave_minutes(minutes: u32) {
+    update_settings(|s| s.autosave_minutes = Some(minutes));
+}
+
+/// Folder for projects created without asking: `Documents/FLP_next` when it exists.
+pub fn default_projects_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+    let home = PathBuf::from(home);
+    let docs = home.join("Documents");
+    Some(if docs.is_dir() { docs } else { home }.join("FLP_next"))
 }
 
 /// Makes `theme` the egui look.

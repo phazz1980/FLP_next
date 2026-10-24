@@ -88,6 +88,9 @@ pub struct EditorApp {
     job: Option<Job>,
     pending: Option<Pending>,
     allow_close: bool,
+    /// Autosave period in minutes; 0 means off.
+    pub autosave_minutes: u32,
+    last_autosave: Instant,
 }
 
 impl EditorApp {
@@ -117,6 +120,8 @@ impl EditorApp {
             job: None,
             pending: None,
             allow_close: false,
+            autosave_minutes: theme::autosave_minutes(),
+            last_autosave: Instant::now(),
         };
         if let Some(t) =
             theme::saved_choice().and_then(|n| app.themes.iter().find(|t| t.name == n).cloned())
@@ -127,8 +132,12 @@ impl EditorApp {
         app.scan_ports(&cc.egui_ctx);
         app.lib_dir = find_library(project.as_deref());
         app.reload_library();
-        if let Some(path) = project {
-            app.open(&path);
+        // Start with a project: the given one, the last one or a fresh one.
+        let last =
+            theme::last_project().filter(|p| p.join(flp_core::project::PROJECT_FILE).is_file());
+        match project.or(last) {
+            Some(path) => app.open(&path),
+            None => app.create_default_project(),
         }
         app
     }
@@ -237,6 +246,7 @@ impl EditorApp {
         match Doc::open(path, &self.lib) {
             Ok(doc) => {
                 self.info(LogLevel::Info, format!("Открыт проект {}", path.display()));
+                theme::save_last_project(path);
                 self.port = doc.project.config.board.port.clone().unwrap_or_default();
                 self.doc = Some(doc);
                 self.selection = None;
@@ -259,6 +269,27 @@ impl EditorApp {
             self.request_open(dir);
             return;
         }
+        self.create_project(&dir);
+    }
+
+    /// Creates "Новый проект N" in the default projects folder and opens it.
+    fn create_default_project(&mut self) {
+        let Some(base) = theme::default_projects_dir() else {
+            return;
+        };
+        let dir = (1..)
+            .map(|n| base.join(format!("Новый проект {n}")))
+            .find(|d| !d.exists())
+            .expect("unbounded range");
+        if let Err(e) = fs::create_dir_all(&dir) {
+            self.info(LogLevel::Error, format!("{}: {e}", dir.display()));
+            return;
+        }
+        self.create_project(&dir);
+    }
+
+    /// Writes an empty ESP32 project into `dir` and opens it.
+    fn create_project(&mut self, dir: &Path) {
         let name = dir
             .file_name()
             .and_then(|n| n.to_str())
@@ -280,7 +311,7 @@ impl EditorApp {
                 return;
             }
         }
-        self.open(&dir);
+        self.open(dir);
     }
 
     pub fn save(&mut self) {
@@ -292,6 +323,30 @@ impl EditorApp {
             }
             Err(e) => self.info(LogLevel::Error, e.to_string()),
         }
+    }
+
+    /// Saves a changed project once the autosave period has passed.
+    fn autosave(&mut self, ctx: &egui::Context) {
+        if self.autosave_minutes == 0 {
+            return;
+        }
+        let period = Duration::from_secs(u64::from(self.autosave_minutes) * 60);
+        let elapsed = self.last_autosave.elapsed();
+        if elapsed < period {
+            ctx.request_repaint_after(period - elapsed);
+            return;
+        }
+        self.last_autosave = Instant::now();
+        ctx.request_repaint_after(period);
+        if self.doc.as_ref().is_some_and(|d| d.dirty) {
+            self.save();
+        }
+    }
+
+    pub fn set_autosave(&mut self, minutes: u32) {
+        self.autosave_minutes = minutes;
+        self.last_autosave = Instant::now();
+        theme::save_autosave_minutes(minutes);
     }
 
     pub fn undo(&mut self) {
@@ -391,7 +446,7 @@ impl EditorApp {
         let mut connect = None;
         for event in job.poll() {
             match event {
-                JobEvent::Line(text) => self.info(LogLevel::Info, text),
+                JobEvent::Line(level, text) => self.info(level, text),
                 JobEvent::Done(Ok(result)) => {
                     self.info(LogLevel::Ok, result.message);
                     if let (true, Some(port)) = (result.debug, result.port) {
@@ -592,6 +647,24 @@ impl EditorApp {
                 {
                     self.save();
                 }
+                ui.menu_button("Автосохранение", |ui| {
+                    let mut minutes = self.autosave_minutes;
+                    ui.radio_value(&mut minutes, 0, "Выключено");
+                    for m in [1, 2, 5, 10, 15, 30] {
+                        ui.radio_value(&mut minutes, m, format!("Каждые {m} мин"));
+                    }
+                    ui.horizontal(|ui| {
+                        ui.label("Период:");
+                        ui.add(
+                            egui::DragValue::new(&mut minutes)
+                                .range(0..=240)
+                                .suffix(" мин"),
+                        );
+                    });
+                    if minutes != self.autosave_minutes {
+                        self.set_autosave(minutes);
+                    }
+                });
                 ui.separator();
                 if ui.button("Выход").clicked() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -801,6 +874,7 @@ impl eframe::App for EditorApp {
         self.poll_ai();
         self.poll_ports();
         self.watch_library();
+        self.autosave(&ctx);
         self.shortcuts(&ctx);
         self.handle_close(&ctx);
         self.update_title(&ctx);
