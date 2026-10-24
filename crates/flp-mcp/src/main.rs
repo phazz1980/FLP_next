@@ -1,8 +1,9 @@
 //! `flp-mcp` — MCP server: exposes the FLP_next command set to any MCP client
 //! (Claude Desktop, Claude Code, ...) over stdio, one JSON-RPC message per line.
 //!
-//! Usage: `flp-mcp <project folder> [--library <dir>]`. Only JSON-RPC goes to
-//! stdout; diagnostics go to stderr.
+//! Usage: `flp-mcp [project folder] [--library <dir>]`. Without a folder the
+//! client opens one with the `open_project` tool (also used to switch).
+//! Only JSON-RPC goes to stdout; diagnostics go to stderr.
 
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -16,8 +17,69 @@ const PROTOCOL_VERSIONS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 const INSTRUCTIONS: &str = "Сервер проекта FLP_next — визуального программирования ESP32 \
 (FBD, как в FLProg). Схема — блоки с понятными id и связи «блок.порт» → «блок.порт». \
+Если проект не открыт или пользователь называет другую папку — вызовите open_project. \
 Начните с get_schema и list_block_types; после правок смотрите поле check в ответе. \
 Правки сразу сохраняются в папку проекта.";
+
+const OPEN_PROJECT: &str = "open_project";
+
+/// Server state: the open project (if any) and the library override.
+struct Server {
+    ctx: Option<FolderContext>,
+    /// From `--library` / `FLP_LIBRARY`; otherwise searched per project.
+    library: Option<PathBuf>,
+}
+
+impl Server {
+    /// Opens (or switches to) the project folder `path`.
+    fn open(&mut self, path: &Path) -> Result<Value, String> {
+        if !path.join("project.toml").is_file() {
+            return Err(format!("в папке {} нет project.toml", path.display()));
+        }
+        let library = self
+            .library
+            .clone()
+            .or_else(|| find_library(path))
+            .ok_or("не найдена папка библиотеки блоков library/; укажите --library")?;
+        let ctx = FolderContext::open(path, &library)?;
+        self.ctx = Some(ctx);
+        eprintln!(
+            "flp-mcp: проект {}, библиотека {}",
+            path.display(),
+            library.display()
+        );
+        Ok(json!({"project": path.display().to_string(), "library": library.display().to_string()}))
+    }
+
+    fn call(&mut self, name: &str, args: &Value) -> Result<Value, String> {
+        if name == OPEN_PROJECT {
+            let path = args
+                .get("path")
+                .and_then(Value::as_str)
+                .ok_or("нужен аргумент path — папка проекта")?;
+            return self.open(Path::new(path));
+        }
+        let ctx = self
+            .ctx
+            .as_mut()
+            .ok_or("проект не открыт: сначала вызовите open_project с папкой проекта")?;
+        // See edits made in the editor since the last call.
+        ctx.refresh().and_then(|()| flp_ai::call(ctx, name, args))
+    }
+}
+
+fn open_project_tool() -> Value {
+    json!({
+        "name": OPEN_PROJECT,
+        "description": "Открыть папку проекта FLP_next (с project.toml) или переключиться на другую. \
+    Остальные команды работают с открытым проектом.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "Абсолютный путь к папке проекта"}},
+            "required": ["path"],
+        },
+    })
+}
 
 fn main() -> ExitCode {
     let mut args = std::env::args_os().skip(1);
@@ -30,26 +92,16 @@ fn main() -> ExitCode {
             project = Some(PathBuf::from(a));
         }
     }
-    let Some(project) = project else {
-        eprintln!("использование: flp-mcp <папка проекта> [--library <папка>]");
-        return ExitCode::from(2);
-    };
-    let Some(library) = library.or_else(|| find_library(&project)) else {
-        eprintln!("не найдена папка библиотеки блоков library/; укажите --library");
-        return ExitCode::from(2);
-    };
-    let mut ctx = match FolderContext::open(&project, &library) {
-        Ok(ctx) => ctx,
-        Err(e) => {
-            eprintln!("ошибка: {e}");
-            return ExitCode::from(2);
+    let mut server = Server { ctx: None, library };
+    match project {
+        Some(project) => {
+            if let Err(e) = server.open(&project) {
+                eprintln!("ошибка: {e}");
+                return ExitCode::from(2);
+            }
         }
-    };
-    eprintln!(
-        "flp-mcp: проект {}, библиотека {}",
-        project.display(),
-        library.display()
-    );
+        None => eprintln!("flp-mcp: проект не открыт, ждём open_project"),
+    }
 
     let stdin = io::stdin();
     let mut stdout = io::stdout().lock();
@@ -58,7 +110,7 @@ fn main() -> ExitCode {
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(response) = handle(&mut ctx, &line) {
+        if let Some(response) = handle(&mut server, &line) {
             if writeln!(stdout, "{response}")
                 .and_then(|()| stdout.flush())
                 .is_err()
@@ -71,7 +123,7 @@ fn main() -> ExitCode {
 }
 
 /// Handles one message; returns the response line, or `None` for notifications.
-fn handle(ctx: &mut FolderContext, line: &str) -> Option<Value> {
+fn handle(server: &mut Server, line: &str) -> Option<Value> {
     let msg: Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(e) => return Some(error(Value::Null, -32700, &format!("parse error: {e}"))),
@@ -96,18 +148,17 @@ fn handle(ctx: &mut FolderContext, line: &str) -> Option<Value> {
         }
         "ping" => json!({}),
         "tools/list" => {
-            let tools: Vec<Value> = flp_ai::tools()
-                .into_iter()
-                .map(|t| json!({"name": t.name, "description": t.description, "inputSchema": t.input_schema}))
+            let tools: Vec<Value> = std::iter::once(open_project_tool())
+                .chain(flp_ai::tools().into_iter().map(|t| {
+                    json!({"name": t.name, "description": t.description, "inputSchema": t.input_schema})
+                }))
                 .collect();
             json!({"tools": tools})
         }
         "tools/call" => {
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
-            // See edits made in the editor since the last call.
-            let outcome = ctx.refresh().and_then(|()| flp_ai::call(ctx, name, &args));
-            let (text, is_error) = match outcome {
+            let (text, is_error) = match server.call(name, &args) {
                 Ok(v) => (serde_json::to_string_pretty(&v).unwrap_or_default(), false),
                 Err(e) => (e, true),
             };
@@ -141,13 +192,51 @@ fn find_library(project: &Path) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
-    fn ctx() -> FolderContext {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        FolderContext::open(&root.join("examples/pump"), &root.join("library")).unwrap()
+    fn root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
     }
 
-    fn rpc(ctx: &mut FolderContext, msg: Value) -> Option<Value> {
-        handle(ctx, &msg.to_string())
+    fn ctx() -> Server {
+        let mut s = Server {
+            ctx: None,
+            library: Some(root().join("library")),
+        };
+        s.open(&root().join("examples/pump")).unwrap();
+        s
+    }
+
+    fn rpc(s: &mut Server, msg: Value) -> Option<Value> {
+        handle(s, &msg.to_string())
+    }
+
+    fn call(s: &mut Server, name: &str, args: Value) -> Value {
+        rpc(
+            s,
+            json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                   "params": {"name": name, "arguments": args}}),
+        )
+        .unwrap()["result"]
+            .clone()
+    }
+
+    #[test]
+    fn open_project_on_demand() {
+        let mut s = Server {
+            ctx: None,
+            library: None,
+        };
+        assert_eq!(call(&mut s, "check", json!({}))["isError"], true);
+        let bad = call(
+            &mut s,
+            OPEN_PROJECT,
+            json!({"path": root().join("crates").to_str()}),
+        );
+        assert_eq!(bad["isError"], true);
+        // Library is found by walking up from the project folder.
+        let pump = root().join("examples/pump");
+        let ok = call(&mut s, OPEN_PROJECT, json!({"path": pump.to_str()}));
+        assert_eq!(ok["isError"], false);
+        assert_eq!(call(&mut s, "check", json!({}))["isError"], false);
     }
 
     #[test]
@@ -173,6 +262,7 @@ mod tests {
         .unwrap();
         let tools = list["result"]["tools"].as_array().unwrap();
         assert!(tools.iter().any(|t| t["name"] == "get_schema"));
+        assert!(tools.iter().any(|t| t["name"] == OPEN_PROJECT));
         assert!(tools.iter().all(|t| t["inputSchema"]["type"] == "object"));
     }
 
