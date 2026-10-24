@@ -107,6 +107,13 @@ pub struct BlockInfo {
     /// (`DallasTemperature`, optionally with a version: `OneWire@2.3.8`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub libraries: Vec<String>,
+    /// Only one instance per project (Wi-Fi, NTP, deep sleep).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub single: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !v
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -118,6 +125,10 @@ pub struct PortDef {
     /// the input must be connected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<ParamValue>,
+    /// Condition on parameter values (`mode == "input"`); the port exists only
+    /// while it holds. See [`BlockDef::enabled`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when: Option<String>,
     #[serde(default)]
     pub description: String,
 }
@@ -134,6 +145,10 @@ pub struct ParamDef {
     pub min: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max: Option<f64>,
+    /// Condition on other parameters; the parameter is shown and required
+    /// only while it holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when: Option<String>,
     #[serde(default)]
     pub description: String,
 }
@@ -149,6 +164,87 @@ impl BlockDef {
 
     pub fn param(&self, name: &str) -> Option<&ParamDef> {
         self.params.iter().find(|p| p.name == name)
+    }
+
+    /// Evaluates a `when` condition against the parameter values of a block instance
+    /// (defaults filled in). No condition means always enabled.
+    ///
+    /// The condition is a Jinja expression, the same as in `{% if %}` of templates;
+    /// parameters are plain variables, durations are milliseconds:
+    /// `mode == "input" and time > 1000`.
+    pub fn enabled(
+        &self,
+        when: Option<&str>,
+        params: &BTreeMap<String, ParamValue>,
+    ) -> Result<bool, String> {
+        let Some(when) = when else { return Ok(true) };
+        let env = minijinja::Environment::new();
+        let expr = env
+            .compile_expression(when)
+            .map_err(|e| format!("условие «{when}»: {e}"))?;
+        let ctx: BTreeMap<&str, minijinja::Value> = self
+            .params
+            .iter()
+            .filter_map(|p| {
+                let value = params.get(&p.name).or(p.default.as_ref())?;
+                Some((p.name.as_str(), condition_value(p.kind, value)))
+            })
+            .collect();
+        expr.eval(ctx)
+            .map(|v| v.is_true())
+            .map_err(|e| format!("условие «{when}»: {e}"))
+    }
+
+    /// Inputs present on a block instance; a broken condition counts as enabled
+    /// (the schema check reports it).
+    pub fn active_inputs<'a>(
+        &'a self,
+        params: &'a BTreeMap<String, ParamValue>,
+    ) -> impl Iterator<Item = &'a PortDef> {
+        self.inputs
+            .iter()
+            .filter(|p| self.enabled(p.when.as_deref(), params).unwrap_or(true))
+    }
+
+    /// Outputs present on a block instance; see [`BlockDef::active_inputs`].
+    pub fn active_outputs<'a>(
+        &'a self,
+        params: &'a BTreeMap<String, ParamValue>,
+    ) -> impl Iterator<Item = &'a PortDef> {
+        self.outputs
+            .iter()
+            .filter(|p| self.enabled(p.when.as_deref(), params).unwrap_or(true))
+    }
+
+    /// Parameters shown for a block instance; see [`BlockDef::active_inputs`].
+    pub fn active_params<'a>(
+        &'a self,
+        params: &'a BTreeMap<String, ParamValue>,
+    ) -> impl Iterator<Item = &'a ParamDef> {
+        self.params
+            .iter()
+            .filter(|p| self.enabled(p.when.as_deref(), params).unwrap_or(true))
+    }
+
+    /// Checks a `when` condition: it must parse and use only parameters of the block.
+    fn validate_when(&self, owner: &str, when: Option<&str>) -> Result<(), String> {
+        let Some(when) = when else { return Ok(()) };
+        let env = minijinja::Environment::new();
+        let expr = env
+            .compile_expression(when)
+            .map_err(|e| format!("«{owner}»: условие «{when}» не разобрано: {e}"))?;
+        let mut unknown: Vec<String> = expr
+            .undeclared_variables(false)
+            .into_iter()
+            .filter(|v| self.param(v).is_none())
+            .collect();
+        unknown.sort();
+        if let Some(v) = unknown.first() {
+            return Err(format!(
+                "«{owner}»: в условии «{when}» нет такого параметра «{v}»"
+            ));
+        }
+        Ok(())
     }
 
     /// Checks internal consistency; `folder` is the name of the block folder.
@@ -200,7 +296,45 @@ impl BlockDef {
                 }
             }
         }
+        let ports = self.inputs.iter().chain(&self.outputs);
+        for (name, when) in ports
+            .map(|p| (&p.name, &p.when))
+            .chain(self.params.iter().map(|p| (&p.name, &p.when)))
+        {
+            self.validate_when(name, when.as_deref())?;
+        }
+        if let Some(p) = self
+            .params
+            .iter()
+            .find(|p| p.when.as_deref().is_some_and(|w| mentions(w, &p.name)))
+        {
+            return Err(format!(
+                "условие параметра «{}» не может зависеть от него самого",
+                p.name
+            ));
+        }
         Ok(())
+    }
+}
+
+/// Whether expression `when` reads variable `name`.
+fn mentions(when: &str, name: &str) -> bool {
+    minijinja::Environment::new()
+        .compile_expression(when)
+        .is_ok_and(|e| e.undeclared_variables(false).contains(name))
+}
+
+/// Parameter value as seen by `when` conditions; durations are milliseconds.
+fn condition_value(kind: ParamKind, value: &ParamValue) -> minijinja::Value {
+    use minijinja::Value;
+    match value {
+        ParamValue::Bool(b) => Value::from(*b),
+        ParamValue::Int(v) => Value::from(*v),
+        ParamValue::Float(v) => Value::from(*v),
+        ParamValue::Text(s) if kind == ParamKind::Duration => {
+            Value::from(parse_duration_ms(s).unwrap_or(0))
+        }
+        ParamValue::Text(s) => Value::from(s.as_str()),
     }
 }
 
@@ -389,5 +523,67 @@ mod tests {
             "{HEADER}[[output]]\nname = \"q\"\ntype = \"bool\"\ndefault = false\n"
         ));
         assert!(on_output.validate("x").is_err());
+    }
+
+    const CONDITIONAL: &str =
+        "[[input]]\nname = \"val\"\ntype = \"int\"\nwhen = 'source == \"input\"'\n\
+         [[output]]\nname = \"q\"\ntype = \"bool\"\n\
+         [[param]]\nname = \"source\"\ntype = \"string\"\ndefault = \"const\"\n\
+         [[param]]\nname = \"time\"\ntype = \"duration\"\nwhen = 'source == \"const\"'\n";
+
+    #[test]
+    fn when_conditions() {
+        let d = def(&format!("{HEADER}{CONDITIONAL}"));
+        assert_eq!(d.validate("x"), Ok(()));
+        let mut params = BTreeMap::new();
+        let names = |ps: Vec<&str>| ps.join(",");
+        let inputs = |p: &BTreeMap<String, ParamValue>| {
+            names(d.active_inputs(p).map(|i| i.name.as_str()).collect())
+        };
+        let shown = |p: &BTreeMap<String, ParamValue>| {
+            names(d.active_params(p).map(|i| i.name.as_str()).collect())
+        };
+        assert_eq!(inputs(&params), "");
+        assert_eq!(shown(&params), "source,time");
+        params.insert("source".into(), ParamValue::Text("input".into()));
+        assert_eq!(inputs(&params), "val");
+        assert_eq!(shown(&params), "source");
+        assert_eq!(d.active_outputs(&params).count(), 1);
+    }
+
+    #[test]
+    fn when_sees_durations_in_ms() {
+        let d = def(&format!(
+            "{HEADER}[[output]]\nname = \"q\"\ntype = \"bool\"\nwhen = \"time > 1000\"\n\
+             [[param]]\nname = \"time\"\ntype = \"duration\"\ndefault = \"1s\"\n"
+        ));
+        let mut params = BTreeMap::new();
+        assert_eq!(d.active_outputs(&params).count(), 0);
+        params.insert("time".into(), ParamValue::Text("2s".into()));
+        assert_eq!(d.active_outputs(&params).count(), 1);
+    }
+
+    #[test]
+    fn when_validation() {
+        let unknown = def(&format!(
+            "{HEADER}[[input]]\nname = \"a\"\ntype = \"bool\"\nwhen = \"nope\"\n"
+        ));
+        let err = unknown.validate("x").unwrap_err();
+        assert!(err.contains("nope"), "{err}");
+        let broken = def(&format!(
+            "{HEADER}[[param]]\nname = \"m\"\ntype = \"int\"\ndefault = 0\n\
+             [[input]]\nname = \"a\"\ntype = \"bool\"\nwhen = \"m ==\"\n"
+        ));
+        assert!(broken.validate("x").is_err());
+        let itself = def(&format!(
+            "{HEADER}[[param]]\nname = \"m\"\ntype = \"int\"\nwhen = \"m > 0\"\n"
+        ));
+        assert!(itself.validate("x").is_err());
+    }
+
+    #[test]
+    fn single_flag() {
+        assert!(!def(HEADER).info.single);
+        assert!(def(&format!("{HEADER}single = true\n")).info.single);
     }
 }

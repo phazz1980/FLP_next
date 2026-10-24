@@ -1,0 +1,25 @@
+// @global once
+Bus bus_{{ param.pin }}({{ param.pin }});
+// @setup once
+bus_{{ param.pin }}.begin();
+// @functions once
+float probe_read(Bus &bus) {
+  return bus.read();
+}
+// @global
+float {{ id }}_last = 0.0f;
+// @functions
+float {{ id }}_value() {
+  return {{ id }}_last{% if value.mode == "value" %} * {{ param.scale }}{% endif %};
+}
+// @loop
+{% if value.use_en %}
+if ({{ input.en }}) {{ id }}_last = probe_read(bus_{{ param.pin }});
+{% else %}
+{{ id }}_last = probe_read(bus_{{ param.pin }});
+{% endif %}
+{{ output.out }} = {{ id }}_value();
+{{ output.ok }} = true;
+{% if value.mode == "raw" %}
+{{ output.raw }} = (int32_t){{ id }}_last;
+{% endif %}

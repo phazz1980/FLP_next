@@ -28,11 +28,11 @@ pub struct Signal {
 pub struct Instance<'a> {
     pub block: &'a Block,
     pub lib: &'a LibraryBlock,
-    /// Every input port → its source (a link or the port default).
+    /// Every enabled input port → its source (a link or the port default).
     pub inputs: BTreeMap<&'a str, Input>,
-    /// Output port → index in [`Program::signals`].
+    /// Enabled output port → index in [`Program::signals`].
     pub outputs: BTreeMap<&'a str, usize>,
-    /// Every declared parameter, with defaults filled in.
+    /// Every parameter that has a value, with defaults filled in.
     pub params: BTreeMap<&'a str, ParamValue>,
 }
 
@@ -89,7 +89,7 @@ impl<'a> Program<'a> {
         let mut names: HashMap<String, PortRef> = HashMap::new();
         for &bi in &report.order {
             let block = &logic.blocks[bi];
-            for out in &lib_block(block).def.outputs {
+            for out in lib_block(block).def.active_outputs(&block.params) {
                 let name = format!("{}_{}", block.id, out.name);
                 let port = PortRef::new(&block.id, &out.name);
                 if let Some(a) = names.insert(name.clone(), port.clone()) {
@@ -106,7 +106,7 @@ impl<'a> Program<'a> {
             let lib = lib_block(block);
             let def = &lib.def;
             let mut inputs = BTreeMap::new();
-            for port in &def.inputs {
+            for port in def.active_inputs(&block.params) {
                 let link = logic
                     .links
                     .iter()
@@ -127,8 +127,7 @@ impl<'a> Program<'a> {
                 );
             }
             let outputs = def
-                .outputs
-                .iter()
+                .active_outputs(&block.params)
                 .map(|o| {
                     (
                         o.name.as_str(),
@@ -136,15 +135,13 @@ impl<'a> Program<'a> {
                     )
                 })
                 .collect();
+            // A parameter switched off by its condition may have no value.
             let params = def
                 .params
                 .iter()
-                .map(|p| {
-                    let value = block.params.get(&p.name).or(p.default.as_ref());
-                    (
-                        p.name.as_str(),
-                        value.expect("required params checked").clone(),
-                    )
+                .filter_map(|p| {
+                    let value = block.params.get(&p.name).or(p.default.as_ref())?;
+                    Some((p.name.as_str(), value.clone()))
                 })
                 .collect();
             blocks.push(Instance {

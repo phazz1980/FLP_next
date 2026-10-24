@@ -121,3 +121,35 @@ fn debug_module_snapshot() {
     assert!(code.contains("flp_dbg_setup();"));
     assert!(code.contains("flp_dbg_loop();"));
 }
+
+/// Block format features on a test block (`tests/fixtures/library/probe`):
+/// `once` sections go in once per distinct text, `@functions` before `setup()`,
+/// ports and parameters switched off by `when` are absent from the code.
+#[test]
+fn shared_code_snapshot() {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let (lib, errors) = Library::load(fixtures.join("library")).unwrap();
+    assert!(errors.is_empty(), "{errors:?}");
+    let project = Project::load(fixtures.join("shared_code")).unwrap();
+    let code = generate(&project, &lib, &ArduinoCpp::RELEASE).unwrap();
+    let snapshot =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/shared_code.ino");
+    assert_snapshot(&snapshot, &code);
+
+    // Two buses for three blocks; the helper function once.
+    assert_eq!(code.matches("Bus bus_4(4);").count(), 1, "{code}");
+    assert_eq!(code.matches("Bus bus_5(5);").count(), 1, "{code}");
+    assert_eq!(
+        code.matches("float probe_read(Bus &bus)").count(),
+        1,
+        "{code}"
+    );
+    assert!(
+        code.find("float a_value()") < code.find("void setup()"),
+        "{code}"
+    );
+    // `raw` exists only in mode "raw", `en` only with use_en.
+    assert!(code.contains("int32_t b_raw"), "{code}");
+    assert!(!code.contains("a_raw"), "{code}");
+    assert!(code.contains("if (a_ok) b_last"), "{code}");
+}

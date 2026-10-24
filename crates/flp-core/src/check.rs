@@ -109,6 +109,7 @@ fn check_blocks<'a>(
     report: &mut Report,
 ) -> Vec<Option<&'a BlockDef>> {
     let mut seen = HashMap::new();
+    let mut singles: HashMap<&str, &str> = HashMap::new();
     let mut defs = Vec::with_capacity(logic.blocks.len());
     for (i, block) in logic.blocks.iter().enumerate() {
         let id = block.id.as_str();
@@ -143,9 +144,33 @@ fn check_blocks<'a>(
                 ),
             }
         }
+        // Conditions that fail to evaluate (e.g. comparing a string with a number).
+        let conditions = def.inputs.iter().chain(&def.outputs).map(|p| &p.when);
+        for when in conditions.chain(def.params.iter().map(|p| &p.when)) {
+            if let Err(e) = def.enabled(when.as_deref(), &block.params) {
+                report.block_error(id, format!("блок «{id}»: {e}"));
+            }
+        }
         for p in &def.params {
-            if p.default.is_none() && !block.params.contains_key(&p.name) {
+            if p.default.is_none()
+                && !block.params.contains_key(&p.name)
+                && def
+                    .enabled(p.when.as_deref(), &block.params)
+                    .unwrap_or(true)
+            {
                 report.block_error(id, format!("блок «{id}»: не задан параметр «{}»", p.name));
+            }
+        }
+        if def.info.single {
+            if let Some(first) = singles.insert(&block.kind, id) {
+                singles.insert(&block.kind, first);
+                report.block_error(
+                    id,
+                    format!(
+                        "блок «{id}»: «{}» может быть в проекте только один, уже есть «{first}»",
+                        def.info.name
+                    ),
+                );
             }
         }
         defs.push(Some(def));
@@ -248,7 +273,12 @@ impl<'a> Resolver<'a, '_> {
         } else {
             (def.output(&r.port), def.input(&r.port))
         };
+        let params = &self.logic.blocks[bi].params;
         let msg = match (port, wrong) {
+            (Some(p), _) if !def.enabled(p.when.as_deref(), params).unwrap_or(true) => format!(
+                "{what}: порт «{r}» отключён параметрами блока ({})",
+                p.when.as_deref().unwrap_or_default()
+            ),
             (Some(p), _) => return Some((bi, p)),
             (None, Some(_)) if is_input => {
                 format!("{what}: «{r}» — это выход, а связь должна вести во вход")
@@ -419,7 +449,10 @@ fn type_name(ty: SignalType) -> &'static str {
 fn check_unconnected_inputs(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) {
     for (bi, block) in logic.blocks.iter().enumerate() {
         let Some(def) = defs[bi] else { continue };
-        for input in def.inputs.iter().filter(|i| i.default.is_none()) {
+        let required = def
+            .active_inputs(&block.params)
+            .filter(|i| i.default.is_none());
+        for input in required {
             // Any link counts: an invalid one was already reported, don't pile up.
             let fed = logic
                 .links
@@ -669,6 +702,98 @@ mod tests {
         assert!(!r.has_errors(), "{:#?}", r.diagnostics);
         assert_eq!(r.feedback, [0]);
         assert_eq!(ids(&logic, &r.order), ["m", "x"]);
+    }
+
+    /// Library with `src` (bool output) and `timer`, whose input `val` exists only
+    /// with `source = "input"` and whose required `time` only with `source = "const"`.
+    /// `wifi` is a single-instance block.
+    fn conditional_library() -> Library {
+        let mut lib = library();
+        for src in [
+            "[block]\ntype = \"timer\"\nname = \"Таймер\"\ngroup = \"Тест\"\n\
+             [[input]]\nname = \"val\"\ntype = \"bool\"\nwhen = 'source == \"input\"'\n\
+             [[output]]\nname = \"out\"\ntype = \"bool\"\n\
+             [[param]]\nname = \"source\"\ntype = \"string\"\ndefault = \"const\"\n\
+             [[param]]\nname = \"time\"\ntype = \"duration\"\nwhen = 'source == \"const\"'\n",
+            "[block]\ntype = \"wifi\"\nname = \"Wi-Fi\"\ngroup = \"Тест\"\nsingle = true\n",
+        ] {
+            let def: BlockDef = toml::from_str(src).unwrap();
+            assert_eq!(def.validate(&def.info.kind), Ok(()));
+            lib.insert(LibraryBlock {
+                def,
+                dir: Default::default(),
+                inline_templates: Default::default(),
+            });
+        }
+        lib
+    }
+
+    fn check_src(src: &str) -> Vec<String> {
+        let logic: Logic = toml::from_str(src).unwrap();
+        check(&logic, &conditional_library(), None)
+            .errors()
+            .map(|d| d.message.clone())
+            .collect()
+    }
+
+    #[test]
+    fn disabled_port_and_param() {
+        // Default source "const": `time` is required, `val` does not exist.
+        let errors = check_src(
+            "[[block]]\nid = \"a\"\ntype = \"src\"\n\
+             [[block]]\nid = \"t\"\ntype = \"timer\"\n\
+             [[link]]\nfrom = \"a.out\"\nto = \"t.val\"\n",
+        );
+        assert_eq!(errors.len(), 2, "{errors:#?}");
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("не задан параметр «time»")));
+        assert!(errors.iter().any(|e| e.contains("отключён параметрами")));
+
+        // Source "input": `val` must be connected, `time` is not needed.
+        let errors = check_src("[[block]]\nid = \"t\"\ntype = \"timer\"\nsource = \"input\"\n");
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(errors[0].contains("на вход «val» ничего не подано"));
+        let errors = check_src(
+            "[[block]]\nid = \"a\"\ntype = \"src\"\n\
+             [[block]]\nid = \"t\"\ntype = \"timer\"\nsource = \"input\"\n\
+             [[link]]\nfrom = \"a.out\"\nto = \"t.val\"\n",
+        );
+        assert!(errors.is_empty(), "{errors:#?}");
+    }
+
+    #[test]
+    fn broken_condition_value_is_reported() {
+        // Adding a number to a string fails at evaluation.
+        let mut lib = conditional_library();
+        let def: BlockDef = toml::from_str(
+            "[block]\ntype = \"odd\"\nname = \"odd\"\ngroup = \"Тест\"\n\
+             [[output]]\nname = \"q\"\ntype = \"bool\"\nwhen = \"m + 1 > 0\"\n\
+             [[param]]\nname = \"m\"\ntype = \"string\"\ndefault = \"x\"\n",
+        )
+        .unwrap();
+        lib.insert(LibraryBlock {
+            def,
+            dir: Default::default(),
+            inline_templates: Default::default(),
+        });
+        let logic: Logic = toml::from_str("[[block]]\nid = \"o\"\ntype = \"odd\"\n").unwrap();
+        let r = check(&logic, &lib, None);
+        assert_eq!(r.errors().count(), 1, "{:#?}", r.diagnostics);
+    }
+
+    #[test]
+    fn single_block() {
+        let errors = check_src("[[block]]\nid = \"w\"\ntype = \"wifi\"\n");
+        assert!(errors.is_empty(), "{errors:#?}");
+        let errors = check_src(
+            "[[block]]\nid = \"w1\"\ntype = \"wifi\"\n\
+             [[block]]\nid = \"w2\"\ntype = \"wifi\"\n\
+             [[block]]\nid = \"w3\"\ntype = \"wifi\"\n",
+        );
+        assert_eq!(errors.len(), 2, "{errors:#?}");
+        assert!(errors[0].contains("«w2»") && errors[0].contains("уже есть «w1»"));
+        assert!(errors[1].contains("«w3»") && errors[1].contains("уже есть «w1»"));
     }
 
     #[test]

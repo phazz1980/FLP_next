@@ -53,7 +53,15 @@ struct Sections {
     global: String,
     setup: String,
     looped: String,
+    functions: String,
+    /// `// @global once`, `// @setup once`, `// @functions once`: shared by all
+    /// instances of the block type; the same text goes into the sketch once.
+    once_global: String,
+    once_setup: String,
+    once_functions: String,
 }
+
+const SECTION_LIST: &str = "// @global, // @setup, // @loop, // @functions";
 
 fn render_block(
     env: &Environment,
@@ -208,18 +216,34 @@ fn string_literal(s: &str) -> String {
     out
 }
 
-/// Splits rendered template text by `// @global`, `// @setup`, `// @loop` markers.
+/// Splits rendered template text by section markers: `// @global`, `// @setup`,
+/// `// @loop`, `// @functions`, and `once` variants of all but `loop`.
 fn split_sections(text: &str) -> Result<Sections, String> {
     let mut sections = Sections::default();
     let mut current: Option<&mut String> = None;
     for line in text.lines() {
         let marker = line.trim();
         if let Some(name) = marker.strip_prefix("// @") {
-            current = Some(match name {
-                "global" => &mut sections.global,
-                "setup" => &mut sections.setup,
-                "loop" => &mut sections.looped,
-                _ => return Err(format!("неизвестный раздел «{marker}»")),
+            let words: Vec<&str> = name.split_whitespace().collect();
+            current = Some(match words.as_slice() {
+                ["global"] => &mut sections.global,
+                ["setup"] => &mut sections.setup,
+                ["loop"] => &mut sections.looped,
+                ["functions"] => &mut sections.functions,
+                ["global", "once"] => &mut sections.once_global,
+                ["setup", "once"] => &mut sections.once_setup,
+                ["functions", "once"] => &mut sections.once_functions,
+                ["loop", "once"] => {
+                    return Err("раздела «// @loop once» нет: код цикла выполняется \
+                                для каждого блока в порядке схемы"
+                        .to_owned())
+                }
+                _ => {
+                    return Err(format!(
+                        "неизвестный раздел «{marker}»: допустимы {SECTION_LIST}, \
+                         к любому, кроме loop, можно добавить «once»"
+                    ))
+                }
             });
             continue;
         }
@@ -231,7 +255,7 @@ fn split_sections(text: &str) -> Result<Sections, String> {
             None if marker.is_empty() => {}
             None => {
                 return Err(format!(
-                    "код до первого раздела (// @global, // @setup, // @loop): «{marker}»"
+                    "код до первого раздела ({SECTION_LIST}): «{marker}»"
                 ))
             }
         }
@@ -240,6 +264,10 @@ fn split_sections(text: &str) -> Result<Sections, String> {
         &mut sections.global,
         &mut sections.setup,
         &mut sections.looped,
+        &mut sections.functions,
+        &mut sections.once_global,
+        &mut sections.once_setup,
+        &mut sections.once_functions,
     ] {
         let trimmed = s.trim_matches('\n').to_owned();
         *s = trimmed;
@@ -286,9 +314,22 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
         }
     }
 
+    for (kind, code) in shared(rendered, |s| &s.once_global) {
+        let _ = writeln!(out, "\n{}\n{code}", shared_comment(kind));
+    }
     for (inst, sec) in rendered {
         if !sec.global.is_empty() {
             let _ = writeln!(out, "\n{}\n{}", block_comment(inst), sec.global);
+        }
+    }
+
+    // Functions go before setup() and loop(), so no prototypes are needed.
+    for (kind, code) in shared(rendered, |s| &s.once_functions) {
+        let _ = writeln!(out, "\n{}\n{code}", shared_comment(kind));
+    }
+    for (inst, sec) in rendered {
+        if !sec.functions.is_empty() {
+            let _ = writeln!(out, "\n{}\n{}", block_comment(inst), sec.functions);
         }
     }
 
@@ -319,7 +360,18 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
     if debug {
         out.push_str("  flp_dbg_setup();\n\n");
     }
-    push_function_body(&mut out, rendered, |s| &s.setup, &|_| Vec::new());
+    let once_setup = shared(rendered, |s| &s.once_setup);
+    for (i, (kind, code)) in once_setup.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        let _ = writeln!(out, "  {}", shared_comment(kind));
+        push_indented(&mut out, code.lines().map(str::to_owned));
+    }
+    let after_shared = !once_setup.is_empty();
+    push_function_body(&mut out, rendered, after_shared, |s| &s.setup, &|_| {
+        Vec::new()
+    });
     out.push_str("}\n\nvoid loop() {\n");
     if let Some(table) = &table {
         let vars: Vec<String> = (0..table.entries.len())
@@ -330,7 +382,7 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
             let _ = writeln!(out, "  // Forced variables\n  {}\n", vars.join(" "));
         }
     }
-    push_function_body(&mut out, rendered, |s| &s.looped, &forces);
+    push_function_body(&mut out, rendered, false, |s| &s.looped, &forces);
     if debug {
         out.push_str("\n  flp_dbg_loop();\n");
     }
@@ -338,13 +390,16 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
     out
 }
 
+/// Writes the code of each block into a function body; `after` means the body
+/// already has code, so the first block is separated by a blank line too.
 fn push_function_body(
     out: &mut String,
     rendered: &[(&Instance, Sections)],
+    after: bool,
     section: fn(&Sections) -> &String,
     extra: &dyn Fn(&Instance) -> Vec<String>,
 ) {
-    let mut first = true;
+    let mut first = !after;
     for (inst, sec) in rendered {
         let code = section(sec);
         let extra = extra(inst);
@@ -356,14 +411,38 @@ fn push_function_body(
         }
         first = false;
         let _ = writeln!(out, "  {}", block_comment(inst));
-        for line in code.lines().map(str::to_owned).chain(extra) {
-            if line.is_empty() {
-                out.push('\n');
-            } else {
-                let _ = writeln!(out, "  {line}");
-            }
+        push_indented(out, code.lines().map(str::to_owned).chain(extra));
+    }
+}
+
+fn push_indented(out: &mut String, lines: impl Iterator<Item = String>) {
+    for line in lines {
+        if line.is_empty() {
+            out.push('\n');
+        } else {
+            let _ = writeln!(out, "  {line}");
         }
     }
+}
+
+/// Non-empty `once` sections, without repeats of the same block type and text,
+/// in order of first use.
+fn shared<'a>(
+    rendered: &'a [(&Instance, Sections)],
+    section: fn(&Sections) -> &String,
+) -> Vec<(&'a str, &'a str)> {
+    let mut out: Vec<(&str, &str)> = Vec::new();
+    for (inst, sec) in rendered {
+        let item = (inst.block.kind.as_str(), section(sec).as_str());
+        if !item.1.is_empty() && !out.contains(&item) {
+            out.push(item);
+        }
+    }
+    out
+}
+
+fn shared_comment(kind: &str) -> String {
+    format!("// {kind}: общий код")
 }
 
 fn block_comment(inst: &Instance) -> String {
@@ -382,6 +461,21 @@ mod tests {
         assert_eq!(s.looped, "x++;\n  y();");
         assert!(split_sections("x++;\n// @loop\n").is_err());
         assert!(split_sections("// @init\n").is_err());
+    }
+
+    #[test]
+    fn functions_and_once_sections() {
+        let s = split_sections(
+            "// @global once\nOneWire bus(4);\n// @functions\nint f() { return 1; }\n\
+             // @setup  once\nbus.begin();\n// @functions once\nvoid g() {}\n",
+        )
+        .unwrap();
+        assert_eq!(s.once_global, "OneWire bus(4);");
+        assert_eq!(s.functions, "int f() { return 1; }");
+        assert_eq!(s.once_setup, "bus.begin();");
+        assert_eq!(s.once_functions, "void g() {}");
+        assert!(split_sections("// @loop once\nx++;\n").is_err());
+        assert!(split_sections("// @global twice\n").is_err());
     }
 
     #[test]

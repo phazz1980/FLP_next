@@ -1,0 +1,45 @@
+# Test block for the block format: once sections, functions and `when`.
+[block]
+type = "probe"
+name = "Тестовый датчик"
+group = "Тест"
+description = "Датчик на общей шине: проверка разделов once и условий when."
+
+[[input]]
+name = "en"
+type = "bool"
+when = "use_en"
+description = "Разрешение опроса, только при use_en"
+
+[[output]]
+name = "out"
+type = "float"
+
+[[output]]
+name = "ok"
+type = "bool"
+
+[[output]]
+name = "raw"
+type = "int"
+when = 'mode == "raw"'
+
+[[param]]
+name = "pin"
+type = "pin"
+
+[[param]]
+name = "use_en"
+type = "bool"
+default = false
+
+[[param]]
+name = "mode"
+type = "string"
+default = "value"
+
+[[param]]
+name = "scale"
+type = "float"
+when = 'mode == "value"'
+description = "Множитель, нужен только в режиме value"

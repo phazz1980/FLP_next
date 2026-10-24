@@ -1,0 +1,6 @@
+[project]
+name = "shared_code"
+description = "Три датчика на двух шинах: общий код вставляется один раз на шину"
+
+[board]
+fqbn = "esp32:esp32:esp32"

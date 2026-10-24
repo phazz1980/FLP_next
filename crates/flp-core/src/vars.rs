@@ -84,6 +84,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                 name: if get { "out" } else { "in" }.to_owned(),
                 ty,
                 default: None,
+                when: None,
                 description: String::new(),
             };
             let def = BlockDef {
@@ -108,6 +109,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                     memory: get,
                     includes: Vec::new(),
                     libraries: Vec::new(),
+                    single: false,
                 },
                 inputs: if get { Vec::new() } else { vec![port.clone()] },
                 outputs: if get { vec![port] } else { Vec::new() },
@@ -117,6 +119,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                     default: None,
                     min: None,
                     max: None,
+                    when: None,
                     description: "Имя переменной".to_owned(),
                 }],
             };

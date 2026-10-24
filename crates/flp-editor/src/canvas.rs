@@ -10,7 +10,7 @@ use eframe::egui::{
     Vec2,
 };
 use flp_core::vars::{VAR_GET, VAR_SET};
-use flp_core::{Block, BlockDef, BlockPos, ParamValue, PortRef, Severity, SignalType};
+use flp_core::{Block, BlockDef, BlockPos, ParamValue, PortDef, PortRef, Severity, SignalType};
 
 use crate::app::{EditorApp, LogLevel, Selection};
 use crate::debugview;
@@ -138,14 +138,20 @@ fn size(block: &Block, def: Option<&BlockDef>) -> Vec2 {
     match kind_of(block) {
         Kind::Tag { .. } => Vec2::new(text_w(&text, 11.0) + 18.0, TAG_H),
         Kind::Box => {
-            let (ins, outs) = def.map_or((0, 0), |d| (d.inputs.len(), d.outputs.len()));
-            let rows = ins.max(outs).max(1);
-            let longest = |ports: Option<&Vec<flp_core::PortDef>>| {
-                ports.map_or(0.0, |ps| {
-                    ps.iter().map(|p| text_w(&p.name, 9.5)).fold(0.0, f32::max)
-                })
+            let (ins, outs) = def.map_or((Vec::new(), Vec::new()), |d| {
+                (
+                    d.active_inputs(&block.params).collect(),
+                    d.active_outputs(&block.params).collect(),
+                )
+            });
+            let rows = ins.len().max(outs.len()).max(1);
+            let longest = |ports: &[&PortDef]| {
+                ports
+                    .iter()
+                    .map(|p| text_w(&p.name, 9.5))
+                    .fold(0.0, f32::max)
             };
-            let ports_w = longest(def.map(|d| &d.inputs)) + longest(def.map(|d| &d.outputs)) + 22.0;
+            let ports_w = longest(&ins) + longest(&outs) + 22.0;
             let w = (text_w(&text, 11.0) + 16.0).max(ports_w).max(64.0);
             Vec2::new((w / 4.0).ceil() * 4.0, HEAD_H + rows as f32 * ROW_H + 4.0)
         }
@@ -441,7 +447,11 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let port_screen = |r: &PortRef, output: bool| -> Option<(Pos2, SignalType)> {
         let block = logic.block(&r.block)?;
         let def = defs[r.block.as_str()]?;
-        let ports = if output { &def.outputs } else { &def.inputs };
+        let ports: Vec<&PortDef> = if output {
+            def.active_outputs(&block.params).collect()
+        } else {
+            def.active_inputs(&block.params).collect()
+        };
         let i = ports.iter().position(|q| q.name == r.port)?;
         Some((
             port_pos(screen_rect(&r.block)?, kind_of(block), i, output),
@@ -574,7 +584,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                     pal.weak,
                 );
                 if let Some(def) = def {
-                    for (i, port) in def.inputs.iter().enumerate() {
+                    for (i, port) in def.active_inputs(&block.params).enumerate() {
                         let p = port_pos(r, kind, i, false);
                         painter.circle_filled(p, PORT_R * z.sqrt(), signal_color(&pal, port.ty));
                         painter.text(
@@ -600,7 +610,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                             }
                         }
                     }
-                    for (i, port) in def.outputs.iter().enumerate() {
+                    for (i, port) in def.active_outputs(&block.params).enumerate() {
                         let p = port_pos(r, kind, i, true);
                         painter.circle_filled(p, PORT_R * z.sqrt(), signal_color(&pal, port.ty));
                         painter.text(
@@ -660,11 +670,14 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         };
         let kind = kind_of(block);
         let ports = def
-            .inputs
-            .iter()
+            .active_inputs(&block.params)
             .enumerate()
             .map(|(i, q)| (i, q, false))
-            .chain(def.outputs.iter().enumerate().map(|(i, q)| (i, q, true)));
+            .chain(
+                def.active_outputs(&block.params)
+                    .enumerate()
+                    .map(|(i, q)| (i, q, true)),
+            );
         for (i, q, output) in ports {
             let pos = port_pos(r, kind, i, output);
             let area = Rect::from_center_size(pos, Vec2::splat(10.0));

@@ -1,0 +1,22 @@
+[[block]]
+id = "a"
+type = "probe"
+pin = 4
+scale = 2.0
+
+[[block]]
+id = "b"
+type = "probe"
+pin = 4
+mode = "raw"
+use_en = true
+
+[[block]]
+id = "c"
+type = "probe"
+pin = 5
+scale = 0.5
+
+[[link]]
+from = "a.ok"
+to = "b.en"

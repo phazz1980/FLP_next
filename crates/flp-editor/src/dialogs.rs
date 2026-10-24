@@ -7,7 +7,7 @@ use std::fs;
 
 use eframe::egui::{self, Color32, RichText, Ui};
 use flp_core::value::parse_duration_ms;
-use flp_core::{ParamDef, ParamKind, ParamValue, SheetInfo, SignalType, Var};
+use flp_core::{ParamDef, ParamKind, ParamValue, PortDef, SheetInfo, SignalType, Var};
 
 use crate::app::{EditorApp, LogLevel, Selection};
 
@@ -221,6 +221,15 @@ fn block_body(app: &EditorApp, ui: &mut Ui, d: &mut BlockDialog) {
     ui.label(RichText::new(&def.info.name).strong());
     ui.weak(&def.info.description);
     ui.add_space(6.0);
+    // Parameters and ports switched off by `when` follow the values being edited.
+    let current: BTreeMap<String, ParamValue> = d
+        .values
+        .iter()
+        .filter_map(|(k, v)| Some((k.clone(), v.clone()?)))
+        .collect();
+    let params: Vec<&ParamDef> = def.active_params(&current).collect();
+    let inputs: Vec<&PortDef> = def.active_inputs(&current).collect();
+    let outputs: Vec<&PortDef> = def.active_outputs(&current).collect();
     egui::Grid::new("block_props")
         .num_columns(2)
         .spacing([10.0, 6.0])
@@ -228,7 +237,7 @@ fn block_body(app: &EditorApp, ui: &mut Ui, d: &mut BlockDialog) {
             ui.label("Надпись (id)");
             ui.text_edit_singleline(&mut d.new_id);
             ui.end_row();
-            for p in &def.params {
+            for &p in &params {
                 ui.label(&p.name).on_hover_text(&p.description);
                 ui.horizontal(|ui| {
                     param_editor(ui, p, d);
@@ -243,12 +252,12 @@ fn block_body(app: &EditorApp, ui: &mut Ui, d: &mut BlockDialog) {
                 ui.end_row();
             }
         });
-    if !def.inputs.is_empty() || !def.outputs.is_empty() {
+    if !inputs.is_empty() || !outputs.is_empty() {
         ui.add_space(6.0);
         egui::CollapsingHeader::new("Входы и выходы")
             .default_open(true)
             .show(ui, |ui| {
-                for input in &def.inputs {
+                for input in &inputs {
                     let source = doc
                         .project
                         .logic
@@ -270,7 +279,7 @@ fn block_body(app: &EditorApp, ui: &mut Ui, d: &mut BlockDialog) {
                     ))
                     .on_hover_text(&input.description);
                 }
-                for output in &def.outputs {
+                for output in &outputs {
                     ui.label(format!("выход {} · {}", output.name, type_name(output.ty)))
                         .on_hover_text(&output.description);
                 }
