@@ -20,7 +20,7 @@ fn examples_compile() {
     let (lib, _) = Library::load(repo_path("library")).unwrap();
     for name in ["pump", "button"] {
         let project = Project::load(repo_path("examples").join(name)).unwrap();
-        let code = generate(&project, &lib, &ArduinoCpp).unwrap();
+        let code = generate(&project, &lib, &ArduinoCpp::RELEASE).unwrap();
         write_sketch(&project.root, &code).unwrap();
         let mut log = Vec::new();
         let result = cli.compile(

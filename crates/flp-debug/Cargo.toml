@@ -1,0 +1,14 @@
+[package]
+name = "flp-debug"
+description = "Online debugging protocol and host session of FLP_next"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+# Serial port transport (USB). Off for crates that only need the protocol.
+serial = ["dep:serialport"]
+
+[dependencies]
+flp-core = { path = "../flp-core" }
+serialport = { version = "4", optional = true, default-features = false }

@@ -6,13 +6,23 @@ use std::path::PathBuf;
 
 use flp_core::library::ESP32_CPP_TEMPLATE;
 use flp_core::value::parse_duration_ms;
-use flp_core::{ParamKind, ParamValue, SignalType};
+use flp_core::vars::VAR_SET;
+use flp_core::{ParamKind, ParamValue, PortRef, SignalType};
 use minijinja::{context, AutoEscape, Environment, UndefinedBehavior, Value};
 
 use crate::{Backend, GenError, Instance, Program, Source};
 
 /// Arduino C++ for ESP32, built by arduino-cli.
-pub struct ArduinoCpp;
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ArduinoCpp {
+    /// Embed the online debugging module.
+    pub debug: bool,
+}
+
+impl ArduinoCpp {
+    pub const RELEASE: Self = Self { debug: false };
+    pub const DEBUG: Self = Self { debug: true };
+}
 
 impl Backend for ArduinoCpp {
     fn template_file(&self) -> &'static str {
@@ -25,7 +35,7 @@ impl Backend for ArduinoCpp {
         for inst in &program.blocks {
             rendered.push((inst, render_block(&env, program, inst)?));
         }
-        Ok(assemble(program, &rendered))
+        Ok(assemble(program, &rendered, self.debug))
     }
 }
 
@@ -237,7 +247,7 @@ fn split_sections(text: &str) -> Result<Sections, String> {
     Ok(sections)
 }
 
-fn assemble(program: &Program, rendered: &[(&Instance, Sections)]) -> String {
+fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) -> String {
     let mut out = String::new();
     let order: Vec<&str> = program.blocks.iter().map(|b| b.block.id.as_str()).collect();
     let _ = writeln!(
@@ -282,10 +292,48 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)]) -> String {
         }
     }
 
+    let table = debug.then(|| crate::debug::debug_table(program));
+    if let Some(table) = &table {
+        out.push_str(&crate::debug::runtime(table));
+    }
+    // Forcing: after each block, its forced outputs (and a written variable) win.
+    let forces = |inst: &Instance| -> Vec<String> {
+        let Some(table) = &table else {
+            return Vec::new();
+        };
+        let mut lines: Vec<String> = inst
+            .outputs
+            .keys()
+            .filter_map(|&port| table.output_index(&PortRef::new(&inst.block.id, port)))
+            .map(|i| format!("flp_dbg_force({i});"))
+            .collect();
+        if inst.block.kind == VAR_SET {
+            if let Some(i) = inst.block.var_name().and_then(|v| table.var_index(v)) {
+                lines.push(format!("flp_dbg_force({i});"));
+            }
+        }
+        lines
+    };
+
     out.push_str("\nvoid setup() {\n");
-    push_function_body(&mut out, rendered, |s| &s.setup);
+    if debug {
+        out.push_str("  flp_dbg_setup();\n\n");
+    }
+    push_function_body(&mut out, rendered, |s| &s.setup, &|_| Vec::new());
     out.push_str("}\n\nvoid loop() {\n");
-    push_function_body(&mut out, rendered, |s| &s.looped);
+    if let Some(table) = &table {
+        let vars: Vec<String> = (0..table.entries.len())
+            .filter(|&i| matches!(table.entries[i].source, flp_debug::Source::Var(_)))
+            .map(|i| format!("flp_dbg_force({i});"))
+            .collect();
+        if !vars.is_empty() {
+            let _ = writeln!(out, "  // Forced variables\n  {}\n", vars.join(" "));
+        }
+    }
+    push_function_body(&mut out, rendered, |s| &s.looped, &forces);
+    if debug {
+        out.push_str("\n  flp_dbg_loop();\n");
+    }
     out.push_str("}\n");
     out
 }
@@ -294,11 +342,13 @@ fn push_function_body(
     out: &mut String,
     rendered: &[(&Instance, Sections)],
     section: fn(&Sections) -> &String,
+    extra: &dyn Fn(&Instance) -> Vec<String>,
 ) {
     let mut first = true;
     for (inst, sec) in rendered {
         let code = section(sec);
-        if code.is_empty() {
+        let extra = extra(inst);
+        if code.is_empty() && extra.is_empty() {
             continue;
         }
         if !first {
@@ -306,7 +356,7 @@ fn push_function_body(
         }
         first = false;
         let _ = writeln!(out, "  {}", block_comment(inst));
-        for line in code.lines() {
+        for line in code.lines().map(str::to_owned).chain(extra) {
             if line.is_empty() {
                 out.push('\n');
             } else {

@@ -6,5 +6,6 @@ edition.workspace = true
 
 [dependencies]
 flp-core = { path = "../flp-core" }
+flp-debug = { path = "../flp-debug" }
 minijinja = "2"
 thiserror.workspace = true

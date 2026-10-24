@@ -5,6 +5,7 @@
 //! ([`ArduinoCpp`]); a Rust backend can be added next to it later.
 
 pub mod arduino;
+pub mod debug;
 pub mod error;
 pub mod program;
 

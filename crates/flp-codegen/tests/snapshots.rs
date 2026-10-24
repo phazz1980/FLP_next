@@ -54,7 +54,7 @@ fn examples_match_snapshots() {
     let lib = library();
     for dir in examples() {
         let project = Project::load(&dir).unwrap();
-        let code = generate(&project, &lib, &ArduinoCpp)
+        let code = generate(&project, &lib, &ArduinoCpp::RELEASE)
             .unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
         let name = dir.file_name().unwrap().to_str().unwrap();
         let snapshot = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -88,7 +88,7 @@ fn every_block_has_an_example() {
 fn schema_errors_stop_generation() {
     let mut project = Project::load(repo_path("examples/pump")).unwrap();
     project.logic.links.pop();
-    match generate(&project, &library(), &ArduinoCpp) {
+    match generate(&project, &library(), &ArduinoCpp::RELEASE) {
         Err(GenError::Schema(diagnostics)) => {
             assert!(diagnostics.iter().any(|d| d.message.contains("pump")));
         }
@@ -103,10 +103,21 @@ fn defaults_are_applied() {
     for b in &mut project.logic.blocks {
         b.params.remove("b");
     }
-    let code = generate(&project, &library(), &ArduinoCpp).unwrap();
+    let code = generate(&project, &library(), &ArduinoCpp::RELEASE).unwrap();
     assert!(code.contains("low_out = pressure_out < 0.0f;"), "{code}");
     assert!(
         code.contains("digitalWrite(26, (delay_out) ? HIGH : LOW);"),
         "{code}"
     );
+}
+
+/// The debug build of an example with block outputs and variables.
+#[test]
+fn debug_module_snapshot() {
+    let project = Project::load(repo_path("examples/tags")).unwrap();
+    let code = generate(&project, &library(), &ArduinoCpp::DEBUG).unwrap();
+    let snapshot = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/tags.debug.ino");
+    assert_snapshot(&snapshot, &code);
+    assert!(code.contains("flp_dbg_setup();"));
+    assert!(code.contains("flp_dbg_loop();"));
 }

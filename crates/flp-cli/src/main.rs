@@ -47,12 +47,15 @@ enum Command {
         /// Вывести скетч в консоль вместо записи в файл
         #[arg(long)]
         stdout: bool,
+        /// Встроить модуль онлайн-отладки
+        #[arg(long)]
+        debug: bool,
     },
     /// Сгенерировать скетч и собрать прошивку через arduino-cli
     Build {
         /// Папка проекта
         project: PathBuf,
-        /// Отладочная сборка (без сильной оптимизации)
+        /// Отладочная сборка: модуль онлайн-отладки, без сильной оптимизации
         #[arg(long)]
         debug: bool,
     },
@@ -63,7 +66,7 @@ enum Command {
         /// Порт платы, например COM3 (по умолчанию из project.toml или единственный найденный)
         #[arg(long, short)]
         port: Option<String>,
-        /// Отладочная сборка (без сильной оптимизации)
+        /// Отладочная сборка: модуль онлайн-отладки, без сильной оптимизации
         #[arg(long)]
         debug: bool,
     },
@@ -73,7 +76,11 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Command::Check { project } => run_check(&project, cli.library.as_deref()),
-        Command::Gen { project, stdout } => run_gen(&project, cli.library.as_deref(), stdout),
+        Command::Gen {
+            project,
+            stdout,
+            debug,
+        } => run_gen(&project, cli.library.as_deref(), stdout, debug),
         Command::Build { project, debug } => {
             run_build(&project, cli.library.as_deref(), debug, None)
         }
@@ -123,12 +130,12 @@ fn run_check(project_dir: &Path, library: Option<&Path>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn run_gen(project_dir: &Path, library: Option<&Path>, stdout: bool) -> ExitCode {
+fn run_gen(project_dir: &Path, library: Option<&Path>, stdout: bool, debug: bool) -> ExitCode {
     let (project, lib) = match load(project_dir, library) {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
-    let code = match generate(&project, &lib) {
+    let code = match generate(&project, &lib, debug) {
         Ok((code, _)) => code,
         Err(exit) => return exit,
     };
@@ -153,7 +160,7 @@ fn run_build(
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
-    let libraries = match generate(&project, &lib) {
+    let libraries = match generate(&project, &lib, debug) {
         Ok((code, libraries)) => match write_sketch(&project, &code) {
             Ok(()) => libraries,
             Err(exit) => return exit,
@@ -211,9 +218,14 @@ fn run_build(
 }
 
 /// Generates the sketch, printing schema errors. Also returns the Arduino libraries it needs.
-fn generate(project: &Project, lib: &Library) -> Result<(String, Vec<String>), ExitCode> {
+fn generate(
+    project: &Project,
+    lib: &Library,
+    debug: bool,
+) -> Result<(String, Vec<String>), ExitCode> {
+    let backend = ArduinoCpp { debug };
     let result = Program::build(project, lib).and_then(|program| {
-        let code = ArduinoCpp.generate(&program)?;
+        let code = backend.generate(&program)?;
         let libraries = program.libraries().into_iter().map(String::from).collect();
         Ok((code, libraries))
     });

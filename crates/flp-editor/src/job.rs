@@ -62,7 +62,9 @@ fn run(
     log: &mut dyn FnMut(&str),
 ) -> Result<String, String> {
     let program = Program::build(project, lib).map_err(|e| e.to_string())?;
-    let code = ArduinoCpp.generate(&program).map_err(|e| e.to_string())?;
+    let code = ArduinoCpp::RELEASE
+        .generate(&program)
+        .map_err(|e| e.to_string())?;
     let (path, _) = flp_codegen::write_sketch(&project.root, &code).map_err(|e| e.to_string())?;
     log(&format!("Скетч: {}", path.display()));
 
