@@ -23,4 +23,4 @@ pub use library::{BlockDef, Library, LibraryBlock, ParamDef, ParamKind, PortDef,
 pub use logic::{Block, Link, Logic, PortRef, PortRefError};
 pub use project::{BoardConfig, Project, ProjectConfig, ProjectInfo};
 pub use value::ParamValue;
-pub use vars::Var;
+pub use vars::{Var, VarType};

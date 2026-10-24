@@ -31,6 +31,8 @@ pub enum EditError {
     BadValue(String),
     #[error("нет переменной «{0}»")]
     NoVar(String),
+    #[error("блок переменной «{0}» уже подключён с другой стороны: переменную в одном блоке можно либо читать, либо записывать")]
+    VarBothSides(String),
     #[error("недопустимое имя переменной «{0}»: только латиница, цифры и «_», первой — буква")]
     InvalidVarName(String),
     #[error("переменная «{0}» уже есть")]
@@ -232,6 +234,9 @@ impl Project {
 
     /// Connects an output to an input. An existing link into the same input is replaced.
     pub fn connect(&mut self, lib: &Library, from: PortRef, to: PortRef) -> Result<(), EditError> {
+        // A variable block reads or writes depending on the side the link comes to.
+        self.adapt_var_block(&from.block, false)?;
+        self.adapt_var_block(&to.block, true)?;
         let out_ty = {
             let def = self.block_def(lib, &from.block)?;
             def.output(&from.port)
@@ -255,6 +260,30 @@ impl Project {
         }
         self.logic.links.retain(|l| l.to != to);
         self.logic.links.push(Link { from, to });
+        Ok(())
+    }
+
+    /// Turns a variable block into a reader or a writer before a link is attached;
+    /// allowed only while the block has no links.
+    fn adapt_var_block(&mut self, id: &str, write: bool) -> Result<(), EditError> {
+        let want = if write { VAR_SET } else { VAR_GET };
+        let Some(block) = self.logic.block(id) else {
+            return Ok(());
+        };
+        if (block.kind != VAR_GET && block.kind != VAR_SET) || block.kind == want {
+            return Ok(());
+        }
+        if self
+            .logic
+            .links
+            .iter()
+            .any(|l| l.from.block == id || l.to.block == id)
+        {
+            return Err(EditError::VarBothSides(id.to_owned()));
+        }
+        if let Some(b) = self.logic.blocks.iter_mut().find(|b| b.id == id) {
+            b.kind = want.to_owned();
+        }
         Ok(())
     }
 
@@ -569,11 +598,11 @@ mod tests {
 
     #[test]
     fn variables() {
-        use crate::SignalType;
         let mut p = project();
         let var = |name: &str| Var {
             name: name.into(),
-            ty: SignalType::Float,
+            ty: crate::VarType::Float,
+            write_enable: false,
             init: Some(ParamValue::Float(1.5)),
             description: String::new(),
         };
@@ -591,7 +620,7 @@ mod tests {
         p.update_var("t", var("temp")).unwrap();
         assert!(p.logic.blocks.iter().all(|b| b.var_name() == Some("temp")));
         let mut bad = var("temp");
-        bad.ty = SignalType::Bool;
+        bad.ty = crate::VarType::Bool;
         assert_eq!(
             p.update_var("temp", bad),
             Err(EditError::BadInit("temp".into()))
@@ -599,6 +628,36 @@ mod tests {
 
         p.remove_var("temp").unwrap();
         assert!(p.logic.vars.is_empty() && p.logic.blocks.is_empty());
+    }
+
+    #[test]
+    fn var_block_side_decides_access() {
+        let lib = library();
+        let mut p = project();
+        p.add_var(Var {
+            name: "on".into(),
+            ty: crate::VarType::Bool,
+            write_enable: false,
+            init: None,
+            description: String::new(),
+        })
+        .unwrap();
+        let src = p.add_block(&lib, "src", POS).unwrap();
+        let sink = p.add_block(&lib, "sink", POS).unwrap();
+        let tag = p.add_var_block("on", false, POS).unwrap();
+        // Link into the reader turns it into a writer.
+        p.connect(&lib, PortRef::new(&src, "out"), PortRef::new(&tag, "in"))
+            .unwrap();
+        assert_eq!(p.logic.block(&tag).unwrap().kind, VAR_SET);
+        // Now the output side is taken by the write.
+        assert_eq!(
+            p.connect(&lib, PortRef::new(&tag, "out"), PortRef::new(&sink, "in")),
+            Err(EditError::VarBothSides(tag.clone()))
+        );
+        p.disconnect(&PortRef::new(&tag, "in"));
+        p.connect(&lib, PortRef::new(&tag, "out"), PortRef::new(&sink, "in"))
+            .unwrap();
+        assert_eq!(p.logic.block(&tag).unwrap().kind, VAR_GET);
     }
 
     #[test]

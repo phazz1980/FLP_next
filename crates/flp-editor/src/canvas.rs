@@ -10,7 +10,9 @@ use eframe::egui::{
     Vec2,
 };
 use flp_core::vars::{VAR_GET, VAR_SET};
-use flp_core::{Block, BlockDef, BlockPos, ParamValue, PortDef, PortRef, Severity, SignalType};
+use flp_core::{
+    Block, BlockDef, BlockPos, Logic, ParamValue, PortDef, PortRef, Severity, SignalType,
+};
 
 use crate::app::{EditorApp, LogLevel, Selection};
 use crate::debugview;
@@ -33,7 +35,7 @@ const ADD_SHEET_H: f32 = 28.0;
 #[derive(Debug, Clone)]
 pub enum DragItem {
     Block(String),
-    /// Variable: read, or write when Shift is held on drop.
+    /// Variable: the side the first link comes to decides read or write.
     Var(String),
 }
 
@@ -66,7 +68,7 @@ pub struct CanvasState {
     moving: Option<String>,
     /// Block to scroll into view on the next frame.
     pub focus: Option<String>,
-    /// Screen corner where a selection frame (Ctrl + drag) started.
+    /// Screen corner where a selection frame (left drag) started.
     band: Option<Pos2>,
     /// Canvas point under the mouse: where pasted blocks go.
     hover: Option<BlockPos>,
@@ -166,6 +168,14 @@ fn size(block: &Block, def: Option<&BlockDef>) -> Vec2 {
             Vec2::new((w / 4.0).ceil() * 4.0, HEAD_H + rows as f32 * ROW_H + 4.0)
         }
     }
+}
+
+/// Whether a variable block already has a link on either side.
+fn tag_linked(logic: &Logic, id: &str) -> bool {
+    logic
+        .links
+        .iter()
+        .any(|l| l.from.block == id || l.to.block == id)
 }
 
 fn port_pos(rect: Rect, kind: Kind, index: usize, output: bool) -> Pos2 {
@@ -345,7 +355,6 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let z = view.zoom;
     let font = |size: f32| FontId::proportional(size * z.clamp(0.5, 2.0));
     let pointer = ui.input(|i| i.pointer.hover_pos());
-    let shift = ui.input(|i| i.modifiers.shift);
     let ctrl = ui.input(|i| i.modifiers.command);
 
     // Sheets.
@@ -577,8 +586,16 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 };
                 painter.text(r.center(), Align2::CENTER_CENTER, text, font(11.0), color);
                 if let Some(port) = def.and_then(|d| d.inputs.first().or(d.outputs.first())) {
-                    let p = port_pos(r, kind, 0, !write);
-                    painter.circle_filled(p, PORT_R * z.sqrt(), signal_color(&pal, port.ty));
+                    let color = signal_color(&pal, port.ty);
+                    painter.circle_filled(port_pos(r, kind, 0, !write), PORT_R * z.sqrt(), color);
+                    // Not connected yet: the other side is free too.
+                    if !tag_linked(logic, &block.id) {
+                        painter.circle_filled(
+                            port_pos(r, kind, 0, write),
+                            PORT_R * z.sqrt(),
+                            color,
+                        );
+                    }
                 }
             }
             Kind::Box => {
@@ -701,6 +718,20 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             continue;
         };
         let kind = kind_of(block);
+        // An unconnected variable block offers both sides; the link decides
+        // whether it reads (output `out`) or writes (input `in`).
+        let tag_port = match kind {
+            Kind::Tag { write } if !tag_linked(logic, &block.id) => def
+                .inputs
+                .first()
+                .or(def.outputs.first())
+                .map(|q| PortDef {
+                    name: if write { "out" } else { "in" }.to_owned(),
+                    ..q.clone()
+                })
+                .map(|q| (q, write)),
+            _ => None,
+        };
         let ports = def
             .active_inputs(&block.params)
             .enumerate()
@@ -709,7 +740,8 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 def.active_outputs(&block.params)
                     .enumerate()
                     .map(|(i, q)| (i, q, true)),
-            );
+            )
+            .chain(tag_port.as_ref().map(|(q, output)| (0, q, *output)));
         for (i, q, output) in ports {
             let pos = port_pos(r, kind, i, output);
             let area = Rect::from_center_size(pos, Vec2::splat(10.0));
@@ -802,9 +834,9 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     };
     app.canvas.hover = pointer.filter(|p| rect.contains(*p)).and_then(drop_at);
 
-    // Selection frame: Ctrl + drag on empty space.
+    // Selection frame: left drag on empty space.
     let mut framed = None;
-    if bg.drag_started() && ctrl && app.canvas.wire.is_none() {
+    if bg.drag_started_by(egui::PointerButton::Primary) && app.canvas.wire.is_none() {
         app.canvas.band = bg.interact_pointer_pos();
     }
     if let (Some(a), Some(b)) = (app.canvas.band, pointer) {
@@ -847,7 +879,10 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     });
 
     // Pan and zoom.
-    if bg.dragged() && app.canvas.wire.is_none() && app.canvas.band.is_none() && framed.is_none() {
+    // Pan with the right or middle button; the left one draws a selection frame.
+    let panning =
+        bg.dragged_by(egui::PointerButton::Secondary) || bg.dragged_by(egui::PointerButton::Middle);
+    if panning && app.canvas.wire.is_none() && app.canvas.band.is_none() {
         view.pan += bg.drag_delta();
     }
     if ui.rect_contains_pointer(rect) {
@@ -940,7 +975,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         if let Some((item, pos)) = drop {
             let result = match item {
                 DragItem::Block(kind) => doc.edit(&lib, None, |p| p.add_block(&lib, &kind, pos)),
-                DragItem::Var(name) => doc.edit(&lib, None, |p| p.add_var_block(&name, shift, pos)),
+                DragItem::Var(name) => doc.edit(&lib, None, |p| p.add_var_block(&name, false, pos)),
             };
             match result {
                 Ok(id) => added = Some(id),

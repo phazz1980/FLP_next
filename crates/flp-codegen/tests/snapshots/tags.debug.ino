@@ -23,7 +23,7 @@ const uint32_t FLP_DBG_FINGERPRINT = 0x84B418D3UL;
 const uint16_t FLP_DBG_COUNT = 10;
 // Наблюдаемые значения: выходы блоков, затем переменные (+ пустой элемент в конце).
 void* const flp_dbg_ptr[FLP_DBG_COUNT + 1] = { &adc_out, &to_c_out, &temp_r_out, &setpoint_r_out, &error_out, &cold_out, &heating_r_out, &var_temp, &var_setpoint, &var_heating, nullptr };
-const uint8_t flp_dbg_type[FLP_DBG_COUNT + 1] = { 1, 2, 2, 2, 2, 0, 0, 2, 2, 0, 0 };  // 0 bool, 1 int, 2 float
+const uint8_t flp_dbg_type[FLP_DBG_COUNT + 1] = { 1, 2, 2, 2, 2, 0, 0, 2, 2, 0, 0 };  // see type_code in flp-codegen
 bool flp_dbg_forced[FLP_DBG_COUNT + 1];
 uint32_t flp_dbg_force_raw[FLP_DBG_COUNT + 1];
 uint8_t flp_dbg_rx[4 + 255 + 2];
@@ -55,19 +55,34 @@ void flp_dbg_frame(uint8_t type, const uint8_t* data, uint8_t len) {
 
 uint32_t flp_dbg_get(uint16_t i) {
   uint32_t raw = 0;
-  if (flp_dbg_type[i] == 0) {
-    raw = *(bool*)flp_dbg_ptr[i] ? 1 : 0;
-  } else {
-    memcpy(&raw, flp_dbg_ptr[i], 4);
+  void* p = flp_dbg_ptr[i];
+  switch (flp_dbg_type[i]) {
+    case 0: raw = *(bool*)p ? 1 : 0; break;
+    case 3: raw = (uint32_t)(int32_t)*(int8_t*)p; break;
+    case 4: raw = *(uint8_t*)p; break;
+    case 5: raw = (uint32_t)(int32_t)*(int16_t*)p; break;
+    case 6: raw = *(uint16_t*)p; break;
+    case 8: raw = (uint32_t)(int32_t)*(int64_t*)p; break;
+    case 9: raw = (uint32_t)*(uint64_t*)p; break;
+    case 10: { float f = (float)*(double*)p; memcpy(&raw, &f, 4); break; }
+    default: memcpy(&raw, p, 4);
   }
   return raw;
 }
 
 void flp_dbg_put(uint16_t i, uint32_t raw) {
-  if (flp_dbg_type[i] == 0) {
-    *(bool*)flp_dbg_ptr[i] = raw != 0;
-  } else {
-    memcpy(flp_dbg_ptr[i], &raw, 4);
+  void* p = flp_dbg_ptr[i];
+  int32_t v = (int32_t)raw;
+  switch (flp_dbg_type[i]) {
+    case 0: *(bool*)p = raw != 0; break;
+    case 3: *(int8_t*)p = (int8_t)v; break;
+    case 4: *(uint8_t*)p = (uint8_t)v; break;
+    case 5: *(int16_t*)p = (int16_t)v; break;
+    case 6: *(uint16_t*)p = (uint16_t)v; break;
+    case 8: *(int64_t*)p = v; break;
+    case 9: *(uint64_t*)p = (uint32_t)raw; break;
+    case 10: { float f; memcpy(&f, &raw, 4); *(double*)p = f; break; }
+    default: memcpy(p, &raw, 4);
   }
 }
 

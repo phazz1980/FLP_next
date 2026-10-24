@@ -374,7 +374,7 @@ fn check_vars(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) ->
                 None,
                 format!(
                     "начальное значение переменной «{name}» не подходит к типу {}",
-                    type_name(var.ty)
+                    var.ty.name()
                 ),
             );
         }

@@ -99,11 +99,13 @@ fn table() -> DebugTable {
                 source: Source::Output(PortRef::new("button", "out")),
                 ty: SignalType::Bool,
                 storage: "button_out".into(),
+                cpp_type: "",
             },
             Entry {
                 source: Source::Var("setpoint".into()),
                 ty: SignalType::Float,
                 storage: "var_setpoint".into(),
+                cpp_type: "",
             },
         ],
     }

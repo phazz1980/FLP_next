@@ -3,6 +3,7 @@
 //! Each project keeps a persistent build folder `<project>/.flp/build`, so
 //! repeated builds only recompile the changed sketch.
 
+use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read};
@@ -61,7 +62,7 @@ pub enum BuildMode {
     /// Working firmware with normal optimization.
     #[default]
     Release,
-    /// Build for online debugging, without heavy optimization.
+    /// Firmware with the online debugging module (same compiler flags as release).
     Debug,
 }
 
@@ -85,6 +86,42 @@ pub struct SerialPort {
     pub address: String,
     /// Board names recognized by arduino-cli, or the port label.
     pub description: String,
+    /// arduino-cli recognized a board on this port.
+    pub has_board: bool,
+    /// USB serial adapter (has VID/PID), unlike built-in COM ports.
+    pub usb: bool,
+}
+
+/// Picks the port for automatic upload: the only port with a recognized board,
+/// otherwise the only USB port, otherwise the only port at all.
+pub fn auto_port(ports: &[SerialPort]) -> Result<String, BuildError> {
+    if ports.is_empty() {
+        return Err(BuildError::NoPort);
+    }
+    let tiers: [&dyn Fn(&SerialPort) -> bool; 3] = [&|p| p.has_board, &|p| p.usb, &|_| true];
+    for tier in tiers {
+        let found: Vec<&SerialPort> = ports.iter().filter(|p| tier(p)).collect();
+        match found.len() {
+            0 => continue,
+            1 => return Ok(found[0].address.clone()),
+            _ => {
+                return Err(BuildError::AmbiguousPort(
+                    found.iter().map(|p| p.address.clone()).collect(),
+                ))
+            }
+        }
+    }
+    unreachable!("the last tier matches every port")
+}
+
+/// Orders port names naturally: `COM3` < `COM10`.
+fn port_order(a: &str, b: &str) -> std::cmp::Ordering {
+    fn split(s: &str) -> (&str, Option<u64>) {
+        let digits = s.len() - s.trim_end_matches(|c: char| c.is_ascii_digit()).len();
+        let (head, tail) = s.split_at(s.len() - digits);
+        (head, tail.parse().ok())
+    }
+    split(a).cmp(&split(b)).then_with(|| a.cmp(b))
 }
 
 /// Folder with Arduino libraries shipped with FLP_next (FLProg_Network, Modbus...).
@@ -267,14 +304,7 @@ impl ArduinoCli {
         if let Some(port) = explicit.or(board.port.as_deref()) {
             return Ok(port.to_owned());
         }
-        let mut ports = self.serial_ports()?;
-        match ports.len() {
-            0 => Err(BuildError::NoPort),
-            1 => Ok(ports.remove(0).address),
-            _ => Err(BuildError::AmbiguousPort(
-                ports.into_iter().map(|p| p.address).collect(),
-            )),
-        }
+        auto_port(&self.serial_ports()?)
     }
 
     fn spawn_error(&self, source: std::io::Error) -> BuildError {
@@ -351,14 +381,31 @@ fn check_status(what: &'static str, status: ExitStatus) -> Result<(), BuildError
     }
 }
 
+/// Chips whose boards are usually wired through the chip's own USB, without a UART bridge.
+const NATIVE_USB_CHIPS: [&str; 3] = [
+    "esp32:esp32:esp32c3",
+    "esp32:esp32:esp32c6",
+    "esp32:esp32:esp32h2",
+];
+
+/// Board options with defaults filled in: on native-USB chips `Serial` must go to USB
+/// (`CDCOnBoot=cdc`), otherwise the board is silent on its only port. An option set in
+/// the project wins.
+fn board_options(board: &BoardConfig) -> BTreeMap<String, String> {
+    let mut options = board.options.clone();
+    if NATIVE_USB_CHIPS.contains(&board.fqbn.as_str()) {
+        options
+            .entry("CDCOnBoot".into())
+            .or_insert_with(|| "cdc".into());
+    }
+    options
+}
+
 fn board_args(board: &BoardConfig) -> Vec<OsString> {
     let mut args = vec!["--fqbn".into(), board.fqbn.clone().into()];
-    if !board.options.is_empty() {
-        let opts: Vec<String> = board
-            .options
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect();
+    let options = board_options(board);
+    if !options.is_empty() {
+        let opts: Vec<String> = options.iter().map(|(k, v)| format!("{k}={v}")).collect();
         args.push("--board-options".into());
         args.push(opts.join(",").into());
     }
@@ -370,9 +417,9 @@ fn compile_args(project_root: &Path, board: &BoardConfig, opts: &CompileOptions)
     args.extend(board_args(board));
     args.push("--build-path".into());
     args.push(build_dir(project_root).into());
-    if opts.mode == BuildMode::Debug {
-        args.push("--optimize-for-debug".into());
-    }
+    // Debug firmware differs only by the debugging module in the sketch. Compiler flags
+    // stay the same, so the cached core is shared and switching modes rebuilds just
+    // the sketch (`--optimize-for-debug` would recompile the whole ESP32 core).
     for dir in &opts.libraries {
         args.push("--libraries".into());
         args.push(dir.into());
@@ -499,6 +546,8 @@ fn parse_board_list(json: &str) -> Result<Vec<SerialPort>, BuildError> {
         protocol: String,
         #[serde(default)]
         label: String,
+        #[serde(default)]
+        properties: std::collections::HashMap<String, String>,
     }
     #[derive(Deserialize)]
     struct MatchingBoard {
@@ -507,13 +556,15 @@ fn parse_board_list(json: &str) -> Result<Vec<SerialPort>, BuildError> {
 
     let list: BoardList =
         serde_json::from_str(json).map_err(|e| BuildError::BadOutput(e.to_string()))?;
-    Ok(list
+    let mut ports: Vec<SerialPort> = list
         .detected_ports
         .into_iter()
         .filter(|d| d.port.protocol == "serial")
         .map(|d| {
             let names: Vec<String> = d.matching_boards.into_iter().map(|b| b.name).collect();
             SerialPort {
+                has_board: !names.is_empty(),
+                usb: d.port.properties.contains_key("vid"),
                 description: if names.is_empty() {
                     d.port.label
                 } else {
@@ -522,7 +573,9 @@ fn parse_board_list(json: &str) -> Result<Vec<SerialPort>, BuildError> {
                 address: d.port.address,
             }
         })
-        .collect())
+        .collect();
+    ports.sort_by(|a, b| port_order(&a.address, &b.address));
+    Ok(ports)
 }
 
 #[cfg(test)]
@@ -565,6 +618,21 @@ mod tests {
     }
 
     #[test]
+    fn native_usb_chips_print_to_usb() {
+        let mut c3 = BoardConfig {
+            fqbn: "esp32:esp32:esp32c3".into(),
+            ..board()
+        };
+        c3.options.clear();
+        assert_eq!(board_options(&c3)["CDCOnBoot"], "cdc");
+        // The project's own choice wins.
+        c3.options.insert("CDCOnBoot".into(), "default".into());
+        assert_eq!(board_options(&c3)["CDCOnBoot"], "default");
+        // Boards with a UART bridge keep their defaults.
+        assert!(!board_options(&board()).contains_key("CDCOnBoot"));
+    }
+
+    #[test]
     fn compile_command_line() {
         let root = Path::new("proj");
         let opts = CompileOptions {
@@ -584,7 +652,6 @@ mod tests {
                 "CPUFreq=240",
                 "--build-path",
                 &build,
-                "--optimize-for-debug",
                 "--jobs",
                 "0",
                 &sketch,
@@ -627,6 +694,8 @@ mod tests {
     fn board_list_json() {
         let json = r#"{
           "detected_ports": [
+            {"port": {"address": "COM10", "label": "COM10", "protocol": "serial",
+                      "properties": {"pid": "0x7523", "vid": "0x1A86"}}},
             {"port": {"address": "COM1", "label": "COM1", "protocol": "serial",
                       "protocol_label": "Serial Port"}},
             {"port": {"address": "COM5", "label": "COM5", "protocol": "serial",
@@ -642,14 +711,35 @@ mod tests {
             [
                 SerialPort {
                     address: "COM1".into(),
-                    description: "COM1".into()
+                    description: "COM1".into(),
+                    has_board: false,
+                    usb: false,
                 },
                 SerialPort {
                     address: "COM5".into(),
-                    description: "ESP32 Dev Module".into()
+                    description: "ESP32 Dev Module".into(),
+                    has_board: true,
+                    usb: true,
+                },
+                SerialPort {
+                    address: "COM10".into(),
+                    description: "COM10".into(),
+                    has_board: false,
+                    usb: true,
                 },
             ]
         );
+        assert_eq!(auto_port(&ports).unwrap(), "COM5");
+        // Without a recognized board the only USB adapter wins over COM1.
+        assert_eq!(
+            auto_port(&[ports[0].clone(), ports[2].clone()]).unwrap(),
+            "COM10"
+        );
+        assert!(matches!(
+            auto_port(&[ports[1].clone(), ports[1].clone()]),
+            Err(BuildError::AmbiguousPort(_))
+        ));
+        assert!(matches!(auto_port(&[]), Err(BuildError::NoPort)));
         assert_eq!(parse_board_list("{}").unwrap(), []);
         assert!(parse_board_list("not json").is_err());
     }

@@ -14,7 +14,7 @@ use std::fs;
 use flp_codegen::{ArduinoCpp, Backend, Program};
 use flp_core::library::{BLOCK_FILE, DOCS_FILE, ESP32_CPP_TEMPLATE};
 use flp_core::{
-    check, BlockPos, Library, LibraryBlock, ParamValue, PortRef, Project, Severity, SignalType, Var,
+    check, BlockPos, Library, LibraryBlock, ParamValue, PortRef, Project, Severity, Var, VarType,
 };
 use serde_json::{json, Map, Value};
 
@@ -115,7 +115,8 @@ pub fn tools() -> Vec<Tool> {
             description: "Создать или изменить переменную (тег). Переменную, которую никто не записывает, можно использовать как уставку.",
             input_schema: json!({"type": "object", "properties": {
                 "name": {"type": "string"},
-                "type": {"type": "string", "enum": ["bool", "int", "float"]},
+                "type": {"type": "string", "description": "тип Arduino: bool, char, byte, short, word, int, unsigned int, long, unsigned long, long long, unsigned long long, int8_t…uint64_t, float, double"},
+                "write_enable": {"type": "boolean", "description": "добавить блоку записи вход en «Разрешение записи»"},
                 "init": {"description": "начальное значение"},
                 "description": {"type": "string"},
                 "rename_to": {"type": "string"}
@@ -315,9 +316,10 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
         }
         "set_variable" => {
             let name = s("name")?;
-            let ty: SignalType =
-                serde_json::from_value(args.get("type").cloned().unwrap_or_default())
-                    .map_err(|_| "type: bool, int или float".to_owned())?;
+            let ty: VarType = serde_json::from_value(args.get("type").cloned().unwrap_or_default())
+                .map_err(|_| {
+                    "type: тип Arduino (bool, byte, int, long, float, double…)".to_owned()
+                })?;
             let init = match args.get("init") {
                 None | Some(Value::Null) => None,
                 Some(v) => Some(
@@ -331,6 +333,10 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
                     .unwrap_or(&name)
                     .to_owned(),
                 ty,
+                write_enable: args
+                    .get("write_enable")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
                 init,
                 description: args
                     .get("description")

@@ -19,6 +19,9 @@ use crate::job::{Job, JobEvent, JobKind};
 use crate::panels;
 use crate::theme::{self, Theme};
 
+/// What a build was made from: project folder, schema revision, debug firmware.
+type BuildKey = (PathBuf, u64, bool);
+
 /// What is selected on the canvas.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
@@ -107,11 +110,21 @@ pub struct EditorApp {
     port_scan: Option<Receiver<Result<Vec<SerialPort>, String>>>,
     /// Online debugging session, when running.
     pub debug: Option<DebugState>,
+    /// Build firmware with the debugging module (all builds, precompilation too).
+    pub debug_firmware: bool,
     /// Chat with the AI assistant.
     pub ai: crate::ai::AiChat,
     /// Live values published for the AI while debugging.
     ai_live: crate::ai::SharedLive,
     job: Option<Job>,
+    /// Project and revision the running job was started for.
+    job_rev: Option<BuildKey>,
+    /// Build requested while precompilation runs; starts right after it.
+    queued: Option<JobKind>,
+    /// Project and revision the build folder holds a release build of.
+    precompiled: Option<BuildKey>,
+    /// Last seen revision and when it changed: precompile after a pause in edits.
+    seen_rev: Option<(u64, Instant)>,
     pending: Option<Pending>,
     allow_close: bool,
     /// Autosave period in minutes; 0 means off.
@@ -141,6 +154,7 @@ impl EditorApp {
             ports: Vec::new(),
             port_scan: None,
             debug: None,
+            debug_firmware: false,
             ai: Default::default(),
             ai_live: Default::default(),
             job: None,
@@ -148,6 +162,10 @@ impl EditorApp {
             allow_close: false,
             autosave_minutes: theme::autosave_minutes(),
             last_autosave: Instant::now(),
+            job_rev: None,
+            queued: None,
+            precompiled: None,
+            seen_rev: None,
         };
         if let Some(t) =
             theme::saved_choice().and_then(|n| app.themes.iter().find(|t| t.name == n).cloned())
@@ -475,7 +493,12 @@ impl EditorApp {
     }
 
     pub fn start_job(&mut self, kind: JobKind, ctx: &egui::Context) {
-        if self.job.is_some() {
+        if let Some(job) = &self.job {
+            // The user's build waits for precompilation, which shares the build folder.
+            if job.background && !matches!(kind, JobKind::Precompile) && self.queued.is_none() {
+                self.info(LogLevel::Info, "Ждём окончания фоновой сборки...");
+                self.queued = Some(kind);
+            }
             return;
         }
         // The upload needs the serial port that debugging holds.
@@ -488,26 +511,70 @@ impl EditorApp {
             self.info(LogLevel::Error, "Сначала исправьте ошибки схемы");
             return;
         }
+        self.job_rev = Some((doc.project.root.clone(), doc.revision, self.debug_firmware));
         let ctx = ctx.clone();
-        let job = Job::start(kind, doc.project.clone(), self.lib.clone(), move || {
-            ctx.request_repaint()
-        });
-        self.info(LogLevel::Info, format!("{}...", job.title));
+        let job = Job::start(
+            kind,
+            self.debug_firmware,
+            doc.project.clone(),
+            self.lib.clone(),
+            move || ctx.request_repaint(),
+        );
+        if !job.background {
+            self.info(LogLevel::Info, format!("{}...", job.title));
+        }
         self.job = Some(job);
     }
 
+    /// A foreground job runs; precompilation does not block build buttons.
     pub fn job_running(&self) -> bool {
-        self.job.is_some()
+        self.job.as_ref().is_some_and(|j| !j.background) || self.queued.is_some()
+    }
+
+    /// Starts precompilation once the schema has been unchanged for a while.
+    fn precompile(&mut self, ctx: &egui::Context) {
+        const PAUSE: Duration = Duration::from_secs(3);
+        let Some(doc) = &self.doc else { return };
+        let rev = doc.revision;
+        let now = Instant::now();
+        match self.seen_rev {
+            Some((seen, _)) if seen == rev => {}
+            _ => self.seen_rev = Some((rev, now)),
+        }
+        let current = Some((doc.project.root.clone(), rev, self.debug_firmware));
+        let quiet = self.seen_rev.is_some_and(|(_, t)| now - t >= PAUSE);
+        if self.job.is_some()
+            || self.debug.is_some()
+            || !quiet
+            || doc.report.has_errors()
+            || self.precompiled == current
+        {
+            return;
+        }
+        // Mark it tried even if the build fails, so a broken sketch is not rebuilt in a loop.
+        self.precompiled = current;
+        self.start_job(JobKind::Precompile, ctx);
     }
 
     fn poll_job(&mut self, ctx: &egui::Context) {
         let Some(job) = &self.job else { return };
+        let background = job.background;
         let mut done = false;
         let mut connect = None;
         for event in job.poll() {
             match event {
+                JobEvent::Line(..) if background => {}
                 JobEvent::Line(level, text) => self.info(level, text),
+                JobEvent::Done(Ok(_)) if background => done = true,
+                JobEvent::Done(Err(_)) if background => {
+                    self.info(
+                        LogLevel::Warning,
+                        "Фоновая сборка не удалась; подробности покажет «Собрать»",
+                    );
+                    done = true;
+                }
                 JobEvent::Done(Ok(result)) => {
+                    self.precompiled = self.job_rev.clone();
                     self.info(LogLevel::Ok, result.message);
                     if let (true, Some(port)) = (result.debug, result.port) {
                         connect = Some(port);
@@ -522,6 +589,9 @@ impl EditorApp {
         }
         if done {
             self.job = None;
+            if let Some(kind) = self.queued.take() {
+                self.start_job(kind, ctx);
+            }
         }
         if let Some(port) = connect {
             self.connect_debug(Some(port), ctx);
@@ -530,8 +600,9 @@ impl EditorApp {
 
     /// Builds and uploads firmware with the debugging module, then connects.
     pub fn start_debug(&mut self, ctx: &egui::Context) {
+        self.debug_firmware = true;
         let port = self.port_choice();
-        self.start_job(JobKind::Upload { port, debug: true }, ctx);
+        self.start_job(JobKind::Upload { port }, ctx);
     }
 
     /// Connects to a board that already runs debugging firmware.
@@ -541,7 +612,7 @@ impl EditorApp {
         let port = port
             .or_else(|| self.port_choice())
             .or_else(|| doc.project.config.board.port.clone())
-            .or_else(|| (self.ports.len() == 1).then(|| self.ports[0].address.clone()));
+            .or_else(|| flp_build::auto_port(&self.ports).ok());
         let Some(port) = port else {
             self.info(
                 LogLevel::Error,
@@ -839,7 +910,7 @@ impl EditorApp {
                     .clicked()
                 {
                     let port = self.port_choice();
-                    self.start_job(JobKind::Upload { port, debug: false }, ui.ctx());
+                    self.start_job(JobKind::Upload { port }, ui.ctx());
                 }
             });
             ui.menu_button("Библиотека", |ui| {
@@ -974,6 +1045,7 @@ impl eframe::App for EditorApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll_job(&ctx);
+        self.precompile(&ctx);
         self.poll_debug();
         self.poll_ai();
         self.poll_ports();

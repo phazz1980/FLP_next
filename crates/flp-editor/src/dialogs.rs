@@ -7,7 +7,7 @@ use std::fs;
 
 use eframe::egui::{self, Color32, RichText, Ui};
 use flp_core::value::parse_duration_ms;
-use flp_core::{ParamDef, ParamKind, ParamValue, PortDef, SheetInfo, SignalType, Var};
+use flp_core::{ParamDef, ParamKind, ParamValue, PortDef, SheetInfo, SignalType, Var, VarType};
 
 use crate::app::{EditorApp, LogLevel, Selection};
 
@@ -31,7 +31,8 @@ pub struct VarDialog {
     /// Name before editing; `None` for a new variable.
     original: Option<String>,
     name: String,
-    ty: SignalType,
+    ty: VarType,
+    write_enable: bool,
     init: String,
     description: String,
 }
@@ -88,7 +89,8 @@ impl Dialog {
             Some(n) => app.doc.as_ref()?.project.logic.var(n)?.clone(),
             None => Var {
                 name: String::new(),
-                ty: SignalType::Float,
+                ty: VarType::Float,
+                write_enable: false,
                 init: None,
                 description: String::new(),
             },
@@ -98,6 +100,7 @@ impl Dialog {
             init: var.init.as_ref().map(value_text).unwrap_or_default(),
             name: var.name,
             ty: var.ty,
+            write_enable: var.write_enable,
             description: var.description,
         }))
     }
@@ -378,14 +381,17 @@ fn var_body(ui: &mut Ui, d: &mut VarDialog) {
             ui.text_edit_singleline(&mut d.name);
             ui.end_row();
             ui.label("Тип");
-            ui.horizontal(|ui| {
-                for ty in [SignalType::Bool, SignalType::Int, SignalType::Float] {
-                    ui.selectable_value(&mut d.ty, ty, type_name(ty));
-                }
-            });
+            egui::ComboBox::from_id_salt("var_type")
+                .selected_text(d.ty.name())
+                .height(400.0)
+                .show_ui(ui, |ui| {
+                    for ty in VarType::ALL {
+                        ui.selectable_value(&mut d.ty, ty, ty.name());
+                    }
+                });
             ui.end_row();
             ui.label("Начальное значение");
-            let hint = match d.ty {
+            let hint = match d.ty.signal() {
                 SignalType::Bool => "false",
                 SignalType::Int => "0",
                 SignalType::Float => "0.0",
@@ -399,6 +405,10 @@ fn var_body(ui: &mut Ui, d: &mut VarDialog) {
             ui.end_row();
             ui.label("Описание");
             ui.text_edit_singleline(&mut d.description);
+            ui.end_row();
+            ui.label("");
+            ui.checkbox(&mut d.write_enable, "Вход «Разрешение записи» (en)")
+                .on_hover_text("Блок записи получает логический вход en: значение записывается, только пока он true.");
             ui.end_row();
         });
     ui.add_space(4.0);
@@ -429,6 +439,7 @@ fn apply(app: &mut EditorApp, dialog: &Dialog) -> Result<(), String> {
                 app.port = board.port.clone().unwrap_or_default();
                 doc.project.config.board = board;
                 doc.dirty = true;
+                doc.revision += 1;
             }
         }
         Dialog::Block(d) => {
@@ -455,6 +466,7 @@ fn apply(app: &mut EditorApp, dialog: &Dialog) -> Result<(), String> {
             let var = Var {
                 name: d.name.trim().to_owned(),
                 ty: d.ty,
+                write_enable: d.write_enable,
                 init: parse_init(d.ty, &d.init)?,
                 description: d.description.trim().to_owned(),
             };
@@ -480,13 +492,13 @@ fn apply(app: &mut EditorApp, dialog: &Dialog) -> Result<(), String> {
 }
 
 /// Parses the initial value field; empty means "no initial value".
-fn parse_init(ty: SignalType, text: &str) -> Result<Option<ParamValue>, String> {
+fn parse_init(ty: VarType, text: &str) -> Result<Option<ParamValue>, String> {
     let t = text.trim();
     if t.is_empty() {
         return Ok(None);
     }
-    let bad = || format!("«{t}» не подходит к типу {}", type_name(ty));
-    let value = match ty {
+    let bad = || format!("«{t}» не подходит к типу {}", ty.name());
+    let value = match ty.signal() {
         SignalType::Bool => match t {
             "true" | "1" | "да" => ParamValue::Bool(true),
             "false" | "0" | "нет" => ParamValue::Bool(false),
@@ -495,6 +507,9 @@ fn parse_init(ty: SignalType, text: &str) -> Result<Option<ParamValue>, String> 
         SignalType::Int => ParamValue::Int(t.parse().map_err(|_| bad())?),
         SignalType::Float => ParamValue::Float(t.replace(',', ".").parse().map_err(|_| bad())?),
     };
+    if !ty.accepts(&value) {
+        return Err(bad());
+    }
     Ok(Some(value))
 }
 
@@ -522,14 +537,14 @@ mod tests {
     #[test]
     fn init_values() {
         assert_eq!(
-            parse_init(SignalType::Float, "22,5"),
+            parse_init(VarType::Float, "22,5"),
             Ok(Some(ParamValue::Float(22.5)))
         );
         assert_eq!(
-            parse_init(SignalType::Bool, "да"),
+            parse_init(VarType::Bool, "да"),
             Ok(Some(ParamValue::Bool(true)))
         );
-        assert_eq!(parse_init(SignalType::Int, ""), Ok(None));
-        assert!(parse_init(SignalType::Int, "1.5").is_err());
+        assert_eq!(parse_init(VarType::Int, ""), Ok(None));
+        assert!(parse_init(VarType::Int, "1.5").is_err());
     }
 }

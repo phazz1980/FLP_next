@@ -10,6 +10,13 @@ name = "in"
 type = "bool"
 description = "true — высокий уровень (или низкий при инверсии)"
 
+[[input]]
+name = "en"
+type = "bool"
+default = true
+when = "write_enable"
+description = "Разрешение записи: пока false, выход сохраняет прежнее состояние"
+
 [[param]]
 name = "pin"
 type = "pin"
@@ -20,3 +27,9 @@ name = "inverted"
 type = "bool"
 default = false
 description = "Инвертировать выход (для реле, включаемых низким уровнем)"
+
+[[param]]
+name = "write_enable"
+type = "bool"
+default = false
+description = "Добавить вход «Разрешение записи» (en)"

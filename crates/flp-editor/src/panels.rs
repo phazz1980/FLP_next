@@ -7,7 +7,7 @@ use flp_core::{BlockPos, ParamKind};
 
 use crate::app::{EditorApp, LogLevel, RightTab};
 use crate::canvas::DragItem;
-use crate::dialogs::{type_name, value_text, Dialog};
+use crate::dialogs::{value_text, Dialog};
 use crate::job::JobKind;
 
 pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
@@ -60,8 +60,11 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
             .clicked()
         {
             let port = app.port_choice();
-            app.start_job(JobKind::Upload { port, debug: false }, ui.ctx());
+            app.start_job(JobKind::Upload { port }, ui.ctx());
         }
+        ui.checkbox(&mut app.debug_firmware, "С отладкой").on_hover_text(
+            "Собирать прошивку с модулем онлайн-отладки (и фоновую сборку тоже);              после заливки редактор подключится к плате",
+        );
         ui.separator();
         ui.label("Порт:");
         let selected = if app.port.is_empty() {
@@ -241,12 +244,12 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
                                         .iter()
                                         .any(|b| b.var_name() == Some(var.name.as_str()));
                                     let text = if used {
-                                        RichText::new(format!("{} <{}>", var.name, type_name(var.ty)))
+                                        RichText::new(format!("{} <{}>", var.name, var.ty.name()))
                                     } else {
                                         RichText::new(format!(
                                             "{} <{}>  (не используется)",
                                             var.name,
-                                            type_name(var.ty)
+                                            var.ty.name()
                                         ))
                                         .color(pal.warning)
                                     };
@@ -258,7 +261,7 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
                                         )
                                         .response;
                                     let resp = resp.on_hover_text(format!(
-                                        "{}\nПеретащите на плату — чтение, с Shift — запись. Двойной щелчок — изменить.",
+                                        "{}\nПеретащите на плату: чтение или запись определяется тем, с какой стороны подключена связь. Двойной щелчок — изменить.",
                                         var.description
                                     ));
                                     if resp.double_clicked() {

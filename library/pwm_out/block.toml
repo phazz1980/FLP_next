@@ -10,7 +10,20 @@ name = "in"
 type = "float"
 description = "Заполнение, % (0…100; значения вне диапазона ограничиваются)"
 
+[[input]]
+name = "en"
+type = "bool"
+default = true
+when = "write_enable"
+description = "Разрешение записи: пока false, выход сохраняет прежнее состояние"
+
 [[param]]
 name = "pin"
 type = "pin"
 description = "Номер вывода GPIO"
+
+[[param]]
+name = "write_enable"
+type = "bool"
+default = false
+description = "Добавить вход «Разрешение записи» (en)"

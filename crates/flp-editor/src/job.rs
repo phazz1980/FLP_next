@@ -11,10 +11,10 @@ use crate::app::LogLevel;
 
 pub enum JobKind {
     Build,
+    /// Quiet low-priority build that warms the build cache after edits.
+    Precompile,
     Upload {
         port: Option<String>,
-        /// Firmware with the online debugging module; the editor connects afterwards.
-        debug: bool,
     },
 }
 
@@ -32,35 +32,46 @@ pub enum JobEvent {
 
 pub struct Job {
     pub title: &'static str,
+    /// Precompilation: no log output, buttons stay enabled.
+    pub background: bool,
     rx: Receiver<JobEvent>,
 }
 
 impl Job {
     /// Starts generation + build (+ upload) on a worker thread. `wake` is called after
     /// every event so the UI can repaint.
+    /// `debug`: firmware with the online debugging module; after an upload the editor
+    /// connects to it.
     pub fn start(
         kind: JobKind,
+        debug: bool,
         project: Project,
         lib: Library,
         wake: impl Fn() + Send + 'static,
     ) -> Self {
         let title = match kind {
             JobKind::Build => "Сборка",
-            JobKind::Upload { debug: false, .. } => "Заливка",
-            JobKind::Upload { debug: true, .. } => "Заливка отладочной прошивки",
+            JobKind::Precompile => "Фоновая сборка",
+            JobKind::Upload { .. } if debug => "Заливка отладочной прошивки",
+            JobKind::Upload { .. } => "Заливка",
         };
+        let background = matches!(kind, JobKind::Precompile);
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
             let send = |e: JobEvent| {
                 let _ = tx.send(e);
                 wake();
             };
-            let result = run(kind, &project, &lib, &mut |level, line| {
+            let result = run(kind, debug, &project, &lib, &mut |level, line| {
                 send(JobEvent::Line(level, line.to_owned()))
             });
             send(JobEvent::Done(result));
         });
-        Self { title, rx }
+        Self {
+            title,
+            background,
+            rx,
+        }
     }
 
     /// Events received since the last call.
@@ -71,11 +82,12 @@ impl Job {
 
 fn run(
     kind: JobKind,
+    debug: bool,
     project: &Project,
     lib: &Library,
     out: &mut dyn FnMut(LogLevel, &str),
 ) -> Result<Done, String> {
-    let debug = matches!(kind, JobKind::Upload { debug: true, .. });
+    let background = matches!(kind, JobKind::Precompile);
     let program = Program::build(project, lib).map_err(|e| e.to_string())?;
     let code = ArduinoCpp { debug }
         .generate(&program)
@@ -101,7 +113,8 @@ fn run(
         } else {
             BuildMode::Release
         },
-        verbose: true,
+        verbose: !background,
+        low_priority: background,
         ..Default::default()
     };
     // Only build stages and diagnostics; compiler command lines stay hidden.
@@ -121,12 +134,12 @@ fn run(
     .map_err(|e| e.to_string())?;
 
     match kind {
-        JobKind::Build => Ok(Done {
+        JobKind::Build | JobKind::Precompile => Ok(Done {
             message: "Сборка готова".into(),
             port: None,
             debug,
         }),
-        JobKind::Upload { port, .. } => {
+        JobKind::Upload { port } => {
             let port = cli
                 .choose_port(port.as_deref(), board)
                 .map_err(|e| e.to_string())?;

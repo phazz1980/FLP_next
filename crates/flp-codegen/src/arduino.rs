@@ -300,14 +300,14 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
     if !vars.is_empty() {
         out.push_str("\n// Переменные\n");
         for v in vars {
-            let init = v
-                .init
-                .as_ref()
-                .map_or_else(|| zero(v.ty).to_owned(), |i| constant_literal(v.ty, i));
+            let init = v.init.as_ref().map_or_else(
+                || zero(v.ty.signal()).to_owned(),
+                |i| constant_literal(v.ty.signal(), i),
+            );
             let _ = writeln!(
                 out,
                 "{} {} = {};",
-                cpp_type(v.ty),
+                v.ty.cpp(),
                 flp_core::vars::storage_name(&v.name),
                 init
             );

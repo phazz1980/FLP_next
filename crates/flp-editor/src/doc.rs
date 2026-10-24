@@ -15,6 +15,8 @@ pub struct Doc {
     pub project: Project,
     /// Unsaved changes.
     pub dirty: bool,
+    /// Bumped on every change of the project; background precompilation compares it.
+    pub revision: u64,
     /// Check result for the current schema, refreshed after every edit.
     pub report: Report,
     undo: Vec<Snapshot>,
@@ -34,6 +36,7 @@ impl Doc {
         Ok(Self {
             project,
             dirty: false,
+            revision: 0,
             report,
             undo: Vec::new(),
             redo: Vec::new(),
@@ -66,6 +69,7 @@ impl Doc {
                 self.redo.clear();
                 self.last_key = key;
                 self.dirty = true;
+                self.revision += 1;
                 self.recheck(lib);
                 Ok(value)
             }
@@ -114,6 +118,7 @@ impl Doc {
     fn after_history(&mut self, lib: &Library) {
         self.last_key = None;
         self.dirty = true;
+        self.revision += 1;
         self.recheck(lib);
     }
 

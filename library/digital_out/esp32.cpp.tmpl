@@ -1,4 +1,4 @@
 // @setup
 pinMode({{ param.pin }}, OUTPUT);
 // @loop
-digitalWrite({{ param.pin }}, {% if param.inverted %}!{% endif %}({{ input.in }}) ? HIGH : LOW);
+{% if param.write_enable %}if ({{ input.en }}) {% endif %}digitalWrite({{ param.pin }}, {% if param.inverted %}!{% endif %}({{ input.in }}) ? HIGH : LOW);

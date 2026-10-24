@@ -21,23 +21,37 @@ pub fn debug_table(program: &Program) -> DebugTable {
                 source: Source::Output(PortRef::new(&inst.block.id, port)),
                 ty: signal.ty,
                 storage: signal.name.clone(),
+                cpp_type: "",
             });
         }
     }
     let mut entries: Vec<Entry> = entries.into_iter().flatten().collect();
     entries.extend(program.project.logic.vars.iter().map(|v| Entry {
         source: Source::Var(v.name.clone()),
-        ty: v.ty,
+        ty: v.ty.signal(),
         storage: storage_name(&v.name),
+        cpp_type: v.ty.cpp(),
     }));
     DebugTable { entries }
 }
 
-fn type_code(ty: SignalType) -> u8 {
-    match ty {
-        SignalType::Bool => 0,
-        SignalType::Int => 1,
-        SignalType::Float => 2,
+/// Storage kind in firmware: 0 bool, 1 int32, 2 float, 3 int8, 4 uint8, 5 int16,
+/// 6 uint16, 7 uint32, 8 int64, 9 uint64, 10 double. Values travel as int32 / float bits.
+fn type_code(e: &Entry) -> u8 {
+    match e.cpp_type {
+        "char" | "int8_t" => 3,
+        "byte" | "uint8_t" => 4,
+        "short" | "int16_t" => 5,
+        "word" | "uint16_t" => 6,
+        "unsigned int" | "unsigned long" | "uint32_t" => 7,
+        "long long" | "int64_t" => 8,
+        "unsigned long long" | "uint64_t" => 9,
+        "double" => 10,
+        _ => match e.ty {
+            SignalType::Bool => 0,
+            SignalType::Int => 1,
+            SignalType::Float => 2,
+        },
     }
 }
 
@@ -53,7 +67,7 @@ pub fn runtime(table: &DebugTable) -> String {
     let types: Vec<String> = table
         .entries
         .iter()
-        .map(|e| type_code(e.ty).to_string())
+        .map(|e| type_code(e).to_string())
         .chain(["0".to_owned()])
         .collect();
     let mut out = String::new();
@@ -66,7 +80,7 @@ const uint32_t FLP_DBG_FINGERPRINT = 0x{fingerprint:08X}UL;
 const uint16_t FLP_DBG_COUNT = {n};
 // Наблюдаемые значения: выходы блоков, затем переменные (+ пустой элемент в конце).
 void* const flp_dbg_ptr[FLP_DBG_COUNT + 1] = {{ {ptrs} }};
-const uint8_t flp_dbg_type[FLP_DBG_COUNT + 1] = {{ {types} }};  // 0 bool, 1 int, 2 float
+const uint8_t flp_dbg_type[FLP_DBG_COUNT + 1] = {{ {types} }};  // see type_code in flp-codegen
 bool flp_dbg_forced[FLP_DBG_COUNT + 1];
 uint32_t flp_dbg_force_raw[FLP_DBG_COUNT + 1];
 uint8_t flp_dbg_rx[4 + 255 + 2];
@@ -98,19 +112,34 @@ void flp_dbg_frame(uint8_t type, const uint8_t* data, uint8_t len) {{
 
 uint32_t flp_dbg_get(uint16_t i) {{
   uint32_t raw = 0;
-  if (flp_dbg_type[i] == 0) {{
-    raw = *(bool*)flp_dbg_ptr[i] ? 1 : 0;
-  }} else {{
-    memcpy(&raw, flp_dbg_ptr[i], 4);
+  void* p = flp_dbg_ptr[i];
+  switch (flp_dbg_type[i]) {{
+    case 0: raw = *(bool*)p ? 1 : 0; break;
+    case 3: raw = (uint32_t)(int32_t)*(int8_t*)p; break;
+    case 4: raw = *(uint8_t*)p; break;
+    case 5: raw = (uint32_t)(int32_t)*(int16_t*)p; break;
+    case 6: raw = *(uint16_t*)p; break;
+    case 8: raw = (uint32_t)(int32_t)*(int64_t*)p; break;
+    case 9: raw = (uint32_t)*(uint64_t*)p; break;
+    case 10: {{ float f = (float)*(double*)p; memcpy(&raw, &f, 4); break; }}
+    default: memcpy(&raw, p, 4);
   }}
   return raw;
 }}
 
 void flp_dbg_put(uint16_t i, uint32_t raw) {{
-  if (flp_dbg_type[i] == 0) {{
-    *(bool*)flp_dbg_ptr[i] = raw != 0;
-  }} else {{
-    memcpy(flp_dbg_ptr[i], &raw, 4);
+  void* p = flp_dbg_ptr[i];
+  int32_t v = (int32_t)raw;
+  switch (flp_dbg_type[i]) {{
+    case 0: *(bool*)p = raw != 0; break;
+    case 3: *(int8_t*)p = (int8_t)v; break;
+    case 4: *(uint8_t*)p = (uint8_t)v; break;
+    case 5: *(int16_t*)p = (int16_t)v; break;
+    case 6: *(uint16_t*)p = (uint16_t)v; break;
+    case 8: *(int64_t*)p = v; break;
+    case 9: *(uint64_t*)p = (uint32_t)raw; break;
+    case 10: {{ float f; memcpy(&f, &raw, 4); *(double*)p = f; break; }}
+    default: memcpy(p, &raw, 4);
   }}
 }}
 

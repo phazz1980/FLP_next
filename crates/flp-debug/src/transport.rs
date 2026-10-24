@@ -23,17 +23,41 @@ mod serial {
 
     struct SerialTransport(Box<dyn serialport::SerialPort>);
 
+    /// How long a write may stall (e.g. while the board reboots after the port opens).
+    /// After that the frame is dropped: the session repeats requests and reports a
+    /// silent board itself, so a stalled driver is not a lost link.
+    const WRITE_DEADLINE: Duration = Duration::from_millis(500);
+
+    /// Windows USB-serial drivers report a timeout as ERROR_SEM_TIMEOUT (121).
+    fn is_timeout(e: &io::Error) -> bool {
+        e.kind() == io::ErrorKind::TimedOut || e.raw_os_error() == Some(121)
+    }
+
     impl Transport for SerialTransport {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             match self.0.read(buf) {
                 Ok(n) => Ok(n),
-                Err(e) if e.kind() == io::ErrorKind::TimedOut => Ok(0),
+                Err(e) if is_timeout(&e) => Ok(0),
                 Err(e) => Err(e),
             }
         }
 
-        fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
-            Write::write_all(&mut self.0, data)
+        fn write_all(&mut self, mut data: &[u8]) -> io::Result<()> {
+            let deadline = std::time::Instant::now() + WRITE_DEADLINE;
+            while !data.is_empty() {
+                match self.0.write(data) {
+                    Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                    Ok(n) => data = &data[n..],
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    Err(e) if is_timeout(&e) => {
+                        if std::time::Instant::now() >= deadline {
+                            return Ok(());
+                        }
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(())
         }
     }
 
@@ -41,10 +65,16 @@ mod serial {
     pub fn serial(port: &str) -> Connector {
         let port = port.to_owned();
         Box::new(move || {
-            let p = serialport::new(&port, BAUD)
+            let mut p = serialport::new(&port, BAUD)
                 .timeout(Duration::from_millis(50))
                 .open()
                 .map_err(io::Error::other)?;
+            // On DevKit boards DTR/RTS drive EN and GPIO0 through the auto-reset
+            // circuit; a half-asserted pair holds the chip in reset or the bootloader.
+            // Release both, as the Arduino serial monitor does.
+            p.write_data_terminal_ready(false)
+                .map_err(io::Error::other)?;
+            p.write_request_to_send(false).map_err(io::Error::other)?;
             Ok(Box::new(SerialTransport(p)) as Box<dyn Transport>)
         })
     }

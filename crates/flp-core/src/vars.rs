@@ -18,11 +18,158 @@ pub const VAR_SET: &str = "var_set";
 /// Parameter of variable blocks naming the variable.
 pub const VAR_PARAM: &str = "var";
 
+/// Arduino storage type of a variable. On the sheets it carries the signal of
+/// [`VarType::signal`]; the sketch stores it in the declared C++ type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum VarType {
+    #[serde(rename = "bool", alias = "boolean")]
+    Bool,
+    #[serde(rename = "char")]
+    Char,
+    #[serde(rename = "byte")]
+    Byte,
+    #[serde(rename = "short")]
+    Short,
+    #[serde(rename = "word")]
+    Word,
+    #[serde(rename = "int")]
+    Int,
+    #[serde(rename = "unsigned int")]
+    UnsignedInt,
+    #[serde(rename = "long")]
+    Long,
+    #[serde(rename = "unsigned long")]
+    UnsignedLong,
+    #[serde(rename = "long long")]
+    LongLong,
+    #[serde(rename = "unsigned long long")]
+    UnsignedLongLong,
+    #[serde(rename = "int8_t")]
+    Int8,
+    #[serde(rename = "uint8_t")]
+    Uint8,
+    #[serde(rename = "int16_t")]
+    Int16,
+    #[serde(rename = "uint16_t")]
+    Uint16,
+    #[serde(rename = "int32_t")]
+    Int32,
+    #[serde(rename = "uint32_t")]
+    Uint32,
+    #[serde(rename = "int64_t")]
+    Int64,
+    #[serde(rename = "uint64_t")]
+    Uint64,
+    #[serde(rename = "float")]
+    Float,
+    #[serde(rename = "double")]
+    Double,
+}
+
+impl VarType {
+    pub const ALL: [VarType; 21] = [
+        VarType::Bool,
+        VarType::Char,
+        VarType::Byte,
+        VarType::Short,
+        VarType::Word,
+        VarType::Int,
+        VarType::UnsignedInt,
+        VarType::Long,
+        VarType::UnsignedLong,
+        VarType::LongLong,
+        VarType::UnsignedLongLong,
+        VarType::Int8,
+        VarType::Uint8,
+        VarType::Int16,
+        VarType::Uint16,
+        VarType::Int32,
+        VarType::Uint32,
+        VarType::Int64,
+        VarType::Uint64,
+        VarType::Float,
+        VarType::Double,
+    ];
+
+    /// Name as written in Arduino code and in `logic.toml`.
+    pub fn name(self) -> &'static str {
+        match self {
+            VarType::Bool => "bool",
+            VarType::Char => "char",
+            VarType::Byte => "byte",
+            VarType::Short => "short",
+            VarType::Word => "word",
+            VarType::Int => "int",
+            VarType::UnsignedInt => "unsigned int",
+            VarType::Long => "long",
+            VarType::UnsignedLong => "unsigned long",
+            VarType::LongLong => "long long",
+            VarType::UnsignedLongLong => "unsigned long long",
+            VarType::Int8 => "int8_t",
+            VarType::Uint8 => "uint8_t",
+            VarType::Int16 => "int16_t",
+            VarType::Uint16 => "uint16_t",
+            VarType::Int32 => "int32_t",
+            VarType::Uint32 => "uint32_t",
+            VarType::Int64 => "int64_t",
+            VarType::Uint64 => "uint64_t",
+            VarType::Float => "float",
+            VarType::Double => "double",
+        }
+    }
+
+    /// C++ type of the storage in the sketch. `int` stays 32-bit as before.
+    pub fn cpp(self) -> &'static str {
+        match self {
+            VarType::Int => "int32_t",
+            other => other.name(),
+        }
+    }
+
+    /// Signal type of the variable blocks on the sheets.
+    pub fn signal(self) -> SignalType {
+        match self {
+            VarType::Bool => SignalType::Bool,
+            VarType::Float | VarType::Double => SignalType::Float,
+            _ => SignalType::Int,
+        }
+    }
+
+    /// Allowed range of an integer type.
+    pub fn int_range(self) -> Option<(i64, i64)> {
+        Some(match self {
+            VarType::Char | VarType::Int8 => (i8::MIN.into(), i8::MAX.into()),
+            VarType::Byte | VarType::Uint8 => (0, u8::MAX.into()),
+            VarType::Short | VarType::Int16 => (i16::MIN.into(), i16::MAX.into()),
+            VarType::Word | VarType::Uint16 => (0, u16::MAX.into()),
+            VarType::Int | VarType::Long | VarType::Int32 => (i32::MIN.into(), i32::MAX.into()),
+            VarType::UnsignedInt | VarType::UnsignedLong | VarType::Uint32 => (0, u32::MAX.into()),
+            VarType::LongLong | VarType::Int64 | VarType::UnsignedLongLong | VarType::Uint64 => {
+                (i64::MIN, i64::MAX)
+            }
+            _ => return None,
+        })
+    }
+
+    /// Whether `value` fits as the initial value.
+    pub fn accepts(self, value: &ParamValue) -> bool {
+        match (self.int_range(), value) {
+            (Some((lo, hi)), ParamValue::Int(v)) => (lo..=hi).contains(v),
+            (Some(_), _) => false,
+            (None, _) => self.signal().accepts(value),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Var {
     pub name: String,
     #[serde(rename = "type")]
-    pub ty: SignalType,
+    pub ty: VarType,
+    /// The writing block gets a bool input `en`: the value is written only while it
+    /// is true ("разрешение записи").
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub write_enable: bool,
     /// Value after power-on; false / 0 when omitted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub init: Option<ParamValue>,
@@ -55,11 +202,15 @@ pub(crate) fn builtin_kind(logic: &Logic, block: &Block) -> Option<String> {
     if block.kind != VAR_GET && block.kind != VAR_SET {
         return None;
     }
-    let ty = block
-        .var_name()
-        .and_then(|name| logic.var(name))
-        .map_or(SignalType::Float, |v| v.ty);
-    Some(format!("{}_{}", block.kind, type_suffix(ty)))
+    let var = block.var_name().and_then(|name| logic.var(name));
+    let ty = var.map_or(SignalType::Float, |v| v.ty.signal());
+    let en = block.kind == VAR_SET && var.is_some_and(|v| v.write_enable);
+    Some(format!(
+        "{}_{}{}",
+        block.kind,
+        type_suffix(ty),
+        if en { "_en" } else { "" }
+    ))
 }
 
 fn type_suffix(ty: SignalType) -> &'static str {
@@ -78,7 +229,7 @@ pub fn storage_name(var: &str) -> String {
 pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
     let mut blocks = BTreeMap::new();
     for ty in [SignalType::Bool, SignalType::Int, SignalType::Float] {
-        for get in [true, false] {
+        for (get, en) in [(true, false), (false, false), (false, true)] {
             let kind = if get { VAR_GET } else { VAR_SET };
             let port = PortDef {
                 name: if get { "out" } else { "in" }.to_owned(),
@@ -111,7 +262,20 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                     libraries: Vec::new(),
                     single: false,
                 },
-                inputs: if get { Vec::new() } else { vec![port.clone()] },
+                inputs: match (get, en) {
+                    (true, _) => Vec::new(),
+                    (false, false) => vec![port.clone()],
+                    (false, true) => vec![
+                        port.clone(),
+                        PortDef {
+                            name: "en".to_owned(),
+                            ty: SignalType::Bool,
+                            default: Some(ParamValue::Bool(true)),
+                            when: None,
+                            description: "Разрешение записи".to_owned(),
+                        },
+                    ],
+                },
                 outputs: if get { vec![port] } else { Vec::new() },
                 params: vec![ParamDef {
                     name: VAR_PARAM.to_owned(),

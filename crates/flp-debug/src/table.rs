@@ -20,6 +20,8 @@ pub struct Entry {
     pub ty: SignalType,
     /// C++ name of the storage in the sketch.
     pub storage: String,
+    /// C++ type of the storage; empty for the default of `ty` (bool, int32_t, float).
+    pub cpp_type: &'static str,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -121,6 +123,7 @@ mod tests {
             source: Source::Var(storage.into()),
             ty,
             storage: storage.into(),
+            cpp_type: "",
         }
     }
 
