@@ -59,6 +59,14 @@ enum Command {
         #[arg(long)]
         debug: bool,
     },
+    /// Показывать живые значения с платы (прошивка собрана с --debug)
+    Monitor {
+        /// Папка проекта
+        project: PathBuf,
+        /// Порт платы, например COM3 (по умолчанию из project.toml)
+        #[arg(long, short)]
+        port: Option<String>,
+    },
     /// Собрать прошивку и залить её на плату
     Upload {
         /// Папка проекта
@@ -89,6 +97,7 @@ fn main() -> ExitCode {
             port,
             debug,
         } => run_build(&project, cli.library.as_deref(), debug, Some(port)),
+        Command::Monitor { project, port } => run_monitor(&project, cli.library.as_deref(), port),
     }
 }
 
@@ -253,6 +262,60 @@ fn write_sketch(project: &Project, code: &str) -> Result<(), ExitCode> {
         }
     }
     Ok(())
+}
+
+/// Prints live values every half second until Ctrl+C.
+fn run_monitor(project_dir: &Path, library: Option<&Path>, port: Option<String>) -> ExitCode {
+    let (project, lib) = match load(project_dir, library) {
+        Ok(loaded) => loaded,
+        Err(code) => return code,
+    };
+    let program = match Program::build(&project, &lib) {
+        Ok(p) => p,
+        Err(GenError::Schema(d)) => {
+            print_diagnostics(&d);
+            return ExitCode::from(EXIT_SCHEMA_ERRORS);
+        }
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            return ExitCode::from(EXIT_GEN_FAILED);
+        }
+    };
+    let Some(port) = port.or_else(|| project.config.board.port.clone()) else {
+        eprintln!("ошибка: укажите порт через --port или в project.toml ([board] port = \"COM3\")");
+        return ExitCode::from(EXIT_BUILD_FAILED);
+    };
+    let table = flp_codegen::debug::debug_table(&program);
+    let names: Vec<String> = table
+        .entries
+        .iter()
+        .map(|e| match &e.source {
+            flp_debug::Source::Output(p) => p.to_string(),
+            flp_debug::Source::Var(v) => format!("${v}"),
+        })
+        .collect();
+    let session = flp_debug::Session::start(table, flp_debug::transport::serial(&port), || {});
+    println!("Монитор {port}, Ctrl+C — выход");
+    let mut printed_console = 0;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let live = session.snapshot();
+        for line in live.console.iter().skip(printed_console) {
+            println!("> {line}");
+        }
+        printed_console = live.console.len();
+        let values: Vec<String> = names
+            .iter()
+            .zip(&live.values)
+            .zip(&live.forced)
+            .map(|((name, v), f)| {
+                let v = v.map_or("—".to_owned(), |v| v.to_string());
+                let mark = if f.is_some() { " (F)" } else { "" };
+                format!("{name}={v}{mark}")
+            })
+            .collect();
+        println!("[{}] {}", live.status, values.join("  "));
+    }
 }
 
 fn print_diagnostics(diagnostics: &[Diagnostic]) {
