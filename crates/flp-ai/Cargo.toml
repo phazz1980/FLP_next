@@ -1,0 +1,14 @@
+[package]
+name = "flp-ai"
+description = "Shared command set for the AI assistant and the MCP server of FLP_next"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+flp-build = { path = "../flp-build" }
+flp-codegen = { path = "../flp-codegen" }
+flp-core = { path = "../flp-core" }
+flp-debug = { path = "../flp-debug", features = ["serial"] }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true

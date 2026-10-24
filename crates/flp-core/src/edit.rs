@@ -156,6 +156,33 @@ impl Project {
         Ok(())
     }
 
+    /// A free spot on `sheet` for a block placed without coordinates (by AI or a
+    /// command): blocks go left to right in rows below the existing ones.
+    pub fn free_position(&self, sheet: u32) -> BlockPos {
+        let on_sheet: Vec<&BlockPos> = self
+            .layout
+            .blocks
+            .values()
+            .filter(|p| p.sheet == sheet)
+            .collect();
+        let bottom = on_sheet.iter().map(|p| p.y).fold(-120.0_f32, f32::max);
+        let row: Vec<&&BlockPos> = on_sheet.iter().filter(|p| p.y == bottom).collect();
+        let right = row.iter().map(|p| p.x).fold(-140.0_f32, f32::max);
+        if right + 140.0 < 1000.0 && !row.is_empty() {
+            BlockPos {
+                sheet,
+                x: right + 140.0,
+                y: bottom,
+            }
+        } else {
+            BlockPos {
+                sheet,
+                x: 40.0,
+                y: bottom + 120.0,
+            }
+        }
+    }
+
     /// Sets the name and comment of a sheet; an empty pair removes the entry.
     pub fn set_sheet_info(&mut self, info: crate::SheetInfo) {
         let sheets = &mut self.layout.sheets;

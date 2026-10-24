@@ -1,0 +1,17 @@
+[package]
+name = "flp-mcp"
+description = "MCP server of FLP_next: the AI command set over stdio"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "flp-mcp"
+path = "src/main.rs"
+
+[dependencies]
+flp-ai = { path = "../flp-ai" }
+flp-build = { path = "../flp-build" }
+flp-codegen = { path = "../flp-codegen" }
+flp-core = { path = "../flp-core" }
+flp-debug = { path = "../flp-debug", features = ["serial"] }
+serde_json.workspace = true
