@@ -6,9 +6,7 @@ edition.workspace = true
 
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 minijinja = "2"
-
-[dev-dependencies]
-serde_json.workspace = true

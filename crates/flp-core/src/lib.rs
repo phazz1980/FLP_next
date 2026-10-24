@@ -16,7 +16,7 @@ pub mod vars;
 mod toml_io;
 
 pub use check::{check, Diagnostic, Report, Severity};
-pub use edit::EditError;
+pub use edit::{EditError, Fragment};
 pub use error::{Error, Result};
 pub use layout::{BlockPos, Layout, SheetInfo};
 pub use library::{BlockDef, Library, LibraryBlock, ParamDef, ParamKind, PortDef, SignalType};

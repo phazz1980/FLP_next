@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText};
 use flp_build::{ArduinoCli, SerialPort};
-use flp_core::{Library, PortRef, Severity};
+use flp_core::{BlockPos, Fragment, Library, PortRef, Severity};
 
 use crate::canvas::{self, CanvasState};
 use crate::debugview::{self, DebugState};
@@ -23,8 +23,34 @@ use crate::theme::{self, Theme};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
     Block(String),
+    /// Several blocks (two or more), selected with Ctrl or a frame.
+    Blocks(Vec<String>),
     /// A link, identified by the input it feeds.
     Link(PortRef),
+}
+
+impl Selection {
+    /// Selection of the given blocks: none, one or a group.
+    pub fn of_blocks(mut ids: Vec<String>) -> Option<Self> {
+        ids.dedup();
+        match ids.len() {
+            0 => None,
+            1 => ids.pop().map(Selection::Block),
+            _ => Some(Selection::Blocks(ids)),
+        }
+    }
+
+    pub fn blocks(&self) -> &[String] {
+        match self {
+            Selection::Block(id) => std::slice::from_ref(id),
+            Selection::Blocks(ids) => ids,
+            Selection::Link(_) => &[],
+        }
+    }
+
+    pub fn has_block(&self, id: &str) -> bool {
+        self.blocks().iter().any(|b| b == id)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -368,8 +394,10 @@ impl EditorApp {
             return;
         };
         let result = match &sel {
-            Selection::Block(id) => doc
-                .edit(&self.lib, None, |p| p.remove_block(id))
+            Selection::Block(_) | Selection::Blocks(_) => doc
+                .edit(&self.lib, None, |p| {
+                    sel.blocks().iter().try_for_each(|id| p.remove_block(id))
+                })
                 .map_err(|e| e.to_string()),
             Selection::Link(to) => doc.edit(&self.lib, None, |p| {
                 if p.disconnect(to) {
@@ -381,6 +409,38 @@ impl EditorApp {
         };
         if let Err(e) = result {
             self.info(LogLevel::Error, e);
+        }
+    }
+
+    /// Puts the selected blocks on the system clipboard as JSON, so they can be
+    /// pasted in another editor window or project.
+    pub fn copy_selection(&mut self, ctx: &egui::Context) {
+        let (Some(doc), Some(sel)) = (&self.doc, &self.selection) else {
+            return;
+        };
+        if sel.blocks().is_empty() {
+            return;
+        }
+        let frag = doc.project.copy_fragment(sel.blocks());
+        let n = frag.blocks.len();
+        ctx.copy_text(frag.to_clipboard());
+        self.info(LogLevel::Info, format!("Скопировано блоков: {n}"));
+    }
+
+    /// Inserts blocks from clipboard text at `at` (or a free spot on the active sheet).
+    pub fn paste(&mut self, text: &str, at: Option<BlockPos>) {
+        let Some(frag) = Fragment::from_clipboard(text) else {
+            return;
+        };
+        let Some(doc) = &mut self.doc else { return };
+        let at = at.unwrap_or_else(|| doc.project.free_position(self.sheet));
+        let lib = self.lib.clone();
+        match doc.edit(&lib, None, |p| p.paste_fragment(&lib, &frag, at)) {
+            Ok(ids) => {
+                self.sheet = at.sheet;
+                self.selection = Selection::of_blocks(ids);
+            }
+            Err(e) => self.info(LogLevel::Error, format!("Вставка: {e}")),
         }
     }
 
@@ -621,6 +681,27 @@ impl EditorApp {
         {
             self.delete_selection();
         }
+        if self.dialog.is_none() && !ctx.egui_wants_keyboard_input() {
+            let (copy, paste) = ctx.input(|i| {
+                let mut copy = false;
+                let mut paste = None;
+                for e in &i.events {
+                    match e {
+                        egui::Event::Copy => copy = true,
+                        egui::Event::Paste(t) => paste = Some(t.clone()),
+                        _ => {}
+                    }
+                }
+                (copy, paste)
+            });
+            if copy {
+                self.copy_selection(ctx);
+            }
+            if let Some(text) = paste {
+                let at = self.canvas.paste_pos();
+                self.paste(&text, at);
+            }
+        }
     }
 
     fn menu_bar(&mut self, ui: &mut egui::Ui) {
@@ -703,6 +784,29 @@ impl EditorApp {
                     .clicked()
                 {
                     self.delete_selection();
+                }
+                let has_blocks = self
+                    .selection
+                    .as_ref()
+                    .is_some_and(|s| !s.blocks().is_empty());
+                if ui
+                    .add_enabled(
+                        has_blocks,
+                        egui::Button::new("Копировать").shortcut_text("Ctrl+C"),
+                    )
+                    .clicked()
+                {
+                    self.copy_selection(ui.ctx());
+                }
+                if ui
+                    .add_enabled(
+                        self.doc.is_some(),
+                        egui::Button::new("Вставить").shortcut_text("Ctrl+V"),
+                    )
+                    .clicked()
+                {
+                    ui.ctx()
+                        .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
                 }
             });
             ui.menu_button("Проект", |ui| {

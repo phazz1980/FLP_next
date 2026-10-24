@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use eframe::egui::{self, Id, RichText, ScrollArea, Ui};
 use flp_core::{BlockPos, ParamKind};
 
-use crate::app::{EditorApp, LogLevel, RightTab, Selection};
+use crate::app::{EditorApp, LogLevel, RightTab};
 use crate::canvas::DragItem;
 use crate::dialogs::{type_name, value_text, Dialog};
 use crate::job::JobKind;
@@ -219,7 +219,7 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
                                 .default_open(true)
                                 .show(ui, |ui| {
                                     for (id, text) in items {
-                                        let sel = app.selection == Some(Selection::Block(id.clone()));
+                                        let sel = app.selection.as_ref().is_some_and(|s| s.has_block(id));
                                         if ui.selectable_label(sel, text).clicked() {
                                             focus = Some(id.clone());
                                         }
@@ -299,7 +299,7 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
                                 .default_open(false)
                                 .show(ui, |ui| {
                                     for id in &blocks {
-                                        let sel = app.selection == Some(Selection::Block(id.to_string()));
+                                        let sel = app.selection.as_ref().is_some_and(|s| s.has_block(id));
                                         if ui.selectable_label(sel, *id).clicked() {
                                             focus = Some(id.to_string());
                                         }

@@ -66,6 +66,16 @@ pub struct CanvasState {
     moving: Option<String>,
     /// Block to scroll into view on the next frame.
     pub focus: Option<String>,
+    /// Screen corner where a selection frame (Ctrl + drag) started.
+    band: Option<Pos2>,
+    /// Canvas point under the mouse: where pasted blocks go.
+    hover: Option<BlockPos>,
+}
+
+impl CanvasState {
+    pub fn paste_pos(&self) -> Option<BlockPos> {
+        self.hover
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -336,6 +346,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let font = |size: f32| FontId::proportional(size * z.clamp(0.5, 2.0));
     let pointer = ui.input(|i| i.pointer.hover_pos());
     let shift = ui.input(|i| i.modifiers.shift);
+    let ctrl = ui.input(|i| i.modifiers.command);
 
     // Sheets.
     painter.rect_filled(rect, 0.0, pal.canvas);
@@ -499,14 +510,35 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         let def = defs[id];
         let kind = kind_of(block);
         let resp = ui.interact(r, Id::unique(("block", id)), Sense::click_and_drag());
-        if resp.clicked() || resp.drag_started() || resp.secondary_clicked() {
-            select = Some(Selection::Block(id.to_owned()));
+        let in_sel = selected.as_ref().is_some_and(|s| s.has_block(id));
+        if resp.clicked() && ctrl {
+            // Ctrl + click adds the block to the selection or removes it.
+            let mut ids = selected
+                .as_ref()
+                .map(|s| s.blocks().to_vec())
+                .unwrap_or_default();
+            if in_sel {
+                ids.retain(|b| b != id);
+            } else {
+                ids.push(id.to_owned());
+            }
+            select = Some(Selection::of_blocks(ids));
+        } else if resp.clicked() || resp.secondary_clicked() || (resp.drag_started() && !in_sel) {
+            select = Some(Selection::of_blocks(vec![id.to_owned()]));
         }
         if resp.drag_started() {
             app.canvas.moving = Some(id.to_owned());
         }
         if resp.dragged() && app.canvas.wire.is_none() {
-            moves.push((id.to_owned(), resp.drag_delta() / z));
+            // Dragging a block of a group moves the whole group.
+            match selected.as_ref().filter(|s| in_sel && s.blocks().len() > 1) {
+                Some(s) => {
+                    for b in s.blocks() {
+                        moves.push((b.clone(), resp.drag_delta() / z));
+                    }
+                }
+                None => moves.push((id.to_owned(), resp.drag_delta() / z)),
+            }
         }
         if resp.drag_stopped() {
             drag_end = Some(id.to_owned());
@@ -515,7 +547,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             open_dialog = Some(id.to_owned());
         }
 
-        let is_sel = selected.as_ref() == Some(&Selection::Block(id.to_owned()));
+        let is_sel = in_sel;
         let border = if errors.contains(&id) {
             Stroke::new(1.8, pal.error)
         } else if is_sel {
@@ -768,6 +800,33 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             y: ((w.y - band.body_top()) / GRID).round().max(0.0) * GRID,
         })
     };
+    app.canvas.hover = pointer.filter(|p| rect.contains(*p)).and_then(drop_at);
+
+    // Selection frame: Ctrl + drag on empty space.
+    let mut framed = None;
+    if bg.drag_started() && ctrl && app.canvas.wire.is_none() {
+        app.canvas.band = bg.interact_pointer_pos();
+    }
+    if let (Some(a), Some(b)) = (app.canvas.band, pointer) {
+        let frame = Rect::from_two_pos(a, b);
+        painter.rect(
+            frame,
+            CornerRadius::ZERO,
+            pal.accent.gamma_multiply(0.12),
+            Stroke::new(1.0, pal.accent),
+            StrokeKind::Inside,
+        );
+        if bg.drag_stopped() || released {
+            let ids: Vec<String> = logic
+                .blocks
+                .iter()
+                .filter(|bl| screen_rect(&bl.id).is_some_and(|r| frame.intersects(r)))
+                .map(|bl| bl.id.clone())
+                .collect();
+            framed = Some(Selection::of_blocks(ids));
+            app.canvas.band = None;
+        }
+    }
     let drop = dropped.and_then(|item| Some(((*item).clone(), drop_at(pointer?)?)));
     // Where a moved block ends up: the sheet under its top-left corner.
     let landing = drag_end.as_ref().and_then(|id| {
@@ -788,7 +847,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     });
 
     // Pan and zoom.
-    if bg.dragged() && app.canvas.wire.is_none() {
+    if bg.dragged() && app.canvas.wire.is_none() && app.canvas.band.is_none() && framed.is_none() {
         view.pan += bg.drag_delta();
     }
     if ui.rect_contains_pointer(rect) {
@@ -808,8 +867,11 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     if bg.clicked() {
         app.select(clicked_link.map(Selection::Link));
     }
+    if let Some(s) = framed {
+        app.select(s);
+    }
     if let Some(s) = select {
-        if let Selection::Block(id) = &s {
+        if let Some(Selection::Block(id)) = &s {
             if let Some(p) = app
                 .doc
                 .as_ref()
@@ -818,7 +880,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 app.sheet = p.sheet;
             }
         }
-        app.select(Some(s));
+        app.select(s);
     }
     if let Some(s) = active_sheet {
         app.sheet = s;
@@ -827,6 +889,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let mut problems = Vec::new();
     let mut added = None;
     if let Some(doc) = &mut app.doc {
+        let group = moves.len() > 1;
         for (id, delta) in moves {
             if let Some(&pos) = doc.project.layout.blocks.get(&id) {
                 let moved = BlockPos {
@@ -834,12 +897,38 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                     y: pos.y + delta.y,
                     ..pos
                 };
-                let _ = doc.edit(&lib, Some(format!("move:{id}")), |p| {
-                    p.move_block(&id, moved)
-                });
+                let key = if group {
+                    "move:group".to_owned()
+                } else {
+                    format!("move:{id}")
+                };
+                let _ = doc.edit(&lib, Some(key), |p| p.move_block(&id, moved));
             }
         }
-        if let (Some(id), Some(pos)) = (&drag_end, landing) {
+        let group_end = drag_end.as_ref().and_then(|id| {
+            let ids = app.selection.as_ref()?.blocks();
+            (ids.len() > 1 && ids.contains(id)).then(|| ids.to_vec())
+        });
+        if let Some(ids) = group_end {
+            // A group stays on its sheets; positions snap to the grid.
+            let _ = doc.edit(&lib, Some("move:group".to_owned()), |p| {
+                for id in &ids {
+                    if let Some(&pos) = p.layout.blocks.get(id) {
+                        let snap = |v: f32| (v / GRID).round().max(0.0) * GRID;
+                        p.move_block(
+                            id,
+                            BlockPos {
+                                x: snap(pos.x),
+                                y: snap(pos.y),
+                                ..pos
+                            },
+                        )?;
+                    }
+                }
+                Ok::<_, flp_core::EditError>(())
+            });
+            doc.end_edit();
+        } else if let (Some(id), Some(pos)) = (&drag_end, landing) {
             let _ = doc.edit(&lib, Some(format!("move:{id}")), |p| p.move_block(id, pos));
             doc.end_edit();
         }

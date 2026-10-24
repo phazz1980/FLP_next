@@ -313,6 +313,156 @@ impl Project {
     }
 }
 
+/// Blocks copied to the clipboard: the blocks, links between them, the variables
+/// they use and positions relative to the top-left block. Serialized as JSON, so
+/// it can be pasted into another editor window or project.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Fragment {
+    #[serde(default)]
+    pub vars: Vec<Var>,
+    pub blocks: Vec<Block>,
+    #[serde(default)]
+    pub links: Vec<Link>,
+    /// Offsets from the top-left corner of the copied group, by block id.
+    #[serde(default)]
+    pub offsets: std::collections::BTreeMap<String, (f32, f32)>,
+}
+
+impl Fragment {
+    /// Marker so arbitrary clipboard text is not taken for blocks.
+    const TAG: &'static str = "flp-fragment";
+
+    pub fn to_clipboard(&self) -> String {
+        let mut v = serde_json::to_value(self).expect("fragment serializes");
+        v["format"] = Self::TAG.into();
+        serde_json::to_string_pretty(&v).expect("json")
+    }
+
+    /// Parses clipboard text; `None` when it is not a copied fragment.
+    pub fn from_clipboard(text: &str) -> Option<Self> {
+        let v: serde_json::Value = serde_json::from_str(text.trim()).ok()?;
+        if v.get("format")?.as_str()? != Self::TAG {
+            return None;
+        }
+        serde_json::from_value(v).ok()
+    }
+}
+
+impl Project {
+    /// Copies the given blocks with the links among them; unknown ids are skipped.
+    pub fn copy_fragment(&self, ids: &[String]) -> Fragment {
+        let blocks: Vec<Block> = self
+            .logic
+            .blocks
+            .iter()
+            .filter(|b| ids.contains(&b.id))
+            .cloned()
+            .collect();
+        let has = |id: &str| blocks.iter().any(|b| b.id == id);
+        let links = self
+            .logic
+            .links
+            .iter()
+            .filter(|l| has(&l.from.block) && has(&l.to.block))
+            .cloned()
+            .collect();
+        let mut vars: Vec<Var> = Vec::new();
+        for name in blocks.iter().filter_map(|b| b.var_name()) {
+            if let Some(v) = self.logic.var(name) {
+                if !vars.iter().any(|x| x.name == v.name) {
+                    vars.push(v.clone());
+                }
+            }
+        }
+        let pos: Vec<(&str, BlockPos)> = blocks
+            .iter()
+            .filter_map(|b| Some((b.id.as_str(), *self.layout.blocks.get(&b.id)?)))
+            .collect();
+        let min_x = pos.iter().map(|p| p.1.x).fold(f32::INFINITY, f32::min);
+        let min_y = pos.iter().map(|p| p.1.y).fold(f32::INFINITY, f32::min);
+        let offsets = pos
+            .iter()
+            .map(|(id, p)| ((*id).to_owned(), (p.x - min_x, p.y - min_y)))
+            .collect();
+        Fragment {
+            vars,
+            blocks,
+            links,
+            offsets,
+        }
+    }
+
+    /// Inserts a fragment with its top-left corner at `at` and returns the new ids.
+    /// Taken ids get a numeric suffix; missing variables are declared, existing
+    /// ones with the same name are reused.
+    pub fn paste_fragment(
+        &mut self,
+        lib: &Library,
+        frag: &Fragment,
+        at: BlockPos,
+    ) -> Result<Vec<String>, EditError> {
+        for b in &frag.blocks {
+            if b.var_name().is_none() && lib.get(&b.kind).is_none() {
+                return Err(EditError::UnknownType(b.kind.clone()));
+            }
+            if !is_valid_ident(&b.id) {
+                return Err(EditError::InvalidId(b.id.clone()));
+            }
+        }
+        for v in &frag.vars {
+            if self.logic.var(&v.name).is_none() {
+                self.add_var(v.clone())?;
+            }
+        }
+        let mut renamed = std::collections::BTreeMap::new();
+        let mut ids = Vec::new();
+        for b in &frag.blocks {
+            if let Some(name) = b.var_name() {
+                if self.logic.var(name).is_none() {
+                    return Err(EditError::NoVar(name.to_owned()));
+                }
+            }
+            let id = if self.logic.block(&b.id).is_none() {
+                b.id.clone()
+            } else {
+                let base = b.id.trim_end_matches(|c: char| c.is_ascii_digit());
+                let base = base.trim_end_matches('_');
+                (2..)
+                    .map(|n| format!("{base}_{n}"))
+                    .find(|id| self.logic.block(id).is_none())
+                    .expect("infinite range")
+            };
+            let (dx, dy) = frag.offsets.get(&b.id).copied().unwrap_or_default();
+            self.logic.blocks.push(Block {
+                id: id.clone(),
+                ..b.clone()
+            });
+            self.layout.blocks.insert(
+                id.clone(),
+                BlockPos {
+                    sheet: at.sheet,
+                    x: at.x + dx,
+                    y: at.y + dy,
+                },
+            );
+            renamed.insert(b.id.clone(), id.clone());
+            ids.push(id);
+        }
+        for l in &frag.links {
+            let (Some(from), Some(to)) = (renamed.get(&l.from.block), renamed.get(&l.to.block))
+            else {
+                continue;
+            };
+            self.connect(
+                lib,
+                PortRef::new(from, &l.from.port),
+                PortRef::new(to, &l.to.port),
+            )?;
+        }
+        Ok(ids)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -465,5 +615,36 @@ mod tests {
         assert!(p.set_param(&lib, &s, "speed", None).is_err());
         p.set_param(&lib, &s, "pin", None).unwrap();
         assert!(p.logic.blocks[0].params.is_empty());
+    }
+
+    #[test]
+    fn copy_paste_fragment() {
+        let lib = library();
+        let mut p = project();
+        let a = p.add_block(&lib, "src", POS).unwrap();
+        let b = p
+            .add_block(&lib, "sink", BlockPos { x: 100.0, ..POS })
+            .unwrap();
+        p.connect(&lib, PortRef::new(&a, "out"), PortRef::new(&b, "in"))
+            .unwrap();
+        let frag = p.copy_fragment(&[a.clone(), b.clone()]);
+        let text = frag.to_clipboard();
+        assert_eq!(Fragment::from_clipboard(&text), Some(frag.clone()));
+        assert!(Fragment::from_clipboard("{}").is_none());
+
+        let at = BlockPos {
+            sheet: 2,
+            x: 40.0,
+            y: 60.0,
+        };
+        let ids = p.paste_fragment(&lib, &frag, at).unwrap();
+        assert_eq!(ids, ["src_2", "sink_2"]);
+        assert_eq!(p.logic.links.len(), 2);
+        assert_eq!(p.layout.blocks["sink_2"].x, 140.0);
+        assert_eq!(p.layout.blocks["sink_2"].sheet, 2);
+
+        // Into another project, keeping ids.
+        let mut q = project();
+        assert_eq!(q.paste_fragment(&lib, &frag, POS).unwrap(), [a, b]);
     }
 }
