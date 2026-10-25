@@ -1,0 +1,125 @@
+[block]
+type = "uart_config"
+name = "Настройки UART"
+symbol = "UART CFG"
+group = "UART"
+description = "Настраивает UART прямо на схеме: скорость, формат, выводы, буфер; скорость и формат можно менять на лету со входов."
+
+[block.uart]
+param = "uart"
+access = "config"
+
+[[input]]
+name = "new_speed"
+label = "скорость"
+type = "int"
+default = 0
+when = "runtime"
+description = "Новая скорость, бод; 0 — не менять. Применяется по фронту apply"
+
+[[input]]
+name = "new_format"
+label = "формат"
+type = "string"
+default = ""
+when = "runtime"
+description = "Новый формат (8N1, 8E1, 7O2...); пустая строка — не менять. Применяется по фронту apply"
+
+[[input]]
+name = "apply"
+label = "применить"
+type = "bool"
+when = "runtime"
+description = "По переходу в true порт переходит на скорость и формат со входов"
+
+[[output]]
+name = "baud"
+label = "бод"
+type = "int"
+description = "Текущая скорость порта, бод"
+
+[[output]]
+name = "ok"
+type = "bool"
+when = "runtime"
+description = "false, если последний формат со входа не понят (тогда порт не менялся)"
+
+[[param]]
+name = "uart"
+label = "UART"
+type = "int"
+default = 2
+min = 0
+max = 2
+description = "Какой UART настраивает блок: UART0 есть у ESP32-C3/S3, UART2 — у ESP32 и ESP32-S3"
+
+[[param.choice]]
+value = 0
+label = "UART0"
+
+[[param.choice]]
+value = 1
+label = "UART1"
+
+[[param.choice]]
+value = 2
+label = "UART2"
+
+[[param]]
+name = "speed"
+label = "скорость, бод"
+type = "int"
+default = 9600
+min = 300
+max = 5000000
+description = "Скорость при запуске"
+
+[[param]]
+name = "format"
+label = "формат"
+type = "string"
+default = "8N1"
+description = "Биты данных, чётность (N — нет, E — чёт, O — нечет) и стоп-биты: 8N1, 8E1, 7E2..."
+
+[[param]]
+name = "rx"
+label = "RX"
+type = "int"
+default = 16
+min = -1
+max = 48
+description = "Вывод RX; -1 — вывод ядра Arduino по умолчанию"
+
+[[param]]
+name = "tx"
+label = "TX"
+type = "int"
+default = 17
+min = -1
+max = 48
+description = "Вывод TX; -1 — вывод ядра Arduino по умолчанию"
+
+[[param]]
+name = "de"
+label = "DE/RE"
+type = "int"
+default = -1
+min = -1
+max = 48
+description = "Вывод переключения приёма и передачи RS-485; -1 — без RS-485"
+
+[[param]]
+name = "rx_buffer"
+label = "буфер приёма"
+type = "int"
+default = 256
+min = 64
+max = 8192
+description = "Размер буфера приёма, байт"
+
+[[param]]
+name = "runtime"
+label = "настройка со входов"
+type = "bool"
+default = false
+description = "Добавить входы new_speed, new_format и apply, чтобы менять скорость и формат во время работы"

@@ -4,13 +4,3 @@ description = "Строки и UART: команды ON / SET <число> из U
 
 [board]
 fqbn = "esp32:esp32:esp32"   # ESP32 DevKit
-
-# Порт для команд (RS-232/TTL-адаптер или второй контроллер).
-[[uart]]
-number = 2
-speed = 9600
-format = "8N1"
-rx = 16
-tx = 17
-de = -1
-rx_buffer = 256

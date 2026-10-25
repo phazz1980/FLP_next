@@ -35,6 +35,9 @@ pub enum SignalType {
     Float,
     /// Text (Arduino `String`): IP addresses, messages, names.
     String,
+    /// Inputs only: takes a signal of any type; the template sees the real one
+    /// in `{{ input_type.<port> }}`. Not in [`SignalType::ALL`].
+    Any,
 }
 
 impl SignalType {
@@ -46,9 +49,39 @@ impl SignalType {
     ];
 
     /// Whether an output of type `self` may feed an input of type `to`.
-    /// Only `int` → `float` widening is implicit.
+    /// Only `int` → `float` widening is implicit; an `any` input takes everything.
     pub fn can_feed(self, to: SignalType) -> bool {
-        self == to || (self == SignalType::Int && to == SignalType::Float)
+        (self == to && self != SignalType::Any)
+            || (self == SignalType::Int && to == SignalType::Float)
+            || (to == SignalType::Any && self != SignalType::Any)
+    }
+
+    /// Constant typed for an `any` input: `true`/`false`, a whole number, a number
+    /// with `.` or `,`, otherwise the text as it is.
+    pub fn guess_value(text: &str) -> ParamValue {
+        let t = text.trim();
+        match t {
+            "true" => return ParamValue::Bool(true),
+            "false" => return ParamValue::Bool(false),
+            _ => {}
+        }
+        if let Ok(v) = t.parse::<i64>() {
+            return ParamValue::Int(v);
+        }
+        match t.replace(',', ".").parse::<f64>() {
+            Ok(v) if v.is_finite() => ParamValue::Float(v),
+            _ => ParamValue::Text(text.to_owned()),
+        }
+    }
+
+    /// Type of a constant on an `any` input.
+    pub fn of_value(value: &ParamValue) -> SignalType {
+        match value {
+            ParamValue::Bool(_) => SignalType::Bool,
+            ParamValue::Int(_) => SignalType::Int,
+            ParamValue::Float(_) => SignalType::Float,
+            ParamValue::Text(_) => SignalType::String,
+        }
     }
 
     /// Whether a constant may stand for a signal of this type.
@@ -59,6 +92,7 @@ impl SignalType {
                 | (SignalType::Int, ParamValue::Int(_))
                 | (SignalType::Float, ParamValue::Float(_) | ParamValue::Int(_))
                 | (SignalType::String, ParamValue::Text(_))
+                | (SignalType::Any, _)
         )
     }
 
@@ -69,6 +103,7 @@ impl SignalType {
             SignalType::Int => "int",
             SignalType::Float => "float",
             SignalType::String => "string",
+            SignalType::Any => "any",
         }
     }
 }
@@ -209,6 +244,17 @@ pub struct ParamDef {
     /// (several DS18B20 on one 1-Wire bus).
     #[serde(default, skip_serializing_if = "is_false")]
     pub shared: bool,
+    /// Allowed values with captions: the properties show a drop-down list
+    /// instead of a field (`[[param.choice]]` in `block.toml`).
+    #[serde(rename = "choice", default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<Choice>,
+}
+
+/// One value of a parameter with a list of values.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Choice {
+    pub value: ParamValue,
+    pub label: String,
 }
 
 /// What a block does with a pin (`mode` of a `pin` parameter in `block.toml`).
@@ -288,7 +334,7 @@ impl ParamDef {
     /// Text under the block on the sheet; `None` when the parameter is not shown
     /// (hidden, or an empty value without a caption).
     pub fn caption(&self, value: &ParamValue) -> Option<String> {
-        let text = value.to_string();
+        let text = self.value_label(value);
         match self.show {
             ParamShow::Named => Some(format!("{}={text}", self.title())),
             ParamShow::Hidden => None,
@@ -296,6 +342,29 @@ impl ParamDef {
             ParamShow::Value => Some(text),
             ParamShow::Secret => Some(mask_secret(&text)),
         }
+    }
+
+    /// The value as the user sees it: the caption of its choice, if listed.
+    pub fn value_label(&self, value: &ParamValue) -> String {
+        self.choices
+            .iter()
+            .find(|c| choice_matches(&c.value, value))
+            .map_or_else(|| value.to_string(), |c| c.label.clone())
+    }
+
+    /// Whether `value` is allowed by the list of values (any value without a list).
+    pub fn allows(&self, value: &ParamValue) -> bool {
+        self.choices.is_empty() || self.choices.iter().any(|c| choice_matches(&c.value, value))
+    }
+}
+
+/// `1` and `1.0` are the same choice of a float parameter.
+fn choice_matches(choice: &ParamValue, value: &ParamValue) -> bool {
+    match (choice, value) {
+        (ParamValue::Int(a), ParamValue::Float(b)) | (ParamValue::Float(b), ParamValue::Int(a)) => {
+            *a as f64 == *b
+        }
+        _ => choice == value,
     }
 }
 
@@ -426,6 +495,12 @@ impl BlockDef {
                 ));
             }
         }
+        if let Some(p) = self.outputs.iter().find(|p| p.ty == SignalType::Any) {
+            return Err(format!(
+                "тип any бывает только у входа, а «{}» — выход",
+                p.name
+            ));
+        }
         if let Some(p) = self.outputs.iter().find(|p| p.default.is_some()) {
             return Err(format!(
                 "у выхода «{}» не может быть значения по умолчанию",
@@ -440,6 +515,18 @@ impl BlockDef {
                         p.name
                     ));
                 }
+                if !p.allows(default) {
+                    return Err(format!(
+                        "значения по умолчанию параметра «{}» нет в его списке choice",
+                        p.name
+                    ));
+                }
+            }
+            if let Some(c) = p.choices.iter().find(|c| !p.kind.accepts(&c.value)) {
+                return Err(format!(
+                    "вариант «{}» параметра «{}» не подходит к его типу",
+                    c.label, p.name
+                ));
             }
         }
         for p in &self.params {
@@ -815,8 +902,47 @@ mod tests {
         assert!(!SignalType::Float.can_feed(SignalType::Int));
         assert!(!SignalType::Bool.can_feed(SignalType::Int));
         assert!(!SignalType::Int.can_feed(SignalType::String));
+        for ty in SignalType::ALL {
+            assert!(ty.can_feed(SignalType::Any));
+            assert!(!SignalType::Any.can_feed(ty));
+        }
+        assert!(SignalType::Any.accepts(&ParamValue::Text("x".into())));
+        assert_eq!(SignalType::guess_value(" 12 "), ParamValue::Int(12));
+        assert_eq!(SignalType::guess_value("2,5"), ParamValue::Float(2.5));
+        assert_eq!(SignalType::guess_value("true"), ParamValue::Bool(true));
+        assert_eq!(
+            SignalType::guess_value("ON "),
+            ParamValue::Text("ON ".into())
+        );
         assert!(SignalType::String.accepts(&ParamValue::Text("192.168.1.1".into())));
         assert!(!SignalType::String.accepts(&ParamValue::Int(1)));
+    }
+
+    #[test]
+    fn param_choices() {
+        let src = format!(
+            "{HEADER}[[param]]\nname = \"mode\"\ntype = \"int\"\ndefault = 0\n\
+             [[param.choice]]\nvalue = 0\nlabel = \"Клиент\"\n\
+             [[param.choice]]\nvalue = 1\nlabel = \"Точка доступа\"\n"
+        );
+        let d = def(&src);
+        d.validate("x").unwrap();
+        let p = d.param("mode").unwrap();
+        assert_eq!(
+            p.caption(&ParamValue::Int(1)).as_deref(),
+            Some("mode=Точка доступа")
+        );
+        assert_eq!(p.value_label(&ParamValue::Int(7)), "7");
+        assert!(p.allows(&ParamValue::Int(0)));
+        assert!(!p.allows(&ParamValue::Int(2)));
+
+        let bad_default = def(&src.replace("default = 0", "default = 5"));
+        assert!(bad_default.validate("x").unwrap_err().contains("choice"));
+        let bad_type = def(&src.replace("value = 1", "value = \"1\""));
+        assert!(bad_type
+            .validate("x")
+            .unwrap_err()
+            .contains("Точка доступа"));
     }
 
     #[test]

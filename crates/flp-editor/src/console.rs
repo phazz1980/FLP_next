@@ -79,7 +79,7 @@ pub struct PortConsole {
     connected: bool,
     /// The debugging session talks to firmware built for this schema.
     debug_online: bool,
-    /// The schema reads UART0 (`uart_read`): console input has a reader on the board.
+    /// The schema reads USB (`uart_read`): console input has a reader on the board.
     pub debug_reader: bool,
     /// Lines typed in the debug console, to send as `TEXT_IN`.
     debug_out: Vec<Vec<u8>>,
@@ -225,7 +225,7 @@ impl PortConsole {
     }
 
     /// Whether typed lines can go to the board now: to the port, or while
-    /// debugging to the `uart_read` block on UART0.
+    /// debugging to the `uart_read` block on USB.
     fn can_send(&self) -> bool {
         if self.in_debug {
             self.debug_online && self.debug_reader
@@ -375,11 +375,11 @@ fn input_row(console: &mut PortConsole, ui: &mut Ui) {
     ui.horizontal(|ui| {
         let enabled = console.can_send();
         let hint = if console.in_debug && !console.debug_reader {
-            "в схеме нет блока «Чтение из UART» на UART0 — строку некому прочитать"
+            "в схеме нет блока «Чтение из UART» с портом USB — строку некому прочитать"
         } else if console.in_debug && !enabled {
             "плата не на связи"
         } else if console.in_debug {
-            "строка для «Чтения из UART» на UART0, Enter — отправить"
+            "строка для «Чтения из UART» с USB, Enter — отправить"
         } else if enabled {
             "строка для платы, Enter — отправить"
         } else {

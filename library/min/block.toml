@@ -1,0 +1,18 @@
+[block]
+type = "min"
+name = "Минимум"
+symbol = "MIN"
+group = "Числа"
+description = "Меньшее из a и b."
+
+[[input]]
+name = "a"
+type = "float"
+
+[[input]]
+name = "b"
+type = "float"
+
+[[output]]
+name = "out"
+type = "float"

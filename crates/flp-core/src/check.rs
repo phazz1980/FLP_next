@@ -109,23 +109,12 @@ pub fn check_project(project: &Project, lib: &Library) -> Report {
     let mut report = check(&project.logic, lib, Some(&project.layout));
     let chip = Chip::of_board(&project.config.board);
     let pins = pin_uses(&project.logic, lib);
+    let uarts = crate::uart::check_project_part(project, lib, &pins, chip, &mut report);
     if let Some(chip) = chip {
         check_board_pins(chip, &pins, &mut report);
-        let uart_pins: Vec<PinUse> = project
-            .config
-            .uart
-            .iter()
-            .flat_map(|u| u.pin_uses())
-            .collect();
+        let uart_pins: Vec<PinUse> = uarts.iter().flat_map(|u| u.pin_uses()).collect();
         check_board_pins(chip, &uart_pins, &mut report);
     }
-    crate::uart::check_uarts(
-        &project.config.uart,
-        &crate::uart::block_uarts(&project.logic, lib),
-        &pins,
-        chip,
-        &mut report,
-    );
     report
 }
 
@@ -326,6 +315,22 @@ fn check_param(id: &str, p: &ParamDef, value: &ParamValue, report: &mut Report) 
         report.block_error(
             id,
             format!("блок «{id}»: параметр «{}» — ожидается {expected}", p.name),
+        );
+        return;
+    }
+    if !p.allows(value) {
+        let list: Vec<String> = p
+            .choices
+            .iter()
+            .map(|c| format!("{} ({})", c.value, c.label))
+            .collect();
+        report.block_error(
+            id,
+            format!(
+                "блок «{id}»: параметр «{}» — допустимо только {}",
+                p.name,
+                list.join(", ")
+            ),
         );
         return;
     }
@@ -593,6 +598,7 @@ fn type_name(ty: SignalType) -> &'static str {
         SignalType::Int => "int (целый)",
         SignalType::Float => "float (дробный)",
         SignalType::String => "string (строка)",
+        SignalType::Any => "any (любой)",
     }
 }
 

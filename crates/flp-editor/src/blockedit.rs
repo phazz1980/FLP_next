@@ -10,7 +10,7 @@ use flp_core::ident::ident_from_name;
 use flp_core::library::ESP32_CPP_TEMPLATE;
 use flp_core::vars::{VAR_GET, VAR_SET};
 use flp_core::{
-    BlockDef, LibraryBlock, ParamDef, ParamKind, ParamShow, ParamValue, PinMode, PortDef,
+    BlockDef, Choice, LibraryBlock, ParamDef, ParamKind, ParamShow, ParamValue, PinMode, PortDef,
     SignalType,
 };
 
@@ -113,8 +113,9 @@ struct ParamRow {
     when: String,
     description: String,
     show: ParamShow,
-    /// `local` from `block.toml`, kept as is (no column for it).
+    /// `local` and `[[param.choice]]` from `block.toml`, kept as is (no column for them).
     local: Option<String>,
+    choices: Vec<Choice>,
     /// For pins: direction and sharing, edited next to the type.
     mode: PinMode,
     shared: bool,
@@ -133,6 +134,7 @@ impl ParamRow {
             description: String::new(),
             show: ParamShow::Named,
             local: None,
+            choices: Vec::new(),
             mode: PinMode::Io,
             shared: false,
         }
@@ -151,6 +153,7 @@ impl ParamRow {
             description: p.description.clone(),
             show: p.show,
             local: p.local.clone(),
+            choices: p.choices.clone(),
             mode: p.mode,
             shared: p.shared,
         }
@@ -175,6 +178,7 @@ impl ParamRow {
                 PinMode::Io
             },
             shared: self.kind == ParamKind::Pin && self.shared,
+            choices: self.choices.clone(),
         })
     }
 }
@@ -334,6 +338,7 @@ fn parse_signal(ty: SignalType, text: &str) -> Result<Option<ParamValue>, String
         SignalType::Int => t.parse().ok().map(ParamValue::Int),
         SignalType::Float => parse_float(t).map(ParamValue::Float),
         SignalType::String => Some(ParamValue::Text(t.to_owned())),
+        SignalType::Any => Some(SignalType::guess_value(t)),
     };
     value
         .map(Some)
@@ -748,7 +753,8 @@ fn type_combo(ui: &mut Ui, id: (&str, usize), ty: &mut SignalType) {
         .selected_text(type_name(*ty))
         .width(70.0)
         .show_ui(ui, |ui| {
-            for t in SignalType::ALL {
+            // `any` fits inputs only; the block check says so for an output.
+            for t in SignalType::ALL.into_iter().chain([SignalType::Any]) {
                 ui.selectable_value(ty, t, type_name(t));
             }
         });

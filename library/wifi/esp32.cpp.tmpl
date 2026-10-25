@@ -1,5 +1,6 @@
-{% set client = value.use_mode or value.wifi_mode != 1 %}
-{% set ap = value.use_mode or value.wifi_mode != 0 %}
+{# 0 client, 1 access point, 2 both, 3 chosen by the mode input #}
+{% set client = value.wifi_mode != 1 %}
+{% set ap = value.wifi_mode != 0 %}
 // @global
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgOnBoardWifiInterface flpWifi;
@@ -8,6 +9,173 @@ uint8_t {{ id }}_state = 255;
 {% if value.out_address %}
 // Address shown on the address output; the text is rebuilt only when it changes.
 uint32_t {{ id }}_ip_raw = 0;
+{% endif %}
+{% if value.web %}
+// Stub web page: technical data of the device (port 80).
+FLProgWebServer {{ id }}_web(&flpWifi, 80);
+{% endif %}
+{% if value.ota %}
+// Update over the network (ArduinoOTA through the shared interface).
+FLProgNetworkOta {{ id }}_ota;
+{% endif %}
+{% if value.web %}
+{% if value.web and value.web_update %}
+// Firmware upload from the web page: raw HTTP POST streamed into Update (port 8080).
+FLProgNetworkTcpServer {{ id }}_up;
+FLProgNetworkTcpServerClient *{{ id }}_up_c = nullptr;
+bool {{ id }}_up_on = false;
+uint8_t {{ id }}_up_st = 0;  // 0 idle, 1 headers, 2 body, 3 done (restart pending)
+char {{ id }}_up_line[160];
+uint8_t {{ id }}_up_ll = 0;
+uint32_t {{ id }}_up_len = 0, {{ id }}_up_got = 0, {{ id }}_up_t = 0, {{ id }}_up_try = 0;
+bool {{ id }}_up_auth = false;
+{% endif %}
+// @functions
+{% if value.web_update %}
+void {{ id }}_up_reply(const char *status, const char *text) {
+  String r = String("HTTP/1.1 ") + status + "\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\nContent-Length: " + String(strlen(text)) + "\r\n\r\n" + text;
+  {{ id }}_up_c->write((const uint8_t *)r.c_str(), r.length());
+}
+
+void {{ id }}_up_fail(const char *status, const char *text) {
+  if ({{ id }}_up_st == 2) {
+    Update.abort();
+  }
+  {{ id }}_up_reply(status, text);
+  {{ id }}_up_c->stop();
+  {{ id }}_up_c = nullptr;
+  {{ id }}_up_st = 0;
+}
+
+// Header line: the request line is checked for path and password, Content-Length is remembered.
+void {{ id }}_up_header_line() {
+  char *l = {{ id }}_up_line;
+  if (strncmp(l, "POST /update", 12) == 0) {
+    String expect = String("?p=") + {{ param.ota_password }} + " ";
+    {{ id }}_up_auth = strlen({{ param.ota_password }}) == 0 || strstr(l, expect.c_str()) != nullptr;
+  } else if (strncasecmp(l, "Content-Length:", 15) == 0) {
+    {{ id }}_up_len = (uint32_t)strtoul(l + 15, nullptr, 10);
+  }
+}
+
+void {{ id }}_up_poll() {
+  if (!{{ id }}_up_on) {
+    if (millis() - {{ id }}_up_try > 2000) {
+      {{ id }}_up_try = millis();
+      {{ id }}_up_on = {{ id }}_up.begin(flpWifi, 8080);
+    }
+    return;
+  }
+  {{ id }}_up.pool();
+  if ({{ id }}_up_c == nullptr) {
+    {{ id }}_up_c = {{ id }}_up.takeNewClient();
+    if ({{ id }}_up_c == nullptr) {
+      return;
+    }
+    {{ id }}_up_st = 1;
+    {{ id }}_up_ll = 0;
+    {{ id }}_up_len = 0;
+    {{ id }}_up_got = 0;
+    {{ id }}_up_auth = false;
+    {{ id }}_up_t = millis();
+  }
+  if ({{ id }}_up_st == 3) {
+    if (millis() - {{ id }}_up_t > 800) {
+      ESP.restart();
+    }
+    return;
+  }
+  if (!{{ id }}_up_c->active() || millis() - {{ id }}_up_t > 10000) {
+    if ({{ id }}_up_st == 2) {
+      Update.abort();
+    }
+    {{ id }}_up_c->stop();
+    {{ id }}_up_c = nullptr;
+    {{ id }}_up_st = 0;
+    return;
+  }
+  if ({{ id }}_up_st == 1) {
+    for (uint16_t n = 0; n < 512 && {{ id }}_up_st == 1; n++) {
+      int b = {{ id }}_up_c->read();
+      if (b < 0) {
+        break;
+      }
+      {{ id }}_up_t = millis();
+      if (b == '\n') {
+        {{ id }}_up_line[{{ id }}_up_ll] = 0;
+        if ({{ id }}_up_ll > 0 && {{ id }}_up_line[{{ id }}_up_ll - 1] == '\r') {
+          {{ id }}_up_line[{{ id }}_up_ll - 1] = 0;
+        }
+        bool empty = {{ id }}_up_line[0] == 0;
+        if (!empty) {
+          {{ id }}_up_header_line();
+        }
+        {{ id }}_up_ll = 0;
+        if (empty) {
+          if (!{{ id }}_up_auth) {
+            {{ id }}_up_fail("403 Forbidden", "Неверный пароль");
+          } else if ({{ id }}_up_len == 0 || !Update.begin({{ id }}_up_len)) {
+            {{ id }}_up_fail("500 Internal Server Error", "Нет места под прошивку");
+          } else {
+            {{ id }}_up_st = 2;
+          }
+        }
+      } else if ({{ id }}_up_ll < sizeof({{ id }}_up_line) - 1) {
+        {{ id }}_up_line[{{ id }}_up_ll++] = (char)b;
+      }
+    }
+  }
+  if ({{ id }}_up_st == 2) {
+    for (uint8_t n = 0; n < 4 && {{ id }}_up_got < {{ id }}_up_len; n++) {
+      uint8_t buf[512];
+      uint32_t want = {{ id }}_up_len - {{ id }}_up_got;
+      int got = {{ id }}_up_c->read(buf, want < sizeof(buf) ? want : sizeof(buf));
+      if (got <= 0) {
+        break;
+      }
+      {{ id }}_up_t = millis();
+      if (Update.write(buf, (size_t)got) != (size_t)got) {
+        {{ id }}_up_fail("500 Internal Server Error", "Ошибка записи прошивки");
+        return;
+      }
+      {{ id }}_up_got += (uint32_t)got;
+    }
+    if ({{ id }}_up_got >= {{ id }}_up_len) {
+      if (Update.end(true)) {
+        {{ id }}_up_reply("200 OK", "Прошивка загружена, устройство перезагружается");
+        {{ id }}_up_st = 3;
+        {{ id }}_up_t = millis();
+      } else {
+        {{ id }}_up_fail("500 Internal Server Error", "Прошивка не принята");
+      }
+    }
+  }
+}
+{% endif %}
+
+void {{ id }}_page(FLProgNetworkHttpServer *server) {
+  char mac[18];
+  uint8_t *m = flpWifi.mac();
+  snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", m[0], m[1], m[2], m[3], m[4], m[5]);
+  uint32_t sec = millis() / 1000;
+  String page = F("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>{{ id }}</title></head><body><h1>FLP_next</h1><table>");
+  page += F("<tr><td>IP-адрес</td><td>"); page += flpWifi.localIP().toString(); page += F("</td></tr>");
+  page += F("<tr><td>MAC</td><td>"); page += mac; page += F("</td></tr>");
+  page += F("<tr><td>Сигнал Wi-Fi</td><td>"); page += String(flpWifi.rssi()); page += F(" дБм</td></tr>");
+  page += F("<tr><td>Аптайм</td><td>"); page += String(sec / 3600); page += F(" ч "); page += String(sec / 60 % 60); page += F(" мин</td></tr>");
+  page += F("<tr><td>Сборка</td><td>" __DATE__ " " __TIME__ "</td></tr>");
+{% if value.ota %}
+  page += F("<tr><td>Обновление</td><td>по сети (OTA), имя: "); page += {{ id }}_ota.getName(); page += F("</td></tr>");
+{% else %}
+  page += F("<tr><td>Обновление</td><td>выключено</td></tr>");
+{% endif %}
+  page += F("</table>");
+{% if value.web_update %}
+  page += F("<h2>Обновление прошивки</h2><input type=file id=f accept=.bin><button onclick=\"u()\">Загрузить</button> <span id=s></span><script>function u(){var f=f.files[0];if(!f)return;var p=prompt('Пароль','');s.textContent='...';fetch('http://'+location.hostname+':8080/update?p='+encodeURIComponent(p||''),{method:'POST',headers:{'Content-Type':'text/plain'},body:f}).then(function(r){return r.text()}).then(function(x){s.textContent=x}).catch(function(){s.textContent='ошибка'})}</script>");
+{% endif %}
+  page += F("</body></html>");
+  server->send(200, "text/html", page);
+}
 {% endif %}
 // @setup
 {% if client %}
@@ -33,10 +201,20 @@ flpWifi.setDhcp();
 flpWifi.setApSsid({{ param.ap_ssid }});
 flpWifi.setApPassword({{ param.ap_password }});
 {% endif %}
+{% if value.web %}
+{{ id }}_web.addHandler("/", {{ id }}_page);
+{% endif %}
+{% if value.ota %}
+{{ id }}_ota.setHostname("{{ id }}");
+{% if value.ota_password != "" %}
+{{ id }}_ota.setPasswordValue({{ param.ota_password }});
+{% endif %}
+{{ id }}_ota.begin(flpWifi);
+{% endif %}
 // @loop
 {
   // Client and access point follow the inputs; switched only when they change.
-{% if value.use_mode %}
+{% if value.wifi_mode == 3 %}
   int32_t mode = {{ input.mode }};
   if (mode < 0 || mode > 2) {
     mode = 0;
@@ -64,16 +242,16 @@ flpWifi.setApPassword({{ param.ap_password }});
   }
 }
 flpWifi.pool();
-{% if value.out_ready %}
+{% if value.out_ready and client %}
 {{ output.ready }} = flpWifi.clientIsReady();
 {% endif %}
-{% if value.out_ap_ready %}
+{% if value.out_ap_ready and ap %}
 {{ output.ap_ready }} = flpWifi.apIsReady();
 {% endif %}
 {% if value.out_status %}
 {{ output.status }} = flpWifi.getStatus();
 {% endif %}
-{% if value.out_error %}
+{% if value.out_error and client %}
 {{ output.error }} = flpWifi.getError();
 {% endif %}
 {% if value.out_address %}
@@ -89,4 +267,13 @@ flpWifi.pool();
     {{ output.address }} = ip ? IPAddress(ip).toString() : String();
   }
 }
+{% endif %}
+{% if value.web %}
+{{ id }}_web.pool();
+{% endif %}
+{% if value.web and value.web_update %}
+{{ id }}_up_poll();
+{% endif %}
+{% if value.ota %}
+{{ id }}_ota.pool();
 {% endif %}

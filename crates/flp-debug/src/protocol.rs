@@ -43,7 +43,7 @@ pub const RELEASE_ALL: u8 = 0x13;
 /// Host → board: reset the maxima of `STATS`.
 pub const RESET_STATS: u8 = 0x14;
 /// Host → board: bytes typed in the debug console, for the program to read from
-/// UART0 (the port itself carries frames while debugging).
+/// USB (the port itself carries frames while debugging).
 pub const TEXT_IN: u8 = 0x15;
 /// Bytes per `TEXT_IN` frame; longer input goes in several frames.
 pub const TEXT_IN_CHUNK: usize = 200;

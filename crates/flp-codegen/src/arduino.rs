@@ -132,7 +132,13 @@ fn render_block(
     let var = inst.block.var_name().map(flp_core::vars::storage_name);
     let id = c_ident(&inst.block.id);
     let uart = uart_of(program, inst).map(|(u, _)| uart_value(&u, debug));
-    let ctx = context! { id, input, output, param, value, var, uart };
+    // Real types of the inputs: for `any` ports, the type of what feeds them.
+    let input_type: BTreeMap<&str, &str> = inst
+        .inputs
+        .iter()
+        .map(|(&port, i)| (port, i.ty.name()))
+        .collect();
+    let ctx = context! { id, input, input_type, output, param, value, var, uart };
     let text = env
         .render_named_str(&name, &source, ctx)
         .map_err(|source| GenError::Render {
@@ -148,15 +154,15 @@ fn uart_of(program: &Program, inst: &Instance) -> Option<(UartConfig, UartAccess
     let Some(ParamValue::Int(n)) = inst.params.get(uart.param.as_str()) else {
         return None;
     };
-    let config = flp_core::uart::config_of(&program.project.config.uart, u8::try_from(*n).ok()?)?;
+    let config = flp_core::uart::config_of(&program.uarts, flp_core::uart::port_number(*n))?;
     Some((config, uart.access))
 }
 
 /// `{{ uart.* }}` in templates: ready C++ values of the block's UART.
 /// `input` is what readers take bytes from: the port itself, or in debug
-/// firmware for UART0 the console input of the debugging module.
+/// firmware for USB the console input of the debugging module.
 fn uart_value(u: &UartConfig, debug: bool) -> Value {
-    let input = if u.number == 0 && debug {
+    let input = if u.number == flp_core::uart::USB && debug {
         "flp_dbg_input".to_owned()
     } else {
         u.serial()
@@ -176,22 +182,32 @@ fn uart_value(u: &UartConfig, debug: bool) -> Value {
 }
 
 /// Setup of the UARTs that blocks share (all but `exclusive`, whose library
-/// sets the port up itself). UART0 is started here only if nothing else does.
+/// sets the port up itself). USB is started here only if nothing else does.
 fn uart_setup(program: &Program, serial_started: bool) -> Vec<String> {
+    let uarts: Vec<(UartConfig, UartAccess)> = program
+        .blocks
+        .iter()
+        .filter_map(|inst| uart_of(program, inst))
+        .collect();
+    // A port owned by a library (Modbus RTU) is opened by that library.
+    let owned = |n: u8| {
+        uarts
+            .iter()
+            .any(|(u, a)| u.number == n && *a == UartAccess::Exclusive)
+    };
     let mut used: Vec<UartConfig> = Vec::new();
-    for inst in &program.blocks {
-        if let Some((u, access)) = uart_of(program, inst) {
-            if access != UartAccess::Exclusive && used.iter().all(|o| o.number != u.number) {
-                used.push(u);
-            }
+    for (u, _) in &uarts {
+        if !owned(u.number) && used.iter().all(|o| o.number != u.number) {
+            used.push(u.clone());
         }
     }
-    used.sort_by_key(|u| u.number);
+    // USB first, then the UARTs in order.
+    used.sort_by_key(|u| (u.number != flp_core::uart::USB, u.number));
     let mut lines = Vec::new();
     for u in used {
-        if u.number == 0 {
+        if u.number == flp_core::uart::USB {
             if !serial_started {
-                lines.push(format!("// UART0 (USB): {} бод", u.speed));
+                lines.push(format!("// USB: {} бод", u.speed));
                 lines.push(format!("Serial.begin({});", u.speed));
             }
             continue;
@@ -281,6 +297,7 @@ fn cpp_type(ty: SignalType) -> &'static str {
         SignalType::Int => "int32_t",
         SignalType::Float => "float",
         SignalType::String => "String",
+        SignalType::Any => unreachable!("an any input gets the type of its source"),
     }
 }
 
@@ -290,6 +307,7 @@ fn zero(ty: SignalType) -> &'static str {
         SignalType::Int => "0",
         SignalType::Float => "0.0f",
         SignalType::String => "String()",
+        SignalType::Any => unreachable!("an any input gets the type of its source"),
     }
 }
 
@@ -455,9 +473,9 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
     }
     let table = debug.then(|| crate::debug::debug_table(program));
     if let Some(table) = &table {
-        // Console input is compiled in only for a block reading UART0.
+        // Console input is compiled in only for a block reading USB.
         let text_in = program.blocks.iter().any(
-            |inst| matches!(uart_of(program, inst), Some((u, UartAccess::Read)) if u.number == 0),
+            |inst| matches!(uart_of(program, inst), Some((u, UartAccess::Read)) if u.number == flp_core::uart::USB),
         );
         out.push_str(&crate::debug::runtime(table, text_in));
     }

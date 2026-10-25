@@ -353,6 +353,7 @@ fn signal_color(p: &Palette, ty: SignalType) -> Color32 {
         SignalType::Int => p.int_signal,
         SignalType::Float => p.float_signal,
         SignalType::String => p.string_signal,
+        SignalType::Any => p.text,
     }
 }
 
@@ -1250,6 +1251,7 @@ fn parse_const(ty: SignalType, text: &str) -> Option<ParamValue> {
         SignalType::Int => t.parse().ok().map(ParamValue::Int),
         SignalType::Float => t.replace(',', ".").parse().ok().map(ParamValue::Float),
         SignalType::String => Some(ParamValue::Text(text.to_owned())),
+        SignalType::Any => Some(SignalType::guess_value(text)),
     }
 }
 

@@ -1,23 +1,46 @@
+{% set t = input_type.value %}
+{% set ct = {"bool": "bool", "int": "int32_t", "float": "float", "string": "String"}[t] %}
 // @global
+{% if value.trigger == 0 %}
 bool {{ id }}_prev = false;
+{% elif value.trigger == 2 %}
+{{ ct }} {{ id }}_last;
+bool {{ id }}_started = false;
+{% endif %}
 // @loop
 {
-{% if value.edge %}
+{% if value.trigger == 0 %}
   bool fire = {{ input.en }} && !{{ id }}_prev;
-{% else %}
-  bool fire = {{ input.en }};
-{% endif %}
   {{ id }}_prev = {{ input.en }};
+{% elif value.trigger == 1 %}
+  bool fire = {{ input.en }};
+{% else %}
+  // On change; the first value after start goes out too.
+{% if t == "float" and value.deadband > 0 %}
+  bool changed = !{{ id }}_started || fabsf({{ input.value }} - {{ id }}_last) >= {{ param.deadband }};
+{% else %}
+  bool changed = !{{ id }}_started || {{ input.value }} != {{ id }}_last;
+{% endif %}
+  bool fire = {{ input.en }} && changed;
+{% endif %}
   {{ output.sent }} = false;
   if (fire) {
-{% if value.mode == 0 %}
-    const String& text = {{ input.text }};
-{% if value.ending == 2 %}
-    const char* ending = "\r\n";
+{% if value.send_as == 0 or t == "string" %}
+{% if t == "string" %}
+    const String& text = {{ input.value }};
+{% elif t == "float" %}
+    String text = String({{ input.value }}, {{ param.decimals }});
+{% elif t == "bool" %}
+    String text = {{ input.value }} ? "1" : "0";
+{% else %}
+    String text = String({{ input.value }});
+{% endif %}
+{% if value.send_as == 1 or value.ending == 0 %}
+    const char* ending = "";
 {% elif value.ending == 1 %}
     const char* ending = "\n";
 {% else %}
-    const char* ending = "";
+    const char* ending = "\r\n";
 {% endif %}
     // A busy port would stall the loop: drop the message if the transmit buffer
     // is (nearly) full. A long one may still wait while the hardware FIFO drains.
@@ -28,16 +51,26 @@ bool {{ id }}_prev = false;
       {{ output.sent }} = true;
     }
 {% else %}
-{% if value.mode == 1 %}
-    uint8_t data = (uint8_t)constrain(lroundf({{ input.value }}), 0L, 255L);
-{% elif value.mode == 2 %}
-    int16_t data = (int16_t)constrain(lroundf({{ input.value }}), -32768L, 32767L);
-{% else %}
+{% if t == "bool" %}
+    uint8_t data = {{ input.value }} ? 1 : 0;
+{% elif t == "float" %}
     float data = {{ input.value }};
+{% elif value.int_size == 0 %}
+    uint8_t data = (uint8_t)constrain({{ input.value }}, 0L, 255L);
+{% elif value.int_size == 1 %}
+    int16_t data = (int16_t)constrain({{ input.value }}, -32768L, 32767L);
+{% else %}
+    int32_t data = {{ input.value }};
 {% endif %}
     if ((size_t){{ uart.serial }}.availableForWrite() >= sizeof(data)) {
       {{ uart.serial }}.write((const uint8_t*)&data, sizeof(data));
       {{ output.sent }} = true;
+    }
+{% endif %}
+{% if value.trigger == 2 %}
+    if ({{ output.sent }}) {
+      {{ id }}_last = {{ input.value }};
+      {{ id }}_started = true;
     }
 {% endif %}
   }

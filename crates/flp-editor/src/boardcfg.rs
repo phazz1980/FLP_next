@@ -11,7 +11,7 @@ use std::thread;
 use eframe::egui::{self, RichText, Ui};
 use flp_build::{ArduinoCli, BoardMenu, SerialPort};
 use flp_core::pins::{BoardModel, Chip, BOARD_MODELS};
-use flp_core::uart::{chip_uarts, UartConfig, UART0_SPEED};
+use flp_core::uart::{chip_uarts, UartConfig, USB_SPEED};
 use flp_core::BoardConfig;
 
 /// Common ESP32 boards: FQBN and name.
@@ -56,6 +56,8 @@ pub struct BoardDialog {
     uarts: Vec<UartConfig>,
     /// Blocks on each UART: (number, block id), to show who uses a port.
     users: Vec<(u8, String)>,
+    /// UARTs set up by a settings block on a sheet: (number, block id).
+    from_blocks: Vec<(u8, String)>,
 }
 
 /// Speeds offered for a UART; any other can be typed.
@@ -69,11 +71,13 @@ impl BoardDialog {
         board: &BoardConfig,
         uarts: &[UartConfig],
         users: Vec<(u8, String)>,
+        from_blocks: Vec<(u8, String)>,
         ctx: &egui::Context,
     ) -> Self {
         let mut d = Self {
             uarts: uarts.to_vec(),
             users,
+            from_blocks,
             fqbn: board.fqbn.clone(),
             model: board.model.as_deref().and_then(BoardModel::find),
             port: board.port.clone().unwrap_or_default(),
@@ -164,7 +168,7 @@ impl BoardDialog {
     fn uart_section(&mut self, ui: &mut Ui) {
         ui.label(RichText::new("UART").strong());
         ui.weak(format!(
-            "UART0 — USB: заливка, отладка и монитор порта, {UART0_SPEED} бод. Блоки могут только писать в него."
+            "USB — заливка, отладка и монитор порта, {USB_SPEED} бод, без настроек. UART0 у ESP32 занят USB-мостом, у ESP32-C3/S3 — свободный порт."
         ));
         let board = BoardConfig {
             fqbn: self.fqbn.trim().to_owned(),
@@ -182,10 +186,19 @@ impl BoardDialog {
         }
         numbers.sort_unstable();
         for number in numbers {
+            if let Some((_, id)) = self.from_blocks.iter().find(|(n, _)| *n == number) {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("UART{number}")).strong());
+                    ui.weak(format!(
+                        "настроен блоком «{id}» на схеме — меняйте его свойства"
+                    ));
+                });
+                continue;
+            }
             let users: Vec<&str> = self
                 .users
                 .iter()
-                .filter(|(n, _)| *n == number)
+                .filter(|(n, id)| *n == number && !self.from_blocks.iter().any(|(_, b)| b == id))
                 .map(|(_, id)| id.as_str())
                 .collect();
             let index = self.uarts.iter().position(|u| u.number == number);

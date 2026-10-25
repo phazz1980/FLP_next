@@ -73,14 +73,16 @@ fn type_code(e: &Entry) -> u8 {
             SignalType::Bool => 0,
             SignalType::Int => 1,
             SignalType::Float => 2,
-            SignalType::String => unreachable!("strings are not in the debug table"),
+            SignalType::String | SignalType::Any => {
+                unreachable!("strings are not in the debug table")
+            }
         },
     }
 }
 
 /// The firmware side of the protocol, placed after all globals of the sketch
 /// and after the cycle time module of [`crate::stats`].
-/// `text_in`: a block reads UART0, so the module keeps the console input
+/// `text_in`: a block reads USB, so the module keeps the console input
 /// (`TEXT_IN` frames) for it in `flp_dbg_input`.
 pub fn runtime(table: &DebugTable, text_in: bool) -> String {
     let n = table.entries.len();
@@ -402,9 +404,9 @@ void flp_dbg_texts() {{
     )
 }
 
-/// Console input of the debug session: a ring buffer that `uart_read` on UART0
+/// Console input of the debug session: a ring buffer that `uart_read` on USB
 /// reads through `flp_dbg_input` the way it reads a `HardwareSerial`.
-const TEXT_IN_MODULE: &str = r#"// Ввод из консоли отладки (кадры TEXT_IN) для «Чтения из UART» на UART0.
+const TEXT_IN_MODULE: &str = r#"// Ввод из консоли отладки (кадры TEXT_IN) для «Чтения из UART» с USB.
 uint8_t flp_dbg_in_buf[256];
 uint8_t flp_dbg_in_head = 0;
 uint8_t flp_dbg_in_tail = 0;

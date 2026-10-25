@@ -399,6 +399,25 @@ fn param_editor(
         }
         return;
     }
+    if !p.choices.is_empty() {
+        let selected = current
+            .as_ref()
+            .map_or_else(|| "не задан".to_owned(), |v| p.value_label(v));
+        egui::ComboBox::from_id_salt(("param_choice", &p.name))
+            .selected_text(selected)
+            .show_ui(ui, |ui| {
+                for c in &p.choices {
+                    let on = current.as_ref() == Some(&c.value);
+                    if ui.selectable_label(on, &c.label).clicked() {
+                        if let ParamValue::Text(s) = &c.value {
+                            d.texts.insert(p.name.clone(), s.clone());
+                        }
+                        d.values.insert(p.name.clone(), Some(c.value.clone()));
+                    }
+                }
+            });
+        return;
+    }
     let mut set = |v: ParamValue| {
         d.values.insert(p.name.clone(), Some(v));
     };
@@ -630,7 +649,7 @@ fn var_body(ui: &mut Ui, d: &mut VarDialog) {
                 SignalType::Bool => "false",
                 SignalType::Int => "0",
                 SignalType::Float => "0.0",
-                SignalType::String => "текст",
+                SignalType::String | SignalType::Any => "текст",
             };
             let valid = parse_init(d.ty, &d.init).is_ok();
             let mut edit = egui::TextEdit::singleline(&mut d.init).hint_text(hint);
@@ -779,7 +798,7 @@ fn parse_init(ty: VarType, text: &str) -> Result<Option<ParamValue>, String> {
         SignalType::Int => ParamValue::Int(t.parse().map_err(|_| bad())?),
         SignalType::Float => ParamValue::Float(t.replace(',', ".").parse().map_err(|_| bad())?),
         // Text keeps its spaces.
-        SignalType::String => ParamValue::Text(text.to_owned()),
+        SignalType::String | SignalType::Any => ParamValue::Text(text.to_owned()),
     };
     if !ty.accepts(&value) {
         return Err(bad());

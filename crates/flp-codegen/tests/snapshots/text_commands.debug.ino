@@ -1,5 +1,5 @@
 // Сгенерировано FLP_next из проекта «text_commands». Ручные правки будут перезаписаны.
-// Порядок выполнения: adc → bar → p_text → name → tick → p_send → rx → command_w → command_r → message → message_w → length → length_w → report → is_on → pump → head → is_set → arg → number → apply → setpoint_w
+// Порядок выполнения: adc → bar → p_text → name → tick → p_send → port2 → rx → command_w → command_r → message → message_w → length → length_w → report → is_on → pump → head → is_set → arg → number → apply → setpoint_w
 
 #include <Arduino.h>
 
@@ -10,6 +10,7 @@ String p_text_out = String();
 String name_out = String();
 bool tick_out = false;
 bool p_send_sent = false;
+int32_t port2_baud = 0;
 String rx_line = String();
 bool rx_ready = false;
 int32_t rx_available = 0;
@@ -35,7 +36,8 @@ float var_setpoint = 3.0f;
 unsigned long tick_start = 0;
 
 // p_send: uart_send
-bool p_send_prev = false;
+float p_send_last;
+bool p_send_started = false;
 
 // rx: uart_read
 String rx_buf;
@@ -145,11 +147,11 @@ uint32_t flp_st_free_heap() {
 
 // ---- Онлайн-отладка FLP_next (протокол v2) ----
 // Кадры: 0xAA 0x55, тип, длина, данные, CRC-16/CCITT. Обычный Serial.print не мешает.
-const uint32_t FLP_DBG_FINGERPRINT = 0x86EB466BUL;
-const uint16_t FLP_DBG_COUNT = 15;
+const uint32_t FLP_DBG_FINGERPRINT = 0xD1DEAEFFUL;
+const uint16_t FLP_DBG_COUNT = 16;
 // Наблюдаемые значения: выходы блоков, затем переменные (+ пустой элемент в конце).
-void* const flp_dbg_ptr[FLP_DBG_COUNT + 1] = { &adc_out, &bar_out, &tick_out, &p_send_sent, &rx_ready, &rx_available, &length_out, &report_sent, &is_on_out, &is_set_out, &number_out, &number_ok, &apply_out, &var_message_len, &var_setpoint, nullptr };
-const uint8_t flp_dbg_type[FLP_DBG_COUNT + 1] = { 1, 2, 0, 0, 0, 1, 1, 0, 0, 0, 2, 0, 0, 1, 2, 0 };  // see type_code in flp-codegen
+void* const flp_dbg_ptr[FLP_DBG_COUNT + 1] = { &adc_out, &bar_out, &tick_out, &p_send_sent, &port2_baud, &rx_ready, &rx_available, &length_out, &report_sent, &is_on_out, &is_set_out, &number_out, &number_ok, &apply_out, &var_message_len, &var_setpoint, nullptr };
+const uint8_t flp_dbg_type[FLP_DBG_COUNT + 1] = { 1, 2, 0, 0, 1, 0, 1, 1, 0, 0, 0, 2, 0, 0, 1, 2, 0 };  // see type_code in flp-codegen
 bool flp_dbg_forced[FLP_DBG_COUNT + 1];
 uint32_t flp_dbg_force_raw[FLP_DBG_COUNT + 1];
 uint8_t flp_dbg_rx[4 + 255 + 2];
@@ -418,7 +420,7 @@ void loop() {
   flp_st_begin();
 
   // Forced variables
-  flp_dbg_force(13); flp_dbg_force(14);
+  flp_dbg_force(14); flp_dbg_force(15);
 
   flp_st_sheet(0);  // лист 1
   // adc: analog_in
@@ -447,8 +449,9 @@ void loop() {
 
   // p_send: uart_send
   {
-    bool fire = tick_out && !p_send_prev;
-    p_send_prev = tick_out;
+    // On change; the first value after start goes out too.
+    bool changed = !p_send_started || fabsf(bar_out - p_send_last) >= 0.05f;
+    bool fire = true && changed;
     p_send_sent = false;
     if (fire) {
       float data = bar_out;
@@ -456,11 +459,19 @@ void loop() {
         Serial2.write((const uint8_t*)&data, sizeof(data));
         p_send_sent = true;
       }
+      if (p_send_sent) {
+        p_send_last = bar_out;
+        p_send_started = true;
+      }
     }
   }
   flp_dbg_force(3);
 
   flp_st_sheet(1);  // лист 2
+  // port2: uart_config
+  port2_baud = (int32_t)Serial2.baudRate();
+  flp_dbg_force(4);
+
   // rx: uart_read
   rx_ready = false;
   // One line per cycle: the next one waits in the UART buffer.
@@ -483,8 +494,8 @@ void loop() {
     }
   }
   rx_available = Serial2.available();
+  flp_dbg_force(6);
   flp_dbg_force(5);
-  flp_dbg_force(4);
 
   // command_w: var_set
   if (rx_ready) {
@@ -507,11 +518,11 @@ void loop() {
 
   // length: text_length
   length_out = (int32_t)message_out.length();
-  flp_dbg_force(6);
+  flp_dbg_force(7);
 
   // length_w: var_set
   var_message_len = length_out;
-  flp_dbg_force(13);
+  flp_dbg_force(14);
 
   // report: uart_send
   {
@@ -531,7 +542,7 @@ void loop() {
       }
     }
   }
-  flp_dbg_force(7);
+  flp_dbg_force(8);
 
   flp_st_sheet(1);  // лист 2
   // is_on: text_compare
@@ -542,7 +553,7 @@ void loop() {
     b.toLowerCase();
     is_on_out = a == b;
   }
-  flp_dbg_force(8);
+  flp_dbg_force(9);
 
   // pump: digital_out
   digitalWrite(26, (is_on_out) ? HIGH : LOW);
@@ -552,7 +563,7 @@ void loop() {
 
   // is_set: text_compare
   is_set_out = head_out.startsWith("SET ");
-  flp_dbg_force(9);
+  flp_dbg_force(10);
 
   // arg: text_substring
   arg_out = command_r_out.substring(4);
@@ -565,18 +576,18 @@ void loop() {
       number_out = v;
     }
   }
+  flp_dbg_force(12);
   flp_dbg_force(11);
-  flp_dbg_force(10);
 
   // apply: and
   apply_out = is_set_out && number_ok;
-  flp_dbg_force(12);
+  flp_dbg_force(13);
 
   // setpoint_w: var_set
   if (apply_out) {
     var_setpoint = number_out;
   }
-  flp_dbg_force(14);
+  flp_dbg_force(15);
 
   flp_st_end();
   flp_dbg_loop();

@@ -768,7 +768,7 @@ impl EditorApp {
         self.console.debug_reader = self.doc.as_ref().is_some_and(|doc| {
             flp_core::uart::block_uarts(&doc.project.logic, &self.lib)
                 .iter()
-                .any(|u| u.number == 0 && u.access == flp_core::UartAccess::Read)
+                .any(|u| u.number == flp_core::uart::USB && u.access == flp_core::UartAccess::Read)
         });
         let live = self.debug.as_ref().map(|d| &d.live);
         self.console.sync(live, port, busy, ctx);
@@ -1107,10 +1107,15 @@ impl EditorApp {
             .into_iter()
             .map(|u| (u.number, u.block))
             .collect();
+        let from_blocks = flp_core::uart::block_configs(&doc.project.logic, &self.lib)
+            .into_iter()
+            .map(|(id, u)| (u.number, id))
+            .collect();
         let dialog = crate::boardcfg::BoardDialog::new(
             &doc.project.config.board,
             &doc.project.config.uart,
             users,
+            from_blocks,
             ctx,
         );
         self.dialog = Some(Dialog::Board(dialog));

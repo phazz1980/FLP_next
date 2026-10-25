@@ -15,6 +15,8 @@ pub struct Program<'a> {
     pub blocks: Vec<Instance<'a>>,
     /// One variable per block output, in execution order of the producing blocks.
     pub signals: Vec<Signal>,
+    /// Settings of the UARTs: `[[uart]]` of the board and settings blocks.
+    pub uarts: Vec<flp_core::UartConfig>,
 }
 
 /// Variable holding the value of one block output between scans.
@@ -53,7 +55,8 @@ fn unique<'a>(items: impl Iterator<Item = &'a String>) -> Vec<&'a str> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Input {
     pub source: Source,
-    /// Type of the input port (may differ from the signal type by `int` → `float`).
+    /// Type of the input port (may differ from the signal type by `int` → `float`);
+    /// for an `any` port, the type of its source.
     pub ty: SignalType,
 }
 
@@ -134,13 +137,12 @@ impl<'a> Program<'a> {
                     (None, Some(value)) => Source::Default(value.clone()),
                     (None, None) => unreachable!("unconnected inputs checked"),
                 };
-                inputs.insert(
-                    port.name.as_str(),
-                    Input {
-                        source,
-                        ty: port.ty,
-                    },
-                );
+                let ty = match (&source, port.ty) {
+                    (Source::Signal { index, .. }, SignalType::Any) => signals[*index].ty,
+                    (Source::Default(value), SignalType::Any) => SignalType::of_value(value),
+                    (_, ty) => ty,
+                };
+                inputs.insert(port.name.as_str(), Input { source, ty });
             }
             let outputs = def
                 .active_outputs(&block.params)
@@ -173,6 +175,7 @@ impl<'a> Program<'a> {
             project,
             blocks,
             signals,
+            uarts: flp_core::uart::project_uarts(project, lib),
         })
     }
 }

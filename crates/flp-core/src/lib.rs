@@ -23,8 +23,8 @@ pub use edit::{EditError, Fragment};
 pub use error::{Error, Result};
 pub use layout::{BlockPos, Layout, SheetInfo};
 pub use library::{
-    save_block, user_library_dir, BlockDef, Library, LibraryBlock, ParamDef, ParamKind, ParamShow,
-    PinMode, PortDef, SignalType,
+    save_block, user_library_dir, BlockDef, Choice, Library, LibraryBlock, ParamDef, ParamKind,
+    ParamShow, PinMode, PortDef, SignalType,
 };
 pub use local::LocalValues;
 pub use logic::{Block, Link, Logic, PortRef, PortRefError};

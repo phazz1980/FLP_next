@@ -1,0 +1,14 @@
+[block]
+type = "abs"
+name = "Модуль"
+symbol = "ABS"
+group = "Числа"
+description = "Абсолютное значение: out = |in|."
+
+[[input]]
+name = "in"
+type = "float"
+
+[[output]]
+name = "out"
+type = "float"

@@ -1,0 +1,26 @@
+[block]
+type = "limit"
+name = "Ограничение"
+symbol = "LIMIT"
+group = "Числа"
+description = "Ограничивает значение диапазоном: не меньше lo и не больше hi."
+
+[[input]]
+name = "in"
+type = "float"
+
+[[output]]
+name = "out"
+type = "float"
+
+[[param]]
+name = "lo"
+type = "float"
+default = 0.0
+description = "Нижняя граница"
+
+[[param]]
+name = "hi"
+type = "float"
+default = 100.0
+description = "Верхняя граница"

@@ -2,29 +2,23 @@
 type = "uart_send"
 name = "Отправка в UART"
 symbol = "UART TX"
-group = "Сеть"
-description = "Отправляет строку (или число в двоичном виде) в UART по фронту или каждый цикл, пока en = true."
+group = "UART"
+description = "Отправляет значение любого типа в UART текстом или двоично: по фронту en, каждый цикл или по изменению."
 
 [block.uart]
-param = "uart"
+param = "port"
 access = "write"
 
 [[input]]
 name = "en"
 type = "bool"
-description = "Разрешение отправки: по фронту или каждый цикл, пока true"
-
-[[input]]
-name = "text"
-type = "string"
-when = "mode == 0"
-description = "Строка для отправки"
+default = true
+description = "Разрешение отправки; не подключён — разрешено всегда"
 
 [[input]]
 name = "value"
-type = "float"
-when = "mode != 0"
-description = "Число для двоичной отправки"
+type = "any"
+description = "Что отправлять: bool, int, float или строка — тип берётся от подключённого выхода"
 
 [[output]]
 name = "sent"
@@ -32,29 +26,86 @@ type = "bool"
 description = "true в цикле, когда данные ушли в буфер UART"
 
 [[param]]
-name = "uart"
-label = "UART"
+name = "port"
+label = "порт"
+type = "int"
+default = -1
+min = -1
+max = 2
+description = "USB (видно в мониторе порта и в консоли отладки) или UART из настроек платы; UART0 свободен только у ESP32-C3/S3"
+
+[[param.choice]]
+value = -1
+label = "USB (монитор порта)"
+
+[[param.choice]]
+value = 0
+label = "UART0"
+
+[[param.choice]]
+value = 1
+label = "UART1"
+
+[[param.choice]]
+value = 2
+label = "UART2"
+
+[[param]]
+name = "send_as"
+label = "как отправлять"
+type = "int"
+default = 0
+min = 0
+max = 1
+description = "Текстом (число печатается цифрами) или двоично (число — байтами, младший первым; строка — её байты)"
+
+[[param.choice]]
+value = 0
+label = "Текстом"
+
+[[param.choice]]
+value = 1
+label = "Двоично"
+
+[[param]]
+name = "trigger"
+label = "когда отправлять"
 type = "int"
 default = 0
 min = 0
 max = 2
-description = "Номер UART: 0 — USB (видно в мониторе порта и в консоли отладки), 1 или 2 — из настроек платы"
+description = "По фронту en, каждый цикл пока en = true, или когда значение изменилось (пока en = true)"
+
+[[param.choice]]
+value = 0
+label = "По фронту en"
+
+[[param.choice]]
+value = 1
+label = "Каждый цикл, пока en"
+
+[[param.choice]]
+value = 2
+label = "По изменению значения"
 
 [[param]]
-name = "mode"
-label = "что отправлять"
+name = "deadband"
+label = "мёртвая зона"
+type = "float"
+default = 0.0
+min = 0.0
+when = "trigger == 2"
+description = "Для float: изменение меньше этого не считается — шум датчика не шлёт данные каждый цикл"
+
+[[param]]
+name = "decimals"
+label = "знаков после точки"
 type = "int"
-default = 0
+default = 2
 min = 0
-max = 3
-description = "0 — строка, 1 — байт, 2 — int16, 3 — float (числа в двоичном виде, младший байт первым)"
-
-[[param]]
-name = "edge"
-label = "по фронту en"
-type = "bool"
-default = true
-description = "true — один раз при переходе en в true; false — каждый цикл, пока en = true"
+max = 6
+when = "send_as == 0"
+description = "Для float текстом: сколько знаков после десятичной точки"
 
 [[param]]
 name = "ending"
@@ -63,5 +114,39 @@ type = "int"
 default = 2
 min = 0
 max = 2
-when = "mode == 0"
-description = "Что добавить после строки: 0 — ничего, 1 — \\n, 2 — \\r\\n"
+when = "send_as == 0"
+description = "Что добавить после текста"
+
+[[param.choice]]
+value = 0
+label = "Без окончания"
+
+[[param.choice]]
+value = 1
+label = "\\n (LF)"
+
+[[param.choice]]
+value = 2
+label = "\\r\\n (CR LF)"
+
+[[param]]
+name = "int_size"
+label = "размер целого"
+type = "int"
+default = 2
+min = 0
+max = 2
+when = "send_as == 1"
+description = "Для int двоично: сколько байт отправлять (bool — всегда 1 байт, float — 4)"
+
+[[param.choice]]
+value = 0
+label = "Байт (0…255)"
+
+[[param.choice]]
+value = 1
+label = "int16 (2 байта)"
+
+[[param.choice]]
+value = 2
+label = "long (4 байта)"

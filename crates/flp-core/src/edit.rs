@@ -436,7 +436,10 @@ impl Project {
             block: id.to_owned(),
             param: name.to_owned(),
         })?;
-        if value.as_ref().is_some_and(|v| !param.kind.accepts(v)) {
+        if value
+            .as_ref()
+            .is_some_and(|v| !param.kind.accepts(v) || !param.allows(v))
+        {
             return Err(EditError::BadValue(name.to_owned()));
         }
         let index = self.block_index(id)?;

@@ -459,6 +459,7 @@ fn signal_color(ty: SignalType) -> Rgb8 {
         SignalType::Int => (0x2a, 0x5d, 0xb0),
         SignalType::Float => (0xc0, 0x6a, 0x10),
         SignalType::String => (0x8a, 0x3f, 0xa8),
+        SignalType::Any => (0x60, 0x60, 0x60),
     }
 }
 

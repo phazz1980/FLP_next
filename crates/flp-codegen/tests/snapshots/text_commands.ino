@@ -1,5 +1,5 @@
 // Сгенерировано FLP_next из проекта «text_commands». Ручные правки будут перезаписаны.
-// Порядок выполнения: adc → bar → p_text → name → tick → p_send → rx → command_w → command_r → message → message_w → length → length_w → report → is_on → pump → head → is_set → arg → number → apply → setpoint_w
+// Порядок выполнения: adc → bar → p_text → name → tick → p_send → port2 → rx → command_w → command_r → message → message_w → length → length_w → report → is_on → pump → head → is_set → arg → number → apply → setpoint_w
 
 #include <Arduino.h>
 
@@ -10,6 +10,7 @@ String p_text_out = String();
 String name_out = String();
 bool tick_out = false;
 bool p_send_sent = false;
+int32_t port2_baud = 0;
 String rx_line = String();
 bool rx_ready = false;
 int32_t rx_available = 0;
@@ -35,7 +36,8 @@ float var_setpoint = 3.0f;
 unsigned long tick_start = 0;
 
 // p_send: uart_send
-bool p_send_prev = false;
+float p_send_last;
+bool p_send_started = false;
 
 // rx: uart_read
 String rx_buf;
@@ -63,7 +65,7 @@ bool flp_text_to_float(const String& text, float& out) {
 }
 
 void setup() {
-  // UART0 (USB): 115200 бод
+  // USB: 115200 бод
   Serial.begin(115200);
   // UART2: 9600 бод, 8N1, RX GPIO16, TX GPIO17
   Serial2.setRxBufferSize(256);
@@ -114,8 +116,9 @@ void loop() {
 
   // p_send: uart_send
   {
-    bool fire = tick_out && !p_send_prev;
-    p_send_prev = tick_out;
+    // On change; the first value after start goes out too.
+    bool changed = !p_send_started || fabsf(bar_out - p_send_last) >= 0.05f;
+    bool fire = true && changed;
     p_send_sent = false;
     if (fire) {
       float data = bar_out;
@@ -123,8 +126,15 @@ void loop() {
         Serial2.write((const uint8_t*)&data, sizeof(data));
         p_send_sent = true;
       }
+      if (p_send_sent) {
+        p_send_last = bar_out;
+        p_send_started = true;
+      }
     }
   }
+
+  // port2: uart_config
+  port2_baud = (int32_t)Serial2.baudRate();
 
   // rx: uart_read
   rx_ready = false;

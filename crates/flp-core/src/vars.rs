@@ -323,6 +323,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                         local: None,
                         mode: Default::default(),
                         shared: false,
+                        choices: Vec::new(),
                     }];
                     if !get {
                         params.push(ParamDef {
@@ -338,6 +339,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                             local: None,
                             mode: Default::default(),
                             shared: false,
+                            choices: Vec::new(),
                         });
                     }
                     params

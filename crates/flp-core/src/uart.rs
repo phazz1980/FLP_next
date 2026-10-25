@@ -1,8 +1,11 @@
-//! Hardware UARTs of the board: settings in `project.toml` (`[[uart]]`), the
-//! blocks that use them (`[block.uart]` in `block.toml`) and their check.
+//! Hardware UARTs of the board: settings in `project.toml` (`[[uart]]`) or in a
+//! settings block on a sheet (`uart_config`), the blocks that use them
+//! (`[block.uart]` in `block.toml`) and their check.
 //!
-//! UART0 is the USB port (upload, debugging, the port monitor): it has no
-//! settings, runs at the debug link speed and is only written to by blocks.
+//! USB (`Serial`: upload, debugging, the port monitor) is a port of its own
+//! for blocks (`-1` in the project): it has no settings and runs at the debug
+//! link speed. On ESP32 it is UART0 through the USB bridge, so UART0 is not
+//! offered there; ESP32-C3/S3 have native USB and a free UART0 (`Serial0`).
 
 use std::collections::BTreeMap;
 
@@ -13,14 +16,38 @@ use crate::library::PinMode;
 use crate::pins::{Chip, PinUse};
 use crate::{Library, Logic, ParamValue};
 
-/// Speed of UART0; equals the debug link speed of `flp-debug`.
-pub const UART0_SPEED: u32 = 115_200;
+/// Speed of the USB port; equals the debug link speed of `flp-debug`.
+pub const USB_SPEED: u32 = 115_200;
+
+/// Number of the USB port inside the program; blocks write `-1` for it.
+pub const USB: u8 = u8::MAX;
+/// A number no UART has (a typo in the project), so that the check reports it.
+const INVALID: u8 = u8::MAX - 1;
+
+/// Port of a block parameter: `-1` is USB, `0`… a UART.
+pub fn port_number(value: i64) -> u8 {
+    match value {
+        -1 => USB,
+        n => u8::try_from(n)
+            .ok()
+            .filter(|&n| n < INVALID)
+            .unwrap_or(INVALID),
+    }
+}
+
+/// `USB`, `UART0`, `UART1`...
+pub fn port_name(number: u8) -> String {
+    match number {
+        USB => "USB".into(),
+        n => format!("UART{n}"),
+    }
+}
 
 /// One `[[uart]]` of `project.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UartConfig {
-    /// 1 or 2 (ESP32-C3 has only UART1).
+    /// 0, 1 or 2 — which of them the board has, see [`chip_uarts`].
     pub number: u8,
     /// Baud rate.
     pub speed: u32,
@@ -103,7 +130,7 @@ impl UartConfig {
         .into_iter()
         .filter(|&(_, gpio, _)| gpio >= 0)
         .map(|(param, gpio, mode)| PinUse {
-            block: format!("UART{}", self.number),
+            block: port_name(self.number),
             kind: "uart".into(),
             param: param.into(),
             gpio,
@@ -114,10 +141,10 @@ impl UartConfig {
     }
 }
 
-/// `Serial`, `Serial1`, `Serial2`.
+/// `Serial` for USB, `Serial0`, `Serial1`, `Serial2` for the UARTs.
 pub fn serial_name(number: u8) -> String {
     match number {
-        0 => "Serial".into(),
+        USB => "Serial".into(),
         n => format!("Serial{n}"),
     }
 }
@@ -139,6 +166,9 @@ pub enum UartAccess {
     Write,
     /// Receives: one reader per port, the bytes it takes are gone for others.
     Read,
+    /// Sets the port up instead of `[[uart]]`: its parameters `speed`, `format`,
+    /// `rx`, `tx`, `de`, `rx_buffer` are the UART settings. Not an owner of the port.
+    Config,
 }
 
 /// A block on a UART, in schema order.
@@ -170,23 +200,143 @@ pub fn block_uarts(logic: &Logic, lib: &Library) -> Vec<BlockUart> {
         };
         out.push(BlockUart {
             block: block.id.clone(),
-            number: u8::try_from(number).unwrap_or(u8::MAX),
+            number: port_number(number),
             access: uart.access,
         });
     }
     out
 }
 
-/// UART numbers a chip has besides UART0.
+/// UARTs set up by settings blocks (`access = "config"`): (block id, settings).
+pub fn block_configs(logic: &Logic, lib: &Library) -> Vec<(String, UartConfig)> {
+    let mut out = Vec::new();
+    for b in block_uarts(logic, lib) {
+        if b.access != UartAccess::Config {
+            continue;
+        }
+        let Some(block) = logic.block(&b.block) else {
+            continue;
+        };
+        let Some(def) = lib.resolve(logic, block).map(|l| &l.def) else {
+            continue;
+        };
+        let value = |name: &str| {
+            block
+                .params
+                .get(name)
+                .or_else(|| def.param(name).and_then(|p| p.default.as_ref()))
+        };
+        let defaults = UartConfig::new(b.number);
+        let int = |name: &str, default: i64| match value(name) {
+            Some(ParamValue::Int(v)) => *v,
+            _ => default,
+        };
+        let format = match value("format") {
+            Some(ParamValue::Text(s)) => s.clone(),
+            _ => defaults.format.clone(),
+        };
+        out.push((
+            b.block.clone(),
+            UartConfig {
+                number: b.number,
+                speed: u32::try_from(int("speed", defaults.speed.into())).unwrap_or(0),
+                format,
+                rx: int("rx", defaults.rx),
+                tx: int("tx", defaults.tx),
+                de: int("de", defaults.de),
+                rx_buffer: u32::try_from(int("rx_buffer", defaults.rx_buffer.into())).unwrap_or(0),
+            },
+        ));
+    }
+    out
+}
+
+/// Settings of all UARTs: `[[uart]]` of the board plus the settings blocks.
+/// A UART set in both places, or by two blocks, keeps the first settings;
+/// with `report` the clash is reported.
+fn merged_uarts(
+    project: &crate::Project,
+    lib: &Library,
+    report: Option<&mut Report>,
+) -> Vec<UartConfig> {
+    let mut uarts = project.config.uart.clone();
+    let mut problems = Vec::new();
+    let mut by_block: Vec<(u8, String)> = Vec::new();
+    for (id, config) in block_configs(&project.logic, lib) {
+        let name = port_name(config.number);
+        if config.number == USB {
+            problems.push((id, "USB не настраивается — выберите UART".into()));
+        } else if let Some((_, first)) = by_block.iter().find(|(n, _)| *n == config.number) {
+            problems.push((id, format!("{name} уже настроен блоком «{first}»")));
+        } else if uarts.iter().any(|u| u.number == config.number) {
+            problems.push((
+                id,
+                format!("{name} уже настроен в настройках платы — уберите его там или удалите этот блок"),
+            ));
+        } else {
+            by_block.push((config.number, id));
+            uarts.push(config);
+        }
+    }
+    if let Some(report) = report {
+        for (id, text) in problems {
+            let message = format!("блок «{id}»: {text}");
+            report.push(Severity::Error, Some(&id), None, message);
+        }
+    }
+    uarts.sort_by_key(|u| u.number);
+    uarts
+}
+
+/// Settings of all UARTs of the project, for the code generator and the editor.
+pub fn project_uarts(project: &crate::Project, lib: &Library) -> Vec<UartConfig> {
+    merged_uarts(project, lib, None)
+}
+
+/// UARTs a chip has for blocks besides USB. UART0 of ESP32 is the USB bridge.
 pub fn chip_uarts(chip: Chip) -> &'static [u8] {
     match chip {
-        Chip::Esp32 | Chip::Esp32S3 => &[1, 2],
-        Chip::Esp32C3 | Chip::Esp32C3SuperMini => &[1],
+        Chip::Esp32 => &[1, 2],
+        Chip::Esp32S3 => &[0, 1, 2],
+        Chip::Esp32C3 | Chip::Esp32C3SuperMini => &[0, 1],
+    }
+}
+
+/// Why a UART is missing: UART0 of ESP32 is taken by the USB bridge.
+fn missing(number: u8, chip: Option<Chip>, available: &[u8]) -> String {
+    let board = chip.map_or("платы", Chip::name);
+    if number == 0 && chip == Some(Chip::Esp32) {
+        "у ESP32 UART0 — это USB-мост: выберите «USB» или UART1/UART2".into()
+    } else {
+        format!(
+            "у {board} нет {} (есть {})",
+            port_name(number),
+            list(available)
+        )
     }
 }
 
 /// Settings of the UARTs, uses by blocks and pins against the blocks' pins.
 /// `chip` is `None` for boards without a pin table.
+/// [`check_uarts`] on the merged settings, for [`crate::check_project`].
+pub(crate) fn check_project_part(
+    project: &crate::Project,
+    lib: &Library,
+    block_pins: &[PinUse],
+    chip: Option<Chip>,
+    report: &mut Report,
+) -> Vec<UartConfig> {
+    let uarts = merged_uarts(project, lib, Some(report));
+    check_uarts(
+        &uarts,
+        &block_uarts(&project.logic, lib),
+        block_pins,
+        chip,
+        report,
+    );
+    uarts
+}
+
 pub(crate) fn check_uarts(
     uarts: &[UartConfig],
     blocks: &[BlockUart],
@@ -195,16 +345,12 @@ pub(crate) fn check_uarts(
     report: &mut Report,
 ) {
     let available = chip.map_or(&[1, 2][..], chip_uarts);
-    let board = chip.map_or("платы", Chip::name);
     let mut configured = BTreeMap::new();
     for u in uarts {
-        let name = format!("UART{}", u.number);
+        let name = port_name(u.number);
         let mut error = |text: String| report.push(Severity::Error, None, None, text);
         if !available.contains(&u.number) {
-            error(format!(
-                "{name}: у {board} такого UART нет (есть {})",
-                list(available)
-            ));
+            error(format!("{name}: {}", missing(u.number, chip, available)));
         }
         if configured.insert(u.number, u).is_some() {
             error(format!("{name} настроен дважды"));
@@ -251,20 +397,30 @@ pub(crate) fn check_uarts(
 
     for (i, b) in blocks.iter().enumerate() {
         let id = b.block.as_str();
-        let name = format!("UART{}", b.number);
-        // UART0 (USB) needs no settings; while debugging, readers get the console input.
-        if b.number == 0 && b.access == UartAccess::Exclusive {
+        let name = port_name(b.number);
+        // USB needs no settings; while debugging, readers get the console input.
+        if b.number == USB && b.access == UartAccess::Exclusive {
             report.push(
                 Severity::Error,
                 Some(id),
                 None,
                 format!(
-                    "блок «{id}»: UART0 занят USB: заливка, отладка и монитор порта — выберите UART1 или UART2"
+                    "блок «{id}»: USB занят заливкой, отладкой и монитором порта — выберите UART"
                 ),
             );
             continue;
         }
-        if b.number != 0 && !configured.contains_key(&b.number) {
+        if b.number != USB && !available.contains(&b.number) {
+            let why = missing(b.number, chip, available);
+            report.push(
+                Severity::Error,
+                Some(id),
+                None,
+                format!("блок «{id}»: {why}"),
+            );
+            continue;
+        }
+        if b.number != USB && !configured.contains_key(&b.number) {
             report.push(
                 Severity::Error,
                 Some(id),
@@ -273,8 +429,12 @@ pub(crate) fn check_uarts(
             );
             continue;
         }
+        if b.access == UartAccess::Config {
+            continue;
+        }
         let clash = blocks[..i].iter().find(|o| {
             o.number == b.number
+                && o.access != UartAccess::Config
                 && (o.access == UartAccess::Exclusive
                     || b.access == UartAccess::Exclusive
                     || (o.access == UartAccess::Read && b.access == UartAccess::Read))
@@ -302,8 +462,9 @@ pub(crate) fn check_uarts(
 /// UART a block uses. The full check ([`crate::check_project`]) adds pin conflicts.
 pub fn check_project_uarts(project: &crate::Project, lib: &Library) -> Report {
     let mut report = Report::default();
+    let uarts = merged_uarts(project, lib, Some(&mut report));
     check_uarts(
-        &project.config.uart,
+        &uarts,
         &block_uarts(&project.logic, lib),
         &[],
         Chip::of_board(&project.config.board),
@@ -312,12 +473,12 @@ pub fn check_project_uarts(project: &crate::Project, lib: &Library) -> Report {
     report
 }
 
-/// Settings of a UART for templates and setup code; UART0 gets the USB settings.
+/// Settings of a port for templates and setup code; USB gets its fixed settings.
 pub fn config_of(uarts: &[UartConfig], number: u8) -> Option<UartConfig> {
-    if number == 0 {
+    if number == USB {
         return Some(UartConfig {
-            number: 0,
-            speed: UART0_SPEED,
+            number: USB,
+            speed: USB_SPEED,
             rx: -1,
             tx: -1,
             ..Default::default()
@@ -329,7 +490,7 @@ pub fn config_of(uarts: &[UartConfig], number: u8) -> Option<UartConfig> {
 fn list(numbers: &[u8]) -> String {
     numbers
         .iter()
-        .map(|n| format!("UART{n}"))
+        .map(|&n| port_name(n))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -384,6 +545,67 @@ pub fn migrate_legacy(uarts: &mut Vec<UartConfig>, logic: &mut Logic) -> Vec<u8>
     created
 }
 
+/// `uart_send` and `uart_read` took the port in `uart`, where 0 meant USB;
+/// now it is `port` with -1 for USB, and 0 is UART0 (ESP32-C3/S3).
+fn migrate_port_param(logic: &mut Logic) {
+    for block in logic
+        .blocks
+        .iter_mut()
+        .filter(|b| b.kind == "uart_send" || b.kind == "uart_read")
+    {
+        if let Some(value) = block.params.remove("uart") {
+            let port = match value {
+                ParamValue::Int(0) => ParamValue::Int(-1),
+                other => other,
+            };
+            block.params.insert("port".into(), port);
+        }
+    }
+}
+
+/// `uart_send` before its input took any type: `edge` (bool) and `mode`
+/// (0 text, 1 byte, 2 int16, 3 float, 4 long) with inputs `text`, `value`
+/// (float) and `lvalue` (int). Now `trigger`, `send_as`, `int_size` and the
+/// one input `value`. A float sent as a byte or int16 now goes out as a float.
+pub fn migrate_uart_send(logic: &mut Logic) {
+    migrate_port_param(logic);
+    let mut renamed: Vec<String> = Vec::new();
+    for block in logic.blocks.iter_mut().filter(|b| b.kind == "uart_send") {
+        if let Some(edge) = block.params.remove("edge") {
+            if edge == ParamValue::Bool(false) {
+                block.params.insert("trigger".into(), ParamValue::Int(1));
+            }
+        }
+        if let Some(ParamValue::Int(mode)) = block.params.remove("mode") {
+            if mode != 0 {
+                block.params.insert("send_as".into(), ParamValue::Int(1));
+            }
+            let size = match mode {
+                1 => Some(0),
+                2 => Some(1),
+                4 => Some(2),
+                _ => None,
+            };
+            if let Some(size) = size {
+                block
+                    .params
+                    .insert("int_size".into(), ParamValue::Int(size));
+            }
+        }
+        for old in ["text", "lvalue"] {
+            if let Some(value) = block.consts.remove(old) {
+                block.consts.insert("value".into(), value);
+            }
+        }
+        renamed.push(block.id.clone());
+    }
+    for link in &mut logic.links {
+        if renamed.contains(&link.to.block) && matches!(link.to.port.as_str(), "text" | "lvalue") {
+            link.to.port = "value".into();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,7 +624,8 @@ mod tests {
             assert_eq!(u.frame(), None, "{bad}");
         }
         assert_eq!(UartConfig::new(2).serial(), "Serial2");
-        assert_eq!(serial_name(0), "Serial");
+        assert_eq!(serial_name(USB), "Serial");
+        assert_eq!(serial_name(0), "Serial0");
     }
 
     fn messages(
@@ -444,7 +667,7 @@ mod tests {
         // Writers share a port; USB is write-only.
         assert!(messages(
             std::slice::from_ref(&two),
-            &[("a", 2, Write), ("b", 2, Write), ("c", 0, Write)],
+            &[("a", 2, Write), ("b", 2, Write), ("c", USB, Write)],
             Chip::Esp32
         )
         .is_empty());
@@ -463,16 +686,26 @@ mod tests {
             Chip::Esp32,
         );
         assert!(m[0].contains("только один блок"), "{m:?}");
-        let m = messages(&[], &[("mb", 0, Exclusive)], Chip::Esp32);
-        assert!(m[0].contains("UART0 занят USB"), "{m:?}");
+        let m = messages(&[], &[("mb", USB, Exclusive)], Chip::Esp32);
+        assert!(m[0].contains("USB занят"), "{m:?}");
+        // UART0: the USB bridge on ESP32, a free port on ESP32-C3.
+        let m = messages(&[], &[("tx", 0, Write)], Chip::Esp32);
+        assert!(m[0].contains("UART0 — это USB-мост"), "{m:?}");
+        let zero = UartConfig::new(0);
+        assert!(messages(
+            std::slice::from_ref(&zero),
+            &[("tx", 0, Write), ("u", USB, Write)],
+            Chip::Esp32C3
+        )
+        .is_empty());
         // USB: no settings needed, one reader besides writers.
-        assert!(messages(&[], &[("rx", 0, Read), ("tx", 0, Write)], Chip::Esp32).is_empty());
-        let m = messages(&[], &[("r1", 0, Read), ("r2", 0, Read)], Chip::Esp32);
+        assert!(messages(&[], &[("rx", USB, Read), ("tx", USB, Write)], Chip::Esp32).is_empty());
+        let m = messages(&[], &[("r1", USB, Read), ("r2", USB, Read)], Chip::Esp32);
         assert!(m[0].contains("только один блок"), "{m:?}");
 
         // ESP32-C3 has no UART2; a pin taken by a block; a bad format; twice.
         let m = messages(std::slice::from_ref(&two), &[], Chip::Esp32C3);
-        assert!(m[0].contains("такого UART нет (есть UART1)"), "{m:?}");
+        assert!(m[0].contains("нет UART2 (есть UART0, UART1)"), "{m:?}");
         let mut one = UartConfig::new(1);
         one.tx = 4;
         one.format = "8X1".into();
@@ -488,6 +721,59 @@ mod tests {
         one.rx = 16;
         let m = messages(&[one, two], &[], Chip::Esp32);
         assert_eq!(m, ["UART2: вывод RX GPIO16 уже занят UART1 (rx)"]);
+    }
+
+    #[test]
+    fn old_uart_send_params_move() {
+        let mut logic: Logic = toml::from_str(
+            r#"
+[[block]]
+id = "a"
+type = "uart_send"
+uart = 0
+edge = false
+
+[[block]]
+id = "r"
+type = "uart_read"
+uart = 2
+
+[[block]]
+id = "b"
+type = "uart_send"
+mode = 4
+edge = true
+
+[[block]]
+id = "src"
+type = "constant"
+
+[[link]]
+from = "src.out"
+to = "a.text"
+
+[[link]]
+from = "src.out"
+to = "b.lvalue"
+"#,
+        )
+        .unwrap();
+        migrate_uart_send(&mut logic);
+        let a = &logic.blocks[0].params;
+        assert_eq!(a.get("trigger"), Some(&ParamValue::Int(1)));
+        assert!(!a.contains_key("edge") && !a.contains_key("send_as"));
+        let b = &logic.blocks[2].params;
+        assert_eq!(b.get("send_as"), Some(&ParamValue::Int(1)));
+        assert_eq!(b.get("int_size"), Some(&ParamValue::Int(2)));
+        assert!(!b.contains_key("mode") && !b.contains_key("trigger"));
+        assert!(logic.links.iter().all(|l| l.to.port == "value"));
+        // `uart = 0` meant USB: now `port = -1`; other numbers stay.
+        assert_eq!(a.get("port"), Some(&ParamValue::Int(-1)));
+        assert!(!a.contains_key("uart"));
+        assert_eq!(
+            logic.blocks[1].params.get("port"),
+            Some(&ParamValue::Int(2))
+        );
     }
 
     #[test]

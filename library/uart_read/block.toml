@@ -2,11 +2,11 @@
 type = "uart_read"
 name = "Чтение из UART"
 symbol = "UART RX"
-group = "Сеть"
+group = "UART"
 description = "Принимает данные из UART: строку до разделителя (line, импульс ready) или по одному байту."
 
 [block.uart]
-param = "uart"
+param = "port"
 access = "read"
 
 [[output]]
@@ -39,13 +39,29 @@ type = "int"
 description = "Сколько байт ещё ждёт в буфере приёма"
 
 [[param]]
-name = "uart"
-label = "UART"
+name = "port"
+label = "порт"
 type = "int"
 default = 2
-min = 0
+min = -1
 max = 2
-description = "Номер UART: 0 — USB (монитор порта, в отладке — ввод в консоли), 1 или 2 — из настроек платы"
+description = "USB (монитор порта, в отладке — ввод в консоли) или UART из настроек платы; UART0 свободен только у ESP32-C3/S3"
+
+[[param.choice]]
+value = -1
+label = "USB (монитор порта)"
+
+[[param.choice]]
+value = 0
+label = "UART0"
+
+[[param.choice]]
+value = 1
+label = "UART1"
+
+[[param.choice]]
+value = 2
+label = "UART2"
 
 [[param]]
 name = "mode"
@@ -54,7 +70,15 @@ type = "int"
 default = 0
 min = 0
 max = 1
-description = "0 — строками до разделителя, 1 — по одному байту за цикл"
+description = "Как читать: строками до разделителя или по одному байту за цикл"
+
+[[param.choice]]
+value = 0
+label = "Строками до разделителя"
+
+[[param.choice]]
+value = 1
+label = "По одному байту"
 
 [[param]]
 name = "end"
@@ -64,7 +88,19 @@ default = 0
 min = 0
 max = 2
 when = "mode == 0"
-description = "Конец строки: 0 — \\n (\\r отбрасывается), 1 — \\r (\\n отбрасывается), 2 — символ end_char"
+description = "Конец строки"
+
+[[param.choice]]
+value = 0
+label = "\\n (\\r отбрасывается)"
+
+[[param.choice]]
+value = 1
+label = "\\r (\\n отбрасывается)"
+
+[[param.choice]]
+value = 2
+label = "Свой символ"
 
 [[param]]
 name = "end_char"

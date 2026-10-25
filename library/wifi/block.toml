@@ -5,7 +5,7 @@ symbol = "Wi-Fi"
 group = "Сеть"
 description = "Подключение ESP32 к сети Wi-Fi и/или своя точка доступа (библиотека FLProg_Network). Входы и выходы включаются в свойствах блока."
 single = true
-includes = ["flprogNetwork.h"]
+includes = ["flprogNetwork.h", "flprogWebServer.h", "service/flprogNetworkOta.h", "Update.h"]
 
 [[input]]
 name = "en"
@@ -18,20 +18,20 @@ description = "Включение Wi-Fi: true — работает, false — р
 name = "mode"
 type = "int"
 label = "Режим"
-when = "use_mode"
-description = "Режим работы: 0 клиент, 1 точка доступа, 2 клиент и точка доступа"
+when = "wifi_mode == 3"
+description = "Режим работы: 0 клиент, 1 точка доступа, 2 клиент и точка доступа (другое — клиент)"
 
 [[output]]
 name = "ready"
 type = "bool"
-when = "out_ready"
+when = "out_ready and wifi_mode != 1"
 description = "true, пока ESP32 подключён к сети и получил адрес"
 
 [[output]]
 name = "ap_ready"
 type = "bool"
 label = "AP"
-when = "out_ap_ready"
+when = "out_ap_ready and wifi_mode != 0"
 description = "true, пока работает своя точка доступа"
 
 [[output]]
@@ -50,7 +50,7 @@ description = "Состояние: 0 выключен, 1 ожидание, 2 п�
 [[output]]
 name = "error"
 type = "int"
-when = "out_error"
+when = "out_error and wifi_mode != 1"
 description = "Код ошибки: 0 нет, 1 нет ответа от точки доступа (таймаут), 2 сеть (SSID) не найдена"
 
 [[param]]
@@ -58,16 +58,28 @@ name = "wifi_mode"
 type = "int"
 label = "Режим"
 default = 0
-min = 0
-max = 2
-when = "not use_mode"
-show = "hidden"
-description = "Режим работы: 0 клиент, 1 точка доступа, 2 клиент и точка доступа"
+description = "Режим работы; набор входов, выходов и настроек следует за ним"
+
+[[param.choice]]
+value = 0
+label = "Клиент"
+
+[[param.choice]]
+value = 1
+label = "Точка доступа"
+
+[[param.choice]]
+value = 2
+label = "Клиент и точка доступа"
+
+[[param.choice]]
+value = 3
+label = "Задаётся входом «Режим»"
 
 [[param]]
 name = "ssid"
 type = "string"
-when = "use_mode or wifi_mode != 1"
+when = "wifi_mode != 1"
 show = "value"
 description = "Имя сети (SSID), к которой подключаться"
 
@@ -75,7 +87,7 @@ description = "Имя сети (SSID), к которой подключатьс�
 name = "password"
 type = "string"
 default = ""
-when = "use_mode or wifi_mode != 1"
+when = "wifi_mode != 1"
 show = "secret"
 local = "ssid"
 description = "Пароль сети. Хранится в программе отдельно для каждой сети, в файл проекта не попадает"
@@ -84,28 +96,28 @@ description = "Пароль сети. Хранится в программе о�
 name = "dhcp"
 type = "bool"
 default = true
-when = "use_mode or wifi_mode != 1"
+when = "wifi_mode != 1"
 description = "Получать адрес автоматически (DHCP)"
 
 [[param]]
 name = "ip"
 type = "string"
 default = "192.168.1.177"
-when = "not dhcp and (use_mode or wifi_mode != 1)"
+when = "not dhcp and (wifi_mode != 1)"
 description = "Постоянный IP-адрес"
 
 [[param]]
 name = "gateway"
 type = "string"
 default = "192.168.1.1"
-when = "not dhcp and (use_mode or wifi_mode != 1)"
+when = "not dhcp and (wifi_mode != 1)"
 description = "Шлюз (он же DNS)"
 
 [[param]]
 name = "subnet"
 type = "string"
 default = "255.255.255.0"
-when = "not dhcp and (use_mode or wifi_mode != 1)"
+when = "not dhcp and (wifi_mode != 1)"
 description = "Маска подсети"
 
 [[param]]
@@ -113,7 +125,7 @@ name = "ap_ssid"
 type = "string"
 label = "SSID точки"
 default = "FLP_ESP32"
-when = "use_mode or wifi_mode != 0"
+when = "wifi_mode != 0"
 show = "value"
 description = "Имя своей точки доступа"
 
@@ -122,7 +134,7 @@ name = "ap_password"
 type = "string"
 label = "Пароль точки"
 default = ""
-when = "use_mode or wifi_mode != 0"
+when = "wifi_mode != 0"
 show = "secret"
 local = "ap_ssid"
 description = "Пароль своей точки доступа (не короче 8 знаков; пусто — открытая сеть). Хранится в программе, в файл проекта не попадает"
@@ -136,18 +148,11 @@ show = "hidden"
 description = "Показать вход включения Wi-Fi"
 
 [[param]]
-name = "use_mode"
-type = "bool"
-label = "Вход «Режим»"
-default = false
-show = "hidden"
-description = "Показать вход переключения режима"
-
-[[param]]
 name = "out_ready"
 type = "bool"
 label = "Выход ready"
 default = true
+when = "wifi_mode != 1"
 show = "hidden"
 description = "Показать выход «есть связь»"
 
@@ -155,7 +160,8 @@ description = "Показать выход «есть связь»"
 name = "out_ap_ready"
 type = "bool"
 label = "Выход AP"
-default = false
+default = true
+when = "wifi_mode != 0"
 show = "hidden"
 description = "Показать выход «точка доступа работает»"
 
@@ -180,5 +186,37 @@ name = "out_error"
 type = "bool"
 label = "Выход error"
 default = false
+when = "wifi_mode != 1"
 show = "hidden"
 description = "Показать выход кода ошибки"
+
+[[param]]
+name = "web"
+type = "bool"
+label = "Веб-страница"
+default = true
+description = "Страница-заглушка на порту 80: IP, MAC, аптайм, версия сборки и состояние обновления"
+
+[[param]]
+name = "web_update"
+type = "bool"
+label = "Загрузка прошивки"
+default = true
+when = "web"
+description = "Форма на странице для загрузки прошивки (.bin): файл принимает отдельный приёмник на порту 8080 и пишет в память, затем устройство перезагружается"
+
+[[param]]
+name = "ota"
+type = "bool"
+label = "Обновление по сети"
+default = true
+description = "Прошивку можно обновить по сети (OTA) — менеджером OTA FLProg или Arduino IDE. Имя устройства — id блока"
+
+[[param]]
+name = "ota_password"
+type = "string"
+label = "Пароль OTA"
+default = ""
+when = "ota or web_update"
+show = "secret"
+description = "Пароль обновления (по сети и через страницу); пусто — без пароля (любой в сети может залить прошивку)"

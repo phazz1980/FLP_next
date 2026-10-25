@@ -1,0 +1,12 @@
+[block]
+type = "my_block"
+name = "Новый блок"
+group = "Время"
+
+[[input]]
+name = "in"
+type = "bool"
+
+[[output]]
+name = "out"
+type = "bool"

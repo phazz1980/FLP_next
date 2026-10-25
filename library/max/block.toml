@@ -1,0 +1,18 @@
+[block]
+type = "max"
+name = "Максимум"
+symbol = "MAX"
+group = "Числа"
+description = "Большее из a и b."
+
+[[input]]
+name = "a"
+type = "float"
+
+[[input]]
+name = "b"
+type = "float"
+
+[[output]]
+name = "out"
+type = "float"

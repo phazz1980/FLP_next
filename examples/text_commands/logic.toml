@@ -1,6 +1,6 @@
 # Строки и UART: сообщение о давлении и разбор текстовых команд.
 # Команда приходит строкой из UART2, сообщение раз в секунду уходит в USB
-# (видно в мониторе порта), давление — числом float в UART2.
+# (видно в мониторе порта), давление — числом float в UART2, когда оно меняется.
 
 [[var]]
 name = "message"
@@ -70,7 +70,7 @@ id = "length_w"
 type = "var_set"
 var = "message_len"
 
-# Раз в секунду: сообщение в USB, давление в UART2.
+# Раз в секунду — сообщение в USB; давление в UART2 — при изменении больше 0,05 бар.
 [[block]]
 id = "tick"
 type = "generator"
@@ -80,21 +80,33 @@ time_off = "500ms"
 [[block]]
 id = "report"
 type = "uart_send"
-uart = 0
+port = -1
 
 [[block]]
 id = "p_send"
 type = "uart_send"
-uart = 2
-mode = 3
+port = 2
+send_as = 1
+trigger = 2
+deadband = 0.05
 
 # --- Плата 2: команды ---
+
+# Порт для команд (RS-232/TTL-адаптер или второй контроллер): UART2 настроен
+# блоком на схеме, а не в «Настройках МК».
+[[block]]
+id = "port2"
+type = "uart_config"
+uart = 2
+speed = 9600
+rx = 16
+tx = 17
 
 # Строка до \n из UART2 становится новой командой.
 [[block]]
 id = "rx"
 type = "uart_read"
-uart = 2
+port = 2
 
 [[block]]
 id = "command_w"
@@ -229,11 +241,7 @@ to   = "report.en"
 
 [[link]]
 from = "message.out"
-to   = "report.text"
-
-[[link]]
-from = "tick.out"
-to   = "p_send.en"
+to   = "report.value"
 
 [[link]]
 from = "bar.out"

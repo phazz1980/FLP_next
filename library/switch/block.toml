@@ -1,0 +1,23 @@
+[block]
+type = "switch"
+name = "Переключатель"
+symbol = "SWITCH"
+group = "Переключатели"
+description = "Выбор из двух: out = a, если sel = 0, иначе b."
+
+[[input]]
+name = "sel"
+type = "bool"
+label = "Выбор"
+
+[[input]]
+name = "a"
+type = "float"
+
+[[input]]
+name = "b"
+type = "float"
+
+[[output]]
+name = "out"
+type = "float"

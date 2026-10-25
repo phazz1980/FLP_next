@@ -1,0 +1,46 @@
+{% if value.runtime %}
+// @functions once
+// Arduino frame constant for a format like "8E1"; 0 if the text is not a format.
+uint32_t flp_uart_format(const String& text) {
+  String f = text;
+  f.trim();
+  f.toUpperCase();
+{% for d in [5, 6, 7, 8] %}
+{% for p in ["N", "E", "O"] %}
+{% for s in [1, 2] %}
+  if (f == "{{ d }}{{ p }}{{ s }}") return SERIAL_{{ d }}{{ p }}{{ s }};
+{% endfor %}
+{% endfor %}
+{% endfor %}
+  return 0;
+}
+
+// @global
+bool {{ id }}_prev = false;
+// @loop
+// Speed and format from the inputs take effect on a rising edge of apply:
+// 0 keeps the speed, an empty string keeps the format.
+if ({{ input.apply }} && !{{ id }}_prev) {
+  String format = {{ input.new_format }};
+  format.trim();
+  uint32_t config = format.length() > 0 ? flp_uart_format(format) : 0;
+  {{ output.ok }} = format.length() == 0 || config != 0;
+  unsigned long speed = {{ input.new_speed }} > 0 ? (unsigned long){{ input.new_speed }} : {{ uart.serial }}.baudRate();
+  if (config != 0) {
+    // A new frame format needs the port restarted.
+    {{ uart.serial }}.end();
+    {{ uart.serial }}.setRxBufferSize({{ uart.rx_buffer }});
+    {{ uart.serial }}.begin(speed, config, {{ uart.rx }}, {{ uart.tx }});
+{% if uart.de >= 0 %}
+    {{ uart.serial }}.setPins(-1, -1, -1, {{ uart.de }});
+    {{ uart.serial }}.setMode(UART_MODE_RS485_HALF_DUPLEX);
+{% endif %}
+  } else if ({{ input.new_speed }} > 0) {
+    {{ uart.serial }}.updateBaudRate(speed);
+  }
+}
+{{ id }}_prev = {{ input.apply }};
+{% else %}
+// @loop
+{% endif %}
+{{ output.baud }} = (int32_t){{ uart.serial }}.baudRate();

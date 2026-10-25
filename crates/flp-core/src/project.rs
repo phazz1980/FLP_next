@@ -187,6 +187,8 @@ impl Project {
     /// Brings a project written by an older version to the current format.
     fn migrated(mut self) -> Self {
         crate::uart::migrate_legacy(&mut self.config.uart, &mut self.logic);
+        migrate_wifi_mode(&mut self.logic);
+        crate::uart::migrate_uart_send(&mut self.logic);
         self
     }
 
@@ -284,9 +286,52 @@ fn zip_err(path: &Path, source: ZipError) -> Error {
     }
 }
 
+/// The Wi-Fi block took its mode from the input when the check box `use_mode`
+/// was on; now that is the choice `wifi_mode = 3`.
+fn migrate_wifi_mode(logic: &mut Logic) {
+    for block in logic.blocks.iter_mut().filter(|b| b.kind == "wifi") {
+        if let Some(use_mode) = block.params.remove("use_mode") {
+            if use_mode == crate::ParamValue::Bool(true) {
+                block
+                    .params
+                    .insert("wifi_mode".into(), crate::ParamValue::Int(3));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wifi_use_mode_becomes_mode_choice() {
+        let mut logic: Logic = toml::from_str(
+            r#"
+[[block]]
+id = "on"
+type = "wifi"
+ssid = "net"
+use_mode = true
+wifi_mode = 1
+
+[[block]]
+id = "off"
+type = "wifi"
+ssid = "net"
+use_mode = false
+wifi_mode = 2
+"#,
+        )
+        .unwrap();
+        migrate_wifi_mode(&mut logic);
+        let on = &logic.blocks[0].params;
+        assert_eq!(on.get("wifi_mode"), Some(&crate::ParamValue::Int(3)));
+        assert!(!on.contains_key("use_mode"));
+        let off = &logic.blocks[1].params;
+        assert_eq!(off.get("wifi_mode"), Some(&crate::ParamValue::Int(2)));
+        assert!(!off.contains_key("use_mode"));
+    }
 
     #[test]
     fn archive_roundtrip_keeps_extra_entries() {

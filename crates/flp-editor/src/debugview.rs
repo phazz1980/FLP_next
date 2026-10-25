@@ -215,7 +215,7 @@ pub fn value_menu(ui: &mut Ui, dbg: &mut DebugState, index: usize) {
             }
         }
         // Not in the debug table.
-        SignalType::String => {}
+        SignalType::String | SignalType::Any => {}
     }
     if forced.is_some() && ui.button("Снять форсировку").clicked() {
         dbg.send(Command::Force { index, value: None });
@@ -362,7 +362,7 @@ fn value_row(ui: &mut Ui, dbg: &mut DebugState, pal: &Palette, index: usize) {
                     });
                 }
             }
-            SignalType::String => {}
+            SignalType::String | SignalType::Any => {}
         }
         if forced.is_some()
             && ui

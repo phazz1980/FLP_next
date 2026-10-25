@@ -1,0 +1,6 @@
+[project]
+name = "math_switch"
+description = "Алгебра и переключатель: ограничение, модуль, минимум, максимум и выбор из двух"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

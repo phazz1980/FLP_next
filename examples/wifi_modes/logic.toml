@@ -27,8 +27,7 @@ type = "wifi"
 ssid = "MyNetwork"
 ap_ssid = "FLP_ESP32"
 use_en = true
-use_mode = true
-out_ap_ready = true
+wifi_mode = 3
 out_status = true
 out_error = true
 

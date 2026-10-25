@@ -1,0 +1,98 @@
+# Датчик 0…100 %, кнопка выбирает: ШИМ по датчику с ограничением или фиксированные 50 %
+
+[[block]]
+id = "adc"
+type = "analog_in"
+pin = 34
+
+[[block]]
+id = "level"
+type = "scale"
+out_max = 100.0
+
+[[block]]
+id = "dev"
+type = "abs"
+
+[[block]]
+id = "lowest"
+type = "min"
+const = { b = 80.0 }
+
+[[block]]
+id = "highest"
+type = "max"
+const = { b = 10.0 }
+
+[[block]]
+id = "clamp"
+type = "limit"
+lo = 20.0
+hi = 90.0
+
+[[block]]
+id = "button"
+type = "digital_in"
+pin = 12
+pullup = true
+inverted = true
+
+[[block]]
+id = "pick"
+type = "switch"
+const = { b = 50.0 }
+
+[[block]]
+id = "fan"
+type = "pwm_out"
+pin = 25
+
+[[block]]
+id = "dev_out"
+type = "pwm_out"
+pin = 26
+
+[[block]]
+id = "max_out"
+type = "pwm_out"
+pin = 27
+
+[[link]]
+from = "adc.out"
+to   = "level.in"
+
+[[link]]
+from = "level.out"
+to   = "clamp.in"
+
+[[link]]
+from = "level.out"
+to   = "dev.in"
+
+[[link]]
+from = "level.out"
+to   = "lowest.a"
+
+[[link]]
+from = "lowest.out"
+to   = "highest.a"
+
+[[link]]
+from = "button.out"
+to   = "pick.sel"
+
+[[link]]
+from = "clamp.out"
+to   = "pick.a"
+
+[[link]]
+from = "pick.out"
+to   = "fan.in"
+
+[[link]]
+from = "dev.out"
+to   = "dev_out.in"
+
+[[link]]
+from = "highest.out"
+to   = "max_out.in"

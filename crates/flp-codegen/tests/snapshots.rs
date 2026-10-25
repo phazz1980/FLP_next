@@ -160,7 +160,7 @@ fn diagnostics_in_normal_build() {
 }
 
 /// Blocks on shared UARTs (`tests/fixtures/library/uart_probe`): the ports are
-/// started in `setup()` from `[[uart]]`, UART0 only when nothing else starts it.
+/// started in `setup()` from `[[uart]]`, USB only when nothing else starts it.
 #[test]
 fn shared_uart_setup() {
     let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
@@ -180,7 +180,7 @@ type = "uart_probe"
 [[block]]
 id = "usb"
 type = "uart_probe"
-uart = 0
+uart = -1
 "#,
     )
     .unwrap();
@@ -194,7 +194,7 @@ uart = 0
         rx_buffer: 512,
     }];
     let code = generate(&project, &lib, &ArduinoCpp::RELEASE).unwrap();
-    let setup = "  // UART0 (USB): 115200 бод
+    let setup = "  // USB: 115200 бод
   Serial.begin(115200);
   // UART1: 19200 бод, 8E1, RX GPIO25, TX GPIO26
   Serial1.setRxBufferSize(512);
@@ -205,10 +205,10 @@ uart = 0
     assert!(code.contains(setup), "{code}");
     assert_eq!(code.matches("Serial1.begin").count(), 1, "{code}");
     assert!(code.contains("Serial1.println(7);"), "{code}");
-    assert!(code.contains("  // UART1, 19200"), "{code}");
-    // The debug module starts UART0 itself.
+    assert!(code.contains("  // Serial1, 19200"), "{code}");
+    // The debug module starts USB itself.
     let code = generate(&project, &lib, &ArduinoCpp::DEBUG).unwrap();
-    assert!(!code.contains("// UART0 (USB)"), "{code}");
+    assert!(!code.contains("// USB: "), "{code}");
 
     // A UART without settings stops generation.
     project.config.uart.clear();
@@ -238,13 +238,12 @@ fn uart_block_modes() {
             block.params.insert((*k).to_owned(), v.clone());
         }
     };
-    use ParamValue::{Bool, Int, Text};
+    use ParamValue::{Int, Text};
     set(
         &mut project,
         "report",
-        &[("edge", Bool(false)), ("ending", Int(1))],
+        &[("trigger", Int(1)), ("ending", Int(1))],
     );
-    set(&mut project, "p_send", &[("mode", Int(2))]);
     set(
         &mut project,
         "rx",
@@ -257,34 +256,156 @@ fn uart_block_modes() {
     let code = generate(&project, &library(), &ArduinoCpp::RELEASE).unwrap();
     assert!(code.contains("bool fire = tick_out;"), "{code}");
     assert!(code.contains(r#"const char* ending = "\n";"#), "{code}");
-    assert!(
-        code.contains("int16_t data = (int16_t)constrain(lroundf(bar_out), -32768L, 32767L);"),
-        "{code}"
-    );
     assert!(code.contains(r#"bool end = c == ";"[0];"#), "{code}");
     assert!(code.contains("millis() - rx_last >= 200UL"), "{code}");
 
     // Byte by byte: other outputs; the line outputs are gone, so the links go too.
     set(&mut project, "rx", &[("mode", Int(1))]);
-    set(&mut project, "p_send", &[("mode", Int(1))]);
     project.logic.links.retain(|l| l.from.block != "rx");
     project.logic.blocks.retain(|b| b.id != "command_w");
     let code = generate(&project, &library(), &ArduinoCpp::RELEASE).unwrap();
     assert!(code.contains("rx_new = Serial2.available() > 0;"), "{code}");
     assert!(code.contains("rx_byte = Serial2.read();"), "{code}");
     assert!(!code.contains("rx_buf"), "{code}");
-    assert!(
-        code.contains("uint8_t data = (uint8_t)constrain(lroundf(bar_out), 0L, 255L);"),
-        "{code}"
-    );
 
-    // Debug firmware starts UART0 itself; the block only writes to it.
+    // Debug firmware starts USB itself; the block only writes to it.
     let project = Project::load(repo_path("examples/text_commands")).unwrap();
     let code = generate(&project, &library(), &ArduinoCpp::DEBUG).unwrap();
     assert_eq!(code.matches("Serial.begin(").count(), 1, "{code}");
 }
 
-/// `uart_read` on UART0: the port itself in normal firmware, the console input
+/// Source of `p_send.value`, parameters and the lines expected in the code.
+type Case<'a> = (&'a str, &'a [(&'a str, ParamValue)], &'a [&'a str]);
+
+/// `uart_send` takes the type of what feeds `value`: text or binary per type,
+/// and "on change" compares values of that type.
+#[test]
+fn uart_send_value_types() {
+    // (source of p_send.value, parameters) → expected lines.
+    let cases: [Case; 6] = [
+        (
+            "length.out",
+            &[
+                ("send_as", ParamValue::Int(1)),
+                ("int_size", ParamValue::Int(2)),
+            ],
+            &["int32_t data = length_out;"],
+        ),
+        (
+            "length.out",
+            &[
+                ("send_as", ParamValue::Int(1)),
+                ("int_size", ParamValue::Int(1)),
+            ],
+            &["int16_t data = (int16_t)constrain(length_out, -32768L, 32767L);"],
+        ),
+        (
+            "length.out",
+            &[
+                ("send_as", ParamValue::Int(1)),
+                ("int_size", ParamValue::Int(0)),
+            ],
+            &["uint8_t data = (uint8_t)constrain(length_out, 0L, 255L);"],
+        ),
+        (
+            "bar.out",
+            &[
+                ("send_as", ParamValue::Int(0)),
+                ("decimals", ParamValue::Int(3)),
+            ],
+            &[
+                "String text = String(bar_out, 3);",
+                "fabsf(bar_out - p_send_last) >= 0.05f",
+            ],
+        ),
+        (
+            "is_on.out",
+            &[
+                ("send_as", ParamValue::Int(0)),
+                ("trigger", ParamValue::Int(2)),
+            ],
+            &[
+                r#"String text = is_on_out ? "1" : "0";"#,
+                "bool p_send_last;",
+            ],
+        ),
+        (
+            "message.out",
+            &[("send_as", ParamValue::Int(1))],
+            &[
+                "const String& text = message_out;",
+                r#"const char* ending = "";"#,
+                "String p_send_last;",
+                "!p_send_started || message_out != p_send_last;",
+            ],
+        ),
+    ];
+    for (source, params, expected) in cases {
+        let mut project = Project::load(repo_path("examples/text_commands")).unwrap();
+        let block = project
+            .logic
+            .blocks
+            .iter_mut()
+            .find(|b| b.id == "p_send")
+            .unwrap();
+        for (k, v) in params {
+            block.params.insert((*k).to_owned(), v.clone());
+        }
+        let link = project
+            .logic
+            .links
+            .iter_mut()
+            .find(|l| l.to.block == "p_send" && l.to.port == "value")
+            .unwrap();
+        let (b, port) = source.split_once('.').unwrap();
+        link.from = flp_core::PortRef::new(b, port);
+        let code = generate(&project, &library(), &ArduinoCpp::RELEASE)
+            .unwrap_or_else(|e| panic!("{source}: {e}"));
+        for line in expected {
+            assert!(code.contains(line), "{source}: нет «{line}»\n{code}");
+        }
+    }
+}
+
+/// UART0 is a port of its own on ESP32-C3 (`Serial0`), next to USB (`Serial`);
+/// on ESP32 it is the USB bridge and not offered.
+#[test]
+fn uart0_of_esp32c3() {
+    let mut project = Project::load(repo_path("examples/text_commands")).unwrap();
+    project.config.board.fqbn = "esp32:esp32:esp32c3".into();
+    for (id, key) in [("port2", "uart"), ("rx", "port"), ("p_send", "port")] {
+        let block = project
+            .logic
+            .blocks
+            .iter_mut()
+            .find(|b| b.id == id)
+            .unwrap();
+        block.params.insert(key.into(), ParamValue::Int(0));
+        // GPIO16/17 of the example are not on ESP32-C3.
+        block.params.remove("rx");
+        block.params.remove("tx");
+    }
+    let code = generate(&project, &library(), &ArduinoCpp::RELEASE).unwrap();
+    assert!(code.contains("  Serial.begin(115200);"), "{code}");
+    assert!(code.contains("  Serial0.setRxBufferSize(256);"), "{code}");
+    assert!(code.contains("while (Serial0.available() > 0) {"), "{code}");
+    assert!(
+        code.contains("Serial0.write((const uint8_t*)&data, sizeof(data));"),
+        "{code}"
+    );
+
+    project.config.board.fqbn = "esp32:esp32:esp32".into();
+    match generate(&project, &library(), &ArduinoCpp::RELEASE) {
+        Err(GenError::Schema(d)) => assert!(
+            d.iter()
+                .any(|d| d.message.contains("у ESP32 UART0 — это USB-мост")),
+            "{d:?}"
+        ),
+        other => panic!("ожидалась ошибка схемы, получено {other:?}"),
+    }
+}
+
+/// `uart_read` on USB: the port itself in normal firmware, the console input
 /// (`TEXT_IN`) of the debugging module in debug firmware.
 #[test]
 fn uart0_reader_takes_console_input() {
@@ -295,7 +416,7 @@ fn uart0_reader_takes_console_input() {
         .iter_mut()
         .find(|b| b.id == "rx")
         .unwrap();
-    rx.params.insert("uart".into(), ParamValue::Int(0));
+    rx.params.insert("port".into(), ParamValue::Int(-1));
 
     let code = generate(&project, &library(), &ArduinoCpp::RELEASE).unwrap();
     assert!(code.contains("while (Serial.available() > 0) {"), "{code}");
@@ -318,10 +439,99 @@ fn uart0_reader_takes_console_input() {
     );
     assert_eq!(code.matches("Serial.begin(").count(), 1, "{code}");
 
-    // Without a UART0 reader the module has no console input.
+    // Without a USB reader the module has no console input.
     let project = Project::load(repo_path("examples/text_commands")).unwrap();
     let code = generate(&project, &library(), &ArduinoCpp::DEBUG).unwrap();
     assert!(!code.contains("flp_dbg_in"), "{code}");
+}
+
+/// `uart_config` on a sheet: settings of its UART, the speed from an input, and
+/// one place per UART.
+#[test]
+fn uart_config_block() {
+    let mut project = Project::load(repo_path("examples/text_commands")).unwrap();
+    let port2 = project
+        .logic
+        .blocks
+        .iter_mut()
+        .find(|b| b.id == "port2")
+        .unwrap();
+    port2
+        .params
+        .insert("runtime".into(), ParamValue::Bool(true));
+    port2.params.insert("speed".into(), ParamValue::Int(19200));
+    port2
+        .params
+        .insert("format".into(), ParamValue::Text("8E1".into()));
+    project.logic.links.extend(
+        toml::from_str::<flp_core::Logic>(
+            r#"
+[[link]]
+from = "length.out"
+to = "port2.new_speed"
+
+[[link]]
+from = "arg.out"
+to = "port2.new_format"
+
+[[link]]
+from = "tick.out"
+to = "port2.apply"
+"#,
+        )
+        .unwrap()
+        .links,
+    );
+    let code = generate(&project, &library(), &ArduinoCpp::RELEASE).unwrap();
+    assert!(
+        code.contains("  Serial2.begin(19200, SERIAL_8E1, 16, 17);"),
+        "{code}"
+    );
+    assert!(code.contains("if (tick_out && !port2_prev) {"), "{code}");
+    assert!(code.contains("String format = arg_out;"), "{code}");
+    assert!(
+        code.contains(r#"if (f == "7O2") return SERIAL_7O2;"#),
+        "{code}"
+    );
+    // A new format restarts the port with its pins and buffer; a speed alone does not.
+    assert!(
+        code.contains("Serial2.setRxBufferSize(256);\n      Serial2.begin(speed, config, 16, 17);"),
+        "{code}"
+    );
+    assert!(
+        code.contains("} else if (length_out > 0) {\n      Serial2.updateBaudRate(speed);"),
+        "{code}"
+    );
+    assert!(
+        code.contains("port2_baud = (int32_t)Serial2.baudRate();"),
+        "{code}"
+    );
+
+    let schema_error = |project: &Project| match generate(project, &library(), &ArduinoCpp::RELEASE)
+    {
+        Err(GenError::Schema(d)) => d.into_iter().map(|d| d.message).collect::<Vec<_>>(),
+        other => panic!("ожидалась ошибка схемы, получено {other:?}"),
+    };
+    // The same UART in the board settings too.
+    let mut both = Project::load(repo_path("examples/text_commands")).unwrap();
+    both.config.uart.push(flp_core::UartConfig::new(2));
+    let m = schema_error(&both);
+    assert!(
+        m.iter()
+            .any(|m| m.contains("блок «port2»: UART2 уже настроен в настройках платы")),
+        "{m:?}"
+    );
+    // Two settings blocks for one UART.
+    let mut twice = Project::load(repo_path("examples/text_commands")).unwrap();
+    let mut copy = twice.logic.block("port2").unwrap().clone();
+    copy.id = "port2_again".into();
+    twice.logic.blocks.push(copy);
+    let m = schema_error(&twice);
+    assert!(
+        m.iter()
+            .any(|m| m.contains("блок «port2_again»: UART2 уже настроен блоком «port2»")),
+        "{m:?}"
+    );
 }
 
 /// Block format features on a test block (`tests/fixtures/library/probe`):

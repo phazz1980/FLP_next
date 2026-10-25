@@ -5,7 +5,7 @@ symbol = "ETH"
 group = "Сеть"
 description = "Проводная сеть на модуле W5500 (W5100, W5200) по SPI (библиотека FLProg_Network)."
 single = true
-includes = ["flprogNetwork.h"]
+includes = ["flprogNetwork.h", "flprogWebServer.h", "service/flprogNetworkOta.h", "Update.h"]
 
 [[output]]
 name = "ready"
@@ -53,3 +53,34 @@ type = "string"
 default = "255.255.255.0"
 when = "not dhcp"
 description = "Маска подсети"
+
+[[param]]
+name = "web"
+type = "bool"
+label = "Веб-страница"
+default = true
+description = "Страница-заглушка на порту 80: IP, MAC, аптайм, версия сборки и состояние обновления"
+
+[[param]]
+name = "web_update"
+type = "bool"
+label = "Загрузка прошивки"
+default = true
+when = "web"
+description = "Форма на странице для загрузки прошивки (.bin): файл принимает отдельный приёмник на порту 8080 и пишет в память, затем устройство перезагружается"
+
+[[param]]
+name = "ota"
+type = "bool"
+label = "Обновление по сети"
+default = true
+description = "Прошивку можно обновить по сети (OTA) — менеджером OTA FLProg или Arduino IDE. Имя устройства — id блока"
+
+[[param]]
+name = "ota_password"
+type = "string"
+label = "Пароль OTA"
+default = ""
+when = "ota or web_update"
+show = "secret"
+description = "Пароль обновления (по сети и через страницу); пусто — без пароля (любой в сети может залить прошивку)"
