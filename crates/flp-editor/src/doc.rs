@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use flp_core::{check, BlockPos, Layout, Library, Logic, Project, Report};
+use flp_core::{check_project, BlockPos, Layout, Library, Logic, Project, Report};
 
 /// State that undo/redo restores.
 #[derive(Clone)]
@@ -32,7 +32,7 @@ impl Doc {
     pub fn open(path: &Path, lib: &Library) -> flp_core::Result<Self> {
         let mut project = Project::load(path)?;
         place_unplaced(&mut project);
-        let report = check(&project.logic, lib, Some(&project.layout));
+        let report = check_project(&project, lib);
         Ok(Self {
             project,
             dirty: false,
@@ -45,7 +45,7 @@ impl Doc {
     }
 
     pub fn recheck(&mut self, lib: &Library) {
-        self.report = check(&self.project.logic, lib, Some(&self.project.layout));
+        self.report = check_project(&self.project, lib);
     }
 
     /// Applies an edit as one undo step. `key` merges consecutive edits of the same

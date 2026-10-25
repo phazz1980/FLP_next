@@ -6,7 +6,6 @@
 id = "wifi"
 type = "wifi"
 ssid = "MyNetwork"
-password = "12345678"
 
 [[block]]
 id = "slave"

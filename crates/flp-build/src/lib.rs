@@ -83,6 +83,17 @@ pub struct CompileOptions {
     pub libraries: Vec<PathBuf>,
     /// Verbose output (`-v`) with compiler warnings; see [`classify`].
     pub verbose: bool,
+    /// Run arduino-cli even if the last build is up to date.
+    pub force: bool,
+}
+
+/// Outcome of a successful [`ArduinoCli::compile`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Compiled {
+    /// arduino-cli compiled the sketch.
+    Built,
+    /// The build folder already held firmware for this sketch and settings.
+    UpToDate,
 }
 
 /// Serial port found by `arduino-cli board list`.
@@ -174,6 +185,60 @@ pub fn build_dir(work_dir: &Path) -> PathBuf {
     work_dir.join("build")
 }
 
+/// File in the build folder with the fingerprint of the last successful build.
+pub const BUILD_STAMP: &str = "flp-build.stamp";
+
+/// Fingerprint of everything that decides the firmware: arduino-cli, board and its
+/// options, library folders and the sketch files. Output settings (`-v`, `--jobs`)
+/// are left out. Changes inside library folders or an updated core are not seen;
+/// [`CompileOptions::force`] covers that.
+fn build_stamp(exe: &Path, work_dir: &Path, board: &BoardConfig, opts: &CompileOptions) -> String {
+    let mut h = Fnv64::new();
+    h.write(exe.as_os_str().as_encoded_bytes());
+    h.write(board.fqbn.as_bytes());
+    for (k, v) in board_options(board) {
+        h.write(k.as_bytes());
+        h.write(v.as_bytes());
+    }
+    for dir in &opts.libraries {
+        h.write(dir.as_os_str().as_encoded_bytes());
+    }
+    let mut files: Vec<PathBuf> = std::fs::read_dir(sketch_dir(work_dir))
+        .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).collect())
+        .unwrap_or_default();
+    files.sort();
+    for file in files {
+        h.write(file.file_name().unwrap_or_default().as_encoded_bytes());
+        h.write(&std::fs::read(&file).unwrap_or_default());
+    }
+    format!("{:016x}", h.0)
+}
+
+/// The build folder holds a firmware image (`.bin` for ESP32, `.hex` for AVR).
+fn has_firmware(work_dir: &Path) -> bool {
+    let dir = build_dir(work_dir);
+    ["sketch.ino.bin", "sketch.ino.hex"]
+        .iter()
+        .any(|f| dir.join(f).is_file())
+}
+
+/// FNV-1a: stable across runs and Rust versions, unlike `DefaultHasher`.
+struct Fnv64(u64);
+
+impl Fnv64 {
+    fn new() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+
+    /// Hashes `bytes` with a length prefix, so neighbouring parts cannot merge.
+    fn write(&mut self, bytes: &[u8]) {
+        for b in (bytes.len() as u64).to_le_bytes().iter().chain(bytes) {
+            self.0 ^= u64::from(*b);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+}
+
 /// Shared control of a running arduino-cli: cancellation and priority, set from
 /// another thread (e.g. the editor UI).
 #[derive(Debug, Default)]
@@ -252,13 +317,16 @@ impl ArduinoCli {
     }
 
     /// Compiles the generated sketch of the project. Output lines go to `on_line`.
+    ///
+    /// Skips arduino-cli when the build folder already holds firmware for the same
+    /// sketch and settings (see [`BUILD_STAMP`]), so it survives editor restarts.
     pub fn compile(
         &self,
         work_dir: &Path,
         board: &BoardConfig,
         opts: &CompileOptions,
         on_line: &mut dyn FnMut(&str),
-    ) -> Result<(), BuildError> {
+    ) -> Result<Compiled, BuildError> {
         let work_dir = &plain_path(work_dir);
         let mut opts = opts.clone();
         for dir in bundled_libraries(work_dir) {
@@ -266,9 +334,22 @@ impl ArduinoCli {
                 opts.libraries.push(dir);
             }
         }
+        let stamp_path = build_dir(work_dir).join(BUILD_STAMP);
+        let stamp = build_stamp(&self.exe, work_dir, board, &opts);
+        if !opts.force
+            && has_firmware(work_dir)
+            && std::fs::read_to_string(&stamp_path).is_ok_and(|s| s.trim() == stamp)
+        {
+            return Ok(Compiled::UpToDate);
+        }
+        // A failed or cancelled build leaves no stamp, so the next one runs for real.
+        let _ = std::fs::remove_file(&stamp_path);
         let args = compile_args(work_dir, board, &opts);
         let status = self.run(&args, opts.low_priority, on_line)?;
-        check_status("сборка", status)
+        check_status("сборка", status)?;
+        // Only a missed shortcut next time if this fails.
+        let _ = std::fs::write(&stamp_path, &stamp);
+        Ok(Compiled::Built)
     }
 
     /// Uploads the last build to the board on `port`.
@@ -688,6 +769,7 @@ mod tests {
     fn board() -> BoardConfig {
         BoardConfig {
             fqbn: "esp32:esp32:esp32".into(),
+            model: None,
             port: None,
             options: [("CPUFreq".to_owned(), "240".to_owned())].into(),
         }
@@ -707,6 +789,35 @@ mod tests {
             PathBuf::from(r"\\srv\share")
         );
         assert_eq!(plain_path(Path::new("rel/p")), PathBuf::from("rel/p"));
+    }
+
+    #[test]
+    fn build_stamp_follows_sketch_and_board_only() {
+        let root = env::temp_dir().join(format!("flp-stamp-{}", std::process::id()));
+        let sketch = sketch_dir(&root);
+        std::fs::create_dir_all(&sketch).unwrap();
+        std::fs::write(sketch.join("sketch.ino"), "void loop() {}").unwrap();
+        let exe = Path::new("arduino-cli");
+        let plain = CompileOptions::default();
+        let stamp = build_stamp(exe, &root, &board(), &plain);
+
+        let output_only = CompileOptions {
+            verbose: true,
+            jobs: Some(2),
+            low_priority: true,
+            ..Default::default()
+        };
+        assert_eq!(build_stamp(exe, &root, &board(), &output_only), stamp);
+
+        let other_board = BoardConfig {
+            fqbn: "esp32:esp32:esp32c3".into(),
+            ..board()
+        };
+        assert_ne!(build_stamp(exe, &root, &other_board, &plain), stamp);
+
+        std::fs::write(sketch.join("sketch.ino"), "void loop() { }").unwrap();
+        assert_ne!(build_stamp(exe, &root, &board(), &plain), stamp);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

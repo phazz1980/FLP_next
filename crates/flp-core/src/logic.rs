@@ -1,6 +1,6 @@
 //! Blocks and links of the schema, without coordinates.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::str::FromStr;
 
@@ -26,13 +26,26 @@ impl Logic {
 }
 
 /// Block instance in the schema.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Block {
     /// Human-readable unique id (`pressure`, `pump`).
     pub id: String,
     /// Library block type (`analog_in`, `timer_on`).
     #[serde(rename = "type")]
     pub kind: String,
+    /// Constants on inputs without a link: port → value.
+    #[serde(rename = "const", default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub consts: BTreeMap<String, ParamValue>,
+    /// Logical outputs inverted for every link that leaves them.
+    #[serde(rename = "invert", default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub inverted: BTreeSet<String>,
+    /// Logical inputs inverted, whatever feeds them (a link or a constant).
+    #[serde(
+        rename = "invert_in",
+        default,
+        skip_serializing_if = "BTreeSet::is_empty"
+    )]
+    pub inverted_inputs: BTreeSet<String>,
     /// All other keys of the table are parameter values.
     #[serde(flatten)]
     pub params: BTreeMap<String, ParamValue>,

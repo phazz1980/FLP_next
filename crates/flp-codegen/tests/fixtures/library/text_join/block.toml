@@ -1,0 +1,19 @@
+# Test block for the string signal type.
+[block]
+type = "text_join"
+name = "Склейка строк"
+group = "Тест"
+description = "Склеивает две строки: проверка типа string."
+
+[[input]]
+name = "a"
+type = "string"
+
+[[input]]
+name = "b"
+type = "string"
+default = " — ok"
+
+[[output]]
+name = "out"
+type = "string"

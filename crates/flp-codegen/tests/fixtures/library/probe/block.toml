@@ -27,6 +27,7 @@ when = 'mode == "raw"'
 [[param]]
 name = "pin"
 type = "pin"
+shared = true
 
 [[param]]
 name = "use_en"

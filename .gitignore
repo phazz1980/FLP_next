@@ -1,3 +1,9 @@
 /target
 # Per-project build cache (persistent build folder of arduino-cli)
 .flp/
+
+# Bundled Arduino libraries (FLProg_Network, Modbus...), kept locally
+/Flprog_Network/
+
+# Distribution archive
+/dist/

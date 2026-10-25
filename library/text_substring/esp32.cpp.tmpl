@@ -1,0 +1,6 @@
+// @loop
+{% if value.len < 0 %}
+{{ output.out }} = {{ input.in }}.substring({{ param.start }});
+{% else %}
+{{ output.out }} = {{ input.in }}.substring({{ param.start }}, {{ param.start }} + {{ param.len }});
+{% endif %}

@@ -29,6 +29,7 @@ pub fn preview_block(def: &BlockDef, template: &str) -> Result<String, GenError>
             SignalType::Bool => ParamValue::Bool(false),
             SignalType::Int => ParamValue::Int(0),
             SignalType::Float => ParamValue::Float(0.0),
+            SignalType::String => ParamValue::Text(String::new()),
         });
     }
     let mut params = BTreeMap::new();
@@ -59,10 +60,13 @@ pub fn preview_block(def: &BlockDef, template: &str) -> Result<String, GenError>
             },
             board: BoardConfig {
                 fqbn: "esp32:esp32:esp32".into(),
+                model: None,
                 port: None,
                 options: BTreeMap::new(),
             },
             diagnostics: Diagnostics::default(),
+            // A block on a UART finds its settings with the defaults.
+            uart: vec![flp_core::UartConfig::new(1), flp_core::UartConfig::new(2)],
         },
         logic: Logic {
             vars: Vec::new(),
@@ -70,6 +74,7 @@ pub fn preview_block(def: &BlockDef, template: &str) -> Result<String, GenError>
                 id: preview_id(&def),
                 kind: def.info.kind.clone(),
                 params,
+                ..Default::default()
             }],
             links: Vec::new(),
         },

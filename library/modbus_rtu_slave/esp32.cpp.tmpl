@@ -9,11 +9,12 @@ FlprogUartExecutor flpUart;
 // Shared slave: modbus_read / modbus_write blocks with slave = "rtu" access its tables.
 ModbusSlaveRTU flpModbusRtu({{ param.uart }}, &flpUart);
 // @setup
-flpModbusRtu.setSpeedUart({{ param.speed }});
-flpModbusRtu.setParityUart({{ param.parity }});
-{% if value.rx >= 0 %}flpModbusRtu.setPinRxUart({{ param.rx }});
-{% endif %}{% if value.tx >= 0 %}flpModbusRtu.setPinTxUart({{ param.tx }});
-{% endif %}{% if value.de >= 0 %}flpModbusRtu.setPinPeDe({{ param.de }});
+// UART{{ uart.number }} from the board settings
+flpModbusRtu.setSpeedUart({{ uart.speed }});
+flpModbusRtu.setParityUart({{ uart.parity }});
+{% if uart.rx >= 0 %}flpModbusRtu.setPinRxUart({{ uart.rx }});
+{% endif %}{% if uart.tx >= 0 %}flpModbusRtu.setPinTxUart({{ uart.tx }});
+{% endif %}{% if uart.de >= 0 %}flpModbusRtu.setPinPeDe({{ uart.de }});
 {% endif %}flpModbusRtu.setSlaveAddress({{ param.address }});
 {% if value.holding > 0 %}flpModbusRtu.configDataTable(FLPROG_HOLDING_REGISTR, {{ param.holding }});
 {% endif %}{% if value.input > 0 %}flpModbusRtu.configDataTable(FLPROG_INPUT_REGISTR, {{ param.input }});

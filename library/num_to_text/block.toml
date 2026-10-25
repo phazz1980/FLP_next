@@ -1,0 +1,38 @@
+[block]
+type = "num_to_text"
+name = "Число → строка"
+symbol = "N→S"
+group = "Строки"
+description = "Переводит число в строку с заданным числом знаков после точки, с текстом до и после."
+
+[[input]]
+name = "in"
+type = "float"
+description = "Число (целое тоже подходит)"
+
+[[output]]
+name = "out"
+type = "string"
+
+[[param]]
+name = "decimals"
+label = "знаков после точки"
+type = "int"
+default = 1
+min = 0
+max = 6
+description = "Знаков после десятичной точки; 0 — целое"
+
+[[param]]
+name = "prefix"
+label = "текст до"
+type = "string"
+default = ""
+description = "Текст перед числом, например «T=»"
+
+[[param]]
+name = "suffix"
+label = "текст после"
+type = "string"
+default = ""
+description = "Текст после числа, например « °C»"

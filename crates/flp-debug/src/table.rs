@@ -24,9 +24,19 @@ pub struct Entry {
     pub cpp_type: &'static str,
 }
 
+/// A string the board reports: travels in its own `TEXT` frames, only on change.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextEntry {
+    pub source: Source,
+    /// C++ name of the `String` in the sketch.
+    pub storage: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DebugTable {
     pub entries: Vec<Entry>,
+    /// Strings: block outputs, then variables.
+    pub texts: Vec<TextEntry>,
 }
 
 impl DebugTable {
@@ -38,13 +48,32 @@ impl DebugTable {
                 SignalType::Bool => 'b',
                 SignalType::Int => 'i',
                 SignalType::Float => 'f',
+                SignalType::String => 's',
             };
             for b in format!("{}:{tag};", e.storage).bytes() {
                 hash ^= u32::from(b);
                 hash = hash.wrapping_mul(0x0100_0193);
             }
         }
+        for t in &self.texts {
+            for b in format!("{}:s;", t.storage).bytes() {
+                hash ^= u32::from(b);
+                hash = hash.wrapping_mul(0x0100_0193);
+            }
+        }
         hash
+    }
+
+    pub fn text_output_index(&self, port: &PortRef) -> Option<usize> {
+        self.texts
+            .iter()
+            .position(|t| matches!(&t.source, Source::Output(p) if p == port))
+    }
+
+    pub fn text_var_index(&self, name: &str) -> Option<usize> {
+        self.texts
+            .iter()
+            .position(|t| matches!(&t.source, Source::Var(v) if v == name))
     }
 
     pub fn output_index(&self, port: &PortRef) -> Option<usize> {
@@ -60,7 +89,8 @@ impl DebugTable {
     }
 }
 
-/// A live value.
+/// A live value. Strings are not reported (values travel as 4 bytes), so the
+/// table never holds a string entry.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value {
     Bool(bool),
@@ -74,6 +104,7 @@ impl Value {
             SignalType::Bool => Value::Bool(raw != 0),
             SignalType::Int => Value::Int(raw as i32),
             SignalType::Float => Value::Float(f32::from_bits(raw)),
+            SignalType::String => unreachable!("strings are not in the debug table"),
         }
     }
 
@@ -96,6 +127,7 @@ impl Value {
             SignalType::Bool => Value::Bool(f != 0.0),
             SignalType::Int => Value::Int(f.round() as i32),
             SignalType::Float => Value::Float(f as f32),
+            SignalType::String => unreachable!("strings are not in the debug table"),
         }
     }
 }
@@ -131,9 +163,11 @@ mod tests {
     fn fingerprint_follows_content() {
         let a = DebugTable {
             entries: vec![entry("x", SignalType::Bool)],
+            ..Default::default()
         };
         let b = DebugTable {
             entries: vec![entry("x", SignalType::Int)],
+            ..Default::default()
         };
         assert_ne!(a.fingerprint(), b.fingerprint());
         assert_eq!(a.fingerprint(), a.clone().fingerprint());

@@ -1,0 +1,20 @@
+[block]
+type = "text_to_num"
+name = "Строка → число"
+symbol = "S→N"
+group = "Строки"
+description = "Разбирает число из строки; ok = true, если строка — число. При ошибке выход не меняется."
+
+[[input]]
+name = "in"
+type = "string"
+
+[[output]]
+name = "out"
+type = "float"
+description = "Последнее успешно разобранное число"
+
+[[output]]
+name = "ok"
+type = "bool"
+description = "true, если в строке число"

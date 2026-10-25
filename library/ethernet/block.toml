@@ -15,6 +15,7 @@ description = "true, пока кабель подключён и адрес по
 [[param]]
 name = "cs"
 type = "pin"
+mode = "out"
 default = 5
 description = "Вывод CS модуля (SPI по умолчанию: SCK 18, MISO 19, MOSI 23)"
 

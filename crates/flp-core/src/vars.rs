@@ -67,10 +67,13 @@ pub enum VarType {
     Float,
     #[serde(rename = "double")]
     Double,
+    /// Arduino `String`.
+    #[serde(rename = "String", alias = "string")]
+    String,
 }
 
 impl VarType {
-    pub const ALL: [VarType; 21] = [
+    pub const ALL: [VarType; 22] = [
         VarType::Bool,
         VarType::Char,
         VarType::Byte,
@@ -92,6 +95,7 @@ impl VarType {
         VarType::Uint64,
         VarType::Float,
         VarType::Double,
+        VarType::String,
     ];
 
     /// Name as written in Arduino code and in the project file.
@@ -118,6 +122,7 @@ impl VarType {
             VarType::Uint64 => "uint64_t",
             VarType::Float => "float",
             VarType::Double => "double",
+            VarType::String => "String",
         }
     }
 
@@ -134,6 +139,7 @@ impl VarType {
         match self {
             VarType::Bool => SignalType::Bool,
             VarType::Float | VarType::Double => SignalType::Float,
+            VarType::String => SignalType::String,
             _ => SignalType::Int,
         }
     }
@@ -212,17 +218,9 @@ pub(crate) fn builtin_kind(logic: &Logic, block: &Block) -> Option<String> {
     Some(format!(
         "{}_{}{}",
         block.kind,
-        type_suffix(ty),
+        ty.name(),
         if en { "_en" } else { "" }
     ))
-}
-
-fn type_suffix(ty: SignalType) -> &'static str {
-    match ty {
-        SignalType::Bool => "bool",
-        SignalType::Int => "int",
-        SignalType::Float => "float",
-    }
 }
 
 /// A variable name is free text (`Давление в баке`): not empty, without control
@@ -259,7 +257,7 @@ pub fn storage_name(var: &str) -> String {
 
 pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
     let mut blocks = BTreeMap::new();
-    for ty in [SignalType::Bool, SignalType::Int, SignalType::Float] {
+    for ty in SignalType::ALL {
         for (get, en) in [(true, false), (false, false), (false, true)] {
             let kind = if get { VAR_GET } else { VAR_SET };
             let port = PortDef {
@@ -293,6 +291,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                     includes: Vec::new(),
                     libraries: Vec::new(),
                     single: false,
+                    uart: None,
                 },
                 inputs: match (get, en) {
                     (true, _) => Vec::new(),
@@ -320,6 +319,10 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                         when: None,
                         label: None,
                         description: "Имя переменной".to_owned(),
+                        show: Default::default(),
+                        local: None,
+                        mode: Default::default(),
+                        shared: false,
                     }];
                     if !get {
                         params.push(ParamDef {
@@ -331,6 +334,10 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                             when: None,
                             label: None,
                             description: "Вход разрешения записи (en)".to_owned(),
+                            show: Default::default(),
+                            local: None,
+                            mode: Default::default(),
+                            shared: false,
                         });
                     }
                     params
@@ -344,7 +351,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                 }
             };
             blocks.insert(
-                format!("{kind}_{}{}", type_suffix(ty), if en { "_en" } else { "" }),
+                format!("{kind}_{}{}", ty.name(), if en { "_en" } else { "" }),
                 LibraryBlock {
                     def,
                     dir: Default::default(),

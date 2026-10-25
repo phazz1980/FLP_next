@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use flp_build::{ArduinoCli, BuildMode, CompileOptions};
+use flp_build::{ArduinoCli, BuildMode, CompileOptions, Compiled};
 use flp_codegen::{ArduinoCpp, Backend, GenError, Program};
-use flp_core::{check, Diagnostic, Library, Project, Severity};
+use flp_core::{check_project, Diagnostic, Library, LocalValues, Project, Severity};
 
 /// Exit code when the schema has errors.
 const EXIT_SCHEMA_ERRORS: u8 = 1;
@@ -58,6 +58,9 @@ enum Command {
         /// Отладочная сборка: модуль онлайн-отладки, без сильной оптимизации
         #[arg(long)]
         debug: bool,
+        /// Собрать заново, даже если прошивка уже собрана из того же скетча
+        #[arg(long)]
+        force: bool,
     },
     /// Показывать живые значения с платы (прошивка собрана с --debug)
     Monitor {
@@ -77,6 +80,9 @@ enum Command {
         /// Отладочная сборка: модуль онлайн-отладки, без сильной оптимизации
         #[arg(long)]
         debug: bool,
+        /// Собрать заново, даже если прошивка уже собрана из того же скетча
+        #[arg(long)]
+        force: bool,
     },
     /// Перевести проект из старого формата (папка с project.toml, logic.toml,
     /// layout.toml) в один файл <папка>/<папка>.flpn; старые файлы не удаляются
@@ -95,14 +101,17 @@ fn main() -> ExitCode {
             stdout,
             debug,
         } => run_gen(&project, cli.library.as_deref(), stdout, debug),
-        Command::Build { project, debug } => {
-            run_build(&project, cli.library.as_deref(), debug, None)
-        }
+        Command::Build {
+            project,
+            debug,
+            force,
+        } => run_build(&project, cli.library.as_deref(), debug, force, None),
         Command::Upload {
             project,
             port,
             debug,
-        } => run_build(&project, cli.library.as_deref(), debug, Some(port)),
+            force,
+        } => run_build(&project, cli.library.as_deref(), debug, force, Some(port)),
         Command::Monitor { project, port } => run_monitor(&project, cli.library.as_deref(), port),
         Command::Convert { project } => run_convert(&project, cli.library.as_deref()),
     }
@@ -140,7 +149,7 @@ fn run_check(project_dir: &Path, library: Option<&Path>) -> ExitCode {
         Err(code) => return code,
     };
 
-    let report = check(&project.logic, &lib, Some(&project.layout));
+    let report = check_project(&project, &lib);
     print_diagnostics(&report.diagnostics);
 
     let errors = report.errors().count();
@@ -196,6 +205,7 @@ fn run_build(
     project_dir: &Path,
     library: Option<&Path>,
     debug: bool,
+    force: bool,
     upload: Option<Option<String>>,
 ) -> ExitCode {
     let (project, lib) = match load(project_dir, library) {
@@ -224,6 +234,7 @@ fn run_build(
         } else {
             BuildMode::Release
         },
+        force,
         ..Default::default()
     };
     let mut print = |line: &str| println!("{line}");
@@ -237,8 +248,10 @@ fn run_build(
         Err(e) => return build_failed(e),
     }
     println!("Сборка для {}...", board.fqbn);
-    if let Err(e) = cli.compile(&project.work_dir(), board, &opts, &mut print) {
-        return build_failed(e);
+    match cli.compile(&project.work_dir(), board, &opts, &mut print) {
+        Ok(Compiled::UpToDate) => println!("Прошивка уже собрана, скетч не менялся"),
+        Ok(Compiled::Built) => {}
+        Err(e) => return build_failed(e),
     }
     let Some(port) = upload else {
         println!(
@@ -266,6 +279,12 @@ fn generate(
     debug: bool,
 ) -> Result<(String, Vec<String>), ExitCode> {
     let backend = ArduinoCpp { debug };
+    // Wi-Fi passwords and other `local` values are kept by the program, not in the file.
+    let store = LocalValues::open_default().unwrap_or_else(|e| {
+        eprintln!("предупреждение: {e}");
+        LocalValues::default()
+    });
+    let project = &project.with_local(lib, &store);
     let result = Program::build(project, lib).and_then(|program| {
         let code = backend.generate(&program)?;
         let libraries = program.libraries().into_iter().map(String::from).collect();
@@ -335,10 +354,10 @@ fn run_monitor(project_dir: &Path, library: Option<&Path>, port: Option<String>)
     loop {
         std::thread::sleep(std::time::Duration::from_millis(500));
         let live = session.snapshot();
-        for line in live.console.iter().skip(printed_console) {
+        for line in live.console_after(printed_console) {
             println!("> {line}");
         }
-        printed_console = live.console.len();
+        printed_console = live.console_total;
         let values: Vec<String> = names
             .iter()
             .zip(&live.values)

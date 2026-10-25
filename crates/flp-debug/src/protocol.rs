@@ -24,6 +24,11 @@ pub const VALUES: u8 = 0x02;
 /// period_max u32, free_heap u32, n u8, n × (sheet u16, last u32, max u32)`.
 /// Times in microseconds; `cycles` counts scans since the last report.
 pub const STATS: u8 = 0x03;
+/// Board → host, when a string changes (and all of them after `HELLO_REQ`):
+/// `index u16` in [`crate::DebugTable::texts`], then UTF-8 bytes (at most [`TEXT_MAX`]).
+pub const TEXT: u8 = 0x04;
+/// Longest string sent in `TEXT`; longer ones are cut at a character boundary.
+pub const TEXT_MAX: usize = 64;
 /// Sheets measured separately; `STATS` with this many still fits in 255 bytes.
 pub const MAX_STAT_SHEETS: usize = 23;
 /// Host → board: ask for `HELLO`.
@@ -37,6 +42,11 @@ pub const RELEASE_ALL: u8 = 0x13;
 
 /// Host → board: reset the maxima of `STATS`.
 pub const RESET_STATS: u8 = 0x14;
+/// Host → board: bytes typed in the debug console, for the program to read from
+/// UART0 (the port itself carries frames while debugging).
+pub const TEXT_IN: u8 = 0x15;
+/// Bytes per `TEXT_IN` frame; longer input goes in several frames.
+pub const TEXT_IN_CHUNK: usize = 200;
 
 /// Cycle time figures of the board, decoded from `STATS`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -178,6 +188,17 @@ impl Parser {
             }
         }
         events
+    }
+
+    /// Takes an unfinished line (a prompt without `\n`), if any. The monitor calls
+    /// it when the board has been quiet for a while.
+    pub fn flush_text(&mut self) -> Option<String> {
+        if self.text.is_empty() {
+            return None;
+        }
+        let line = String::from_utf8_lossy(&self.text).trim_end().to_owned();
+        self.text.clear();
+        Some(line)
     }
 
     fn push_text(&mut self, bytes: &[u8], events: &mut Vec<Event>) {

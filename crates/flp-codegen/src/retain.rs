@@ -6,7 +6,7 @@
 use std::fmt::Write;
 
 use flp_core::vars::storage_name;
-use flp_core::Var;
+use flp_core::{SignalType, Var};
 
 /// NVS namespace of the variables; blocks use their own ones.
 const NAMESPACE: &str = "flp_vars";
@@ -28,6 +28,11 @@ fn saved_name(var: &Var) -> String {
 
 fn retained(vars: &[Var]) -> impl Iterator<Item = &Var> {
     vars.iter().filter(|v| v.retain)
+}
+
+/// `String` keeps its text on the heap, so it is stored as a string, not as bytes.
+fn is_text(var: &Var) -> bool {
+    var.ty.signal() == SignalType::String
 }
 
 /// Global declarations, empty without retained variables.
@@ -61,6 +66,16 @@ pub fn setup(vars: &[Var]) -> Vec<String> {
     ];
     for v in retained(vars) {
         let (var, key) = (storage_name(&v.name), key(v));
+        if is_text(v) {
+            lines.push(format!(
+                "if (flp_retain.isKey(\"{key}\")) {{  // {}",
+                v.name
+            ));
+            lines.push(format!("  {var} = flp_retain.getString(\"{key}\");"));
+            lines.push("}".to_owned());
+            lines.push(format!("{} = {var};", saved_name(v)));
+            continue;
+        }
         lines.push(format!(
             "if (flp_retain.getBytesLength(\"{key}\") == sizeof({var})) {{  // {}",
             v.name
@@ -86,6 +101,13 @@ pub fn save(vars: &[Var]) -> Vec<String> {
     ];
     for v in retained(vars) {
         let (var, saved) = (storage_name(&v.name), saved_name(v));
+        if is_text(v) {
+            lines.push(format!("  if ({var} != {saved}) {{  // {}", v.name));
+            lines.push(format!("    {saved} = {var};"));
+            lines.push(format!("    flp_retain.putString(\"{}\", {var});", key(v)));
+            lines.push("  }".to_owned());
+            continue;
+        }
         lines.push(format!(
             "  if (memcmp(&{var}, &{saved}, sizeof({var})) != 0) {{  // {}",
             v.name

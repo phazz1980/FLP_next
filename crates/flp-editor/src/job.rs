@@ -4,7 +4,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::thread;
 
-use flp_build::{ArduinoCli, BuildControl, BuildMode, CompileOptions, OutputLine};
+use flp_build::{ArduinoCli, BuildControl, BuildMode, CompileOptions, Compiled, OutputLine};
 use flp_codegen::{ArduinoCpp, Backend, Program};
 use flp_core::{Library, Project};
 
@@ -12,6 +12,8 @@ use crate::app::LogLevel;
 
 pub enum JobKind {
     Build,
+    /// Build even if the last build is up to date (library or core changed).
+    Rebuild,
     /// Quiet low-priority build that warms the build cache after edits.
     Precompile,
     Upload {
@@ -35,6 +37,8 @@ pub struct Job {
     pub title: &'static str,
     /// Precompilation: no log output, buttons stay enabled.
     pub background: bool,
+    /// Upload: the serial port must stay free.
+    pub uses_port: bool,
     control: Arc<BuildControl>,
     rx: Receiver<JobEvent>,
 }
@@ -53,11 +57,13 @@ impl Job {
     ) -> Self {
         let title = match kind {
             JobKind::Build => "Сборка",
+            JobKind::Rebuild => "Пересборка",
             JobKind::Precompile => "Фоновая сборка",
             JobKind::Upload { .. } if debug => "Заливка отладочной прошивки",
             JobKind::Upload { .. } => "Заливка",
         };
         let background = matches!(kind, JobKind::Precompile);
+        let uses_port = matches!(kind, JobKind::Upload { .. });
         let control = Arc::new(BuildControl::default());
         let worker = control.clone();
         let (tx, rx) = mpsc::channel();
@@ -74,6 +80,7 @@ impl Job {
         Self {
             title,
             background,
+            uses_port,
             control,
             rx,
         }
@@ -138,26 +145,31 @@ fn run(
         },
         verbose: !background,
         low_priority: background,
+        force: matches!(kind, JobKind::Rebuild),
         ..Default::default()
     };
     // Only build stages and diagnostics; compiler command lines stay hidden.
-    cli.compile(
-        &project.work_dir(),
-        board,
-        &opts,
-        &mut |line| match flp_build::classify(line) {
-            OutputLine::Stage(s) | OutputLine::Size(s) | OutputLine::Context(s) => {
-                out(LogLevel::Info, &s)
-            }
-            OutputLine::Warning(s) => out(LogLevel::Warning, &s),
-            OutputLine::Error(s) => out(LogLevel::Error, &s),
-            OutputLine::Detail => {}
-        },
-    )
-    .map_err(|e| e.to_string())?;
+    let compiled = cli
+        .compile(
+            &project.work_dir(),
+            board,
+            &opts,
+            &mut |line| match flp_build::classify(line) {
+                OutputLine::Stage(s) | OutputLine::Size(s) | OutputLine::Context(s) => {
+                    out(LogLevel::Info, &s)
+                }
+                OutputLine::Warning(s) => out(LogLevel::Warning, &s),
+                OutputLine::Error(s) => out(LogLevel::Error, &s),
+                OutputLine::Detail => {}
+            },
+        )
+        .map_err(|e| e.to_string())?;
+    if compiled == Compiled::UpToDate {
+        out(LogLevel::Info, "Прошивка уже собрана, схема не менялась");
+    }
 
     match kind {
-        JobKind::Build | JobKind::Precompile => Ok(Done {
+        JobKind::Build | JobKind::Rebuild | JobKind::Precompile => Ok(Done {
             message: "Сборка готова".into(),
             port: None,
             debug,

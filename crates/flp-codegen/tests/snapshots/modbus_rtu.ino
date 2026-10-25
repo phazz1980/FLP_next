@@ -37,6 +37,7 @@ ModbusSlaveRTU flpModbusRtu(1, &flpUart);
 
 void setup() {
   // master: modbus_rtu_master
+  // UART2 from the board settings
   flpMaster.setSpeedUart(9600);
   flpMaster.setParityUart(0);
   flpMaster.setPinRxUart(16);
@@ -55,6 +56,7 @@ void setup() {
   flpMaster.begin();
 
   // panel: modbus_rtu_slave
+  // UART1 from the board settings
   flpModbusRtu.setSpeedUart(19200);
   flpModbusRtu.setParityUart(0);
   flpModbusRtu.setPinRxUart(25);

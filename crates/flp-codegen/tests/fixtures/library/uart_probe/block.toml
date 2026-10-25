@@ -1,0 +1,22 @@
+# Test block on a shared UART: the generator starts the port, the block only writes.
+[block]
+type = "uart_probe"
+name = "Проба UART"
+group = "Тест"
+description = "Пишет число в UART: проверка [block.uart] и настроек порта."
+
+[block.uart]
+param = "uart"
+access = "write"
+
+[[input]]
+name = "in"
+type = "int"
+default = 7
+
+[[param]]
+name = "uart"
+type = "int"
+default = 1
+min = 0
+max = 2

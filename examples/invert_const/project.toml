@@ -1,0 +1,6 @@
+[project]
+name = "invert_const"
+description = "Инверсия выхода и константа на входе: светодиод горит, пока температура ниже 25 °C"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

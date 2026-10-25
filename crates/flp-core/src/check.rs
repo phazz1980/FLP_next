@@ -9,8 +9,9 @@ use std::fmt;
 
 use crate::ident::is_valid_ident;
 use crate::library::{BlockDef, ParamDef, ParamKind, PortDef, SignalType};
+use crate::pins::{pin_uses, Chip, PinUse};
 use crate::value::parse_duration_ms;
-use crate::{Layout, Library, Link, Logic, ParamValue, PortRef};
+use crate::{Layout, Library, Link, Logic, ParamValue, PortRef, Project};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
@@ -71,7 +72,7 @@ impl Report {
         self.push(Severity::Error, None, Some(link), message);
     }
 
-    fn push(
+    pub(crate) fn push(
         &mut self,
         severity: Severity,
         block: Option<&str>,
@@ -97,8 +98,96 @@ pub fn check(logic: &Logic, lib: &Library, layout: Option<&Layout>) -> Report {
     if let Some(layout) = layout {
         check_layout(logic, layout, &mut report);
     }
+    check_pin_conflicts(&pin_uses(logic, lib), &mut report);
     order_blocks(logic, &defs, &edges, &mut report);
     report
+}
+
+/// [`check`] with the layout plus what depends on the board: pins the chip lacks
+/// or that do not fit the block, and the UART settings.
+pub fn check_project(project: &Project, lib: &Library) -> Report {
+    let mut report = check(&project.logic, lib, Some(&project.layout));
+    let chip = Chip::of_board(&project.config.board);
+    let pins = pin_uses(&project.logic, lib);
+    if let Some(chip) = chip {
+        check_board_pins(chip, &pins, &mut report);
+        let uart_pins: Vec<PinUse> = project
+            .config
+            .uart
+            .iter()
+            .flat_map(|u| u.pin_uses())
+            .collect();
+        check_board_pins(chip, &uart_pins, &mut report);
+    }
+    crate::uart::check_uarts(
+        &project.config.uart,
+        &crate::uart::block_uarts(&project.logic, lib),
+        &pins,
+        chip,
+        &mut report,
+    );
+    report
+}
+
+/// Two blocks (or two parameters of one block) on one pin, unless the pin is
+/// shared on purpose (a 1-Wire bus).
+fn check_pin_conflicts(uses: &[PinUse], report: &mut Report) {
+    for (i, u) in uses.iter().enumerate() {
+        let Some(first) = uses[..i]
+            .iter()
+            .find(|other| other.gpio == u.gpio && !other.can_share(u))
+        else {
+            continue;
+        };
+        let message = if first.block == u.block {
+            format!(
+                "блок «{}»: параметры «{}» и «{}» на одном выводе GPIO{}",
+                u.block, first.param, u.param, u.gpio
+            )
+        } else {
+            format!(
+                "блок «{}»: вывод GPIO{} уже занят блоком «{}»",
+                u.block, u.gpio, first.block
+            )
+        };
+        report.block_error(&u.block, message);
+    }
+}
+
+fn check_board_pins(chip: Chip, uses: &[PinUse], report: &mut Report) {
+    for u in uses {
+        let (id, gpio) = (u.block.as_str(), u.gpio);
+        let Some(pin) = chip.pin(gpio) else {
+            report.block_error(
+                id,
+                format!("блок «{id}»: у {} нет вывода GPIO{gpio}", chip.name()),
+            );
+            continue;
+        };
+        let problem = if pin.flash {
+            Some("занят флеш-памятью")
+        } else if !pin.fits(u.mode) {
+            Some(match u.mode {
+                crate::PinMode::Adc => "без АЦП",
+                _ => "работает только на вход",
+            })
+        } else {
+            None
+        };
+        if let Some(problem) = problem {
+            report.block_error(
+                id,
+                format!("блок «{id}»: вывод GPIO{gpio} {problem} у {}", chip.name()),
+            );
+        } else if let Some(warning) = pin.warning {
+            report.push(
+                Severity::Warning,
+                Some(id),
+                None,
+                format!("блок «{id}»: вывод GPIO{gpio} — {warning}"),
+            );
+        }
+    }
 }
 
 /// Checks ids, types and parameters. Returns the definition of each block
@@ -141,6 +230,52 @@ fn check_blocks<'a>(
                         "блок «{id}»: у типа «{}» нет параметра «{name}»",
                         block.kind
                     ),
+                ),
+            }
+        }
+        for (port, value) in &block.consts {
+            match def.input(port) {
+                Some(p) if !p.ty.accepts(value) => report.block_error(
+                    id,
+                    format!(
+                        "блок «{id}»: константа на входе «{port}» не подходит к типу {}",
+                        type_name(p.ty)
+                    ),
+                ),
+                Some(_) => {}
+                None => report.block_error(
+                    id,
+                    format!("блок «{id}»: константа на несуществующем входе «{port}»"),
+                ),
+            }
+        }
+        for port in &block.inverted {
+            match def.output(port) {
+                Some(p) if p.ty != SignalType::Bool => report.block_error(
+                    id,
+                    format!(
+                        "блок «{id}»: инвертировать можно только логический выход, «{port}» — нет"
+                    ),
+                ),
+                Some(_) => {}
+                None => report.block_error(
+                    id,
+                    format!("блок «{id}»: инверсия несуществующего выхода «{port}»"),
+                ),
+            }
+        }
+        for port in &block.inverted_inputs {
+            match def.input(port) {
+                Some(p) if p.ty != SignalType::Bool => report.block_error(
+                    id,
+                    format!(
+                        "блок «{id}»: инвертировать можно только логический вход, «{port}» — нет"
+                    ),
+                ),
+                Some(_) => {}
+                None => report.block_error(
+                    id,
+                    format!("блок «{id}»: инверсия несуществующего входа «{port}»"),
                 ),
             }
         }
@@ -203,7 +338,8 @@ fn check_param(id: &str, p: &ParamDef, value: &ParamValue, report: &mut Report) 
         _ => None,
     };
     let Some(number) = number else { return };
-    if p.kind == ParamKind::Pin && number < 0.0 {
+    // A pin parameter allowed below zero (`min = -1`) uses it for "not used".
+    if p.kind == ParamKind::Pin && number < 0.0 && p.min.is_none_or(|min| min >= 0.0) {
         report.block_error(
             id,
             format!(
@@ -456,6 +592,7 @@ fn type_name(ty: SignalType) -> &'static str {
         SignalType::Bool => "bool (логический)",
         SignalType::Int => "int (целый)",
         SignalType::Float => "float (дробный)",
+        SignalType::String => "string (строка)",
     }
 }
 
@@ -471,7 +608,7 @@ fn check_unconnected_inputs(logic: &Logic, defs: &[Option<&BlockDef>], report: &
                 .links
                 .iter()
                 .any(|l| l.to.block == block.id && l.to.port == input.name);
-            if !fed {
+            if !fed && !block.consts.contains_key(&input.name) {
                 report.block_error(
                     &block.id,
                     format!(
@@ -814,5 +951,152 @@ mod tests {
         let (_, r) = run(&[("a", "src"), ("m", "latch")], &[("a.out", "m.in")]);
         assert!(!r.has_errors(), "{:#?}", r.diagnostics);
         assert!(r.feedback.is_empty());
+    }
+
+    /// Library with `out` (pin for output), `ain` (ADC pin), `bus` (shared pin)
+    /// and `uart` (two pins, -1 means "not used").
+    fn pin_library() -> Library {
+        let mut lib = Library::default();
+        for src in [
+            "[block]
+type = \"out\"
+name = \"o\"
+group = \"Тест\"
+             [[param]]
+name = \"pin\"
+type = \"pin\"
+mode = \"out\"
+",
+            "[block]
+type = \"ain\"
+name = \"a\"
+group = \"Тест\"
+             [[param]]
+name = \"pin\"
+type = \"pin\"
+mode = \"adc\"
+",
+            "[block]
+type = \"bus\"
+name = \"b\"
+group = \"Тест\"
+             [[param]]
+name = \"pin\"
+type = \"pin\"
+shared = true
+",
+            "[block]
+type = \"uart\"
+name = \"u\"
+group = \"Тест\"
+             [[param]]
+name = \"rx\"
+type = \"pin\"
+min = -1
+default = -1
+             [[param]]
+name = \"tx\"
+type = \"pin\"
+min = -1
+default = -1
+",
+        ] {
+            let def: BlockDef = toml::from_str(src).unwrap();
+            lib.insert(LibraryBlock {
+                def,
+                dir: Default::default(),
+                inline_templates: Default::default(),
+            });
+        }
+        lib
+    }
+
+    fn pin_project(blocks: &[(&str, &str, &str)]) -> Project {
+        let mut src = String::new();
+        for (id, kind, params) in blocks {
+            src += &format!(
+                "[[block]]
+id = \"{id}\"
+type = \"{kind}\"
+{params}
+"
+            );
+        }
+        Project {
+            path: Default::default(),
+            config: toml::from_str(
+                "[project]
+name = \"p\"
+[board]
+fqbn = \"esp32:esp32:esp32\"
+",
+            )
+            .unwrap(),
+            logic: toml::from_str(&src).unwrap(),
+            layout: Default::default(),
+        }
+    }
+
+    fn pin_messages(blocks: &[(&str, &str, &str)]) -> Vec<String> {
+        check_project(&pin_project(blocks), &pin_library())
+            .diagnostics
+            .into_iter()
+            .map(|d| d.message)
+            .collect()
+    }
+
+    #[test]
+    fn pin_used_twice() {
+        let m = pin_messages(&[
+            ("a", "out", "pin = 4"),
+            ("b", "out", "pin = 4"),
+            ("c", "out", "pin = 5"),
+        ]);
+        assert_eq!(m, ["блок «b»: вывод GPIO4 уже занят блоком «a»"]);
+        let m = pin_messages(&[(
+            "u",
+            "uart",
+            "rx = 16
+tx = 16",
+        )]);
+        assert_eq!(
+            m,
+            ["блок «u»: параметры «rx» и «tx» на одном выводе GPIO16"]
+        );
+    }
+
+    #[test]
+    fn shared_pin_and_unused_pins() {
+        let m = pin_messages(&[
+            ("t1", "bus", "pin = 4"),
+            ("t2", "bus", "pin = 4"),
+            ("u1", "uart", ""),
+            ("u2", "uart", ""),
+        ]);
+        assert!(m.is_empty(), "{m:#?}");
+        let m = pin_messages(&[("t1", "bus", "pin = 4"), ("o", "out", "pin = 4")]);
+        assert_eq!(m, ["блок «o»: вывод GPIO4 уже занят блоком «t1»"]);
+    }
+
+    #[test]
+    fn pins_of_the_board() {
+        let m = pin_messages(&[
+            ("a", "out", "pin = 6"),
+            ("b", "out", "pin = 34"),
+            ("c", "ain", "pin = 5"),
+            ("d", "out", "pin = 40"),
+            ("e", "out", "pin = 1"),
+            ("f", "ain", "pin = 36"),
+        ]);
+        assert_eq!(
+            m,
+            [
+                "блок «a»: вывод GPIO6 занят флеш-памятью у ESP32",
+                "блок «b»: вывод GPIO34 работает только на вход у ESP32",
+                "блок «c»: вывод GPIO5 без АЦП у ESP32",
+                "блок «d»: у ESP32 нет вывода GPIO40",
+                "блок «e»: вывод GPIO1 — UART0: заливка и отладка по USB",
+            ]
+        );
     }
 }

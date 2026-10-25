@@ -1,0 +1,14 @@
+[block]
+type = "text_length"
+name = "Длина строки"
+symbol = "LEN"
+group = "Строки"
+description = "Длина строки в байтах; 0 — пустая строка."
+
+[[input]]
+name = "in"
+type = "string"
+
+[[output]]
+name = "out"
+type = "int"

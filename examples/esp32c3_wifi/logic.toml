@@ -1,0 +1,73 @@
+# ESP32-C3 с Wi-Fi, 3 входа и 3 выхода: кнопка на GPIO9 мигает светодиодом на GPIO8
+
+# Подключение к Wi-Fi. Пароль задаётся в редакторе, в файл проекта не попадает.
+
+[[block]]
+id = "wifi"
+type = "wifi"
+ssid = "MyNetwork"
+
+# Входы. GPIO9 — кнопка BOOT на плате (замыкает на землю).
+
+[[block]]
+id = "button"
+type = "digital_in"
+pin = 9
+pullup = true
+inverted = true
+
+[[block]]
+id = "in2"
+type = "digital_in"
+pin = 3
+pullup = true
+inverted = true
+
+[[block]]
+id = "in3"
+type = "digital_in"
+pin = 4
+pullup = true
+inverted = true
+
+# Пока кнопка нажата, светодиод мигает: 250 мс горит, 250 мс не горит.
+
+[[block]]
+id = "blink"
+type = "generator"
+time_on = "250ms"
+time_off = "250ms"
+
+# Выходы. GPIO8 — встроенный светодиод, горит при низком уровне.
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 8
+inverted = true
+
+[[block]]
+id = "out2"
+type = "digital_out"
+pin = 5
+
+[[block]]
+id = "out3"
+type = "digital_out"
+pin = 6
+
+[[link]]
+from = "button.out"
+to   = "blink.en"
+
+[[link]]
+from = "blink.out"
+to   = "led.in"
+
+[[link]]
+from = "in2.out"
+to   = "out2.in"
+
+[[link]]
+from = "in3.out"
+to   = "out3.in"

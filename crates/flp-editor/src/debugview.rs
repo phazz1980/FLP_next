@@ -16,8 +16,6 @@ pub struct DebugState {
     pub live: Live,
     /// Entries shown in the chart window.
     pub chart: Vec<usize>,
-    /// Console lines already copied into the message panel.
-    pub console_seen: usize,
     /// The cycle time window is open.
     pub diagnostics: bool,
     /// The window with inputs and variables is open.
@@ -48,7 +46,6 @@ impl DebugState {
             table,
             port: port.to_owned(),
             chart: Vec::new(),
-            console_seen: 0,
             diagnostics: false,
             values: false,
             inputs,
@@ -83,6 +80,23 @@ impl DebugState {
         }
         let i = self.table.var_index(name)?;
         Some((self.live.values[i]?, self.live.forced[i].is_some()))
+    }
+
+    /// Live string on a block output (not forceable).
+    pub fn text_output(&self, port: &PortRef) -> Option<&str> {
+        if !self.online() {
+            return None;
+        }
+        let i = self.table.text_output_index(port)?;
+        self.live.texts[i].as_deref()
+    }
+
+    pub fn text_var(&self, name: &str) -> Option<&str> {
+        if !self.online() {
+            return None;
+        }
+        let i = self.table.text_var_index(name)?;
+        self.live.texts[i].as_deref()
     }
 
     pub fn send(&self, command: Command) {
@@ -200,6 +214,8 @@ pub fn value_menu(ui: &mut Ui, dbg: &mut DebugState, index: usize) {
                 dbg.send(Command::Set { index, value });
             }
         }
+        // Not in the debug table.
+        SignalType::String => {}
     }
     if forced.is_some() && ui.button("Снять форсировку").clicked() {
         dbg.send(Command::Force { index, value: None });
@@ -228,6 +244,9 @@ pub fn values_window(dbg: &mut DebugState, pal: &Palette, ctx: &egui::Context) {
                 ui.label("Нет данных: плата не на связи или прошивка для другой схемы");
                 return;
             }
+            let texts: Vec<usize> = (0..dbg.table.texts.len())
+                .filter(|&i| matches!(dbg.table.texts[i].source, Source::Var(_)))
+                .collect();
             let vars: Vec<usize> = (0..dbg.table.entries.len())
                 .filter(|&i| matches!(dbg.table.entries[i].source, Source::Var(_)))
                 .collect();
@@ -248,6 +267,23 @@ pub fn values_window(dbg: &mut DebugState, pal: &Palette, ctx: &egui::Context) {
                             }
                         });
                     ui.add_space(6.0);
+                }
+                if !texts.is_empty() {
+                    ui.strong("Строки");
+                    egui::Grid::new("debug_texts")
+                        .num_columns(2)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for i in texts {
+                                let Source::Var(name) = &dbg.table.texts[i].source else {
+                                    continue;
+                                };
+                                ui.label(name);
+                                let value = dbg.live.texts[i].as_deref().map_or("—".into(), quoted);
+                                ui.monospace(value);
+                                ui.end_row();
+                            }
+                        });
                 }
             });
             ui.separator();
@@ -326,6 +362,7 @@ fn value_row(ui: &mut Ui, dbg: &mut DebugState, pal: &Palette, index: usize) {
                     });
                 }
             }
+            SignalType::String => {}
         }
         if forced.is_some()
             && ui
@@ -362,6 +399,46 @@ pub fn value_label(
     } else {
         value.to_string()
     };
+    label(painter, pal, anchor, text, forced, zoom, place);
+}
+
+/// Live string next to a port, in quotes and cut to a readable length.
+pub fn text_label(
+    painter: &egui::Painter,
+    pal: &Palette,
+    anchor: Pos2,
+    text: &str,
+    zoom: f32,
+    place: Place,
+) {
+    label(painter, pal, anchor, quoted(text), false, zoom, place);
+}
+
+/// `"text"` with control characters made visible, at most 24 characters.
+pub fn quoted(text: &str) -> String {
+    const MAX: usize = 24;
+    let shown: String = text
+        .chars()
+        .take(MAX)
+        .map(|c| if c.is_control() { '·' } else { c })
+        .collect();
+    let more = if text.chars().count() > MAX {
+        "…"
+    } else {
+        ""
+    };
+    format!("\"{shown}{more}\"")
+}
+
+fn label(
+    painter: &egui::Painter,
+    pal: &Palette,
+    anchor: Pos2,
+    text: String,
+    forced: bool,
+    zoom: f32,
+    place: Place,
+) {
     let font = egui::FontId::monospace(9.5 * zoom.clamp(0.6, 1.6));
     let galley = painter.layout_no_wrap(text, font, if forced { Color32::WHITE } else { pal.text });
     let size = galley.size() + Vec2::new(6.0, 2.0);

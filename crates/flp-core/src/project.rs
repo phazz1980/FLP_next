@@ -38,6 +38,9 @@ pub struct ProjectConfig {
     pub board: BoardConfig,
     #[serde(default, skip_serializing_if = "Diagnostics::is_default")]
     pub diagnostics: Diagnostics,
+    /// Hardware UARTs used by blocks (`[[uart]]`), set up in the board settings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uart: Vec<crate::uart::UartConfig>,
 }
 
 /// `[diagnostics]`: cycle time measurement in normal (non-debug) firmware.
@@ -77,6 +80,10 @@ pub struct ProjectInfo {
 pub struct BoardConfig {
     /// Fully qualified board name for arduino-cli, e.g. `esp32:esp32:esp32`.
     pub fqbn: String,
+    /// Exact board on top of the FQBN when it differs in brought-out pins, e.g.
+    /// `esp32c3_supermini` (see [`crate::pins::BOARD_MODELS`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// Serial port for upload and debugging, e.g. `COM3`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port: Option<String>,
@@ -151,7 +158,8 @@ impl Project {
             config,
             logic,
             layout,
-        })
+        }
+        .migrated())
     }
 
     fn load_legacy(dir: &Path) -> Result<Self> {
@@ -172,7 +180,14 @@ impl Project {
             config,
             logic,
             layout,
-        })
+        }
+        .migrated())
+    }
+
+    /// Brings a project written by an older version to the current format.
+    fn migrated(mut self) -> Self {
+        crate::uart::migrate_legacy(&mut self.config.uart, &mut self.logic);
+        self
     }
 
     /// Writes the project archive with just the schema files.

@@ -13,4 +13,5 @@ description = "Отсчёт АЦП, 0…4095 (12 бит)"
 [[param]]
 name = "pin"
 type = "pin"
+mode = "adc"
 description = "Номер вывода с АЦП (на ESP32 при работе Wi-Fi — только 32…39)"

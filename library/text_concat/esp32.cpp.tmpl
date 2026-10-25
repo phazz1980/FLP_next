@@ -1,0 +1,6 @@
+// @loop
+{{ output.out }} = {{ input.a }};
+{% for port in ["b", "c", "d"][:value.count - 1] %}
+{{ output.out }} += {{ param.separator }};
+{{ output.out }} += {{ input[port] }};
+{% endfor %}

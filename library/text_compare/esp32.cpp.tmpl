@@ -1,0 +1,26 @@
+// @loop
+{% if value.ignore_case %}
+{
+  String a = {{ input.a }};
+  String b = {{ param.b }};
+  a.toLowerCase();
+  b.toLowerCase();
+{% if value.mode == 1 %}
+  {{ output.out }} = a.indexOf(b) >= 0;
+{% elif value.mode == 2 %}
+  {{ output.out }} = a.startsWith(b);
+{% elif value.mode == 3 %}
+  {{ output.out }} = a.endsWith(b);
+{% else %}
+  {{ output.out }} = a == b;
+{% endif %}
+}
+{% elif value.mode == 1 %}
+{{ output.out }} = {{ input.a }}.indexOf({{ param.b }}) >= 0;
+{% elif value.mode == 2 %}
+{{ output.out }} = {{ input.a }}.startsWith({{ param.b }});
+{% elif value.mode == 3 %}
+{{ output.out }} = {{ input.a }}.endsWith({{ param.b }});
+{% else %}
+{{ output.out }} = {{ input.a }} == {{ param.b }};
+{% endif %}

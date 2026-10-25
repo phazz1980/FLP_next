@@ -1,0 +1,39 @@
+[block]
+type = "text_compare"
+name = "Сравнение строк"
+symbol = "A = B"
+group = "Строки"
+description = "Сравнивает строку с образцом: равна, содержит, начинается или заканчивается им."
+
+[[input]]
+name = "a"
+type = "string"
+description = "Проверяемая строка"
+
+[[output]]
+name = "out"
+type = "bool"
+description = "true, если условие выполнено"
+
+[[param]]
+name = "b"
+label = "образец"
+type = "string"
+default = ""
+description = "С чем сравнивать, например команда «ON»"
+
+[[param]]
+name = "mode"
+label = "условие"
+type = "int"
+default = 0
+min = 0
+max = 3
+description = "0 — равна, 1 — содержит, 2 — начинается с, 3 — заканчивается на"
+
+[[param]]
+name = "ignore_case"
+label = "без учёта регистра"
+type = "bool"
+default = false
+description = "Не различать большие и маленькие латинские буквы"

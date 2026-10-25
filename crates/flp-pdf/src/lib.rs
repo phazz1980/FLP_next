@@ -10,7 +10,9 @@ use std::path::PathBuf;
 
 use flp_core::project::BOARDS_PDF;
 use flp_core::vars::{VAR_GET, VAR_SET};
-use flp_core::{Block, BlockDef, Library, ParamValue, PortDef, Project, SignalType};
+use flp_core::{
+    Block, BlockDef, Library, LocalValues, ParamShow, ParamValue, PortDef, Project, SignalType,
+};
 use printpdf::path::PaintMode;
 use printpdf::{
     Color, CustomPdfConformance, IndirectFontRef, Line, Mm, PdfConformance, PdfDocument,
@@ -154,7 +156,18 @@ pub fn render(project: &Project, lib: &Library) -> Result<Vec<u8>, PdfError> {
 /// Saves the project archive together with [`BOARDS_PDF`]. If the picture cannot
 /// be drawn, the project is still saved without it and the reason is returned
 /// as a warning.
+///
+/// Values of `local` parameters (Wi-Fi passwords) never go into the archive: if
+/// the project still holds some, they are moved to [`LocalValues`] of this computer.
 pub fn save_project(project: &Project, lib: &Library) -> flp_core::Result<Option<String>> {
+    let mut clean = project.clone();
+    if clean.take_local(lib, &mut LocalValues::default()) {
+        clean = project.clone();
+        let mut store = LocalValues::open_default()?;
+        clean.take_local(lib, &mut store);
+        store.save()?;
+    }
+    let project = &clean;
     match render(project, lib) {
         Ok(pdf) => project.save_with(&[(BOARDS_PDF, &pdf)]).map(|()| None),
         Err(e) => project
@@ -405,14 +418,13 @@ fn draw_block(c: &Canvas, item: &Item, r: Bounds, fed: impl Fn(&str) -> bool) {
                 .params
                 .iter()
                 .filter_map(|p| {
-                    block.params.get(&p.name).map(|v| {
-                        // The PDF is easy to pass around: keep passwords out of it.
-                        let text = if p.name.contains("password") {
-                            "***".to_owned()
-                        } else {
-                            value_text(v)
-                        };
-                        format!("{}={text}", p.title())
+                    let caption = p.caption(block.params.get(&p.name)?)?;
+                    // The PDF is easy to pass around: keep passwords out of it entirely.
+                    let secret = p.show == ParamShow::Secret || p.name.contains("password");
+                    Some(match p.show {
+                        ParamShow::Named if secret => format!("{}=***", p.title()),
+                        _ if secret => "***".to_owned(),
+                        _ => caption,
                     })
                 })
                 .collect();
@@ -446,6 +458,7 @@ fn signal_color(ty: SignalType) -> Rgb8 {
         SignalType::Bool => (0x2e, 0x8b, 0x3a),
         SignalType::Int => (0x2a, 0x5d, 0xb0),
         SignalType::Float => (0xc0, 0x6a, 0x10),
+        SignalType::String => (0x8a, 0x3f, 0xa8),
     }
 }
 

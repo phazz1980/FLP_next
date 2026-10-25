@@ -4,3 +4,22 @@ description = "Шлюз RS-485: мастер на UART2 опрашивает д�
 
 [board]
 fqbn = "esp32:esp32:esp32"   # ESP32 DevKit
+
+# Порты RS-485: скорость, формат и выводы (окно «Настройки платы»).
+[[uart]]
+number = 1
+speed = 19200
+format = "8N1"
+rx = 25
+tx = 27
+de = 14
+rx_buffer = 256
+
+[[uart]]
+number = 2
+speed = 9600
+format = "8N1"
+rx = 16
+tx = 17
+de = 4
+rx_buffer = 256

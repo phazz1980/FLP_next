@@ -1,6 +1,6 @@
 //! Block library: folders `library/<type>/` with `block.toml`, code templates and docs.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -33,9 +33,18 @@ pub enum SignalType {
     Bool,
     Int,
     Float,
+    /// Text (Arduino `String`): IP addresses, messages, names.
+    String,
 }
 
 impl SignalType {
+    pub const ALL: [SignalType; 4] = [
+        SignalType::Bool,
+        SignalType::Int,
+        SignalType::Float,
+        SignalType::String,
+    ];
+
     /// Whether an output of type `self` may feed an input of type `to`.
     /// Only `int` → `float` widening is implicit.
     pub fn can_feed(self, to: SignalType) -> bool {
@@ -49,7 +58,18 @@ impl SignalType {
             (SignalType::Bool, ParamValue::Bool(_))
                 | (SignalType::Int, ParamValue::Int(_))
                 | (SignalType::Float, ParamValue::Float(_) | ParamValue::Int(_))
+                | (SignalType::String, ParamValue::Text(_))
         )
+    }
+
+    /// Name as written in `block.toml` and the project file.
+    pub fn name(self) -> &'static str {
+        match self {
+            SignalType::Bool => "bool",
+            SignalType::Int => "int",
+            SignalType::Float => "float",
+            SignalType::String => "string",
+        }
     }
 }
 
@@ -121,6 +141,9 @@ pub struct BlockInfo {
     /// Only one instance per project (Wi-Fi, NTP, deep sleep).
     #[serde(default, skip_serializing_if = "is_false")]
     pub single: bool,
+    /// The block works through a hardware UART set up in the board settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uart: Option<crate::uart::UartUse>,
 }
 
 fn is_false(v: &bool) -> bool {
@@ -170,6 +193,83 @@ pub struct ParamDef {
     pub when: Option<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+    /// How the value is shown under the block on the sheet.
+    #[serde(default, skip_serializing_if = "ParamShow::is_default")]
+    pub show: ParamShow,
+    /// Name of another text parameter: the value is kept by the program on this
+    /// computer for each value of that one (a Wi-Fi password for each SSID) and
+    /// never goes into the project file. See [`crate::local`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<String>,
+    /// For `pin` parameters: what the block does with the pin; limits the pins
+    /// that fit (an output cannot go on an input-only pin).
+    #[serde(default, skip_serializing_if = "PinMode::is_default")]
+    pub mode: PinMode,
+    /// For `pin` parameters: blocks of the same type may use one pin together
+    /// (several DS18B20 on one 1-Wire bus).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub shared: bool,
+}
+
+/// What a block does with a pin (`mode` of a `pin` parameter in `block.toml`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PinMode {
+    /// Both directions (a 1-Wire or DHT bus, a chip select).
+    #[default]
+    Io,
+    /// Input only: any pin fits.
+    In,
+    /// Output only.
+    Out,
+    /// Analog input: only pins with an ADC.
+    Adc,
+}
+
+impl PinMode {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// How a parameter value is shown under the block on the sheet (`show` in `block.toml`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ParamShow {
+    /// `caption=value`.
+    #[default]
+    Named,
+    /// The value alone.
+    Value,
+    /// The value alone, masked: only the first and last characters stay (passwords).
+    Secret,
+    /// Not shown.
+    Hidden,
+}
+
+impl ParamShow {
+    pub const ALL: [ParamShow; 4] = [
+        ParamShow::Named,
+        ParamShow::Value,
+        ParamShow::Secret,
+        ParamShow::Hidden,
+    ];
+
+    fn is_default(&self) -> bool {
+        *self == ParamShow::Named
+    }
+}
+
+/// `p*****1`: the first and last characters, a star for each other one.
+/// Up to two characters are all stars, so nothing is given away.
+pub fn mask_secret(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    match chars.as_slice() {
+        [first, middle @ .., last] if !middle.is_empty() => {
+            format!("{first}{}{last}", "*".repeat(middle.len()))
+        }
+        _ => "*".repeat(chars.len()),
+    }
 }
 
 impl PortDef {
@@ -183,6 +283,19 @@ impl ParamDef {
     /// What to show to the user: the caption, or the name without one.
     pub fn title(&self) -> &str {
         self.label.as_deref().unwrap_or(&self.name)
+    }
+
+    /// Text under the block on the sheet; `None` when the parameter is not shown
+    /// (hidden, or an empty value without a caption).
+    pub fn caption(&self, value: &ParamValue) -> Option<String> {
+        let text = value.to_string();
+        match self.show {
+            ParamShow::Named => Some(format!("{}={text}", self.title())),
+            ParamShow::Hidden => None,
+            _ if text.is_empty() => None,
+            ParamShow::Value => Some(text),
+            ParamShow::Secret => Some(mask_secret(&text)),
+        }
     }
 }
 
@@ -329,6 +442,22 @@ impl BlockDef {
                 }
             }
         }
+        for p in &self.params {
+            let Some(key) = &p.local else { continue };
+            let key_kind = self.param(key).map(|k| k.kind);
+            if key == &p.name || key_kind != Some(ParamKind::Text) || p.kind != ParamKind::Text {
+                return Err(format!(
+                    "параметр «{}» с local = «{key}»: оба должны быть строковыми и разными",
+                    p.name
+                ));
+            }
+            if p.default.is_none() {
+                return Err(format!(
+                    "у параметра «{}» с local нужно значение по умолчанию:                      на другом компьютере его может не быть",
+                    p.name
+                ));
+            }
+        }
         let ports = self.inputs.iter().chain(&self.outputs);
         for (name, when) in ports
             .map(|p| (&p.name, &p.when))
@@ -459,6 +588,9 @@ pub struct Library {
     blocks: BTreeMap<String, LibraryBlock>,
     /// Types of user blocks.
     user: HashSet<String>,
+    /// Sections and folders of the user library, as paths `Раздел/Папка`
+    /// relative to `user_library/`; empty ones too.
+    user_folders: BTreeSet<String>,
     /// Variable access blocks, one per access kind and signal type (`var_get_float`).
     builtins: BTreeMap<String, LibraryBlock>,
 }
@@ -468,6 +600,7 @@ impl Default for Library {
         Self {
             blocks: BTreeMap::new(),
             user: HashSet::new(),
+            user_folders: BTreeSet::new(),
             builtins: crate::vars::builtin_blocks(),
         }
     }
@@ -504,19 +637,37 @@ impl Library {
         Ok(errors)
     }
 
-    /// Adds user blocks from `dir`. A block whose type is taken by a built-in block
-    /// is skipped with an error: built-in blocks cannot be changed.
+    /// Adds user blocks from `dir`, which is a tree: any folder without `block.toml`
+    /// is a section or folder of the library, and the group of a block is the path
+    /// of its folder (`Раздел/Папка`, empty in the root). A block whose type is
+    /// taken by a built-in block or by another user block is skipped with an error.
     pub fn add_user_dir(&mut self, dir: impl AsRef<Path>) -> Result<Vec<Error>> {
-        let (blocks, mut errors) = read_blocks(dir.as_ref())?;
-        for block in blocks {
+        let mut blocks = Vec::new();
+        let mut errors = Vec::new();
+        read_user_tree(
+            dir.as_ref(),
+            "",
+            &mut blocks,
+            &mut self.user_folders,
+            &mut errors,
+        )?;
+        for (folder, mut block) in blocks {
             let kind = block.def.info.kind.clone();
-            if self.is_builtin(&kind) {
+            let taken = if self.is_builtin(&kind) {
+                Some("встроенным блоком")
+            } else if self.is_user(&kind) {
+                Some("другим пользовательским блоком")
+            } else {
+                None
+            };
+            if let Some(by) = taken {
                 errors.push(Error::InvalidBlockDef {
                     path: block.dir.join(BLOCK_FILE),
-                    message: format!("тип «{kind}» занят встроенным блоком"),
+                    message: format!("тип «{kind}» занят {by}"),
                 });
                 continue;
             }
+            block.def.info.group = folder;
             self.user.insert(kind.clone());
             self.blocks.insert(kind, block);
         }
@@ -526,6 +677,11 @@ impl Library {
     /// Whether `kind` is a user block (from `user_library/`).
     pub fn is_user(&self, kind: &str) -> bool {
         self.user.contains(kind)
+    }
+
+    /// Sections and folders of the user library (`Раздел`, `Раздел/Папка`), sorted.
+    pub fn user_folders(&self) -> impl Iterator<Item = &str> {
+        self.user_folders.iter().map(String::as_str)
     }
 
     /// Whether `kind` is a built-in block, including variable blocks.
@@ -567,6 +723,61 @@ impl Library {
     }
 }
 
+/// Whether `name` may name a section or folder of the user library: not empty,
+/// no spaces at the ends, no characters Windows forbids in file names.
+pub fn is_valid_folder_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.trim() == name
+        && name != "."
+        && name != ".."
+        && !name.ends_with('.')
+        && !name
+            .chars()
+            .any(|c| c.is_control() || r#"<>:"/\|?*"#.contains(c))
+}
+
+/// Walks the user library: block folders go to `blocks` with the path of the
+/// folder they are in, other folders to `folders`.
+fn read_user_tree(
+    dir: &Path,
+    prefix: &str,
+    blocks: &mut Vec<(String, LibraryBlock)>,
+    folders: &mut BTreeSet<String>,
+    errors: &mut Vec<Error>,
+) -> Result<()> {
+    let read_err = |source| Error::Read {
+        path: dir.to_owned(),
+        source,
+    };
+    for entry in fs::read_dir(dir).map_err(read_err)? {
+        let path = entry.map_err(read_err)?.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if path.join(BLOCK_FILE).is_file() {
+            match LibraryBlock::load(&path) {
+                Ok(block) => blocks.push((prefix.to_owned(), block)),
+                Err(e) => errors.push(e),
+            }
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+        let folder = if prefix.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        folders.insert(folder.clone());
+        read_user_tree(&path, &folder, blocks, folders, errors)?;
+    }
+    Ok(())
+}
+
 /// Block folders of `dir`; broken blocks are returned as errors.
 fn read_blocks(dir: &Path) -> Result<(Vec<LibraryBlock>, Vec<Error>)> {
     let read_err = |source| Error::Read {
@@ -603,6 +814,32 @@ mod tests {
         assert!(SignalType::Int.can_feed(SignalType::Float));
         assert!(!SignalType::Float.can_feed(SignalType::Int));
         assert!(!SignalType::Bool.can_feed(SignalType::Int));
+        assert!(!SignalType::Int.can_feed(SignalType::String));
+        assert!(SignalType::String.accepts(&ParamValue::Text("192.168.1.1".into())));
+        assert!(!SignalType::String.accepts(&ParamValue::Int(1)));
+    }
+
+    #[test]
+    fn param_captions() {
+        assert_eq!(mask_secret("password1"), "p*******1");
+        assert_eq!(mask_secret("пароль"), "п****ь");
+        assert_eq!(mask_secret("ab"), "**");
+        assert_eq!(mask_secret(""), "");
+
+        let mut p: ParamDef = toml::from_str(
+            "name = \"ssid\"
+type = \"string\"",
+        )
+        .unwrap();
+        let ssid = ParamValue::Text("Home".into());
+        assert_eq!(p.caption(&ssid).as_deref(), Some("ssid=Home"));
+        p.show = ParamShow::Value;
+        assert_eq!(p.caption(&ssid).as_deref(), Some("Home"));
+        assert_eq!(p.caption(&ParamValue::Text(String::new())), None);
+        p.show = ParamShow::Secret;
+        assert_eq!(p.caption(&ssid).as_deref(), Some("H**e"));
+        p.show = ParamShow::Hidden;
+        assert_eq!(p.caption(&ssid), None);
     }
 
     #[test]
@@ -818,6 +1055,53 @@ group = \"G\"
         let (lib, errors) = Library::load_with_user(&builtin).unwrap();
         assert!(errors.is_empty() && lib.len() == 1);
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn user_sections_and_folders() {
+        let root = std::env::temp_dir().join(format!("flp_user_tree_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let builtin = root.join("library");
+        fs::create_dir_all(&builtin).unwrap();
+        let user = user_library_dir(&builtin);
+        let block = |kind: &str| {
+            def(&format!(
+                "[block]\ntype = \"{kind}\"\nname = \"N\"\ngroup = \"старая\"\n"
+            ))
+        };
+        save_block(&user, &block("top"), "", "").unwrap();
+        save_block(
+            &user.join("Насосы").join("Управление"),
+            &block("pump"),
+            "",
+            "",
+        )
+        .unwrap();
+        save_block(&user.join("Другой"), &block("pump"), "", "").unwrap();
+        fs::create_dir_all(user.join("Пустой раздел")).unwrap();
+
+        let (lib, errors) = Library::load_with_user(&builtin).unwrap();
+        let folders: Vec<&str> = lib.user_folders().collect();
+        assert_eq!(
+            folders,
+            ["Другой", "Насосы", "Насосы/Управление", "Пустой раздел"]
+        );
+        // The group comes from the place in the tree, not from block.toml.
+        assert_eq!(lib.get("top").unwrap().def.info.group, "");
+        let pump = &lib.get("pump").unwrap().def.info.group;
+        assert!(pump == "Насосы/Управление" || pump == "Другой");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].to_string().contains("другим пользовательским"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn folder_names() {
+        assert!(is_valid_folder_name("Насосы"));
+        assert!(is_valid_folder_name("K-Web 3.0"));
+        for bad in ["", " a", "a ", "a/b", "a\\b", "a:b", "..", "a."] {
+            assert!(!is_valid_folder_name(bad), "{bad:?}");
+        }
     }
 
     #[test]

@@ -59,9 +59,9 @@ pub struct Input {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Source {
-    /// Index in [`Program::signals`].
-    Signal(usize),
-    /// Default value of an unconnected input.
+    /// Index in [`Program::signals`]; `invert` for an inverted logical output.
+    Signal { index: usize, invert: bool },
+    /// Constant on the input, or the default value of an unconnected input.
     Default(ParamValue),
 }
 
@@ -84,8 +84,11 @@ impl<'a> Program<'a> {
     pub fn build(project: &'a Project, lib: &'a Library) -> Result<Self, GenError> {
         let logic = &project.logic;
         let report = check(logic, lib, None);
-        if report.has_errors() {
-            return Err(GenError::Schema(report.diagnostics));
+        let uarts = flp_core::uart::check_project_uarts(project, lib);
+        if report.has_errors() || uarts.has_errors() {
+            let mut diagnostics = report.diagnostics;
+            diagnostics.extend(uarts.diagnostics);
+            return Err(GenError::Schema(diagnostics));
         }
         let lib_block = |b: &Block| {
             lib.resolve(logic, b)
@@ -120,10 +123,14 @@ impl<'a> Program<'a> {
                     .links
                     .iter()
                     .find(|l| l.to.block == block.id && l.to.port == port.name);
-                let source = match (link, &port.default) {
-                    (Some(l), _) => {
-                        Source::Signal(by_port[&(l.from.block.as_str(), l.from.port.as_str())])
-                    }
+                let constant = block.consts.get(&port.name).or(port.default.as_ref());
+                let source = match (link, constant) {
+                    (Some(l), _) => Source::Signal {
+                        index: by_port[&(l.from.block.as_str(), l.from.port.as_str())],
+                        invert: logic
+                            .block(&l.from.block)
+                            .is_some_and(|b| b.inverted.contains(&l.from.port)),
+                    },
                     (None, Some(value)) => Source::Default(value.clone()),
                     (None, None) => unreachable!("unconnected inputs checked"),
                 };

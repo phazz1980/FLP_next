@@ -19,17 +19,30 @@ pub struct Live {
     pub schema_matches: Option<bool>,
     /// Latest value per table entry.
     pub values: Vec<Option<Value>>,
+    /// Latest string per [`DebugTable::texts`] entry.
+    pub texts: Vec<Option<String>>,
     /// Forced values per table entry, as requested by the host.
     pub forced: Vec<Option<Value>>,
     /// History of each entry for charts: (seconds since start, value).
     pub history: Vec<Vec<(f64, f64)>>,
-    /// Ordinary serial output of the sketch, newest last.
+    /// Ordinary serial output of the sketch, newest last; the oldest lines are dropped.
     pub console: Vec<String>,
+    /// Console lines received since the start, dropped ones included.
+    pub console_total: u64,
     /// Problems to show to the user (connection lost, wrong schema).
     pub status: String,
     pub frames: u64,
     /// Latest cycle time report of the board.
     pub stats: Option<Stats>,
+}
+
+impl Live {
+    /// Console lines that came after the first `seen` ones (counted by `console_total`).
+    pub fn console_after(&self, seen: u64) -> &[String] {
+        let fresh = self.console_total.saturating_sub(seen);
+        let fresh = usize::try_from(fresh).unwrap_or(usize::MAX);
+        &self.console[self.console.len().saturating_sub(fresh)..]
+    }
 }
 
 const HISTORY: usize = 600;
@@ -48,6 +61,8 @@ pub enum Command {
     ReleaseAll,
     /// Reset the cycle time maxima on the board.
     ResetStats,
+    /// Bytes typed in the debug console (line ending included).
+    TextIn(Vec<u8>),
     Stop,
 }
 
@@ -63,6 +78,7 @@ impl Session {
         let n = table.entries.len();
         let live = Arc::new(Mutex::new(Live {
             values: vec![None; n],
+            texts: vec![None; table.texts.len()],
             forced: vec![None; n],
             history: vec![Vec::new(); n],
             status: "Подключение...".into(),
@@ -192,6 +208,7 @@ fn serve(
             match event {
                 Event::Text(line) => {
                     l.console.push(line);
+                    l.console_total += 1;
                     let excess = l.console.len().saturating_sub(CONSOLE);
                     l.console.drain(..excess);
                 }
@@ -227,6 +244,15 @@ fn serve(
                         protocol::STATS => {
                             if l.schema_matches == Some(true) {
                                 l.stats = Stats::decode(&payload);
+                            }
+                        }
+                        protocol::TEXT if payload.len() >= 2 => {
+                            if l.schema_matches != Some(true) {
+                                continue;
+                            }
+                            let i = usize::from(u16::from_le_bytes([payload[0], payload[1]]));
+                            if let Some(slot) = l.texts.get_mut(i) {
+                                *slot = Some(String::from_utf8_lossy(&payload[2..]).into_owned());
                             }
                         }
                         protocol::VALUES if payload.len() >= 5 => {
@@ -301,6 +327,12 @@ fn apply_command(
             port.write_all(&protocol::encode(protocol::RELEASE_ALL, &[]))
         }
         Command::ResetStats => port.write_all(&protocol::encode(protocol::RESET_STATS, &[])),
+        Command::TextIn(bytes) => {
+            for chunk in bytes.chunks(protocol::TEXT_IN_CHUNK) {
+                port.write_all(&protocol::encode(protocol::TEXT_IN, chunk))?;
+            }
+            Ok(())
+        }
         Command::Stop => Ok(()),
     }
 }

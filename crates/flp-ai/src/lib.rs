@@ -13,8 +13,10 @@ use std::fs;
 
 use flp_codegen::{ArduinoCpp, Backend, Program};
 use flp_core::library::{BLOCK_FILE, DOCS_FILE, ESP32_CPP_TEMPLATE};
+use flp_core::pins::{pin_uses, Chip};
 use flp_core::{
-    check, BlockPos, Library, LibraryBlock, ParamValue, PortRef, Project, Severity, Var, VarType,
+    check_project, BlockPos, Library, LibraryBlock, LocalValues, ParamValue, PortRef, Project,
+    Severity, Var, VarType,
 };
 use serde_json::{json, Map, Value};
 
@@ -51,7 +53,7 @@ pub fn tools() -> Vec<Tool> {
     vec![
         Tool {
             name: "get_schema",
-            description: "Прочитать схему проекта: переменные, блоки с параметрами, связи, платы и результат проверки.",
+            description: "Прочитать схему проекта: переменные, блоки с параметрами, связи, платы, занятые и свободные выводы (pins) и результат проверки.",
             input_schema: json!({"type": "object", "properties": {}}),
         },
         Tool {
@@ -111,11 +113,28 @@ pub fn tools() -> Vec<Tool> {
             input_schema: json!({"type": "object", "properties": {"to": port}, "required": ["to"]}),
         },
         Tool {
+            name: "set_input_const",
+            description: "Поставить на вход константу вместо связи (связь во вход убирается) или убрать константу (value = null). Тип значения — как у входа: true/false, целое, число, строка.",
+            input_schema: json!({"type": "object", "properties": {
+                "input": port,
+                "value": {"description": "значение константы; null убирает её"}
+            }, "required": ["input", "value"]}),
+        },
+        Tool {
+            name: "invert_port",
+            description: "Инвертировать логический (bool) вход или выход блока, как кружок инверсии в FLProg. Инверсию выхода видят все его связи.",
+            input_schema: json!({"type": "object", "properties": {
+                "port": port,
+                "output": {"type": "boolean", "description": "true — выход, false — вход"},
+                "on": {"type": "boolean", "description": "false снимает инверсию; по умолчанию true"}
+            }, "required": ["port", "output"]}),
+        },
+        Tool {
             name: "set_variable",
             description: "Создать или изменить переменную (тег). Переменную, которую никто не записывает, можно использовать как уставку.",
             input_schema: json!({"type": "object", "properties": {
                 "name": {"type": "string"},
-                "type": {"type": "string", "description": "тип Arduino: bool, char, byte, short, word, int, unsigned int, long, unsigned long, long long, unsigned long long, int8_t…uint64_t, float, double"},
+                "type": {"type": "string", "description": "тип Arduino: bool, char, byte, short, word, int, unsigned int, long, unsigned long, long long, unsigned long long, int8_t…uint64_t, float, double, String"},
                 "init": {"description": "начальное значение"},
                 "description": {"type": "string"},
                 "retain": {"type": "boolean", "description": "сохранять во флеш (EEPROM): восстанавливается после перезагрузки"},
@@ -168,7 +187,7 @@ pub fn tools() -> Vec<Tool> {
         },
         Tool {
             name: "create_block_type",
-            description: "Создать новый пользовательский тип блока (папка user_library/): block.toml, шаблон esp32.cpp.tmpl и docs.md. Встроенные блоки менять нельзя. Формат — как у существующих блоков (см. get_block_type).",
+            description: "Создать новый пользовательский тип блока (папка user_library/): block.toml, шаблон esp32.cpp.tmpl и docs.md. Встроенные блоки менять нельзя. Поле group задаёт раздел и папки библиотеки через «/», например «Насосы/Управление». Формат — как у существующих блоков (см. get_block_type).",
             input_schema: json!({"type": "object", "properties": {
                 "type": {"type": "string"},
                 "block_toml": {"type": "string"},
@@ -204,6 +223,7 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
                 "logic": p.logic,
                 "sheets": p.layout.sheets,
                 "placement": p.layout.blocks,
+                "pins": pins(p, &lib),
                 "check": report(p, &lib),
             }))
         }
@@ -314,11 +334,40 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
             })?;
             Ok(ok(ctx, &lib))
         }
+        "set_input_const" => {
+            let input = port("input")?;
+            let value = match args.get("value") {
+                None => return Err("нужен аргумент «value» (null убирает константу)".to_owned()),
+                Some(Value::Null) => None,
+                Some(v) => Some(
+                    serde_json::from_value::<ParamValue>(v.clone())
+                        .map_err(|e| format!("value: {e}"))?,
+                ),
+            };
+            ctx.edit(&mut |p| {
+                p.set_input_const(&lib, &input, value.clone())
+                    .map_err(|e| e.to_string())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "invert_port" => {
+            let target = port("port")?;
+            let output = args
+                .get("output")
+                .and_then(Value::as_bool)
+                .ok_or("нужен аргумент «output»: true — выход, false — вход")?;
+            let on = args.get("on").and_then(Value::as_bool).unwrap_or(true);
+            ctx.edit(&mut |p| {
+                p.set_port_inverted(&lib, &target, output, on)
+                    .map_err(|e| e.to_string())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
         "set_variable" => {
             let name = s("name")?;
             let ty: VarType = serde_json::from_value(args.get("type").cloned().unwrap_or_default())
                 .map_err(|_| {
-                    "type: тип Arduino (bool, byte, int, long, float, double…)".to_owned()
+                    "type: тип Arduino (bool, byte, int, long, float, double, String…)".to_owned()
                 })?;
             let init = match args.get("init") {
                 None | Some(Value::Null) => None,
@@ -379,7 +428,9 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
         "check" => Ok(report(ctx.project(), &lib)),
         "generate" => {
             let debug = args.get("debug").and_then(Value::as_bool).unwrap_or(false);
-            let program = Program::build(ctx.project(), &lib).map_err(|e| e.to_string())?;
+            let store = LocalValues::open_default().map_err(|e| e.to_string())?;
+            let project = ctx.project().with_local(&lib, &store);
+            let program = Program::build(&project, &lib).map_err(|e| e.to_string())?;
             let code = ArduinoCpp { debug }
                 .generate(&program)
                 .map_err(|e| e.to_string())?;
@@ -423,9 +474,28 @@ fn ok(ctx: &dyn Context, lib: &Library) -> Value {
     json!({"ok": true, "check": report(ctx.project(), lib)})
 }
 
+/// Pins taken by blocks and, for a known chip, the free ones with their notes.
+fn pins(project: &Project, lib: &Library) -> Value {
+    let uses = pin_uses(&project.logic, lib);
+    let used: Vec<Value> = uses
+        .iter()
+        .map(|u| json!({"gpio": u.gpio, "block": u.block, "param": u.param}))
+        .collect();
+    let Some(chip) = Chip::of_board(&project.config.board) else {
+        return json!({"used": used});
+    };
+    let free: Vec<Value> = chip
+        .pins()
+        .into_iter()
+        .filter(|p| !p.flash && !uses.iter().any(|u| u.gpio == p.gpio))
+        .map(|p| json!({"gpio": p.gpio, "notes": p.notes()}))
+        .collect();
+    json!({"chip": chip.name(), "used": used, "free": free})
+}
+
 /// Check result in a compact form for the model.
 pub fn report(project: &Project, lib: &Library) -> Value {
-    let r = check(&project.logic, lib, Some(&project.layout));
+    let r = check_project(project, lib);
     let list = |sev: Severity| -> Vec<String> {
         r.diagnostics
             .iter()
@@ -500,14 +570,28 @@ fn create_block_type(
             "тип «{kind}» занят встроенным блоком, встроенные блоки менять нельзя; выберите другое имя"
         ));
     }
-    let dir = lib_dir.join(kind);
-    if dir.exists() {
+    if ctx.library().is_user(kind) {
         return Err(format!("тип «{kind}» уже есть; выберите другое имя"));
     }
     // Validate in memory first, so a broken block never lands in the library.
     let def: flp_core::BlockDef =
         toml::from_str(block_toml).map_err(|e| format!("block.toml: {e}"))?;
     def.validate(kind).map_err(|e| format!("block.toml: {e}"))?;
+    // The group becomes the section and folders of the user library
+    // (`Насосы/Управление`); an unusable group puts the block in the root.
+    let parts: Vec<&str> = def.info.group.split('/').map(str::trim).collect();
+    let folder = if parts
+        .iter()
+        .all(|p| flp_core::library::is_valid_folder_name(p))
+    {
+        parts.iter().fold(lib_dir.clone(), |d, p| d.join(p))
+    } else {
+        lib_dir.clone()
+    };
+    let dir = folder.join(kind);
+    if dir.exists() {
+        return Err(format!("тип «{kind}» уже есть; выберите другое имя"));
+    }
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let write = |file: &str, text: &str| fs::write(dir.join(file), text).map_err(|e| e.to_string());
     write(BLOCK_FILE, block_toml)?;

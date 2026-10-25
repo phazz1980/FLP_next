@@ -2,19 +2,21 @@
 //! outputs, parameters, the ESP32 code template and docs — with a live picture of
 //! the block and a trial generation of its code.
 
-use std::collections::BTreeSet;
 use std::fs;
+use std::path::PathBuf;
 
 use eframe::egui::{self, Color32, Id, RichText, ScrollArea, TextEdit, Ui};
+use flp_core::ident::ident_from_name;
 use flp_core::library::ESP32_CPP_TEMPLATE;
 use flp_core::vars::{VAR_GET, VAR_SET};
-use flp_core::{BlockDef, LibraryBlock, ParamDef, ParamKind, ParamValue, PortDef, SignalType};
+use flp_core::{
+    BlockDef, LibraryBlock, ParamDef, ParamKind, ParamShow, ParamValue, PinMode, PortDef,
+    SignalType,
+};
 
 use crate::app::{EditorApp, LogLevel};
 use crate::dialogs::{type_name, value_text};
 use crate::theme::Palette;
-
-const SIGNAL_TYPES: [SignalType; 3] = [SignalType::Bool, SignalType::Int, SignalType::Float];
 
 const PARAM_KINDS: [ParamKind; 6] = [
     ParamKind::Bool,
@@ -31,6 +33,15 @@ const NEW_TEMPLATE: &str =
 const SECTIONS_HINT: &str = "Разделы: // @global — переменные блока, // @setup — код в setup(), \
 // @loop — код цикла, // @functions — функции. С пометкой once (// @global once) раздел \
 попадает в скетч один раз на все блоки. Имена в разделах без once начинайте с {{ id }}.";
+
+fn show_label(show: ParamShow) -> &'static str {
+    match show {
+        ParamShow::Named => "имя=значение",
+        ParamShow::Value => "значение",
+        ParamShow::Secret => "пароль (p***1)",
+        ParamShow::Hidden => "не показывать",
+    }
+}
 
 fn kind_label(kind: ParamKind) -> &'static str {
     match kind {
@@ -101,6 +112,12 @@ struct ParamRow {
     max: String,
     when: String,
     description: String,
+    show: ParamShow,
+    /// `local` from `block.toml`, kept as is (no column for it).
+    local: Option<String>,
+    /// For pins: direction and sharing, edited next to the type.
+    mode: PinMode,
+    shared: bool,
 }
 
 impl ParamRow {
@@ -114,6 +131,10 @@ impl ParamRow {
             max: String::new(),
             when: String::new(),
             description: String::new(),
+            show: ParamShow::Named,
+            local: None,
+            mode: PinMode::Io,
+            shared: false,
         }
     }
 
@@ -128,6 +149,10 @@ impl ParamRow {
             max: num(p.max),
             when: p.when.clone().unwrap_or_default(),
             description: p.description.clone(),
+            show: p.show,
+            local: p.local.clone(),
+            mode: p.mode,
+            shared: p.shared,
         }
     }
 
@@ -142,6 +167,14 @@ impl ParamRow {
             max: parse_number(&self.max).map_err(err)?,
             when: optional(&self.when),
             description: self.description.trim().to_owned(),
+            show: self.show,
+            local: self.local.clone(),
+            mode: if self.kind == ParamKind::Pin {
+                self.mode
+            } else {
+                PinMode::Io
+            },
+            shared: self.kind == ParamKind::Pin && self.shared,
         })
     }
 }
@@ -149,13 +182,18 @@ impl ParamRow {
 /// Everything the window edits; compared with the saved copy to detect changes.
 #[derive(Debug, Clone, PartialEq)]
 struct Form {
+    /// Type of the block: made from the name for a new block, fixed afterwards
+    /// (schemas refer to it).
     kind: String,
     name: String,
     symbol: String,
+    /// Section and folders in the user library (`Раздел/Папка`), empty in the root.
     group: String,
     description: String,
     memory: bool,
     single: bool,
+    /// `[block.uart]`: kept as it is, the form has no field for it yet.
+    uart: Option<flp_core::UartUse>,
     /// Comma-separated.
     includes: String,
     libraries: String,
@@ -167,15 +205,16 @@ struct Form {
 }
 
 impl Form {
-    fn new_block(kind: String) -> Self {
+    fn new_block(kind: String, group: String) -> Self {
         Self {
             kind,
             name: "Новый блок".into(),
             symbol: String::new(),
-            group: "Пользовательские".into(),
+            group,
             description: String::new(),
             memory: false,
             single: false,
+            uart: None,
             includes: String::new(),
             libraries: String::new(),
             inputs: vec![PortRow::new("in")],
@@ -205,6 +244,7 @@ impl Form {
             description: info.description.clone(),
             memory: info.memory,
             single: info.single,
+            uart: info.uart.clone(),
             includes: info.includes.join(", "),
             libraries: info.libraries.join(", "),
             inputs: def.inputs.iter().map(PortRow::from_def).collect(),
@@ -221,9 +261,6 @@ impl Form {
         if self.name.trim().is_empty() {
             return Err("у блока должно быть название".into());
         }
-        if self.group.trim().is_empty() {
-            return Err("у блока должна быть группа".into());
-        }
         if kind == VAR_GET || kind == VAR_SET {
             return Err(format!("тип «{kind}» занят встроенным блоком переменной"));
         }
@@ -238,6 +275,7 @@ impl Form {
                 includes: list(&self.includes),
                 libraries: list(&self.libraries),
                 single: self.single,
+                uart: self.uart.clone(),
             },
             inputs: self
                 .inputs
@@ -295,6 +333,7 @@ fn parse_signal(ty: SignalType, text: &str) -> Result<Option<ParamValue>, String
         SignalType::Bool => parse_bool(t).map(ParamValue::Bool),
         SignalType::Int => t.parse().ok().map(ParamValue::Int),
         SignalType::Float => parse_float(t).map(ParamValue::Float),
+        SignalType::String => Some(ParamValue::Text(t.to_owned())),
     };
     value
         .map(Some)
@@ -360,10 +399,11 @@ pub struct BlockEditor {
 }
 
 impl BlockEditor {
-    /// A new block with a free type name.
-    pub fn new_block(app: &EditorApp) -> Self {
-        let kind = free_kind(app, "my_block");
-        Self::with(None, Form::new_block(kind))
+    /// A new block in a section or folder of the user library (`""` — the root).
+    pub fn new_block(app: &EditorApp, group: &str) -> Self {
+        let mut form = Form::new_block(String::new(), group.to_owned());
+        form.kind = free_kind(app, &ident_from_name(&form.name));
+        Self::with(None, form)
     }
 
     /// Opens a library block: a user block for editing, a built-in one read-only.
@@ -377,10 +417,14 @@ impl BlockEditor {
     }
 
     /// A new block based on an existing one.
+    /// A copy of a user block lands next to it, of a built-in one in the root.
     pub fn copy_of(app: &EditorApp, block: &LibraryBlock) -> Self {
         let mut form = Form::from_block(block);
-        form.kind = free_kind(app, &format!("{}_copy", form.kind));
+        if !app.lib.is_user(&block.def.info.kind) {
+            form.group.clear();
+        }
         form.name = format!("{} (копия)", form.name);
+        form.kind = free_kind(app, &ident_from_name(&form.name));
         Self::with(None, form)
     }
 
@@ -418,10 +462,9 @@ impl BlockEditor {
     }
 }
 
+/// A type not used by any block, made from `base`.
 fn free_kind(app: &EditorApp, base: &str) -> String {
-    let user_dir = app.user_lib_dir();
-    let taken =
-        |k: &str| app.lib.get(k).is_some() || user_dir.as_ref().is_some_and(|d| d.join(k).exists());
+    let taken = |k: &str| app.lib.get(k).is_some() || k == VAR_GET || k == VAR_SET;
     if !taken(base) {
         return base.to_owned();
     }
@@ -511,6 +554,12 @@ fn confirm_close(app: &mut EditorApp, ctx: &egui::Context, ed: &mut BlockEditor)
 /// Window contents; returns true when the window should close.
 fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
     let pal = app.theme.palette;
+    // Until the first save the type follows the name.
+    if ed.original.is_none() {
+        let kind = free_kind(app, &ident_from_name(&ed.form.name));
+        ed.clean.kind.clone_from(&kind);
+        ed.form.kind = kind;
+    }
     let def = ed.form.to_def();
     if let Ok(def) = &def {
         ed.update_generated(def);
@@ -535,7 +584,7 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
             });
             ui.add_space(16.0);
             let editable = !ed.read_only;
-            ui.vertical(|ui| ui.add_enabled_ui(editable, |ui| header(app, ui, ed)));
+            ui.vertical(|ui| ui.add_enabled_ui(editable, |ui| header(ui, ed)));
         });
         ui.separator();
         ui.horizontal(|ui| {
@@ -566,12 +615,20 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
                 Tab::Code => code_tab(ui, &mut ed.form, editable),
                 Tab::Docs => {
                     ui.weak("docs.md: пояснение и пример. По нему ИИ-помощник подбирает блоки.");
-                    ui.add(
-                        TextEdit::multiline(&mut ed.form.docs)
-                            .interactive(editable)
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(20),
+                    ui.weak(
+                        "Разметка Markdown: # заголовок, **жирный**, *курсив*, `код`, \
+                         - список, 1. список, > цитата, ``` блок кода ```, | таблица |.",
                     );
+                    ui.columns(2, |cols| {
+                        cols[0].add(
+                            TextEdit::multiline(&mut ed.form.docs)
+                                .interactive(editable)
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(20),
+                        );
+                        cols[1].label(RichText::new("Предпросмотр").weak());
+                        crate::markdown::show(&mut cols[1], &ed.form.docs);
+                    });
                 }
                 Tab::Sketch => sketch_tab(ui, ed, &pal),
             });
@@ -579,42 +636,40 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
     close
 }
 
-fn header(app: &EditorApp, ui: &mut Ui, ed: &mut BlockEditor) {
+fn header(ui: &mut Ui, ed: &mut BlockEditor) {
+    let read_only = ed.read_only;
     let f = &mut ed.form;
     egui::Grid::new("block_header")
         .num_columns(4)
         .spacing([10.0, 4.0])
         .show(ui, |ui| {
-            ui.label("Тип");
-            ui.add_sized([160.0, 20.0], TextEdit::singleline(&mut f.kind))
-                .on_hover_text(
-                    "Имя папки в user_library/ и поле type в схеме: буквы (можно русские), цифры и «_». \
-                     Новое имя сохраняет блок как новый тип, старый остаётся.",
-                );
             ui.label("Название");
-            ui.add_sized([220.0, 20.0], TextEdit::singleline(&mut f.name));
-            ui.end_row();
-
+            ui.add_sized([220.0, 20.0], TextEdit::singleline(&mut f.name))
+                .on_hover_text(format!(
+                    "Тип блока в схеме: {}. У нового блока он берётся из названия, \
+                     после сохранения не меняется.",
+                    f.kind
+                ));
             ui.label("Обозначение");
             ui.add_sized(
                 [160.0, 20.0],
                 TextEdit::singleline(&mut f.symbol).hint_text("как название"),
             )
             .on_hover_text("Короткая надпись на блоке: TON, a + b, &");
-            ui.label("Группа");
-            ui.horizontal(|ui| {
-                ui.add_sized([180.0, 20.0], TextEdit::singleline(&mut f.group));
-                let groups: BTreeSet<&str> =
-                    app.lib.iter().map(|b| b.def.info.group.as_str()).collect();
-                ui.menu_button("▾", |ui| {
-                    for g in groups {
-                        if ui.button(g).clicked() {
-                            f.group = g.to_owned();
-                            ui.close();
-                        }
-                    }
-                });
-            });
+            ui.end_row();
+
+            ui.label("Где лежит");
+            let place = if read_only {
+                format!("Встроенные / {}", f.group)
+            } else if f.group.is_empty() {
+                "Блоки пользователей".to_owned()
+            } else {
+                format!("Блоки пользователей / {}", f.group.replace('/', " / "))
+            };
+            ui.label(place).on_hover_text(
+                "Раздел и папка в библиотеке. Перенести блок — правая кнопка на нём \
+                 во вкладке «Пользовательские».",
+            );
             ui.end_row();
 
             ui.label("Описание");
@@ -693,7 +748,7 @@ fn type_combo(ui: &mut Ui, id: (&str, usize), ty: &mut SignalType) {
         .selected_text(type_name(*ty))
         .width(70.0)
         .show_ui(ui, |ui| {
-            for t in SIGNAL_TYPES {
+            for t in SignalType::ALL {
                 ui.selectable_value(ty, t, type_name(t));
             }
         });
@@ -817,7 +872,7 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
     let mut op = None;
     let len = f.params.len();
     egui::Grid::new("block_params")
-        .num_columns(9)
+        .num_columns(10)
         .striped(true)
         .spacing([8.0, 4.0])
         .show(ui, |ui| {
@@ -829,6 +884,7 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
                 "Мин.",
                 "Макс.",
                 "Условие when",
+                "Под блоком",
                 "Описание",
             ] {
                 ui.label(RichText::new(h).strong());
@@ -838,14 +894,19 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
             for (i, row) in f.params.iter_mut().enumerate() {
                 ui.add_sized([90.0, 20.0], TextEdit::singleline(&mut row.name));
                 label_edit(ui, &mut row.label, &row.name);
-                egui::ComboBox::from_id_salt(("param_kind", i))
-                    .selected_text(kind_label(row.kind))
-                    .width(130.0)
-                    .show_ui(ui, |ui| {
-                        for k in PARAM_KINDS {
-                            ui.selectable_value(&mut row.kind, k, kind_label(k));
-                        }
-                    });
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt(("param_kind", i))
+                        .selected_text(kind_label(row.kind))
+                        .width(130.0)
+                        .show_ui(ui, |ui| {
+                            for k in PARAM_KINDS {
+                                ui.selectable_value(&mut row.kind, k, kind_label(k));
+                            }
+                        });
+                    if row.kind == ParamKind::Pin {
+                        pin_mode_edit(ui, i, row);
+                    }
+                });
                 let hint = match row.kind {
                     ParamKind::Duration => "обязателен (1s, 500ms)",
                     _ => "обязателен",
@@ -870,12 +931,44 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
                     [130.0, 20.0],
                     TextEdit::singleline(&mut row.when).hint_text("всегда"),
                 );
+                egui::ComboBox::from_id_salt(("param_show", i))
+                    .selected_text(show_label(row.show))
+                    .width(120.0)
+                    .show_ui(ui, |ui| {
+                        for s in ParamShow::ALL {
+                            ui.selectable_value(&mut row.show, s, show_label(s));
+                        }
+                    })
+                    .response
+                    .on_hover_text("Как значение подписывается под блоком на плате");
                 ui.add_sized([200.0, 20.0], TextEdit::singleline(&mut row.description));
                 row_ops(ui, i, len, &mut op);
                 ui.end_row();
             }
         });
     apply_op(&mut f.params, op);
+}
+
+/// Direction of a pin parameter and whether blocks of the type may share the pin.
+fn pin_mode_edit(ui: &mut Ui, i: usize, row: &mut ParamRow) {
+    let label = |m: PinMode| match m {
+        PinMode::Io => "вход-выход",
+        PinMode::In => "вход",
+        PinMode::Out => "выход",
+        PinMode::Adc => "АЦП",
+    };
+    egui::ComboBox::from_id_salt(("pin_mode", i))
+        .selected_text(label(row.mode))
+        .width(90.0)
+        .show_ui(ui, |ui| {
+            for m in [PinMode::Io, PinMode::In, PinMode::Out, PinMode::Adc] {
+                ui.selectable_value(&mut row.mode, m, label(m));
+            }
+        })
+        .response
+        .on_hover_text("Какие выводы платы подходят: выход не ставится на вывод «только вход», АЦП — только на выводы с АЦП");
+    ui.checkbox(&mut row.shared, "общий")
+        .on_hover_text("Несколько блоков этого типа могут сидеть на одном выводе (шина 1-Wire)");
 }
 
 /// Text inserted into the template from the substitution menu or buttons.
@@ -1172,14 +1265,28 @@ fn footer(
                 close = true;
             }
         }
-        if let Some(dir) = app.user_lib_dir() {
-            ui.weak(format!(
-                "Папка: {}",
-                dir.join(ed.form.kind.trim()).display()
-            ));
+        if let Some(dir) = target_dir(app, ed) {
+            ui.weak(format!("Папка: {}", dir.join(&ed.form.kind).display()));
         }
     });
     close
+}
+
+/// Folder the block is saved into: where it already lies, or for a new block
+/// its section and folders under `user_library/`.
+fn target_dir(app: &EditorApp, ed: &BlockEditor) -> Option<PathBuf> {
+    let existing = ed.original.as_ref().and_then(|k| app.lib.get(k));
+    if let Some(parent) = existing.and_then(|b| b.dir.parent()) {
+        return Some(parent.to_owned());
+    }
+    let user = app.user_lib_dir()?;
+    Some(
+        ed.form
+            .group
+            .split('/')
+            .filter(|p| !p.is_empty())
+            .fold(user, |d, p| d.join(p)),
+    )
 }
 
 /// Writes the block into the library and reloads it; returns whether it worked.
@@ -1191,7 +1298,7 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
             return false;
         }
     };
-    let Some(lib_dir) = app.user_lib_dir() else {
+    let Some(lib_dir) = target_dir(app, ed) else {
         app.info(LogLevel::Error, "Блок не сохранён: нет папки библиотеки");
         return false;
     };
@@ -1203,8 +1310,8 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
         );
         return false;
     }
-    let renamed = ed.original.as_deref() != Some(kind.as_str());
-    if renamed && (app.lib.get(kind).is_some() || lib_dir.join(kind).exists()) {
+    let new = ed.original.as_deref() != Some(kind.as_str());
+    if new && (app.lib.get(kind).is_some() || lib_dir.join(kind).exists()) {
         app.info(
             LogLevel::Error,
             format!("Блок не сохранён: тип «{kind}» уже есть, выберите другое имя"),
@@ -1282,7 +1389,7 @@ pub fn delete_dialog(app: &mut EditorApp, ctx: &egui::Context) {
         Some(true) => {
             app.block_delete = None;
             // Only a folder inside user_library/ is ever removed.
-            if block.dir.parent() != Some(user_dir.as_path()) {
+            if !block.dir.starts_with(&user_dir) || block.dir == user_dir {
                 app.info(
                     LogLevel::Error,
                     "Блок не удалён: он не в папке пользовательских блоков",
@@ -1353,7 +1460,7 @@ min = 0
 
     #[test]
     fn form_errors() {
-        let mut form = Form::new_block("ok".into());
+        let mut form = Form::new_block("ok".into(), String::new());
         assert!(form.to_def().is_ok());
         form.inputs[0].default = "maybe".into();
         assert!(form.to_def().unwrap_err().contains("maybe"));
@@ -1392,7 +1499,7 @@ min = 0
 
     #[test]
     fn new_block_generates() {
-        let form = Form::new_block("demo".into());
+        let form = Form::new_block("demo".into(), String::new());
         let def = form.to_def().unwrap();
         let code = flp_codegen::preview_block(&def, &form.template).unwrap();
         assert!(

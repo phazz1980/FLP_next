@@ -1,0 +1,44 @@
+// @global
+bool {{ id }}_prev = false;
+// @loop
+{
+{% if value.edge %}
+  bool fire = {{ input.en }} && !{{ id }}_prev;
+{% else %}
+  bool fire = {{ input.en }};
+{% endif %}
+  {{ id }}_prev = {{ input.en }};
+  {{ output.sent }} = false;
+  if (fire) {
+{% if value.mode == 0 %}
+    const String& text = {{ input.text }};
+{% if value.ending == 2 %}
+    const char* ending = "\r\n";
+{% elif value.ending == 1 %}
+    const char* ending = "\n";
+{% else %}
+    const char* ending = "";
+{% endif %}
+    // A busy port would stall the loop: drop the message if the transmit buffer
+    // is (nearly) full. A long one may still wait while the hardware FIFO drains.
+    size_t room = text.length() + strlen(ending);
+    if ((size_t){{ uart.serial }}.availableForWrite() >= (room < 64 ? room : 64)) {
+      {{ uart.serial }}.print(text);
+      {{ uart.serial }}.print(ending);
+      {{ output.sent }} = true;
+    }
+{% else %}
+{% if value.mode == 1 %}
+    uint8_t data = (uint8_t)constrain(lroundf({{ input.value }}), 0L, 255L);
+{% elif value.mode == 2 %}
+    int16_t data = (int16_t)constrain(lroundf({{ input.value }}), -32768L, 32767L);
+{% else %}
+    float data = {{ input.value }};
+{% endif %}
+    if ((size_t){{ uart.serial }}.availableForWrite() >= sizeof(data)) {
+      {{ uart.serial }}.write((const uint8_t*)&data, sizeof(data));
+      {{ output.sent }} = true;
+    }
+{% endif %}
+  }
+}

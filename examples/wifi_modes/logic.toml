@@ -1,0 +1,50 @@
+# Wi-Fi со всеми входами и выходами.
+# Тумблер на GPIO13 включает и выключает радио, переменная «Режим Wi-Fi»
+# задаёт режим: 0 клиент, 1 точка доступа, 2 клиент и точка доступа.
+# Светодиод на GPIO2 горит, пока есть связь с сетью.
+
+[[var]]
+name = "Режим Wi-Fi"
+type = "int"
+init = 2
+description = "0 клиент, 1 точка доступа, 2 оба"
+
+[[block]]
+id = "switch"
+type = "digital_in"
+pin = 13
+pullup = true
+inverted = true
+
+[[block]]
+id = "mode"
+type = "var_get"
+var = "Режим Wi-Fi"
+
+[[block]]
+id = "wifi"
+type = "wifi"
+ssid = "MyNetwork"
+ap_ssid = "FLP_ESP32"
+use_en = true
+use_mode = true
+out_ap_ready = true
+out_status = true
+out_error = true
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[link]]
+from = "switch.out"
+to   = "wifi.en"
+
+[[link]]
+from = "mode.out"
+to   = "wifi.mode"
+
+[[link]]
+from = "wifi.ready"
+to   = "led.in"

@@ -1,0 +1,38 @@
+# Инверсия выхода и константа на входе.
+
+# Датчик температуры на GPIO4.
+[[block]]
+id = "temp"
+type = "ds18b20"
+pin = 4
+
+# Поправка датчика задана константой прямо на входе b, без отдельного блока.
+[[block]]
+id = "corrected"
+type = "add"
+const = { b = -0.5 }
+
+# Выход инвертирован: светодиод горит, пока температура НЕ выше 25 °C.
+[[block]]
+id = "hot"
+type = "greater"
+b = 25.0
+invert = ["out"]
+
+# Встроенный светодиод DevKit.
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[link]]
+from = "temp.temp"
+to   = "corrected.a"
+
+[[link]]
+from = "corrected.out"
+to   = "hot.a"
+
+[[link]]
+from = "hot.out"
+to   = "led.in"

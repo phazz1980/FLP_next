@@ -1,0 +1,48 @@
+[block]
+type = "text_concat"
+name = "Сцепление строк"
+symbol = "A+B"
+group = "Строки"
+description = "Склеивает от двух до четырёх строк по порядку a, b, c, d; между ними можно вставить разделитель."
+
+[[input]]
+name = "a"
+type = "string"
+default = ""
+
+[[input]]
+name = "b"
+type = "string"
+default = ""
+
+[[input]]
+name = "c"
+type = "string"
+default = ""
+when = "count >= 3"
+
+[[input]]
+name = "d"
+type = "string"
+default = ""
+when = "count >= 4"
+
+[[output]]
+name = "out"
+type = "string"
+
+[[param]]
+name = "count"
+label = "входов"
+type = "int"
+default = 2
+min = 2
+max = 4
+description = "Число входов"
+
+[[param]]
+name = "separator"
+label = "разделитель"
+type = "string"
+default = ""
+description = "Текст между частями, например «;» или пробел"

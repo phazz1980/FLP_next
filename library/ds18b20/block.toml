@@ -21,6 +21,7 @@ description = "true, если последнее чтение удалось"
 [[param]]
 name = "pin"
 type = "pin"
+shared = true
 description = "Вывод шины 1-Wire (нужен резистор 4,7 кОм на питание)"
 
 [[param]]

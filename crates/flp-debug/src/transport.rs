@@ -61,11 +61,16 @@ mod serial {
         }
     }
 
-    /// Connector for a serial port such as `COM3`.
+    /// Connector for a serial port such as `COM3` at the debug link speed.
     pub fn serial(port: &str) -> Connector {
+        serial_at(port, BAUD)
+    }
+
+    /// Connector for a serial port at any speed (the port monitor).
+    pub fn serial_at(port: &str, baud: u32) -> Connector {
         let port = port.to_owned();
         Box::new(move || {
-            let mut p = serialport::new(&port, BAUD)
+            let mut p = serialport::new(&port, baud)
                 .timeout(Duration::from_millis(50))
                 .open()
                 .map_err(io::Error::other)?;
@@ -81,4 +86,4 @@ mod serial {
 }
 
 #[cfg(feature = "serial")]
-pub use serial::serial;
+pub use serial::{serial, serial_at};

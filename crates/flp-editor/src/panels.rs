@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use eframe::egui::{self, Id, RichText, ScrollArea, Ui};
 use flp_core::{BlockPos, ParamKind};
 
-use crate::app::{EditorApp, LogLevel, RightTab};
+use crate::app::{BottomTab, EditorApp, LogLevel, RightTab};
 use crate::canvas::DragItem;
 use crate::debugview::{self, DebugState};
 use crate::dialogs::{value_text, Dialog};
@@ -47,6 +47,13 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
             .clicked()
         {
             app.run_check();
+        }
+        if ui
+            .add_enabled(has_doc, egui::Button::new("Код C++"))
+            .on_hover_text("Показать скетч Arduino C++, сгенерированный из схемы")
+            .clicked()
+        {
+            app.code_view = Some(crate::codeview::CodeView::new());
         }
         if ui
             .add_enabled(has_doc && idle, egui::Button::new("Собрать"))
@@ -146,14 +153,34 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
     });
 }
 
-pub fn log(app: &mut EditorApp, ui: &mut Ui) {
-    let pal = app.theme.palette;
+/// Bottom panel: editor messages and the port monitor / debug console.
+pub fn bottom(app: &mut EditorApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
-        ui.strong("Сообщения");
-        if ui.small_button("Очистить").clicked() {
-            app.log.clear();
+        ui.selectable_value(&mut app.bottom_tab, BottomTab::Log, "Сообщения");
+        let title = match app.console.unread {
+            0 => app.console.title().to_owned(),
+            n => format!("{} ({n})", app.console.title()),
+        };
+        ui.selectable_value(&mut app.bottom_tab, BottomTab::Console, title);
+        if app.bottom_tab == BottomTab::Log {
+            ui.separator();
+            if ui.small_button("Очистить").clicked() {
+                app.log.clear();
+            }
         }
     });
+    ui.separator();
+    match app.bottom_tab {
+        BottomTab::Log => log(app, ui),
+        BottomTab::Console => {
+            let pal = app.theme.palette;
+            crate::console::show(&mut app.console, &pal, ui);
+        }
+    }
+}
+
+fn log(app: &mut EditorApp, ui: &mut Ui) {
+    let pal = app.theme.palette;
     let mut focus = None;
     ScrollArea::vertical()
         .auto_shrink(false)
@@ -341,6 +368,27 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
             inputs.push((b.id.clone(), text));
         }
     }
+    // Library blocks with a pin, offered by the "add" menus of the two groups.
+    let mut input_kinds = Vec::new();
+    let mut output_kinds = Vec::new();
+    for b in app.lib.iter() {
+        if !b.def.params.iter().any(|p| p.kind == ParamKind::Pin) {
+            continue;
+        }
+        let item = (
+            b.def.info.kind.clone(),
+            b.def.info.name.clone(),
+            b.def.info.description.clone(),
+        );
+        if b.def.outputs.is_empty() {
+            output_kinds.push(item);
+        } else {
+            input_kinds.push(item);
+        }
+    }
+    input_kinds.sort_by(|a, b| a.1.cmp(&b.1));
+    output_kinds.sort_by(|a, b| a.1.cmp(&b.1));
+    let mut add_kind = None;
 
     ScrollArea::vertical().auto_shrink([ui.is_sizing_pass(), false]).show(ui, |ui| {
         let title = format!(
@@ -353,10 +401,24 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
                 egui::CollapsingHeader::new("Теги")
                     .default_open(true)
                     .show(ui, |ui| {
-                        for (title, items) in [("Входы", &inputs), ("Выходы", &outputs)] {
+                        for (title, items, kinds, add) in [
+                            ("Входы", &inputs, &input_kinds, "+ Добавить вход"),
+                            ("Выходы", &outputs, &output_kinds, "+ Добавить выход"),
+                        ] {
                             egui::CollapsingHeader::new(title)
                                 .default_open(true)
                                 .show(ui, |ui| {
+                                    ui.menu_button(add, |ui| {
+                                        for (kind, name, description) in kinds {
+                                            if ui.button(name).on_hover_text(description).clicked() {
+                                                add_kind = Some(kind.clone());
+                                                ui.close();
+                                            }
+                                        }
+                                        if kinds.is_empty() {
+                                            ui.weak("В библиотеке нет таких блоков");
+                                        }
+                                    });
                                     for (id, text) in items {
                                         let sel = app.selection.as_ref().is_some_and(|s| s.has_block(id));
                                         let index = debug.as_ref().and_then(|d| {
@@ -472,6 +534,9 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
     if let Some(id) = focus {
         app.focus_block(&id);
     }
+    if let Some(kind) = add_kind {
+        add_to_schema(app, &kind);
+    }
     if new_var {
         app.dialog = Dialog::for_var(app, None);
     }
@@ -508,6 +573,9 @@ pub fn right(app: &mut EditorApp, ui: &mut Ui) {
     }
 }
 
+/// Library group of the board input/output blocks, not shown in the library panel.
+const IO_GROUP: &str = "Входы и выходы";
+
 fn library(app: &mut EditorApp, ui: &mut Ui) {
     let filter_id = Id::unique("library_filter");
     let mut filter: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
@@ -524,14 +592,18 @@ fn library(app: &mut EditorApp, ui: &mut Ui) {
         ui.selectable_value(&mut user_tab, true, "Пользовательские");
     });
     ui.data_mut(|d| d.insert_temp(tab_id, user_tab));
-    if user_tab && ui.button("+ Новый блок").clicked() {
-        app.block_editor = Some(crate::blockedit::BlockEditor::new_block(app));
+    if user_tab {
+        if let Some(kind) = crate::userlib::show(app, ui, &needle) {
+            add_to_schema(app, &kind);
+        }
+        return;
     }
 
     let mut groups: BTreeMap<&str, Vec<(&str, String, &str)>> = BTreeMap::new();
     for b in app.lib.iter() {
         let info = &b.def.info;
-        if app.lib.is_user(&info.kind) != user_tab {
+        // Board inputs and outputs are added from the tag tree on the left.
+        if app.lib.is_user(&info.kind) || info.group == IO_GROUP {
             continue;
         }
         let hay = format!("{} {} {}", info.kind, info.name, info.description).to_lowercase();
@@ -595,12 +667,7 @@ fn library(app: &mut EditorApp, ui: &mut Ui) {
                         }
                     });
             }
-            if groups.is_empty() && user_tab && needle.is_empty() {
-                ui.weak(
-                    "Своих блоков пока нет. Создайте блок кнопкой выше или на основе \
-                     встроенного: правая кнопка на нём во вкладке «Встроенные».",
-                );
-            } else if groups.is_empty() {
+            if groups.is_empty() {
                 ui.weak("Ничего не найдено");
             }
         });
@@ -614,13 +681,18 @@ fn library(app: &mut EditorApp, ui: &mut Ui) {
         }
     }
     if let Some(kind) = add {
-        let lib = app.lib.clone();
-        let pos = free_spot(app);
-        if let Some(doc) = &mut app.doc {
-            match doc.edit(&lib, None, |p| p.add_block(&lib, &kind, pos)) {
-                Ok(id) => app.focus_block(&id),
-                Err(e) => app.info(LogLevel::Error, e.to_string()),
-            }
+        add_to_schema(app, &kind);
+    }
+}
+
+/// Adds a block of type `kind` to the active sheet (double click in the library).
+fn add_to_schema(app: &mut EditorApp, kind: &str) {
+    let lib = app.lib.clone();
+    let pos = free_spot(app);
+    if let Some(doc) = &mut app.doc {
+        match doc.edit(&lib, None, |p| p.add_block(&lib, kind, pos)) {
+            Ok(id) => app.focus_block(&id),
+            Err(e) => app.info(LogLevel::Error, e.to_string()),
         }
     }
 }

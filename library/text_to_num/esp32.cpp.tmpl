@@ -1,0 +1,26 @@
+// @functions once
+// Number from text: spaces around are skipped, a decimal comma is accepted.
+bool flp_text_to_float(const String& text, float& out) {
+  String t = text;
+  t.trim();
+  t.replace(',', '.');
+  if (t.length() == 0) {
+    return false;
+  }
+  char* end = nullptr;
+  double v = strtod(t.c_str(), &end);
+  if (end == t.c_str() || *end != '\0') {
+    return false;
+  }
+  out = (float)v;
+  return true;
+}
+
+// @loop
+{
+  float v;
+  {{ output.ok }} = flp_text_to_float({{ input.in }}, v);
+  if ({{ output.ok }}) {
+    {{ output.out }} = v;
+  }
+}

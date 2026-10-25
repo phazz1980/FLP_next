@@ -72,6 +72,8 @@ pub struct CanvasState {
     band: Option<Pos2>,
     /// Canvas point under the mouse: where pasted blocks go.
     hover: Option<BlockPos>,
+    /// Text of the constant being typed in the menu of an input.
+    const_text: String,
 }
 
 impl CanvasState {
@@ -269,12 +271,7 @@ fn paint_box(
         let summary: Vec<String> = def
             .params
             .iter()
-            .filter_map(|p| {
-                block
-                    .params
-                    .get(&p.name)
-                    .map(|v| format!("{}={}", p.title(), value_text(v)))
-            })
+            .filter_map(|p| block.params.get(&p.name).and_then(|v| p.caption(v)))
             .collect();
         if !summary.is_empty() {
             painter.text(
@@ -308,6 +305,7 @@ pub fn block_preview(ui: &mut Ui, def: &BlockDef, pal: &Palette) {
         id: flp_codegen::preview_id(def),
         kind: def.info.kind.clone(),
         params,
+        ..Default::default()
     };
     let body = size(&block, Some(def));
     let margin = Vec2::new(48.0, 20.0);
@@ -354,6 +352,7 @@ fn signal_color(p: &Palette, ty: SignalType) -> Color32 {
         SignalType::Bool => p.bool_signal,
         SignalType::Int => p.int_signal,
         SignalType::Float => p.float_signal,
+        SignalType::String => p.string_signal,
     }
 }
 
@@ -641,6 +640,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let mut clicked_link = None;
     // Live values above the input end of each wire; drawn after the blocks to stay on top.
     let mut wire_labels = Vec::new();
+    let mut text_labels = Vec::new();
     for link in &logic.links {
         let (Some((a, ty)), Some((b, _))) =
             (port_screen(&link.from, true), port_screen(&link.to, false))
@@ -663,7 +663,10 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         let is_sel = selected.as_ref() == Some(&Selection::Link(link.to.clone()));
         let color = signal_color(&pal, ty);
         // Online: logical lines light up when true and fade when false.
-        let live = dbg.and_then(|d| d.output(&link.from));
+        // An inverted output feeds the inverted value to its links.
+        let live = dbg
+            .and_then(|d| d.output(&link.from))
+            .map(|(v, forced)| (flip(v, inverted_output(logic, &link.from)), forced));
         let (width, color) = match live {
             Some((flp_debug::Value::Bool(true), _)) => (2.6, pal.ok),
             Some((flp_debug::Value::Bool(false), _)) => (1.4, color.gamma_multiply(0.45)),
@@ -671,6 +674,9 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         };
         if let Some((v, forced)) = live {
             wire_labels.push((b, v, forced));
+        }
+        if let Some(text) = dbg.and_then(|d| d.text_output(&link.from)) {
+            text_labels.push((b, text.to_owned()));
         }
         let stroke = Stroke::new(if is_sel { width + 1.4 } else { width }, color);
         for pts in &lines {
@@ -779,10 +785,18 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                     .var_name()
                     .filter(|_| !write)
                     .and_then(|v| dbg.and_then(|d| d.var(v)));
-                let (text, color) = match live {
-                    Some((v, true)) => (format!("{} = {v} F", label(block, def)), pal.warning),
-                    Some((v, false)) => (format!("{} = {v}", label(block, def)), pal.text),
-                    None => (label(block, def), pal.text),
+                let live_text = block
+                    .var_name()
+                    .filter(|_| !write)
+                    .and_then(|v| dbg.and_then(|d| d.text_var(v)));
+                let (text, color) = match (live, live_text) {
+                    (Some((v, true)), _) => (format!("{} = {v} F", label(block, def)), pal.warning),
+                    (Some((v, false)), _) => (format!("{} = {v}", label(block, def)), pal.text),
+                    (None, Some(s)) => (
+                        format!("{} = {}", label(block, def), debugview::quoted(s)),
+                        pal.text,
+                    ),
+                    (None, None) => (label(block, def), pal.text),
                 };
                 let center = if en {
                     Pos2::new(r.center().x, r.min.y + r.height() * 0.25)
@@ -819,12 +833,23 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 }
             }
             Kind::Box => {
+                // A constant on an input is drawn with the ports, like a link.
                 let fed = |port: &str| {
-                    logic
-                        .links
-                        .iter()
-                        .any(|l| l.to.block == id && l.to.port == port)
+                    block.consts.contains_key(port)
+                        || logic
+                            .links
+                            .iter()
+                            .any(|l| l.to.block == id && l.to.port == port)
                 };
+                // Passwords are kept by the program: show them from there (masked).
+                let filled = def
+                    .filter(|d| d.params.iter().any(|p| p.local.is_some()))
+                    .map(|d| {
+                        let mut b = block.clone();
+                        app.local.fill_block(d, &mut b);
+                        b
+                    });
+                let block = filled.as_ref().unwrap_or(block);
                 paint_box(&painter, r, z, block, def, &pal, border, fed);
             }
         }
@@ -839,7 +864,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         pos: Pos2,
     }
     let mut hits: Vec<Hit> = Vec::new();
-    let mut port_menus: Vec<(PortRef, egui::Response)> = Vec::new();
+    let mut port_menus: Vec<(PortRef, bool, SignalType, egui::Response)> = Vec::new();
     for block in &logic.blocks {
         let (Some(r), Some(def)) = (screen_rect(&block.id), defs[block.id.as_str()]) else {
             continue;
@@ -878,8 +903,9 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                     .enumerate()
                     .map(|(i, q)| (i, q, true)),
             )
-            .chain(tag_port.as_ref().map(|(q, output)| (0, q, *output)));
-        for (i, q, output) in ports {
+            .map(|(i, q, output)| (i, q, output, true))
+            .chain(tag_port.as_ref().map(|(q, output)| (0, q, *output, false)));
+        for (i, q, output, real) in ports {
             let pos = port_pos(r, kind, i, output);
             let area = Rect::from_center_size(pos, Vec2::splat(10.0));
             let resp = ui.interact(
@@ -887,14 +913,50 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 Id::unique(("port", &block.id, &q.name)),
                 Sense::click_and_drag(),
             );
+            let inverted = real
+                && if output {
+                    &block.inverted
+                } else {
+                    &block.inverted_inputs
+                }
+                .contains(&q.name);
+            if inverted {
+                // Small circle on the outer side of the port, as in FLProg.
+                let rr = 3.2 * z.sqrt();
+                let side = if output { rr } else { -rr };
+                painter.circle(
+                    pos + Vec2::new(side, 0.0),
+                    rr,
+                    pal.sheet,
+                    Stroke::new(1.2, signal_color(&pal, q.ty)),
+                );
+            }
+            if let Some(v) = (!output && real)
+                .then(|| block.consts.get(&q.name))
+                .flatten()
+            {
+                // Constant on an input: its value on a short stub, as in FLProg.
+                let start = pos - Vec2::new(14.0 * z, 0.0);
+                painter.line_segment([start, pos], Stroke::new(1.4, pal.text));
+                painter.text(
+                    start - Vec2::new(2.0 * z, 0.0),
+                    Align2::RIGHT_CENTER,
+                    value_text(v),
+                    font(9.5),
+                    pal.text,
+                );
+            }
             if output && kind == Kind::Box {
                 let port = PortRef::new(&block.id, &q.name);
                 if let Some((v, forced)) = dbg.and_then(|d| d.output(&port)) {
+                    let v = flip(v, inverted);
                     debugview::value_label(&painter, &pal, pos, v, forced, z, Place::Right);
+                } else if let Some(text) = dbg.and_then(|d| d.text_output(&port)) {
+                    debugview::text_label(&painter, &pal, pos, text, z, Place::Right);
                 }
-                if dbg.is_some() {
-                    port_menus.push((port, resp.clone()));
-                }
+            }
+            if real {
+                port_menus.push((PortRef::new(&block.id, &q.name), output, q.ty, resp.clone()));
             }
             if resp.hovered() || resp.dragged() {
                 painter.circle_stroke(
@@ -919,6 +981,9 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         }
     }
 
+    for (anchor, text) in text_labels {
+        debugview::text_label(&painter, &pal, anchor, &text, z, Place::Left);
+    }
     for (anchor, v, forced) in wire_labels {
         debugview::value_label(&painter, &pal, anchor, v, forced, z, Place::Left);
     }
@@ -1154,13 +1219,138 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     for (id, resp) in responses {
         block_context_menu(app, &id, &resp);
     }
-    // Online: right click on an output forces it or puts it on the chart.
-    for (port, resp) in port_menus {
-        let Some(d) = &mut app.debug else { break };
-        let Some(index) = d.table.output_index(&port) else {
-            continue;
-        };
-        resp.context_menu(|ui| debugview::value_menu(ui, d, index));
+    for (port, output, ty, resp) in port_menus {
+        port_context_menu(app, &port, output, ty, &resp);
+    }
+}
+
+fn inverted_output(logic: &Logic, port: &PortRef) -> bool {
+    logic
+        .block(&port.block)
+        .is_some_and(|b| b.inverted.contains(&port.port))
+}
+
+/// Live value as a consumer sees it: logical values flip when inverted.
+fn flip(v: flp_debug::Value, invert: bool) -> flp_debug::Value {
+    match v {
+        flp_debug::Value::Bool(b) if invert => flp_debug::Value::Bool(!b),
+        v => v,
+    }
+}
+
+/// Constant typed in the menu of an input of type `ty`; `None` if it does not fit.
+fn parse_const(ty: SignalType, text: &str) -> Option<ParamValue> {
+    let t = text.trim();
+    match ty {
+        SignalType::Bool => match t {
+            "1" | "true" => Some(ParamValue::Bool(true)),
+            "0" | "false" => Some(ParamValue::Bool(false)),
+            _ => None,
+        },
+        SignalType::Int => t.parse().ok().map(ParamValue::Int),
+        SignalType::Float => t.replace(',', ".").parse().ok().map(ParamValue::Float),
+        SignalType::String => Some(ParamValue::Text(text.to_owned())),
+    }
+}
+
+/// Right click on a port: a constant on an input, inversion of a logical port
+/// and, online, forcing an output or putting it on the chart.
+fn port_context_menu(
+    app: &mut EditorApp,
+    port: &PortRef,
+    output: bool,
+    ty: SignalType,
+    resp: &egui::Response,
+) {
+    let Some(block) = app
+        .doc
+        .as_ref()
+        .and_then(|d| d.project.logic.block(&port.block))
+    else {
+        return;
+    };
+    let inverted = if output {
+        &block.inverted
+    } else {
+        &block.inverted_inputs
+    }
+    .contains(&port.port);
+    let constant = block.consts.get(&port.port).filter(|_| !output).cloned();
+    if resp.secondary_clicked() {
+        app.canvas.const_text = constant.as_ref().map(value_text).unwrap_or_default();
+    }
+    let debug_index = app
+        .debug
+        .as_ref()
+        .filter(|_| output)
+        .and_then(|d| d.table.output_index(port));
+    let mut debug = app.debug.take();
+    let mut set_const = None;
+    let mut invert = None;
+    let mut bad_const = false;
+    let text = &mut app.canvas.const_text;
+    resp.context_menu(|ui| {
+        if let (Some(d), Some(index)) = (&mut debug, debug_index) {
+            debugview::value_menu(ui, d, index);
+            ui.separator();
+        }
+        if !output {
+            let title = if constant.is_some() {
+                "Изменить константу"
+            } else {
+                "Вставить константу"
+            };
+            ui.menu_button(title, |ui| {
+                if ty == SignalType::Bool {
+                    for b in [true, false] {
+                        if ui.button(b.to_string()).clicked() {
+                            set_const = Some(Some(ParamValue::Bool(b)));
+                            ui.close();
+                        }
+                    }
+                    return;
+                }
+                let edit = ui.text_edit_singleline(text);
+                let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if ui.button("Применить").clicked() || enter {
+                    match parse_const(ty, text) {
+                        Some(v) => {
+                            set_const = Some(Some(v));
+                            ui.close();
+                        }
+                        None => bad_const = true,
+                    }
+                }
+            });
+            if constant.is_some() && ui.button("Удалить константу").clicked() {
+                set_const = Some(None);
+            }
+        }
+        if ty == SignalType::Bool {
+            let mut on = inverted;
+            if ui.checkbox(&mut on, "Инвертировать").clicked() {
+                invert = Some(on);
+                ui.close();
+            }
+        }
+    });
+    app.debug = debug;
+    if bad_const {
+        let text = app.canvas.const_text.clone();
+        app.info(
+            LogLevel::Error,
+            format!("«{text}» не подходит ко входу {port}: нужно число"),
+        );
+    }
+    let lib = app.lib.clone();
+    let Some(doc) = &mut app.doc else { return };
+    let result = match (set_const, invert) {
+        (Some(value), _) => doc.edit(&lib, None, |p| p.set_input_const(&lib, port, value)),
+        (_, Some(on)) => doc.edit(&lib, None, |p| p.set_port_inverted(&lib, port, output, on)),
+        _ => Ok(()),
+    };
+    if let Err(e) = result {
+        app.info(LogLevel::Error, e.to_string());
     }
 }
 

@@ -1,0 +1,7 @@
+[project]
+name = "esp32c3_wifi"
+description = "ESP32-C3 с Wi-Fi, 3 входа и 3 выхода: кнопка на GPIO9 мигает светодиодом на GPIO8"
+
+[board]
+fqbn = "esp32:esp32:esp32c3"
+model = "esp32c3_supermini"   # ESP32-C3 Super Mini: GPIO0–10, 20, 21

@@ -148,6 +148,51 @@ fn failed_edits_change_nothing() {
 }
 
 #[test]
+fn constants_and_inversion() {
+    let mut c = ctx("const");
+    run(
+        &mut c,
+        "invert_port",
+        json!({"port": "button.out", "output": true}),
+    )
+    .unwrap();
+    let schema = run(&mut c, "get_schema", json!({})).unwrap();
+    assert!(schema["logic"].to_string().contains("\"invert\":[\"out\"]"));
+    let r = run(&mut c, "generate", json!({})).unwrap();
+    assert!(r["sketch"].as_str().unwrap().contains("!button_out"));
+    // Not an input of the button, and not a logical constant.
+    assert!(run(
+        &mut c,
+        "invert_port",
+        json!({"port": "button.out", "output": false})
+    )
+    .is_err());
+    assert!(run(
+        &mut c,
+        "set_input_const",
+        json!({"input": "led.in", "value": 1.5})
+    )
+    .is_err());
+
+    // A constant replaces the link; removing it leaves the input unconnected.
+    let r = run(
+        &mut c,
+        "set_input_const",
+        json!({"input": "led.in", "value": true}),
+    )
+    .unwrap();
+    assert_eq!(r["check"]["errors"], json!([]));
+    assert!(c.project.logic.links.is_empty());
+    let r = run(
+        &mut c,
+        "set_input_const",
+        json!({"input": "led.in", "value": null}),
+    )
+    .unwrap();
+    assert!(r["check"]["errors"].to_string().contains("led"));
+}
+
+#[test]
 fn variables() {
     let mut c = ctx("vars");
     run(

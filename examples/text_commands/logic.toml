@@ -1,0 +1,248 @@
+# Строки и UART: сообщение о давлении и разбор текстовых команд.
+# Команда приходит строкой из UART2, сообщение раз в секунду уходит в USB
+# (видно в мониторе порта), давление — числом float в UART2.
+
+[[var]]
+name = "message"
+type = "String"
+description = "Сообщение о состоянии"
+
+[[var]]
+name = "message_len"
+type = "int"
+description = "Длина сообщения, байт"
+
+[[var]]
+name = "command"
+type = "String"
+init = "SET 2.5"
+description = "Последняя команда: ON, OFF или SET <давление>"
+
+[[var]]
+name = "setpoint"
+type = "float"
+init = 3.0
+description = "Уставка давления, бар"
+
+# --- Плата 1: сообщение ---
+
+# Датчик давления 0…10 бар на АЦП.
+[[block]]
+id = "adc"
+type = "analog_in"
+pin = 34
+
+[[block]]
+id = "bar"
+type = "scale"
+out_max = 10.0
+
+[[block]]
+id = "p_text"
+type = "num_to_text"
+decimals = 1
+prefix = "P="
+suffix = " бар"
+
+[[block]]
+id = "name"
+type = "text_const"
+value = "насос"
+
+# «насос; P=2.4 бар; ON»
+[[block]]
+id = "message"
+type = "text_concat"
+count = 3
+separator = "; "
+
+[[block]]
+id = "message_w"
+type = "var_set"
+var = "message"
+
+[[block]]
+id = "length"
+type = "text_length"
+
+[[block]]
+id = "length_w"
+type = "var_set"
+var = "message_len"
+
+# Раз в секунду: сообщение в USB, давление в UART2.
+[[block]]
+id = "tick"
+type = "generator"
+time_on = "500ms"
+time_off = "500ms"
+
+[[block]]
+id = "report"
+type = "uart_send"
+uart = 0
+
+[[block]]
+id = "p_send"
+type = "uart_send"
+uart = 2
+mode = 3
+
+# --- Плата 2: команды ---
+
+# Строка до \n из UART2 становится новой командой.
+[[block]]
+id = "rx"
+type = "uart_read"
+uart = 2
+
+[[block]]
+id = "command_w"
+type = "var_set"
+var = "command"
+write_enable = true
+
+[[block]]
+id = "command_r"
+type = "var_get"
+var = "command"
+
+# ON / on — включить насос.
+[[block]]
+id = "is_on"
+type = "text_compare"
+b = "ON"
+ignore_case = true
+
+[[block]]
+id = "pump"
+type = "digital_out"
+pin = 26
+
+# SET <число> — новая уставка.
+[[block]]
+id = "head"
+type = "text_substring"
+start = 0
+len = 4
+
+[[block]]
+id = "is_set"
+type = "text_compare"
+b = "SET "
+mode = 2
+
+[[block]]
+id = "arg"
+type = "text_substring"
+start = 4
+
+[[block]]
+id = "number"
+type = "text_to_num"
+
+[[block]]
+id = "apply"
+type = "and"
+
+[[block]]
+id = "setpoint_w"
+type = "var_set"
+var = "setpoint"
+write_enable = true
+
+[[link]]
+from = "adc.out"
+to   = "bar.in"
+
+[[link]]
+from = "bar.out"
+to   = "p_text.in"
+
+[[link]]
+from = "name.out"
+to   = "message.a"
+
+[[link]]
+from = "p_text.out"
+to   = "message.b"
+
+[[link]]
+from = "command_r.out"
+to   = "message.c"
+
+[[link]]
+from = "message.out"
+to   = "message_w.in"
+
+[[link]]
+from = "message.out"
+to   = "length.in"
+
+[[link]]
+from = "length.out"
+to   = "length_w.in"
+
+[[link]]
+from = "command_r.out"
+to   = "is_on.a"
+
+[[link]]
+from = "is_on.out"
+to   = "pump.in"
+
+[[link]]
+from = "command_r.out"
+to   = "head.in"
+
+[[link]]
+from = "head.out"
+to   = "is_set.a"
+
+[[link]]
+from = "command_r.out"
+to   = "arg.in"
+
+[[link]]
+from = "arg.out"
+to   = "number.in"
+
+[[link]]
+from = "is_set.out"
+to   = "apply.a"
+
+[[link]]
+from = "number.ok"
+to   = "apply.b"
+
+[[link]]
+from = "number.out"
+to   = "setpoint_w.in"
+
+[[link]]
+from = "apply.out"
+to   = "setpoint_w.en"
+
+[[link]]
+from = "tick.out"
+to   = "report.en"
+
+[[link]]
+from = "message.out"
+to   = "report.text"
+
+[[link]]
+from = "tick.out"
+to   = "p_send.en"
+
+[[link]]
+from = "bar.out"
+to   = "p_send.value"
+
+[[link]]
+from = "rx.line"
+to   = "command_w.in"
+
+[[link]]
+from = "rx.ready"
+to   = "command_w.en"

@@ -1,0 +1,17 @@
+[block]
+type = "text_const"
+name = "Строковая константа"
+symbol = "ABC"
+group = "Строки"
+description = "Постоянная строка на выходе: текст сообщения, команда, имя."
+
+[[output]]
+name = "out"
+type = "string"
+
+[[param]]
+name = "value"
+label = "текст"
+type = "string"
+default = ""
+description = "Текст"

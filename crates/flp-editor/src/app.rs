@@ -11,8 +11,8 @@ use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText};
 use flp_build::{ArduinoCli, SerialPort};
 use flp_core::project::PROJECT_EXT;
 use flp_core::{
-    BlockPos, BoardConfig, Fragment, Library, PortRef, Project, ProjectConfig, ProjectInfo,
-    Severity,
+    BlockPos, BoardConfig, Fragment, Library, LocalValues, PortRef, Project, ProjectConfig,
+    ProjectInfo, Severity,
 };
 
 use crate::canvas::{self, CanvasState};
@@ -61,6 +61,12 @@ impl Selection {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BottomTab {
+    Log,
+    Console,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightTab {
     Library,
     Ai,
@@ -104,6 +110,9 @@ pub struct EditorApp {
     /// Panel sizes and which side panels are expanded; saved in the editor settings.
     pub panels: theme::PanelSizes,
     pub log: Vec<LogLine>,
+    pub bottom_tab: BottomTab,
+    /// Port monitor, or the console of the debugging session.
+    pub console: crate::console::PortConsole,
     /// Open pop-up window (block properties, variable, sheet).
     pub dialog: Option<Dialog>,
     pub theme: Theme,
@@ -112,6 +121,8 @@ pub struct EditorApp {
     pub theme_editor: Option<crate::themeedit::ThemeEditor>,
     /// Open "Block editor" window.
     pub block_editor: Option<crate::blockedit::BlockEditor>,
+    /// Open "Project code" window.
+    pub code_view: Option<crate::codeview::CodeView>,
     /// User block waiting for the delete confirmation.
     pub block_delete: Option<String>,
     /// Selected upload port; empty means automatic.
@@ -140,6 +151,9 @@ pub struct EditorApp {
     /// Autosave period in minutes; 0 means off.
     pub autosave_minutes: u32,
     last_autosave: Instant,
+    /// Values kept by the program instead of the project file: Wi-Fi passwords
+    /// for each SSID and the list of entered SSIDs.
+    pub local: LocalValues,
 }
 
 impl EditorApp {
@@ -157,11 +171,14 @@ impl EditorApp {
             right_tab: RightTab::Library,
             panels: theme::saved_panels(),
             log: Vec::new(),
+            bottom_tab: BottomTab::Log,
+            console: Default::default(),
             dialog: None,
             theme: theme::light(),
             themes: theme::load_all(),
             theme_editor: None,
             block_editor: None,
+            code_view: None,
             block_delete: None,
             port: String::new(),
             ports: Vec::new(),
@@ -179,7 +196,16 @@ impl EditorApp {
             queued: None,
             precompiled: None,
             seen_rev: None,
+            local: LocalValues::default(),
         };
+        match LocalValues::open_default() {
+            Ok(local) => app.local = local,
+            // Kept in memory only, so the broken file is not overwritten.
+            Err(e) => app.info(
+                LogLevel::Error,
+                format!("Сохранённые пароли не прочитаны: {e}"),
+            ),
+        }
         if let Some(t) =
             theme::saved_choice().and_then(|n| app.themes.iter().find(|t| t.name == n).cloned())
         {
@@ -233,6 +259,27 @@ impl EditorApp {
             Ok(ports) => self.ports = ports,
             Err(e) => self.info(LogLevel::Warning, format!("Порты не найдены: {e}")),
         }
+    }
+
+    /// Writes [`EditorApp::local`] to its file, reporting a failure in the log.
+    pub fn save_local(&mut self) {
+        if let Err(e) = self.local.save() {
+            self.info(LogLevel::Error, format!("Пароли не сохранены: {e}"));
+        }
+    }
+
+    /// Moves Wi-Fi passwords (and other `local` values) out of the open project
+    /// into the program; the next save writes the project file without them.
+    fn take_local(&mut self) {
+        let Some(doc) = &mut self.doc else { return };
+        if doc.project.take_local(&self.lib, &mut self.local) {
+            doc.dirty = true;
+            self.info(
+                LogLevel::Info,
+                "Пароль Wi-Fi перенесён из файла проекта в настройки программы",
+            );
+        }
+        self.save_local();
     }
 
     pub fn info(&mut self, level: LogLevel, text: impl Into<String>) {
@@ -318,6 +365,7 @@ impl EditorApp {
                 self.sheet = 1;
                 self.extra_sheets.clear();
                 self.canvas = CanvasState::default();
+                self.take_local();
             }
             Err(e) => self.info(LogLevel::Error, e.to_string()),
         }
@@ -393,10 +441,12 @@ impl EditorApp {
                 },
                 board: BoardConfig {
                     fqbn: "esp32:esp32:esp32".into(),
+                    model: None,
                     port: None,
                     options: Default::default(),
                 },
                 diagnostics: Default::default(),
+                uart: Vec::new(),
             },
             logic: Default::default(),
             layout: Default::default(),
@@ -556,9 +606,10 @@ impl EditorApp {
             }
             return;
         }
-        // The upload needs the serial port that debugging holds.
+        // The upload needs the serial port that debugging or the monitor holds.
         if matches!(kind, JobKind::Upload { .. }) {
             self.stop_debug();
+            self.console.release();
         }
         let Some(doc) = &self.doc else { return };
         if doc.report.has_errors() {
@@ -571,7 +622,7 @@ impl EditorApp {
         let job = Job::start(
             kind,
             self.debug_firmware,
-            doc.project.clone(),
+            doc.project.with_local(&self.lib, &self.local),
             self.lib.clone(),
             move || ctx.request_repaint(),
         );
@@ -682,12 +733,9 @@ impl EditorApp {
     /// Connects to a board that already runs debugging firmware.
     pub fn connect_debug(&mut self, port: Option<String>, ctx: &egui::Context) {
         self.stop_debug();
+        self.console.release();
         let Some(doc) = &self.doc else { return };
-        let port = port
-            .or_else(|| self.port_choice())
-            .or_else(|| doc.project.config.board.port.clone())
-            .or_else(|| flp_build::auto_port(&self.ports).ok());
-        let Some(port) = port else {
+        let Some(port) = port.or_else(|| self.board_port()) else {
             self.info(
                 LogLevel::Error,
                 "Выберите порт платы на панели инструментов",
@@ -700,6 +748,37 @@ impl EditorApp {
                 self.debug = Some(state);
             }
             Err(e) => self.info(LogLevel::Error, e),
+        }
+    }
+
+    /// Port of the board: chosen in the toolbar, set in the project, or detected.
+    fn board_port(&self) -> Option<String> {
+        self.port_choice()
+            .or_else(|| self.doc.as_ref()?.project.config.board.port.clone())
+            .or_else(|| flp_build::auto_port(&self.ports).ok())
+    }
+
+    /// Keeps the port monitor in step with debugging and uploads.
+    fn poll_console(&mut self, ctx: &egui::Context) {
+        if self.console.hold && !self.ai.busy() {
+            self.console.hold = false;
+        }
+        let busy = self.console.hold || self.job.as_ref().is_some_and(|j| j.uses_port);
+        let port = self.board_port();
+        self.console.debug_reader = self.doc.as_ref().is_some_and(|doc| {
+            flp_core::uart::block_uarts(&doc.project.logic, &self.lib)
+                .iter()
+                .any(|u| u.number == 0 && u.access == flp_core::UartAccess::Read)
+        });
+        let live = self.debug.as_ref().map(|d| &d.live);
+        self.console.sync(live, port, busy, ctx);
+        if let Some(d) = &self.debug {
+            for bytes in self.console.take_debug_input() {
+                d.send(flp_debug::Command::TextIn(bytes));
+            }
+        }
+        if self.bottom_tab == BottomTab::Console {
+            self.console.unread = 0;
         }
     }
 
@@ -733,8 +812,15 @@ impl EditorApp {
                             Ok::<_, String>(())
                         });
                     }
+                    // A password set by AI goes to the program, not into the file.
+                    self.take_local();
                 }
-                crate::ai::Request::StopDebug => self.stop_debug(),
+                crate::ai::Request::StopDebug => {
+                    // The AI is about to upload: free the port until it finishes.
+                    self.stop_debug();
+                    self.console.release();
+                    self.console.hold = true;
+                }
                 crate::ai::Request::ReloadLibrary => self.reload_library(),
             }
         }
@@ -756,17 +842,6 @@ impl EditorApp {
                 .collect()
         });
         *self.ai_live.lock().expect("live values") = published;
-        let fresh: Vec<String> = d
-            .live
-            .console
-            .iter()
-            .skip(d.console_seen)
-            .cloned()
-            .collect();
-        d.console_seen = d.live.console.len();
-        for line in fresh {
-            self.info(LogLevel::Info, format!("> {line}"));
-        }
     }
 
     /// Sheets to show: with blocks, named, added by the user, and the active one.
@@ -981,6 +1056,12 @@ impl EditorApp {
                     self.run_check();
                 }
                 if ui
+                    .add_enabled(has_doc, egui::Button::new("Код C++"))
+                    .clicked()
+                {
+                    self.code_view = Some(crate::codeview::CodeView::new());
+                }
+                if ui
                     .add_enabled(
                         has_doc && idle,
                         egui::Button::new("Собрать").shortcut_text("F5"),
@@ -988,6 +1069,16 @@ impl EditorApp {
                     .clicked()
                 {
                     self.start_job(JobKind::Build, ui.ctx());
+                }
+                if ui
+                    .add_enabled(has_doc && idle, egui::Button::new("Пересобрать полностью"))
+                    .on_hover_text(
+                        "Собрать заново, даже если схема не менялась: \
+                         после обновления библиотек или ядра ESP32",
+                    )
+                    .clicked()
+                {
+                    self.start_job(JobKind::Rebuild, ui.ctx());
                 }
                 if ui
                     .add_enabled(has_doc && idle, egui::Button::new("Залить на плату"))
@@ -999,7 +1090,7 @@ impl EditorApp {
             });
             ui.menu_button("Библиотека", |ui| {
                 if ui.button("Новый блок...").clicked() {
-                    self.block_editor = Some(crate::blockedit::BlockEditor::new_block(self));
+                    self.block_editor = Some(crate::blockedit::BlockEditor::new_block(self, ""));
                 }
                 ui.weak("Изменить блок — правой кнопкой в библиотеке");
                 ui.separator();
@@ -1012,7 +1103,16 @@ impl EditorApp {
 
     pub fn open_board_settings(&mut self, ctx: &egui::Context) {
         let Some(doc) = &self.doc else { return };
-        let dialog = crate::boardcfg::BoardDialog::new(&doc.project.config.board, ctx);
+        let users = flp_core::uart::block_uarts(&doc.project.logic, &self.lib)
+            .into_iter()
+            .map(|u| (u.number, u.block))
+            .collect();
+        let dialog = crate::boardcfg::BoardDialog::new(
+            &doc.project.config.board,
+            &doc.project.config.uart,
+            users,
+            ctx,
+        );
         self.dialog = Some(Dialog::Board(dialog));
         self.scan_ports(ctx);
     }
@@ -1030,7 +1130,9 @@ impl EditorApp {
                 let p = &doc.project;
                 ui.label(format!("Проект: {}", p.config.project.name));
                 ui.separator();
-                ui.label(format!("Плата: {}", p.config.board.fqbn));
+                let board = &p.config.board;
+                ui.label(format!("Плата: {}", crate::boardcfg::board_name(board)))
+                    .on_hover_text(&board.fqbn);
                 ui.separator();
                 ui.label(format!("Блоков: {}", p.logic.blocks.len()));
                 ui.separator();
@@ -1148,6 +1250,7 @@ impl eframe::App for EditorApp {
         self.precompile(&ctx);
         self.poll_debug();
         self.poll_ai();
+        self.poll_console(&ctx);
         self.poll_ports();
         self.watch_library();
         self.autosave(&ctx);
@@ -1170,7 +1273,7 @@ impl eframe::App for EditorApp {
         sizes.log_height = egui::Panel::bottom("log")
             .resizable(true)
             .default_size(sizes.log_height)
-            .show(ui, |ui| panels::log(self, ui))
+            .show(ui, |ui| panels::bottom(self, ui))
             .response
             .rect
             .height();
@@ -1200,6 +1303,7 @@ impl eframe::App for EditorApp {
         dialogs::show(self, &ctx);
         crate::themeedit::show(self, &ctx);
         crate::blockedit::show(self, &ctx);
+        crate::codeview::show(self, &ctx);
         crate::blockedit::delete_dialog(self, &ctx);
         let pal = self.theme.palette;
         if let Some(d) = &mut self.debug {
@@ -1233,7 +1337,22 @@ fn find_library(project: Option<&Path>) -> Option<PathBuf> {
 
 /// Change stamp of the built-in and user block folders.
 fn library_stamp(dir: &Path) -> Option<SystemTime> {
-    newest_mtime(dir).max(newest_mtime(&flp_core::user_library_dir(dir)))
+    newest_mtime(dir).max(newest_mtime_deep(&flp_core::user_library_dir(dir)))
+}
+
+/// Latest modification time in a whole tree: user blocks lie in sections and folders.
+fn newest_mtime_deep(dir: &Path) -> Option<SystemTime> {
+    let mut newest = fs::metadata(dir).and_then(|m| m.modified()).ok();
+    for entry in fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        let t = if path.is_dir() {
+            newest_mtime_deep(&path)
+        } else {
+            fs::metadata(&path).and_then(|m| m.modified()).ok()
+        };
+        newest = newest.max(t);
+    }
+    newest
 }
 
 /// Latest modification time of any file in the library (two levels deep).

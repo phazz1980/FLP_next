@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use flp_build::{ArduinoCli, BuildMode, CompileOptions};
 use flp_codegen::{ArduinoCpp, Backend, Program};
-use flp_core::{Library, Project};
+use flp_core::{Library, LocalValues, Project};
 
 use crate::Context;
 
@@ -58,6 +58,11 @@ impl Context for FolderContext {
     ) -> Result<(), String> {
         let mut changed = self.project.clone();
         edit(&mut changed)?;
+        // A password set by AI goes to the program, not into the project file.
+        let mut store = LocalValues::open_default().map_err(|e| e.to_string())?;
+        if changed.take_local(&self.lib, &mut store) {
+            store.save().map_err(|e| e.to_string())?;
+        }
         if let Some(warning) =
             flp_pdf::save_project(&changed, &self.lib).map_err(|e| e.to_string())?
         {
@@ -133,6 +138,8 @@ pub fn build_project(
     port: Option<String>,
     debug: bool,
 ) -> Result<String, String> {
+    let store = LocalValues::open_default().map_err(|e| e.to_string())?;
+    let project = &project.with_local(lib, &store);
     let program = Program::build(project, lib).map_err(|e| e.to_string())?;
     let code = ArduinoCpp { debug }
         .generate(&program)

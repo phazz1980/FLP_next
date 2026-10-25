@@ -7,7 +7,7 @@
 
 use crate::ident::is_valid_ident;
 use crate::vars::{Var, VAR_GET, VAR_PARAM, VAR_SET, WRITE_ENABLE};
-use crate::{Block, BlockPos, Library, Link, ParamValue, PortRef, Project};
+use crate::{Block, BlockPos, Library, Link, ParamValue, PortRef, Project, SignalType};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EditError {
@@ -25,6 +25,8 @@ pub enum EditError {
     NoInput { block: String, port: String },
     #[error("выход {from} нельзя подать на вход {to}: не совпадают типы")]
     TypeMismatch { from: PortRef, to: PortRef },
+    #[error("порт {0} не логический: инвертировать можно только bool")]
+    NotBool(PortRef),
     #[error("у блока «{block}» нет параметра «{param}»")]
     NoParam { block: String, param: String },
     #[error("значение не подходит к параметру «{0}»")]
@@ -63,7 +65,7 @@ impl Project {
         self.logic.blocks.push(Block {
             id: id.clone(),
             kind: kind.to_owned(),
-            params: Default::default(),
+            ..Default::default()
         });
         self.layout.blocks.insert(id.clone(), pos);
         Ok(id)
@@ -93,6 +95,7 @@ impl Project {
             id: id.clone(),
             kind: kind.to_owned(),
             params: [(VAR_PARAM.to_owned(), ParamValue::Text(var.to_owned()))].into(),
+            ..Default::default()
         });
         self.layout.blocks.insert(id.clone(), pos);
         Ok(id)
@@ -263,8 +266,87 @@ impl Project {
             return Err(EditError::TypeMismatch { from, to });
         }
         self.logic.links.retain(|l| l.to != to);
+        if let Some(b) = self.logic.blocks.iter_mut().find(|b| b.id == to.block) {
+            b.consts.remove(&to.port);
+        }
         self.logic.links.push(Link { from, to });
         Ok(())
+    }
+
+    /// Puts a constant on an input (dropping its link) or removes it (`None`).
+    pub fn set_input_const(
+        &mut self,
+        lib: &Library,
+        input: &PortRef,
+        value: Option<ParamValue>,
+    ) -> Result<(), EditError> {
+        let ty = self
+            .block_def(lib, &input.block)?
+            .input(&input.port)
+            .ok_or_else(|| EditError::NoInput {
+                block: input.block.clone(),
+                port: input.port.clone(),
+            })?
+            .ty;
+        let block = self.block_mut(&input.block)?;
+        match value {
+            Some(v) if !ty.accepts(&v) => return Err(EditError::BadValue(input.port.clone())),
+            Some(v) => {
+                block.consts.insert(input.port.clone(), v);
+                self.logic.links.retain(|l| &l.to != input);
+            }
+            None => {
+                block.consts.remove(&input.port);
+            }
+        }
+        Ok(())
+    }
+
+    /// Inverts a logical port (an output for all its links, or an input), or
+    /// stops inverting it.
+    pub fn set_port_inverted(
+        &mut self,
+        lib: &Library,
+        port: &PortRef,
+        output: bool,
+        on: bool,
+    ) -> Result<(), EditError> {
+        let def = self.block_def(lib, &port.block)?;
+        let ty = if output {
+            def.output(&port.port).ok_or_else(|| EditError::NoOutput {
+                block: port.block.clone(),
+                port: port.port.clone(),
+            })?
+        } else {
+            def.input(&port.port).ok_or_else(|| EditError::NoInput {
+                block: port.block.clone(),
+                port: port.port.clone(),
+            })?
+        }
+        .ty;
+        if ty != SignalType::Bool {
+            return Err(EditError::NotBool(port.clone()));
+        }
+        let block = self.block_mut(&port.block)?;
+        let set = if output {
+            &mut block.inverted
+        } else {
+            &mut block.inverted_inputs
+        };
+        if on {
+            set.insert(port.port.clone());
+        } else {
+            set.remove(&port.port);
+        }
+        Ok(())
+    }
+
+    fn block_mut(&mut self, id: &str) -> Result<&mut Block, EditError> {
+        self.logic
+            .blocks
+            .iter_mut()
+            .find(|b| b.id == id)
+            .ok_or_else(|| EditError::NoBlock(id.to_owned()))
     }
 
     /// Switches the write enable input `en` of one variable block. Turning it on
@@ -621,6 +703,49 @@ mod tests {
             .is_err());
         assert!(p.disconnect(&input));
         assert!(!p.disconnect(&input));
+    }
+
+    #[test]
+    fn constant_and_link_replace_each_other() {
+        let lib = library();
+        let mut p = project();
+        let a = p.add_block(&lib, "src", POS).unwrap();
+        let s = p.add_block(&lib, "sink", POS).unwrap();
+        let input = PortRef::new(&s, "in");
+        p.connect(&lib, PortRef::new(&a, "out"), input.clone())
+            .unwrap();
+        p.set_input_const(&lib, &input, Some(ParamValue::Bool(true)))
+            .unwrap();
+        assert!(p.logic.links.is_empty());
+        assert!(matches!(
+            p.set_input_const(&lib, &input, Some(ParamValue::Float(1.0))),
+            Err(EditError::BadValue(_))
+        ));
+        p.connect(&lib, PortRef::new(&a, "out"), input.clone())
+            .unwrap();
+        assert!(p.logic.block(&s).unwrap().consts.is_empty());
+    }
+
+    #[test]
+    fn only_logical_ports_invert() {
+        let lib = library();
+        let mut p = project();
+        let a = p.add_block(&lib, "src", POS).unwrap();
+        let n = p.add_block(&lib, "num", POS).unwrap();
+        let s = p.add_block(&lib, "sink", POS).unwrap();
+        p.set_port_inverted(&lib, &PortRef::new(&a, "out"), true, true)
+            .unwrap();
+        p.set_port_inverted(&lib, &PortRef::new(&s, "in"), false, true)
+            .unwrap();
+        assert!(p.logic.block(&a).unwrap().inverted.contains("out"));
+        assert!(p.logic.block(&s).unwrap().inverted_inputs.contains("in"));
+        assert!(matches!(
+            p.set_port_inverted(&lib, &PortRef::new(&n, "out"), true, true),
+            Err(EditError::NotBool(_))
+        ));
+        // Saved and loaded back unchanged.
+        let text = toml::to_string(&p.logic).unwrap();
+        assert_eq!(toml::from_str::<Logic>(&text).unwrap(), p.logic);
     }
 
     #[test]

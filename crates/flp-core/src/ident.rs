@@ -12,6 +12,26 @@ pub fn is_valid_ident(s: &str) -> bool {
     chars.all(|c| c.is_alphanumeric() || c == '_')
 }
 
+/// Identifier made from a human name, for the type of a new block: lower case,
+/// runs of spaces and punctuation become one `_` (`Мой насос` → `мой_насос`).
+/// A name that gives nothing usable becomes `block`.
+pub fn ident_from_name(name: &str) -> String {
+    let mut out = String::new();
+    for c in name.trim().chars().flat_map(char::to_lowercase) {
+        if c.is_alphanumeric() {
+            out.push(c);
+        } else if !out.is_empty() && !out.ends_with('_') {
+            out.push('_');
+        }
+    }
+    let out = out.trim_end_matches('_');
+    match out.chars().next() {
+        None => "block".to_owned(),
+        Some(c) if c.is_alphabetic() => out.to_owned(),
+        Some(_) => format!("block_{out}"),
+    }
+}
+
 /// Whether `s` is already a C identifier: ASCII letters, digits and `_`, not
 /// starting with a digit.
 pub fn is_c_ident(s: &str) -> bool {
@@ -87,6 +107,17 @@ mod tests {
         assert!(!is_valid_ident("a-b"));
         assert!(!is_valid_ident("два слова"));
         assert!(!is_valid_ident("a.b"));
+    }
+
+    #[test]
+    fn idents_from_names() {
+        assert_eq!(ident_from_name("Мой насос"), "мой_насос");
+        assert_eq!(ident_from_name("  PID (v2)! "), "pid_v2");
+        assert_eq!(ident_from_name("3 реле"), "block_3_реле");
+        assert_eq!(ident_from_name("—"), "block");
+        for s in ["Мой насос", "  PID (v2)! ", "3 реле", "—"] {
+            assert!(is_valid_ident(&ident_from_name(s)), "{s}");
+        }
     }
 
     #[test]

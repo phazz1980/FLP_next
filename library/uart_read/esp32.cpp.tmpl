@@ -1,0 +1,52 @@
+{% if value.mode == 0 %}
+// @global
+String {{ id }}_buf;
+unsigned long {{ id }}_last = 0;
+// @setup
+{{ id }}_buf.reserve({{ param.max_len }});
+// @loop
+{{ output.ready }} = false;
+// One line per cycle: the next one waits in the UART buffer.
+while ({{ uart.input }}.available() > 0) {
+  char c = (char){{ uart.input }}.read();
+  {{ id }}_last = millis();
+{% if value.end == 0 %}
+  if (c == '\r') {
+    continue;
+  }
+  bool end = c == '\n';
+{% elif value.end == 1 %}
+  if (c == '\n') {
+    continue;
+  }
+  bool end = c == '\r';
+{% else %}
+  bool end = c == {{ param.end_char }}[0];
+{% endif %}
+  if (!end) {
+    {{ id }}_buf += c;
+    end = {{ id }}_buf.length() >= {{ param.max_len }};
+  }
+  if (end) {
+    {{ output.line }} = {{ id }}_buf;
+    {{ id }}_buf = "";
+    {{ output.ready }} = true;
+    break;
+  }
+}
+{% if value.timeout > 0 %}
+// No separator for a while: what came is a line too.
+if (!{{ output.ready }} && {{ id }}_buf.length() > 0 && millis() - {{ id }}_last >= {{ param.timeout }}UL) {
+  {{ output.line }} = {{ id }}_buf;
+  {{ id }}_buf = "";
+  {{ output.ready }} = true;
+}
+{% endif %}
+{% else %}
+// @loop
+{{ output.new }} = {{ uart.input }}.available() > 0;
+if ({{ output.new }}) {
+  {{ output.byte }} = {{ uart.input }}.read();
+}
+{% endif %}
+{{ output.available }} = {{ uart.input }}.available();

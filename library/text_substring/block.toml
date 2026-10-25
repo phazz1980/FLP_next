@@ -1,0 +1,30 @@
+[block]
+type = "text_substring"
+name = "Подстрока"
+symbol = "SUBSTR"
+group = "Строки"
+description = "Часть строки: с позиции start, длиной len байт (-1 — до конца)."
+
+[[input]]
+name = "in"
+type = "string"
+
+[[output]]
+name = "out"
+type = "string"
+
+[[param]]
+name = "start"
+label = "с позиции"
+type = "int"
+default = 0
+min = 0
+description = "Первый байт, счёт с 0"
+
+[[param]]
+name = "len"
+label = "длина"
+type = "int"
+default = -1
+min = -1
+description = "Сколько байт взять; -1 — до конца строки"

@@ -1,8 +1,16 @@
+{% set client = value.use_mode or value.wifi_mode != 1 %}
+{% set ap = value.use_mode or value.wifi_mode != 0 %}
 // @global
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgOnBoardWifiInterface flpWifi;
+// Applied radio state: 0 off, 1 client, 2 access point, 3 both; 255 not yet.
+uint8_t {{ id }}_state = 255;
+{% if value.out_address %}
+// Address shown on the address output; the text is rebuilt only when it changes.
+uint32_t {{ id }}_ip_raw = 0;
+{% endif %}
 // @setup
-flpWifi.clientOn();
+{% if client %}
 flpWifi.setClientSsid({{ param.ssid }});
 flpWifi.setClientPassword({{ param.password }});
 {% if value.dhcp %}
@@ -20,6 +28,65 @@ flpWifi.setDhcp();
   flpWifi.resetDhcp();
 }
 {% endif %}
+{% endif %}
+{% if ap %}
+flpWifi.setApSsid({{ param.ap_ssid }});
+flpWifi.setApPassword({{ param.ap_password }});
+{% endif %}
 // @loop
+{
+  // Client and access point follow the inputs; switched only when they change.
+{% if value.use_mode %}
+  int32_t mode = {{ input.mode }};
+  if (mode < 0 || mode > 2) {
+    mode = 0;
+  }
+{% else %}
+  int32_t mode = {{ param.wifi_mode }};
+{% endif %}
+{% if value.use_en %}
+  uint8_t state = {{ input.en }} ? (uint8_t)(mode + 1) : 0;
+{% else %}
+  uint8_t state = (uint8_t)(mode + 1);
+{% endif %}
+  if (state != {{ id }}_state) {
+    {{ id }}_state = state;
+    if (state & 1) {
+      flpWifi.clientOn();
+    } else {
+      flpWifi.clientOff();
+    }
+    if (state & 2) {
+      flpWifi.apOn();
+    } else {
+      flpWifi.apOff();
+    }
+  }
+}
 flpWifi.pool();
+{% if value.out_ready %}
 {{ output.ready }} = flpWifi.clientIsReady();
+{% endif %}
+{% if value.out_ap_ready %}
+{{ output.ap_ready }} = flpWifi.apIsReady();
+{% endif %}
+{% if value.out_status %}
+{{ output.status }} = flpWifi.getStatus();
+{% endif %}
+{% if value.out_error %}
+{{ output.error }} = flpWifi.getError();
+{% endif %}
+{% if value.out_address %}
+{
+  uint32_t ip = 0;
+  if (flpWifi.clientIsReady()) {
+    ip = (uint32_t)flpWifi.localIP();
+  } else if (flpWifi.apIsReady()) {
+    ip = (uint32_t)flpWifi.accessPointIP();
+  }
+  if (ip != {{ id }}_ip_raw) {
+    {{ id }}_ip_raw = ip;
+    {{ output.address }} = ip ? IPAddress(ip).toString() : String();
+  }
+}
+{% endif %}

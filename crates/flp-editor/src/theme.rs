@@ -58,6 +58,7 @@ palette! {
         bool_signal: "Boolean",
         int_signal: "Integer",
         float_signal: "Float",
+        string_signal: "String",
     }
 }
 
@@ -103,6 +104,7 @@ pub fn light() -> Theme {
             bool_signal: rgb(0, 0, 0),
             int_signal: rgb(0, 0, 255),
             float_signal: rgb(127, 63, 63),
+            string_signal: rgb(128, 0, 160),
         },
     }
 }
@@ -135,6 +137,7 @@ pub fn dark() -> Theme {
             bool_signal: rgb(225, 225, 225),
             int_signal: rgb(96, 136, 255),
             float_signal: rgb(196, 120, 120),
+            string_signal: rgb(200, 130, 230),
         },
     }
 }

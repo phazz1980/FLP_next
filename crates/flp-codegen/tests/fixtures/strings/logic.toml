@@ -1,0 +1,31 @@
+[[var]]
+name = "status"
+type = "String"
+init = "старт"
+retain = true
+
+[[var]]
+name = "count"
+type = "int"
+
+[[block]]
+id = "read"
+type = "var_get"
+var = "status"
+
+[[block]]
+id = "join"
+type = "text_join"
+
+[[block]]
+id = "write"
+type = "var_set"
+var = "status"
+
+[[link]]
+from = "read.out"
+to = "join.a"
+
+[[link]]
+from = "join.out"
+to = "write.in"

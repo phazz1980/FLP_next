@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use flp_core::ident::c_ident;
 use flp_core::library::ESP32_CPP_TEMPLATE;
+use flp_core::uart::{UartAccess, UartConfig};
 use flp_core::value::parse_duration_ms;
 use flp_core::vars::VAR_SET;
 use flp_core::{ParamKind, ParamValue, PortRef, SignalType};
@@ -34,7 +35,7 @@ impl Backend for ArduinoCpp {
         let env = environment();
         let mut rendered = Vec::with_capacity(program.blocks.len());
         for inst in &program.blocks {
-            rendered.push((inst, render_block(&env, program, inst)?));
+            rendered.push((inst, render_block(&env, program, inst, self.debug)?));
         }
         Ok(assemble(program, &rendered, self.debug))
     }
@@ -68,6 +69,7 @@ fn render_block(
     env: &Environment,
     program: &Program,
     inst: &Instance,
+    debug: bool,
 ) -> Result<Sections, GenError> {
     let kind = &inst.block.kind;
     // Built-in blocks have no folder; errors then point at the type name.
@@ -92,15 +94,22 @@ fn render_block(
         .iter()
         .map(|(&port, i)| {
             let expr = match &i.source {
-                Source::Signal(s) => {
-                    let signal = &program.signals[*s];
-                    if signal.ty == i.ty {
+                Source::Signal { index, invert } => {
+                    let signal = &program.signals[*index];
+                    if *invert {
+                        format!("!{}", signal.name)
+                    } else if signal.ty == i.ty {
                         signal.name.clone()
                     } else {
                         format!("({}){}", cpp_type(i.ty), signal.name)
                     }
                 }
                 Source::Default(value) => constant_literal(i.ty, value),
+            };
+            let expr = if inst.block.inverted_inputs.contains(port) {
+                format!("!({expr})")
+            } else {
+                expr
             };
             (port, expr)
         })
@@ -122,7 +131,8 @@ fn render_block(
     // Storage of the variable a `var_get` / `var_set` block accesses.
     let var = inst.block.var_name().map(flp_core::vars::storage_name);
     let id = c_ident(&inst.block.id);
-    let ctx = context! { id, input, output, param, value, var };
+    let uart = uart_of(program, inst).map(|(u, _)| uart_value(&u, debug));
+    let ctx = context! { id, input, output, param, value, var, uart };
     let text = env
         .render_named_str(&name, &source, ctx)
         .map_err(|source| GenError::Render {
@@ -130,6 +140,95 @@ fn render_block(
             source,
         })?;
     split_sections(&text).map_err(|message| GenError::BadTemplate { path, message })
+}
+
+/// UART of a block with `[block.uart]`, with its settings (checked to exist).
+fn uart_of(program: &Program, inst: &Instance) -> Option<(UartConfig, UartAccess)> {
+    let uart = inst.lib.def.info.uart.as_ref()?;
+    let Some(ParamValue::Int(n)) = inst.params.get(uart.param.as_str()) else {
+        return None;
+    };
+    let config = flp_core::uart::config_of(&program.project.config.uart, u8::try_from(*n).ok()?)?;
+    Some((config, uart.access))
+}
+
+/// `{{ uart.* }}` in templates: ready C++ values of the block's UART.
+/// `input` is what readers take bytes from: the port itself, or in debug
+/// firmware for UART0 the console input of the debugging module.
+fn uart_value(u: &UartConfig, debug: bool) -> Value {
+    let input = if u.number == 0 && debug {
+        "flp_dbg_input".to_owned()
+    } else {
+        u.serial()
+    };
+    context! {
+        number => u.number,
+        serial => u.serial(),
+        input,
+        speed => u.speed,
+        config => u.arduino_config(),
+        parity => u.parity_code(),
+        rx => u.rx,
+        tx => u.tx,
+        de => u.de,
+        rx_buffer => u.rx_buffer,
+    }
+}
+
+/// Setup of the UARTs that blocks share (all but `exclusive`, whose library
+/// sets the port up itself). UART0 is started here only if nothing else does.
+fn uart_setup(program: &Program, serial_started: bool) -> Vec<String> {
+    let mut used: Vec<UartConfig> = Vec::new();
+    for inst in &program.blocks {
+        if let Some((u, access)) = uart_of(program, inst) {
+            if access != UartAccess::Exclusive && used.iter().all(|o| o.number != u.number) {
+                used.push(u);
+            }
+        }
+    }
+    used.sort_by_key(|u| u.number);
+    let mut lines = Vec::new();
+    for u in used {
+        if u.number == 0 {
+            if !serial_started {
+                lines.push(format!("// UART0 (USB): {} бод", u.speed));
+                lines.push(format!("Serial.begin({});", u.speed));
+            }
+            continue;
+        }
+        let serial = u.serial();
+        let pin = |p: i64| {
+            if p >= 0 {
+                format!("GPIO{p}")
+            } else {
+                "по умолчанию".into()
+            }
+        };
+        lines.push(format!(
+            "// UART{}: {} бод, {}, RX {}, TX {}",
+            u.number,
+            u.speed,
+            u.format.trim().to_ascii_uppercase(),
+            pin(u.rx),
+            pin(u.tx)
+        ));
+        lines.push(format!("{serial}.setRxBufferSize({});", u.rx_buffer));
+        lines.push(format!(
+            "{serial}.begin({}, {}, {}, {});",
+            u.speed,
+            u.arduino_config(),
+            u.rx,
+            u.tx
+        ));
+        if u.de >= 0 {
+            lines.push(format!(
+                "{serial}.setPins(-1, -1, -1, {});  // DE/RE RS-485",
+                u.de
+            ));
+            lines.push(format!("{serial}.setMode(UART_MODE_RS485_HALF_DUPLEX);"));
+        }
+    }
+    lines
 }
 
 /// Parameter as seen by templates: bools stay bools for `{% if %}`,
@@ -169,17 +268,19 @@ fn constant_literal(ty: SignalType, value: &ParamValue) -> String {
         (SignalType::Float, ParamValue::Int(v)) => float_literal(*v as f64),
         (_, ParamValue::Int(v)) => v.to_string(),
         (_, ParamValue::Float(v)) => float_literal(*v),
-        (_, ParamValue::Text(_)) => {
-            unreachable!("input defaults are checked against the port type")
-        }
+        (_, ParamValue::Text(s)) => format!("String({})", string_literal(s)),
     }
 }
+
+/// Bytes reserved for every string signal and variable at startup.
+const STRING_RESERVE: usize = 32;
 
 fn cpp_type(ty: SignalType) -> &'static str {
     match ty {
         SignalType::Bool => "bool",
         SignalType::Int => "int32_t",
         SignalType::Float => "float",
+        SignalType::String => "String",
     }
 }
 
@@ -188,6 +289,7 @@ fn zero(ty: SignalType) -> &'static str {
         SignalType::Bool => "false",
         SignalType::Int => "0",
         SignalType::Float => "0.0f",
+        SignalType::String => "String()",
     }
 }
 
@@ -353,7 +455,11 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
     }
     let table = debug.then(|| crate::debug::debug_table(program));
     if let Some(table) = &table {
-        out.push_str(&crate::debug::runtime(table));
+        // Console input is compiled in only for a block reading UART0.
+        let text_in = program.blocks.iter().any(
+            |inst| matches!(uart_of(program, inst), Some((u, UartAccess::Read)) if u.number == 0),
+        );
+        out.push_str(&crate::debug::runtime(table, text_in));
     }
     // Forcing: after each block, its forced outputs (and a written variable) win.
     let forces = |inst: &Instance| -> Vec<String> {
@@ -402,6 +508,30 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
         out.push_str("  flp_dbg_setup();\n\n");
     } else if stats {
         let _ = writeln!(out, "  Serial.begin({});\n", flp_debug::transport::BAUD);
+    }
+    let uarts = uart_setup(program, debug || stats);
+    if !uarts.is_empty() {
+        push_indented(&mut out, uarts.into_iter());
+        out.push('\n');
+    }
+    // String storage is reserved up front: fewer heap reallocations in the loop.
+    let strings: Vec<String> = program
+        .signals
+        .iter()
+        .filter(|s| s.ty == SignalType::String)
+        .map(|s| s.name.clone())
+        .chain(
+            vars.iter()
+                .filter(|v| v.ty.signal() == SignalType::String)
+                .map(|v| flp_core::vars::storage_name(&v.name)),
+        )
+        .collect();
+    if !strings.is_empty() {
+        out.push_str("  // Память под строки заранее: меньше дробления кучи.\n");
+        for name in &strings {
+            let _ = writeln!(out, "  {name}.reserve({STRING_RESERVE});");
+        }
+        out.push('\n');
     }
     // Retained variables are restored before any block uses them.
     let restore = crate::retain::setup(vars);

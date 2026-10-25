@@ -3,49 +3,182 @@ type = "wifi"
 name = "Wi-Fi клиент"
 symbol = "Wi-Fi"
 group = "Сеть"
-description = "Подключение ESP32 к точке доступа Wi-Fi (библиотека FLProg_Network)."
+description = "Подключение ESP32 к сети Wi-Fi и/или своя точка доступа (библиотека FLProg_Network). Входы и выходы включаются в свойствах блока."
 single = true
 includes = ["flprogNetwork.h"]
+
+[[input]]
+name = "en"
+type = "bool"
+label = "En"
+when = "use_en"
+description = "Включение Wi-Fi: true — работает, false — радио выключено"
+
+[[input]]
+name = "mode"
+type = "int"
+label = "Режим"
+when = "use_mode"
+description = "Режим работы: 0 клиент, 1 точка доступа, 2 клиент и точка доступа"
 
 [[output]]
 name = "ready"
 type = "bool"
+when = "out_ready"
 description = "true, пока ESP32 подключён к сети и получил адрес"
+
+[[output]]
+name = "ap_ready"
+type = "bool"
+label = "AP"
+when = "out_ap_ready"
+description = "true, пока работает своя точка доступа"
+
+[[output]]
+name = "address"
+type = "string"
+label = "IP"
+when = "out_address"
+description = "IP-адрес ESP32 (в сети, а в режиме точки доступа — её адрес); пустая строка, пока нет связи"
+
+[[output]]
+name = "status"
+type = "int"
+when = "out_status"
+description = "Состояние: 0 выключен, 1 ожидание, 2 подключение, 3 готов, 4 переподключение, 5 ошибка"
+
+[[output]]
+name = "error"
+type = "int"
+when = "out_error"
+description = "Код ошибки: 0 нет, 1 нет ответа от точки доступа (таймаут), 2 сеть (SSID) не найдена"
+
+[[param]]
+name = "wifi_mode"
+type = "int"
+label = "Режим"
+default = 0
+min = 0
+max = 2
+when = "not use_mode"
+show = "hidden"
+description = "Режим работы: 0 клиент, 1 точка доступа, 2 клиент и точка доступа"
 
 [[param]]
 name = "ssid"
 type = "string"
-description = "Имя сети (SSID)"
+when = "use_mode or wifi_mode != 1"
+show = "value"
+description = "Имя сети (SSID), к которой подключаться"
 
 [[param]]
 name = "password"
 type = "string"
 default = ""
-description = "Пароль сети"
+when = "use_mode or wifi_mode != 1"
+show = "secret"
+local = "ssid"
+description = "Пароль сети. Хранится в программе отдельно для каждой сети, в файл проекта не попадает"
 
 [[param]]
 name = "dhcp"
 type = "bool"
 default = true
+when = "use_mode or wifi_mode != 1"
 description = "Получать адрес автоматически (DHCP)"
 
 [[param]]
 name = "ip"
 type = "string"
 default = "192.168.1.177"
-when = "not dhcp"
+when = "not dhcp and (use_mode or wifi_mode != 1)"
 description = "Постоянный IP-адрес"
 
 [[param]]
 name = "gateway"
 type = "string"
 default = "192.168.1.1"
-when = "not dhcp"
+when = "not dhcp and (use_mode or wifi_mode != 1)"
 description = "Шлюз (он же DNS)"
 
 [[param]]
 name = "subnet"
 type = "string"
 default = "255.255.255.0"
-when = "not dhcp"
+when = "not dhcp and (use_mode or wifi_mode != 1)"
 description = "Маска подсети"
+
+[[param]]
+name = "ap_ssid"
+type = "string"
+label = "SSID точки"
+default = "FLP_ESP32"
+when = "use_mode or wifi_mode != 0"
+show = "value"
+description = "Имя своей точки доступа"
+
+[[param]]
+name = "ap_password"
+type = "string"
+label = "Пароль точки"
+default = ""
+when = "use_mode or wifi_mode != 0"
+show = "secret"
+local = "ap_ssid"
+description = "Пароль своей точки доступа (не короче 8 знаков; пусто — открытая сеть). Хранится в программе, в файл проекта не попадает"
+
+[[param]]
+name = "use_en"
+type = "bool"
+label = "Вход En"
+default = false
+show = "hidden"
+description = "Показать вход включения Wi-Fi"
+
+[[param]]
+name = "use_mode"
+type = "bool"
+label = "Вход «Режим»"
+default = false
+show = "hidden"
+description = "Показать вход переключения режима"
+
+[[param]]
+name = "out_ready"
+type = "bool"
+label = "Выход ready"
+default = true
+show = "hidden"
+description = "Показать выход «есть связь»"
+
+[[param]]
+name = "out_ap_ready"
+type = "bool"
+label = "Выход AP"
+default = false
+show = "hidden"
+description = "Показать выход «точка доступа работает»"
+
+[[param]]
+name = "out_address"
+type = "bool"
+label = "Выход IP"
+default = true
+show = "hidden"
+description = "Показать выход IP-адреса"
+
+[[param]]
+name = "out_status"
+type = "bool"
+label = "Выход status"
+default = false
+show = "hidden"
+description = "Показать выход состояния"
+
+[[param]]
+name = "out_error"
+type = "bool"
+label = "Выход error"
+default = false
+show = "hidden"
+description = "Показать выход кода ошибки"

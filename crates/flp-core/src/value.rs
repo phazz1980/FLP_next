@@ -12,6 +12,17 @@ pub enum ParamValue {
     Text(String),
 }
 
+impl std::fmt::Display for ParamValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParamValue::Bool(b) => write!(f, "{b}"),
+            ParamValue::Int(i) => write!(f, "{i}"),
+            ParamValue::Float(x) => write!(f, "{x}"),
+            ParamValue::Text(s) => f.write_str(s),
+        }
+    }
+}
+
 /// Parses a duration like `500ms`, `5s`, `1.5s`, `2m`, `1h` (also `мс`, `с`, `мин`, `ч`)
 /// into whole milliseconds.
 ///

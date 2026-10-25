@@ -1,0 +1,67 @@
+[block]
+type = "uart_send"
+name = "Отправка в UART"
+symbol = "UART TX"
+group = "Сеть"
+description = "Отправляет строку (или число в двоичном виде) в UART по фронту или каждый цикл, пока en = true."
+
+[block.uart]
+param = "uart"
+access = "write"
+
+[[input]]
+name = "en"
+type = "bool"
+description = "Разрешение отправки: по фронту или каждый цикл, пока true"
+
+[[input]]
+name = "text"
+type = "string"
+when = "mode == 0"
+description = "Строка для отправки"
+
+[[input]]
+name = "value"
+type = "float"
+when = "mode != 0"
+description = "Число для двоичной отправки"
+
+[[output]]
+name = "sent"
+type = "bool"
+description = "true в цикле, когда данные ушли в буфер UART"
+
+[[param]]
+name = "uart"
+label = "UART"
+type = "int"
+default = 0
+min = 0
+max = 2
+description = "Номер UART: 0 — USB (видно в мониторе порта и в консоли отладки), 1 или 2 — из настроек платы"
+
+[[param]]
+name = "mode"
+label = "что отправлять"
+type = "int"
+default = 0
+min = 0
+max = 3
+description = "0 — строка, 1 — байт, 2 — int16, 3 — float (числа в двоичном виде, младший байт первым)"
+
+[[param]]
+name = "edge"
+label = "по фронту en"
+type = "bool"
+default = true
+description = "true — один раз при переходе en в true; false — каждый цикл, пока en = true"
+
+[[param]]
+name = "ending"
+label = "окончание строки"
+type = "int"
+default = 2
+min = 0
+max = 2
+when = "mode == 0"
+description = "Что добавить после строки: 0 — ничего, 1 — \\n, 2 — \\r\\n"

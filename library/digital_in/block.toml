@@ -13,6 +13,7 @@ description = "Состояние входа: true — высокий урове
 [[param]]
 name = "pin"
 type = "pin"
+mode = "in"
 description = "Номер вывода GPIO"
 
 [[param]]

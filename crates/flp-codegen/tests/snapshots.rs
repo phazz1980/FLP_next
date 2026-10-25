@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use flp_codegen::{generate, ArduinoCpp, GenError};
-use flp_core::{Library, Project};
+use flp_core::{Library, ParamValue, Project};
 
 fn repo_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -124,6 +124,22 @@ fn debug_module_snapshot() {
     assert!(code.contains("flp_st_end();"));
 }
 
+/// Strings in the debug build: their own table and `TEXT` frames.
+#[test]
+fn debug_strings_snapshot() {
+    let project = Project::load(repo_path("examples/text_commands")).unwrap();
+    let code = generate(&project, &library(), &ArduinoCpp::DEBUG).unwrap();
+    let snapshot =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/text_commands.debug.ino");
+    assert_snapshot(&snapshot, &code);
+    assert!(code.contains("String* const flp_dbg_text[FLP_DBG_TEXTS] = { &p_text_out,"));
+    assert!(code.contains("    flp_dbg_texts();"));
+    // Without strings the debug module has no string table.
+    let tags = Project::load(repo_path("examples/tags")).unwrap();
+    let code = generate(&tags, &library(), &ArduinoCpp::DEBUG).unwrap();
+    assert!(!code.contains("flp_dbg_text"));
+}
+
 /// Normal firmware measures cycle time only with `[diagnostics] enabled`.
 #[test]
 fn diagnostics_in_normal_build() {
@@ -141,6 +157,171 @@ fn diagnostics_in_normal_build() {
     assert!(code.contains("flp_st_report();"), "{code}");
     assert!(code.contains("2000UL"), "{code}");
     assert!(!code.contains("flp_dbg_"), "{code}");
+}
+
+/// Blocks on shared UARTs (`tests/fixtures/library/uart_probe`): the ports are
+/// started in `setup()` from `[[uart]]`, UART0 only when nothing else starts it.
+#[test]
+fn shared_uart_setup() {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let (lib, errors) = Library::load(fixtures.join("library")).unwrap();
+    assert!(errors.is_empty(), "{errors:?}");
+    let mut project = Project::load(repo_path("examples/tags")).unwrap();
+    project.logic = toml::from_str(
+        r#"
+[[block]]
+id = "a"
+type = "uart_probe"
+
+[[block]]
+id = "b"
+type = "uart_probe"
+
+[[block]]
+id = "usb"
+type = "uart_probe"
+uart = 0
+"#,
+    )
+    .unwrap();
+    project.config.uart = vec![flp_core::UartConfig {
+        number: 1,
+        speed: 19200,
+        format: "8e1".into(),
+        rx: 25,
+        tx: 26,
+        de: 14,
+        rx_buffer: 512,
+    }];
+    let code = generate(&project, &lib, &ArduinoCpp::RELEASE).unwrap();
+    let setup = "  // UART0 (USB): 115200 бод
+  Serial.begin(115200);
+  // UART1: 19200 бод, 8E1, RX GPIO25, TX GPIO26
+  Serial1.setRxBufferSize(512);
+  Serial1.begin(19200, SERIAL_8E1, 25, 26);
+  Serial1.setPins(-1, -1, -1, 14);  // DE/RE RS-485
+  Serial1.setMode(UART_MODE_RS485_HALF_DUPLEX);
+";
+    assert!(code.contains(setup), "{code}");
+    assert_eq!(code.matches("Serial1.begin").count(), 1, "{code}");
+    assert!(code.contains("Serial1.println(7);"), "{code}");
+    assert!(code.contains("  // UART1, 19200"), "{code}");
+    // The debug module starts UART0 itself.
+    let code = generate(&project, &lib, &ArduinoCpp::DEBUG).unwrap();
+    assert!(!code.contains("// UART0 (USB)"), "{code}");
+
+    // A UART without settings stops generation.
+    project.config.uart.clear();
+    match generate(&project, &lib, &ArduinoCpp::RELEASE) {
+        Err(GenError::Schema(d)) => {
+            assert!(
+                d.iter().any(|d| d.message.contains("UART1 не настроен")),
+                "{d:?}"
+            )
+        }
+        other => panic!("ожидалась ошибка схемы, получено {other:?}"),
+    }
+}
+
+/// Modes of `uart_send` and `uart_read` that the example does not use.
+#[test]
+fn uart_block_modes() {
+    let mut project = Project::load(repo_path("examples/text_commands")).unwrap();
+    let set = |project: &mut Project, id: &str, params: &[(&str, ParamValue)]| {
+        let block = project
+            .logic
+            .blocks
+            .iter_mut()
+            .find(|b| b.id == id)
+            .unwrap();
+        for (k, v) in params {
+            block.params.insert((*k).to_owned(), v.clone());
+        }
+    };
+    use ParamValue::{Bool, Int, Text};
+    set(
+        &mut project,
+        "report",
+        &[("edge", Bool(false)), ("ending", Int(1))],
+    );
+    set(&mut project, "p_send", &[("mode", Int(2))]);
+    set(
+        &mut project,
+        "rx",
+        &[
+            ("end", Int(2)),
+            ("end_char", Text(";".into())),
+            ("timeout", Text("200ms".into())),
+        ],
+    );
+    let code = generate(&project, &library(), &ArduinoCpp::RELEASE).unwrap();
+    assert!(code.contains("bool fire = tick_out;"), "{code}");
+    assert!(code.contains(r#"const char* ending = "\n";"#), "{code}");
+    assert!(
+        code.contains("int16_t data = (int16_t)constrain(lroundf(bar_out), -32768L, 32767L);"),
+        "{code}"
+    );
+    assert!(code.contains(r#"bool end = c == ";"[0];"#), "{code}");
+    assert!(code.contains("millis() - rx_last >= 200UL"), "{code}");
+
+    // Byte by byte: other outputs; the line outputs are gone, so the links go too.
+    set(&mut project, "rx", &[("mode", Int(1))]);
+    set(&mut project, "p_send", &[("mode", Int(1))]);
+    project.logic.links.retain(|l| l.from.block != "rx");
+    project.logic.blocks.retain(|b| b.id != "command_w");
+    let code = generate(&project, &library(), &ArduinoCpp::RELEASE).unwrap();
+    assert!(code.contains("rx_new = Serial2.available() > 0;"), "{code}");
+    assert!(code.contains("rx_byte = Serial2.read();"), "{code}");
+    assert!(!code.contains("rx_buf"), "{code}");
+    assert!(
+        code.contains("uint8_t data = (uint8_t)constrain(lroundf(bar_out), 0L, 255L);"),
+        "{code}"
+    );
+
+    // Debug firmware starts UART0 itself; the block only writes to it.
+    let project = Project::load(repo_path("examples/text_commands")).unwrap();
+    let code = generate(&project, &library(), &ArduinoCpp::DEBUG).unwrap();
+    assert_eq!(code.matches("Serial.begin(").count(), 1, "{code}");
+}
+
+/// `uart_read` on UART0: the port itself in normal firmware, the console input
+/// (`TEXT_IN`) of the debugging module in debug firmware.
+#[test]
+fn uart0_reader_takes_console_input() {
+    let mut project = Project::load(repo_path("examples/text_commands")).unwrap();
+    let rx = project
+        .logic
+        .blocks
+        .iter_mut()
+        .find(|b| b.id == "rx")
+        .unwrap();
+    rx.params.insert("uart".into(), ParamValue::Int(0));
+
+    let code = generate(&project, &library(), &ArduinoCpp::RELEASE).unwrap();
+    assert!(code.contains("while (Serial.available() > 0) {"), "{code}");
+    assert!(code.contains("  Serial.begin(115200);"), "{code}");
+    assert!(!code.contains("flp_dbg_in"), "{code}");
+
+    let code = generate(&project, &library(), &ArduinoCpp::DEBUG).unwrap();
+    assert!(
+        code.contains("while (flp_dbg_input.available() > 0) {"),
+        "{code}"
+    );
+    assert!(
+        code.contains("char c = (char)flp_dbg_input.read();"),
+        "{code}"
+    );
+    assert!(code.contains("FlpDebugInput flp_dbg_input;"), "{code}");
+    assert!(
+        code.contains("  if (type == 0x15) {\n    flp_dbg_in_push(p, len);"),
+        "{code}"
+    );
+    assert_eq!(code.matches("Serial.begin(").count(), 1, "{code}");
+
+    // Without a UART0 reader the module has no console input.
+    let project = Project::load(repo_path("examples/text_commands")).unwrap();
+    let code = generate(&project, &library(), &ArduinoCpp::DEBUG).unwrap();
+    assert!(!code.contains("flp_dbg_in"), "{code}");
 }
 
 /// Block format features on a test block (`tests/fixtures/library/probe`):
@@ -205,4 +386,34 @@ fn templates_accept_cyrillic_names() {
         )
         .unwrap();
     assert_eq!(text, "x");
+}
+
+/// The `string` signal type: `String` storage, a `String("...")` default for an
+/// unconnected input, a retained variable saved as a string, and no string
+/// entries in the debug table (values travel as 4 bytes).
+#[test]
+fn string_signals_snapshot() {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let (lib, errors) = Library::load(fixtures.join("library")).unwrap();
+    assert!(errors.is_empty(), "{errors:?}");
+    let project = Project::load(fixtures.join("strings")).unwrap();
+    let code = generate(&project, &lib, &ArduinoCpp::RELEASE).unwrap();
+    let snapshot = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/strings.ino");
+    assert_snapshot(&snapshot, &code);
+    assert!(code.contains("String join_out = String();"), "{code}");
+    assert!(code.contains(" + String(\" — ok\");"), "{code}");
+    assert!(code.contains("flp_retain.getString("), "{code}");
+    assert!(code.contains("flp_retain.putString("), "{code}");
+    assert!(!code.contains("sizeof(var_status)"), "{code}");
+
+    let debug = generate(&project, &lib, &ArduinoCpp::DEBUG).unwrap();
+    let table = debug
+        .lines()
+        .find(|l| l.starts_with("void* const flp_dbg_ptr"))
+        .unwrap();
+    assert!(table.contains("&var_count"), "{table}");
+    assert!(
+        !table.contains("var_status") && !table.contains("join_out"),
+        "{table}"
+    );
 }

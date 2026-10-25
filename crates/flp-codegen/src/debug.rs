@@ -7,16 +7,25 @@ use flp_core::vars::storage_name;
 use flp_core::{PortRef, SignalType};
 use flp_debug::protocol;
 use flp_debug::transport::BAUD;
-use flp_debug::{DebugTable, Entry, Source};
+use flp_debug::{DebugTable, Entry, Source, TextEntry};
 
 use crate::Program;
 
 /// Block outputs in signal order, then variables in declaration order.
+/// Strings go to a table of their own: values travel as 4 bytes, strings in `TEXT` frames.
 pub fn debug_table(program: &Program) -> DebugTable {
     let mut entries: Vec<Option<Entry>> = vec![None; program.signals.len()];
+    let mut texts: Vec<Option<TextEntry>> = vec![None; program.signals.len()];
     for inst in &program.blocks {
         for (&port, &s) in &inst.outputs {
             let signal = &program.signals[s];
+            if signal.ty == SignalType::String {
+                texts[s] = Some(TextEntry {
+                    source: Source::Output(PortRef::new(&inst.block.id, port)),
+                    storage: signal.name.clone(),
+                });
+                continue;
+            }
             entries[s] = Some(Entry {
                 source: Source::Output(PortRef::new(&inst.block.id, port)),
                 ty: signal.ty,
@@ -26,13 +35,26 @@ pub fn debug_table(program: &Program) -> DebugTable {
         }
     }
     let mut entries: Vec<Entry> = entries.into_iter().flatten().collect();
-    entries.extend(program.project.logic.vars.iter().map(|v| Entry {
-        source: Source::Var(v.name.clone()),
-        ty: v.ty.signal(),
-        storage: storage_name(&v.name),
-        cpp_type: v.ty.cpp(),
-    }));
-    DebugTable { entries }
+    let mut texts: Vec<TextEntry> = texts.into_iter().flatten().collect();
+    let vars = program.project.logic.vars.iter();
+    texts.extend(
+        vars.clone()
+            .filter(|v| v.ty.signal() == SignalType::String)
+            .map(|v| TextEntry {
+                source: Source::Var(v.name.clone()),
+                storage: storage_name(&v.name),
+            }),
+    );
+    entries.extend(
+        vars.filter(|v| v.ty.signal() != SignalType::String)
+            .map(|v| Entry {
+                source: Source::Var(v.name.clone()),
+                ty: v.ty.signal(),
+                storage: storage_name(&v.name),
+                cpp_type: v.ty.cpp(),
+            }),
+    );
+    DebugTable { entries, texts }
 }
 
 /// Storage kind in firmware: 0 bool, 1 int32, 2 float, 3 int8, 4 uint8, 5 int16,
@@ -51,13 +73,16 @@ fn type_code(e: &Entry) -> u8 {
             SignalType::Bool => 0,
             SignalType::Int => 1,
             SignalType::Float => 2,
+            SignalType::String => unreachable!("strings are not in the debug table"),
         },
     }
 }
 
 /// The firmware side of the protocol, placed after all globals of the sketch
 /// and after the cycle time module of [`crate::stats`].
-pub fn runtime(table: &DebugTable) -> String {
+/// `text_in`: a block reads UART0, so the module keeps the console input
+/// (`TEXT_IN` frames) for it in `flp_dbg_input`.
+pub fn runtime(table: &DebugTable, text_in: bool) -> String {
     let n = table.entries.len();
     let ptrs: Vec<String> = table
         .entries
@@ -179,7 +204,7 @@ void flp_dbg_values() {{
   }}
 }}
 
-void flp_dbg_stats() {{
+{texts}{text_in}void flp_dbg_stats() {{
   uint8_t p[25 + 10 * FLP_ST_SHEETS];
   uint32_t head[6] = {{flp_st_cycles, flp_st_last, flp_st_max, 0, flp_st_period_max, flp_st_free_heap()}};
   head[3] = flp_st_take_avg();
@@ -197,13 +222,13 @@ void flp_dbg_stats() {{
 
 void flp_dbg_command(uint8_t type, const uint8_t* p, uint8_t len) {{
   if (type == 0x{hello_req:02X}) {{
-    flp_dbg_hello();
+    flp_dbg_hello();{texts_reset}
     return;
   }}
   if (type == 0x{reset_stats:02X}) {{
     flp_st_reset();
     return;
-  }}
+  }}{text_in_command}
   if (type == 0x{release_all:02X}) {{
     for (uint16_t i = 0; i < FLP_DBG_COUNT; i++) {{
       flp_dbg_forced[i] = false;
@@ -263,7 +288,7 @@ void flp_dbg_loop() {{
   flp_dbg_poll();
   if (millis() - flp_dbg_last >= 100) {{
     flp_dbg_last = millis();
-    flp_dbg_values();
+    flp_dbg_values();{texts_loop}
     if (++flp_dbg_ticks >= 5) {{
       flp_dbg_ticks = 0;
       flp_dbg_stats();
@@ -287,6 +312,123 @@ void flp_dbg_loop() {{
         reset_stats = protocol::RESET_STATS,
         per_frame = protocol::VALUES_PER_FRAME,
         baud = BAUD,
+        texts = texts_module(table),
+        text_in = if text_in { TEXT_IN_MODULE } else { "" },
+        text_in_command = if text_in {
+            format!(
+                "\n  if (type == 0x{:02X}) {{\n    flp_dbg_in_push(p, len);\n    return;\n  }}",
+                protocol::TEXT_IN
+            )
+        } else {
+            String::new()
+        },
+        texts_reset = if table.texts.is_empty() {
+            ""
+        } else {
+            "\n    flp_dbg_texts_reset();"
+        },
+        texts_loop = if table.texts.is_empty() {
+            ""
+        } else {
+            "\n    flp_dbg_texts();"
+        },
     );
     out
 }
+
+/// Strings of the table: each one goes in a `TEXT` frame when its checksum changes,
+/// at most a few frames per tick so values are not delayed. Empty without strings.
+fn texts_module(table: &DebugTable) -> String {
+    if table.texts.is_empty() {
+        return String::new();
+    }
+    let ptrs: Vec<String> = table
+        .texts
+        .iter()
+        .map(|t| format!("&{}", t.storage))
+        .collect();
+    format!(
+        r#"// Строки: кадр TEXT, только когда строка изменилась (до {max} байт).
+const uint16_t FLP_DBG_TEXTS = {n};
+String* const flp_dbg_text[FLP_DBG_TEXTS] = {{ {ptrs} }};
+uint16_t flp_dbg_text_crc[FLP_DBG_TEXTS];
+bool flp_dbg_text_sent[FLP_DBG_TEXTS];
+uint16_t flp_dbg_text_next = 0;
+
+void flp_dbg_texts_reset() {{
+  for (uint16_t i = 0; i < FLP_DBG_TEXTS; i++) {{
+    flp_dbg_text_sent[i] = false;
+  }}
+}}
+
+void flp_dbg_texts() {{
+  uint8_t p[2 + {max}];
+  uint8_t budget = {budget};
+  for (uint16_t k = 0; k < FLP_DBG_TEXTS && budget > 0; k++) {{
+    uint16_t i = flp_dbg_text_next;
+    flp_dbg_text_next = (i + 1) % FLP_DBG_TEXTS;
+    const String& s = *flp_dbg_text[i];
+    uint16_t len = s.length();
+    if (len > {max}) {{
+      len = {max};
+      // Do not cut a UTF-8 character in half.
+      while (len > 0 && ((uint8_t)s[len] & 0xC0) == 0x80) {{
+        len--;
+      }}
+    }}
+    uint16_t crc = flp_dbg_crc(0xFFFF, (uint8_t)len);
+    for (uint16_t j = 0; j < len; j++) {{
+      crc = flp_dbg_crc(crc, (uint8_t)s[j]);
+    }}
+    if (flp_dbg_text_sent[i] && crc == flp_dbg_text_crc[i]) {{
+      continue;
+    }}
+    flp_dbg_text_crc[i] = crc;
+    flp_dbg_text_sent[i] = true;
+    p[0] = i & 0xFF;
+    p[1] = i >> 8;
+    memcpy(p + 2, s.c_str(), len);
+    flp_dbg_frame(0x{kind:02X}, p, 2 + len);
+    budget--;
+  }}
+}}
+
+"#,
+        n = table.texts.len(),
+        ptrs = ptrs.join(", "),
+        max = protocol::TEXT_MAX,
+        budget = 8,
+        kind = protocol::TEXT,
+    )
+}
+
+/// Console input of the debug session: a ring buffer that `uart_read` on UART0
+/// reads through `flp_dbg_input` the way it reads a `HardwareSerial`.
+const TEXT_IN_MODULE: &str = r#"// Ввод из консоли отладки (кадры TEXT_IN) для «Чтения из UART» на UART0.
+uint8_t flp_dbg_in_buf[256];
+uint8_t flp_dbg_in_head = 0;
+uint8_t flp_dbg_in_tail = 0;
+
+void flp_dbg_in_push(const uint8_t* p, uint8_t len) {
+  for (uint8_t k = 0; k < len; k++) {
+    uint8_t next = flp_dbg_in_head + 1;
+    if (next == flp_dbg_in_tail) {
+      return;  // full: the rest of the line is dropped
+    }
+    flp_dbg_in_buf[flp_dbg_in_head] = p[k];
+    flp_dbg_in_head = next;
+  }
+}
+
+struct FlpDebugInput {
+  int available() { return (uint8_t)(flp_dbg_in_head - flp_dbg_in_tail); }
+  int read() {
+    if (flp_dbg_in_head == flp_dbg_in_tail) {
+      return -1;
+    }
+    return flp_dbg_in_buf[flp_dbg_in_tail++];
+  }
+};
+FlpDebugInput flp_dbg_input;
+
+"#;

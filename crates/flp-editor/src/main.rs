@@ -2,7 +2,7 @@
 //!
 //! Layout follows FLProg: menu and toolbar on top, project tree and tags on the left,
 //! block library and the AI tab on the right, numbered sheets in the centre,
-//! messages at the bottom.
+//! messages and the port monitor at the bottom.
 
 mod ai;
 mod app;
@@ -10,13 +10,17 @@ mod assoc;
 mod blockedit;
 mod boardcfg;
 mod canvas;
+mod codeview;
+mod console;
 mod debugview;
 mod dialogs;
 mod doc;
 mod job;
+mod markdown;
 mod panels;
 mod theme;
 mod themeedit;
+mod userlib;
 
 use std::path::PathBuf;
 

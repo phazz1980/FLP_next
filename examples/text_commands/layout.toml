@@ -1,0 +1,100 @@
+# Координаты блоков для редактора.
+
+[block.adc]
+x = 40.0
+y = 40.0
+
+[block.bar]
+x = 200.0
+y = 40.0
+
+[block.p_text]
+x = 360.0
+y = 40.0
+
+[block.name]
+x = 360.0
+y = 160.0
+
+[block.message]
+x = 560.0
+y = 80.0
+
+[block.message_w]
+x = 760.0
+y = 60.0
+
+[block.length]
+x = 760.0
+y = 160.0
+
+[block.length_w]
+x = 920.0
+y = 160.0
+
+[block.command_r]
+sheet = 2
+x = 40.0
+y = 120.0
+
+[block.is_on]
+sheet = 2
+x = 240.0
+y = 40.0
+
+[block.pump]
+sheet = 2
+x = 420.0
+y = 40.0
+
+[block.head]
+sheet = 2
+x = 240.0
+y = 160.0
+
+[block.is_set]
+sheet = 2
+x = 420.0
+y = 160.0
+
+[block.arg]
+sheet = 2
+x = 240.0
+y = 280.0
+
+[block.number]
+sheet = 2
+x = 420.0
+y = 280.0
+
+[block.apply]
+sheet = 2
+x = 600.0
+y = 200.0
+
+[block.setpoint_w]
+sheet = 2
+x = 780.0
+y = 260.0
+
+[block.tick]
+x = 560.0
+y = 240.0
+
+[block.report]
+x = 760.0
+y = 260.0
+
+[block.p_send]
+x = 360.0
+y = 280.0
+
+[block.rx]
+sheet = 2
+x = 40.0
+y = 400.0
+
+[block.command_w]
+sheet = 2
+x = 240.0
+y = 400.0

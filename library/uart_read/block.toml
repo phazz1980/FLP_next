@@ -1,0 +1,93 @@
+[block]
+type = "uart_read"
+name = "Чтение из UART"
+symbol = "UART RX"
+group = "Сеть"
+description = "Принимает данные из UART: строку до разделителя (line, импульс ready) или по одному байту."
+
+[block.uart]
+param = "uart"
+access = "read"
+
+[[output]]
+name = "line"
+type = "string"
+when = "mode == 0"
+description = "Последняя принятая строка, без разделителя"
+
+[[output]]
+name = "ready"
+type = "bool"
+when = "mode == 0"
+description = "true на один цикл, когда пришла новая строка"
+
+[[output]]
+name = "byte"
+type = "int"
+when = "mode == 1"
+description = "Последний принятый байт, 0…255"
+
+[[output]]
+name = "new"
+type = "bool"
+when = "mode == 1"
+description = "true на один цикл, когда пришёл байт"
+
+[[output]]
+name = "available"
+type = "int"
+description = "Сколько байт ещё ждёт в буфере приёма"
+
+[[param]]
+name = "uart"
+label = "UART"
+type = "int"
+default = 2
+min = 0
+max = 2
+description = "Номер UART: 0 — USB (монитор порта, в отладке — ввод в консоли), 1 или 2 — из настроек платы"
+
+[[param]]
+name = "mode"
+label = "как читать"
+type = "int"
+default = 0
+min = 0
+max = 1
+description = "0 — строками до разделителя, 1 — по одному байту за цикл"
+
+[[param]]
+name = "end"
+label = "разделитель"
+type = "int"
+default = 0
+min = 0
+max = 2
+when = "mode == 0"
+description = "Конец строки: 0 — \\n (\\r отбрасывается), 1 — \\r (\\n отбрасывается), 2 — символ end_char"
+
+[[param]]
+name = "end_char"
+label = "символ разделителя"
+type = "string"
+default = ";"
+when = "mode == 0 and end == 2"
+description = "Первый символ строки — разделитель, например «;»"
+
+[[param]]
+name = "timeout"
+label = "конец по паузе"
+type = "duration"
+default = "0ms"
+when = "mode == 0"
+description = "Пауза, после которой принятое считается строкой и без разделителя; 0 — не ждать паузы"
+
+[[param]]
+name = "max_len"
+label = "макс. длина"
+type = "int"
+default = 64
+min = 1
+max = 1024
+when = "mode == 0"
+description = "Строка длиннее обрывается и выдаётся частями"

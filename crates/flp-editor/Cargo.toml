@@ -9,6 +9,7 @@ name = "flp-editor"
 path = "src/main.rs"
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 eframe = "0.37"
 flp-ai = { path = "../flp-ai" }
 serde.workspace = true
