@@ -20,7 +20,8 @@ pub use edit::{EditError, Fragment};
 pub use error::{Error, Result};
 pub use layout::{BlockPos, Layout, SheetInfo};
 pub use library::{
-    save_block, BlockDef, Library, LibraryBlock, ParamDef, ParamKind, PortDef, SignalType,
+    save_block, user_library_dir, BlockDef, Library, LibraryBlock, ParamDef, ParamKind, PortDef,
+    SignalType,
 };
 pub use logic::{Block, Link, Logic, PortRef, PortRefError};
 pub use project::{BoardConfig, Diagnostics, Project, ProjectConfig, ProjectInfo};

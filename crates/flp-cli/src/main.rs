@@ -348,7 +348,7 @@ fn load_library(project_dir: &Path, explicit: Option<&Path>) -> Option<Library> 
         );
         return None;
     };
-    match Library::load(&dir) {
+    match Library::load_with_user(&dir) {
         Ok((lib, errors)) => {
             for e in errors {
                 println!("предупреждение: блок пропущен: {e}");

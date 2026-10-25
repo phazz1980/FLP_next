@@ -355,6 +355,8 @@ pub struct BlockEditor {
     generated: Option<Generated>,
     /// Closing with unsaved changes: asking what to do.
     confirm_close: bool,
+    /// A built-in block: shown, but cannot be changed.
+    read_only: bool,
 }
 
 impl BlockEditor {
@@ -364,9 +366,14 @@ impl BlockEditor {
         Self::with(None, Form::new_block(kind))
     }
 
-    /// Edits an existing library block.
-    pub fn edit(block: &LibraryBlock) -> Self {
-        Self::with(Some(block.def.info.kind.clone()), Form::from_block(block))
+    /// Opens a library block: a user block for editing, a built-in one read-only.
+    pub fn edit(app: &EditorApp, block: &LibraryBlock) -> Self {
+        let kind = block.def.info.kind.clone();
+        let read_only = !app.lib.is_user(&kind);
+        Self {
+            read_only,
+            ..Self::with(Some(kind), Form::from_block(block))
+        }
     }
 
     /// A new block based on an existing one.
@@ -385,11 +392,12 @@ impl BlockEditor {
             tab: Tab::Ports,
             generated: None,
             confirm_close: false,
+            read_only: false,
         }
     }
 
     fn dirty(&self) -> bool {
-        self.form != self.clean || self.original.is_none()
+        !self.read_only && (self.form != self.clean || self.original.is_none())
     }
 
     /// Regenerates the trial sketch when the definition or template changed.
@@ -411,9 +419,9 @@ impl BlockEditor {
 }
 
 fn free_kind(app: &EditorApp, base: &str) -> String {
-    let taken = |k: &str| {
-        app.lib.get(k).is_some() || app.lib_dir.as_ref().is_some_and(|d| d.join(k).exists())
-    };
+    let user_dir = app.user_lib_dir();
+    let taken =
+        |k: &str| app.lib.get(k).is_some() || user_dir.as_ref().is_some_and(|d| d.join(k).exists());
     if !taken(base) {
         return base.to_owned();
     }
@@ -428,6 +436,7 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
         return;
     };
     let title = match &ed.original {
+        Some(kind) if ed.read_only => format!("Встроенный блок — {kind} (только просмотр)"),
         Some(kind) => format!("Редактор блока — {kind}"),
         None => "Редактор блока — новый блок".to_owned(),
     };
@@ -477,7 +486,8 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
                 }
             });
             ui.add_space(16.0);
-            ui.vertical(|ui| header(app, ui, ed));
+            let editable = !ed.read_only;
+            ui.vertical(|ui| ui.add_enabled_ui(editable, |ui| header(app, ui, ed)));
         });
         ui.separator();
         ui.horizontal(|ui| {
@@ -493,18 +503,24 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
             }
         });
     });
+    let editable = !ed.read_only;
     egui::CentralPanel::default().show(ui, |ui| {
         ScrollArea::both()
             .id_salt("block_editor_tab")
             .auto_shrink([false, false])
             .show(ui, |ui| match ed.tab {
-                Tab::Ports => ports_tab(ui, &mut ed.form),
-                Tab::Params => params_tab(ui, &mut ed.form),
-                Tab::Code => code_tab(ui, &mut ed.form),
+                Tab::Ports => {
+                    ui.add_enabled_ui(editable, |ui| ports_tab(ui, &mut ed.form));
+                }
+                Tab::Params => {
+                    ui.add_enabled_ui(editable, |ui| params_tab(ui, &mut ed.form));
+                }
+                Tab::Code => code_tab(ui, &mut ed.form, editable),
                 Tab::Docs => {
                     ui.weak("docs.md: пояснение и пример. По нему ИИ-помощник подбирает блоки.");
                     ui.add(
                         TextEdit::multiline(&mut ed.form.docs)
+                            .interactive(editable)
                             .desired_width(f32::INFINITY)
                             .desired_rows(20),
                     );
@@ -524,7 +540,7 @@ fn header(app: &EditorApp, ui: &mut Ui, ed: &mut BlockEditor) {
             ui.label("Тип");
             ui.add_sized([160.0, 20.0], TextEdit::singleline(&mut f.kind))
                 .on_hover_text(
-                    "Имя папки в library/ и поле type в схеме: латиница, цифры и «_». \
+                    "Имя папки в user_library/ и поле type в схеме: латиница, цифры и «_». \
                      Новое имя сохраняет блок как новый тип, старый остаётся.",
                 );
             ui.label("Название");
@@ -899,7 +915,7 @@ fn insert_at_cursor(ctx: &egui::Context, id: Id, template: &mut String, text: &s
     ctx.memory_mut(|m| m.request_focus(id));
 }
 
-fn code_tab(ui: &mut Ui, f: &mut Form) {
+fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
     ui.weak(SECTIONS_HINT);
     let inputs = port_snippets(&f.inputs, "input");
     let outputs = port_snippets(&f.outputs, "output");
@@ -970,6 +986,16 @@ fn code_tab(ui: &mut Ui, f: &mut Form) {
     })
     .collect();
 
+    if !editable {
+        let mut text = f.template.as_str();
+        ui.add(
+            TextEdit::multiline(&mut text)
+                .code_editor()
+                .desired_width(f32::INFINITY)
+                .desired_rows(24),
+        );
+        return;
+    }
     let id = Id::unique("block_template");
     let mut insert = None;
     ui.horizontal_wrapped(|ui| {
@@ -1059,6 +1085,22 @@ fn footer(
     def: &Result<BlockDef, String>,
 ) -> bool {
     let mut close = false;
+    if ed.read_only {
+        ui.horizontal(|ui| {
+            ui.colored_label(
+                app.theme.palette.warning,
+                "Встроенный блок изменять нельзя — создайте на его основе свой.",
+            );
+            if ui.button("Создать копию").clicked() {
+                let block = ed.original.as_ref().and_then(|k| app.lib.get(k)).cloned();
+                if let Some(block) = block {
+                    *ed = BlockEditor::copy_of(app, &block);
+                }
+            }
+            close = ui.button("Закрыть").clicked();
+        });
+        return close;
+    }
     ui.horizontal(|ui| {
         if ed.confirm_close {
             ui.colored_label(app.theme.palette.warning, "Изменения не сохранены.");
@@ -1092,7 +1134,7 @@ fn footer(
                 close = true;
             }
         }
-        if let Some(dir) = &app.lib_dir {
+        if let Some(dir) = app.user_lib_dir() {
             ui.weak(format!(
                 "Папка: {}",
                 dir.join(ed.form.kind.trim()).display()
@@ -1111,11 +1153,18 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
             return false;
         }
     };
-    let Some(lib_dir) = app.lib_dir.clone() else {
+    let Some(lib_dir) = app.user_lib_dir() else {
         app.info(LogLevel::Error, "Блок не сохранён: нет папки библиотеки");
         return false;
     };
     let kind = &def.info.kind;
+    if ed.read_only || app.lib.is_builtin(kind) {
+        app.info(
+            LogLevel::Error,
+            format!("Блок не сохранён: тип «{kind}» занят встроенным блоком, его менять нельзя"),
+        );
+        return false;
+    }
     let renamed = ed.original.as_deref() != Some(kind.as_str());
     if renamed && (app.lib.get(kind).is_some() || lib_dir.join(kind).exists()) {
         app.info(
@@ -1139,6 +1188,86 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
             app.info(LogLevel::Error, format!("Блок не сохранён: {e}"));
             false
         }
+    }
+}
+
+/// Asks before deleting a user block (`app.block_delete`) and deletes its folder.
+pub fn delete_dialog(app: &mut EditorApp, ctx: &egui::Context) {
+    let Some(kind) = app.block_delete.clone() else {
+        return;
+    };
+    let (Some(block), Some(user_dir)) = (app.lib.get(&kind).cloned(), app.user_lib_dir()) else {
+        app.block_delete = None;
+        return;
+    };
+    if !app.lib.is_user(&kind) {
+        app.block_delete = None;
+        app.info(LogLevel::Error, "Встроенный блок удалить нельзя");
+        return;
+    }
+    let used = app.doc.as_ref().map_or(0, |d| {
+        d.project
+            .logic
+            .blocks
+            .iter()
+            .filter(|b| b.kind == kind)
+            .count()
+    });
+    let warning = app.theme.palette.warning;
+    let mut answer = None;
+    egui::Modal::new(Id::unique("block_delete")).show(ctx, |ui| {
+        ui.label(RichText::new("Удалить блок").strong());
+        ui.label(format!(
+            "Удалить пользовательский блок «{}» ({kind})? Папка {} будет удалена.",
+            block.def.info.name,
+            block.dir.display()
+        ));
+        if used > 0 {
+            ui.colored_label(
+                warning,
+                format!(
+                    "В открытом проекте таких блоков: {used}. Схема перестанет проходить проверку."
+                ),
+            );
+        }
+        ui.horizontal(|ui| {
+            if ui.button("Удалить").clicked() {
+                answer = Some(true);
+            }
+            if ui.button("Отмена").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape))
+            {
+                answer = Some(false);
+            }
+        });
+    });
+    match answer {
+        Some(true) => {
+            app.block_delete = None;
+            // Only a folder inside user_library/ is ever removed.
+            if block.dir.parent() != Some(user_dir.as_path()) {
+                app.info(
+                    LogLevel::Error,
+                    "Блок не удалён: он не в папке пользовательских блоков",
+                );
+                return;
+            }
+            match fs::remove_dir_all(&block.dir) {
+                Ok(()) => {
+                    app.info(LogLevel::Ok, format!("Блок «{kind}» удалён"));
+                    if app
+                        .block_editor
+                        .as_ref()
+                        .is_some_and(|e| e.original.as_deref() == Some(kind.as_str()))
+                    {
+                        app.block_editor = None;
+                    }
+                    app.reload_library();
+                }
+                Err(e) => app.info(LogLevel::Error, format!("Блок не удалён: {e}")),
+            }
+        }
+        Some(false) => app.block_delete = None,
+        None => {}
     }
 }
 

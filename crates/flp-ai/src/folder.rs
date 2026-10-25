@@ -21,7 +21,7 @@ pub struct FolderContext {
 
 impl FolderContext {
     pub fn open(root: &Path, lib_dir: &Path) -> Result<Self, String> {
-        let (lib, _) = Library::load(lib_dir).map_err(|e| e.to_string())?;
+        let (lib, _) = Library::load_with_user(lib_dir).map_err(|e| e.to_string())?;
         Ok(Self {
             root: root.to_owned(),
             lib_dir: lib_dir.to_owned(),
@@ -47,7 +47,7 @@ impl Context for FolderContext {
     }
 
     fn library_dir(&self) -> PathBuf {
-        self.lib_dir.clone()
+        flp_core::user_library_dir(&self.lib_dir)
     }
 
     fn edit(
@@ -109,7 +109,7 @@ impl Context for FolderContext {
     }
 
     fn reload_library(&mut self) -> Result<(), String> {
-        let (lib, errors) = Library::load(&self.lib_dir).map_err(|e| e.to_string())?;
+        let (lib, errors) = Library::load_with_user(&self.lib_dir).map_err(|e| e.to_string())?;
         self.lib = lib;
         match errors.first() {
             Some(e) => Err(e.to_string()),

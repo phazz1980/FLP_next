@@ -14,6 +14,17 @@ use crate::{Error, ParamValue, Result};
 pub const BLOCK_FILE: &str = "block.toml";
 pub const ESP32_CPP_TEMPLATE: &str = "esp32.cpp.tmpl";
 pub const DOCS_FILE: &str = "docs.md";
+/// Folder of user blocks, next to the built-in `library/`.
+pub const USER_LIBRARY_DIR: &str = "user_library";
+
+/// Folder of user blocks for a built-in library folder: `user_library/` next to it.
+pub fn user_library_dir(lib_dir: &Path) -> PathBuf {
+    let parent = lib_dir
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    parent.join(USER_LIBRARY_DIR)
+}
 
 /// Type of a value carried by a link.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -440,10 +451,14 @@ pub fn save_block(lib_dir: &Path, def: &BlockDef, template: &str, docs: &str) ->
     Ok(dir)
 }
 
-/// All known block types.
+/// All known block types: built-in ones from `library/` and user ones from
+/// `user_library/`. Built-in blocks cannot be changed: a user block may not take
+/// the type of a built-in one.
 #[derive(Debug, Clone)]
 pub struct Library {
     blocks: BTreeMap<String, LibraryBlock>,
+    /// Types of user blocks.
+    user: HashSet<String>,
     /// Variable access blocks, one per access kind and signal type (`var_get_float`).
     builtins: BTreeMap<String, LibraryBlock>,
 }
@@ -452,6 +467,7 @@ impl Default for Library {
     fn default() -> Self {
         Self {
             blocks: BTreeMap::new(),
+            user: HashSet::new(),
             builtins: crate::vars::builtin_blocks(),
         }
     }
@@ -466,28 +482,56 @@ impl Library {
         Ok((lib, errors))
     }
 
-    /// Adds blocks from one more library folder; blocks with the same type are replaced,
-    /// so a user folder added later overrides built-in blocks.
-    pub fn add_dir(&mut self, dir: impl AsRef<Path>) -> Result<Vec<Error>> {
+    /// Loads built-in blocks from `dir` and user blocks from [`user_library_dir`]
+    /// (if it exists). Problems of single blocks are returned alongside, as in
+    /// [`Library::load`].
+    pub fn load_with_user(dir: impl AsRef<Path>) -> Result<(Self, Vec<Error>)> {
         let dir = dir.as_ref();
-        let read_err = |source| Error::Read {
-            path: dir.to_owned(),
-            source,
-        };
-        let mut errors = Vec::new();
-        for entry in fs::read_dir(dir).map_err(read_err)? {
-            let path = entry.map_err(read_err)?.path();
-            if !path.join(BLOCK_FILE).is_file() {
-                continue;
-            }
-            match LibraryBlock::load(&path) {
-                Ok(block) => {
-                    self.blocks.insert(block.def.info.kind.clone(), block);
-                }
-                Err(e) => errors.push(e),
-            }
+        let (mut lib, mut errors) = Self::load(dir)?;
+        let user = user_library_dir(dir);
+        if user.is_dir() {
+            errors.extend(lib.add_user_dir(&user)?);
+        }
+        Ok((lib, errors))
+    }
+
+    /// Adds built-in blocks from one more folder; blocks with the same type are replaced.
+    pub fn add_dir(&mut self, dir: impl AsRef<Path>) -> Result<Vec<Error>> {
+        let (blocks, errors) = read_blocks(dir.as_ref())?;
+        for block in blocks {
+            self.blocks.insert(block.def.info.kind.clone(), block);
         }
         Ok(errors)
+    }
+
+    /// Adds user blocks from `dir`. A block whose type is taken by a built-in block
+    /// is skipped with an error: built-in blocks cannot be changed.
+    pub fn add_user_dir(&mut self, dir: impl AsRef<Path>) -> Result<Vec<Error>> {
+        let (blocks, mut errors) = read_blocks(dir.as_ref())?;
+        for block in blocks {
+            let kind = block.def.info.kind.clone();
+            if self.is_builtin(&kind) {
+                errors.push(Error::InvalidBlockDef {
+                    path: block.dir.join(BLOCK_FILE),
+                    message: format!("тип «{kind}» занят встроенным блоком"),
+                });
+                continue;
+            }
+            self.user.insert(kind.clone());
+            self.blocks.insert(kind, block);
+        }
+        Ok(errors)
+    }
+
+    /// Whether `kind` is a user block (from `user_library/`).
+    pub fn is_user(&self, kind: &str) -> bool {
+        self.user.contains(kind)
+    }
+
+    /// Whether `kind` is a built-in block, including variable blocks.
+    pub fn is_builtin(&self, kind: &str) -> bool {
+        let var_block = kind == crate::vars::VAR_GET || kind == crate::vars::VAR_SET;
+        var_block || (self.blocks.contains_key(kind) && !self.is_user(kind))
     }
 
     /// Adds or replaces a block (e.g. one created by AI before it is written to disk).
@@ -521,6 +565,27 @@ impl Library {
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
     }
+}
+
+/// Block folders of `dir`; broken blocks are returned as errors.
+fn read_blocks(dir: &Path) -> Result<(Vec<LibraryBlock>, Vec<Error>)> {
+    let read_err = |source| Error::Read {
+        path: dir.to_owned(),
+        source,
+    };
+    let mut blocks = Vec::new();
+    let mut errors = Vec::new();
+    for entry in fs::read_dir(dir).map_err(read_err)? {
+        let path = entry.map_err(read_err)?.path();
+        if !path.join(BLOCK_FILE).is_file() {
+            continue;
+        }
+        match LibraryBlock::load(&path) {
+            Ok(block) => blocks.push(block),
+            Err(e) => errors.push(e),
+        }
+    }
+    Ok((blocks, errors))
 }
 
 #[cfg(test)]
@@ -716,6 +781,43 @@ default = 0
         assert_eq!(d.params[0].title(), "t");
         let back: BlockDef = toml::from_str(&toml::to_string(&d).unwrap()).unwrap();
         assert_eq!(back, d);
+    }
+
+    #[test]
+    fn user_blocks() {
+        let root = std::env::temp_dir().join(format!("flp_user_lib_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let builtin = root.join("library");
+        let user = user_library_dir(&builtin);
+        assert_eq!(user, root.join(USER_LIBRARY_DIR));
+        let block = |kind: &str| {
+            def(&format!(
+                "[block]
+type = \"{kind}\"
+name = \"N\"
+group = \"G\"
+"
+            ))
+        };
+        save_block(&builtin, &block("and"), "", "").unwrap();
+        save_block(&user, &block("mine"), "", "").unwrap();
+        save_block(&user, &block("and"), "", "").unwrap();
+
+        let (lib, errors) = Library::load_with_user(&builtin).unwrap();
+        assert_eq!(lib.len(), 2);
+        assert!(lib.is_user("mine") && !lib.is_builtin("mine"));
+        assert!(lib.is_builtin("and") && !lib.is_user("and"));
+        assert!(lib.is_builtin(crate::vars::VAR_GET));
+        // The user copy of a built-in type is refused, the built-in one stays.
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].to_string().contains("встроенным"));
+        assert_eq!(lib.get("and").unwrap().dir, builtin.join("and"));
+
+        // Without a user folder only built-in blocks are loaded.
+        fs::remove_dir_all(&user).unwrap();
+        let (lib, errors) = Library::load_with_user(&builtin).unwrap();
+        assert!(errors.is_empty() && lib.len() == 1);
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

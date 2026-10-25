@@ -22,7 +22,7 @@ use serde_json::{json, Map, Value};
 pub trait Context {
     fn project(&self) -> &Project;
     fn library(&self) -> &Library;
-    /// Folder where new block types are written.
+    /// Folder of user blocks, where new block types are written (`user_library/`).
     fn library_dir(&self) -> std::path::PathBuf;
     /// Applies an edit (one undo step in the editor; saved to disk by the MCP server).
     fn edit(
@@ -168,7 +168,7 @@ pub fn tools() -> Vec<Tool> {
         },
         Tool {
             name: "create_block_type",
-            description: "Создать новый тип блока в библиотеке: block.toml, шаблон esp32.cpp.tmpl и docs.md. Формат — как у существующих блоков (см. get_block_type).",
+            description: "Создать новый пользовательский тип блока (папка user_library/): block.toml, шаблон esp32.cpp.tmpl и docs.md. Встроенные блоки менять нельзя. Формат — как у существующих блоков (см. get_block_type).",
             input_schema: json!({"type": "object", "properties": {
                 "type": {"type": "string"},
                 "block_toml": {"type": "string"},
@@ -494,6 +494,11 @@ fn create_block_type(
     let lib_dir = ctx.library_dir();
     if !flp_core::ident::is_valid_ident(kind) {
         return Err(format!("недопустимое имя типа «{kind}»"));
+    }
+    if ctx.library().is_builtin(kind) {
+        return Err(format!(
+            "тип «{kind}» занят встроенным блоком, встроенные блоки менять нельзя; выберите другое имя"
+        ));
     }
     let dir = lib_dir.join(kind);
     if dir.exists() {

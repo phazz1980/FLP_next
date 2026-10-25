@@ -194,7 +194,7 @@ impl Context for WorkerContext {
     }
 
     fn library_dir(&self) -> PathBuf {
-        self.lib_dir.clone()
+        flp_core::user_library_dir(&self.lib_dir)
     }
 
     fn edit(
@@ -232,7 +232,7 @@ impl Context for WorkerContext {
     }
 
     fn reload_library(&mut self) -> Result<(), String> {
-        let (lib, errors) = Library::load(&self.lib_dir).map_err(|e| e.to_string())?;
+        let (lib, errors) = Library::load_with_user(&self.lib_dir).map_err(|e| e.to_string())?;
         self.lib = lib;
         let _ = self.tx.send(Msg::ReloadLibrary);
         match errors.first() {

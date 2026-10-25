@@ -508,9 +508,25 @@ fn library(app: &mut EditorApp, ui: &mut Ui) {
     ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
     let needle = filter.to_lowercase();
 
+    // Built-in blocks come with the program and cannot be changed; user blocks
+    // live in user_library/ and are made in the block editor.
+    let tab_id = Id::unique("library_user_tab");
+    let mut user_tab: bool = ui.data_mut(|d| d.get_temp(tab_id).unwrap_or_default());
+    ui.horizontal(|ui| {
+        ui.selectable_value(&mut user_tab, false, "Встроенные");
+        ui.selectable_value(&mut user_tab, true, "Пользовательские");
+    });
+    ui.data_mut(|d| d.insert_temp(tab_id, user_tab));
+    if user_tab && ui.button("+ Новый блок").clicked() {
+        app.block_editor = Some(crate::blockedit::BlockEditor::new_block(app));
+    }
+
     let mut groups: BTreeMap<&str, Vec<(&str, String, &str)>> = BTreeMap::new();
     for b in app.lib.iter() {
         let info = &b.def.info;
+        if app.lib.is_user(&info.kind) != user_tab {
+            continue;
+        }
         let hay = format!("{} {} {}", info.kind, info.name, info.description).to_lowercase();
         if needle.is_empty() || hay.contains(&needle) {
             let symbol = info.symbol.as_deref().unwrap_or("");
@@ -526,7 +542,9 @@ fn library(app: &mut EditorApp, ui: &mut Ui) {
         }
     }
     let mut add = None;
-    let mut edit: Option<(String, bool)> = None;
+    // (type, action): 0 — open, 1 — copy, 2 — delete.
+    let mut edit: Option<(String, u8)> = None;
+    let lib = &app.lib;
     ScrollArea::vertical()
         .auto_shrink([ui.is_sizing_pass(), false])
         .show(ui, |ui| {
@@ -547,28 +565,45 @@ fn library(app: &mut EditorApp, ui: &mut Ui) {
                                 add = Some(kind.to_string());
                             }
                             resp.context_menu(|ui| {
-                                if ui.button("Изменить блок...").clicked() {
-                                    edit = Some((kind.to_string(), false));
+                                let user = lib.is_user(kind);
+                                let open = if user {
+                                    "Изменить блок..."
+                                } else {
+                                    "Посмотреть блок..."
+                                };
+                                if ui.button(open).clicked() {
+                                    edit = Some((kind.to_string(), 0));
                                 }
                                 if ui.button("Новый блок на основе этого...").clicked()
                                 {
-                                    edit = Some((kind.to_string(), true));
+                                    edit = Some((kind.to_string(), 1));
+                                }
+                                if user {
+                                    ui.separator();
+                                    if ui.button("Удалить блок...").clicked() {
+                                        edit = Some((kind.to_string(), 2));
+                                    }
                                 }
                             });
                         }
                     });
             }
-            if groups.is_empty() {
+            if groups.is_empty() && user_tab && needle.is_empty() {
+                ui.weak(
+                    "Своих блоков пока нет. Создайте блок кнопкой выше или на основе \
+                     встроенного: правая кнопка на нём во вкладке «Встроенные».",
+                );
+            } else if groups.is_empty() {
                 ui.weak("Ничего не найдено");
             }
         });
-    if let Some((kind, copy)) = edit {
+    if let Some((kind, action)) = edit {
         if let Some(block) = app.lib.get(&kind).cloned() {
-            app.block_editor = Some(if copy {
-                crate::blockedit::BlockEditor::copy_of(app, &block)
-            } else {
-                crate::blockedit::BlockEditor::edit(&block)
-            });
+            match action {
+                0 => app.block_editor = Some(crate::blockedit::BlockEditor::edit(app, &block)),
+                1 => app.block_editor = Some(crate::blockedit::BlockEditor::copy_of(app, &block)),
+                _ => app.block_delete = Some(kind),
+            }
         }
     }
     if let Some(kind) = add {

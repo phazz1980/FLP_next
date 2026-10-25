@@ -108,6 +108,8 @@ pub struct EditorApp {
     pub theme_editor: Option<crate::themeedit::ThemeEditor>,
     /// Open "Block editor" window.
     pub block_editor: Option<crate::blockedit::BlockEditor>,
+    /// User block waiting for the delete confirmation.
+    pub block_delete: Option<String>,
     /// Selected upload port; empty means automatic.
     pub port: String,
     pub ports: Vec<SerialPort>,
@@ -156,6 +158,7 @@ impl EditorApp {
             themes: theme::load_all(),
             theme_editor: None,
             block_editor: None,
+            block_delete: None,
             port: String::new(),
             ports: Vec::new(),
             port_scan: None,
@@ -237,6 +240,11 @@ impl EditorApp {
         });
     }
 
+    /// Folder of user blocks: `user_library/` next to the built-in library.
+    pub fn user_lib_dir(&self) -> Option<PathBuf> {
+        self.lib_dir.as_deref().map(flp_core::user_library_dir)
+    }
+
     pub fn reload_library(&mut self) {
         let Some(dir) = self.lib_dir.clone() else {
             self.info(
@@ -245,21 +253,25 @@ impl EditorApp {
             );
             return;
         };
-        match Library::load(&dir) {
+        match Library::load_with_user(&dir) {
             Ok((lib, errors)) => {
-                let count = lib.len();
+                let user = lib.iter().filter(|b| lib.is_user(&b.def.info.kind)).count();
+                let builtin = lib.len() - user;
                 self.lib = lib;
                 for e in errors {
                     self.info(LogLevel::Warning, format!("Блок пропущен: {e}"));
                 }
                 self.info(
                     LogLevel::Info,
-                    format!("Библиотека: {count} блоков из {}", dir.display()),
+                    format!(
+                        "Библиотека: {builtin} встроенных блоков из {}, {user} пользовательских",
+                        dir.display()
+                    ),
                 );
             }
             Err(e) => self.info(LogLevel::Error, e.to_string()),
         }
-        self.lib_stamp = newest_mtime(&dir);
+        self.lib_stamp = library_stamp(&dir);
         if let Some(doc) = &mut self.doc {
             doc.recheck(&self.lib);
         }
@@ -272,7 +284,7 @@ impl EditorApp {
         }
         self.lib_checked = Instant::now();
         let Some(dir) = &self.lib_dir else { return };
-        let stamp = newest_mtime(dir);
+        let stamp = library_stamp(dir);
         if stamp != self.lib_stamp {
             self.reload_library();
         }
@@ -1115,6 +1127,7 @@ impl eframe::App for EditorApp {
         dialogs::show(self, &ctx);
         crate::themeedit::show(self, &ctx);
         crate::blockedit::show(self, &ctx);
+        crate::blockedit::delete_dialog(self, &ctx);
         let pal = self.theme.palette;
         if let Some(d) = &mut self.debug {
             debugview::values_window(d, &pal, &ctx);
@@ -1143,6 +1156,11 @@ fn find_library(project: Option<&Path>) -> Option<PathBuf> {
         .flatten()
         .flat_map(|s| s.ancestors().map(|a| a.join("library")).collect::<Vec<_>>())
         .find(|d| d.is_dir())
+}
+
+/// Change stamp of the built-in and user block folders.
+fn library_stamp(dir: &Path) -> Option<SystemTime> {
+    newest_mtime(dir).max(newest_mtime(&flp_core::user_library_dir(dir)))
 }
 
 /// Latest modification time of any file in the library (two levels deep).

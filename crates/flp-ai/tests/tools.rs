@@ -55,7 +55,7 @@ impl Context for Mem {
 
     fn reload_library(&mut self) -> Result<(), String> {
         let mut lib = Library::load(repo_path("library")).unwrap().0;
-        lib.add_dir(&self.lib_dir).map_err(|e| e.to_string())?;
+        lib.add_user_dir(&self.lib_dir).map_err(|e| e.to_string())?;
         self.lib = lib;
         Ok(())
     }
@@ -215,7 +215,18 @@ fn creates_block_types_only_when_valid() {
                "docs": "# Удвоение\n"}),
     )
     .unwrap();
-    assert!(c.lib.get("twice").is_some());
+    assert!(c.lib.get("twice").is_some() && c.lib.is_user("twice"));
+    let builtin = "[block]
+type = \"and\"
+name = \"И\"
+group = \"Логика\"
+";
+    let taken = run(
+        &mut c,
+        "create_block_type",
+        json!({"type": "and", "block_toml": builtin, "template": ""}),
+    );
+    assert!(taken.unwrap_err().contains("встроенным"));
     let r = run(&mut c, "add_block", json!({"type": "twice"})).unwrap();
     assert_eq!(r["id"], "twice_1");
 }

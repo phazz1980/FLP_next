@@ -1203,8 +1203,15 @@ fn block_context_menu(app: &mut EditorApp, id: &str, resp: &egui::Response) {
         if var.is_some() && ui.button("Изменить переменную...").clicked() {
             edit_var = true;
         }
-        if library_kind.is_some() && ui.button("Изменить тип блока...").clicked() {
-            edit_type = true;
+        if let Some(block) = &library_kind {
+            let text = if app.lib.is_user(&block.def.info.kind) {
+                "Изменить тип блока..."
+            } else {
+                "Посмотреть тип блока..."
+            };
+            if ui.button(text).clicked() {
+                edit_type = true;
+            }
         }
         ui.menu_button("Перенести на плату", |ui| {
             let new = sheets.last().copied().unwrap_or(1) + 1;
@@ -1229,7 +1236,7 @@ fn block_context_menu(app: &mut EditorApp, id: &str, resp: &egui::Response) {
         }
     }
     if let (true, Some(block)) = (edit_type, &library_kind) {
-        app.block_editor = Some(crate::blockedit::BlockEditor::edit(block));
+        app.block_editor = Some(crate::blockedit::BlockEditor::edit(app, block));
     }
     if let Some(sheet) = move_to {
         let lib = app.lib.clone();
