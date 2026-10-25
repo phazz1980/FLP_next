@@ -46,6 +46,8 @@ fn kind_label(kind: ParamKind) -> &'static str {
 #[derive(Debug, Clone, PartialEq)]
 struct PortRow {
     name: String,
+    /// Caption in Russian; empty: the name is shown.
+    label: String,
     ty: SignalType,
     /// Empty: no default (inputs only).
     default: String,
@@ -57,6 +59,7 @@ impl PortRow {
     fn new(name: &str) -> Self {
         Self {
             name: name.to_owned(),
+            label: String::new(),
             ty: SignalType::Bool,
             default: String::new(),
             when: String::new(),
@@ -67,6 +70,7 @@ impl PortRow {
     fn from_def(p: &PortDef) -> Self {
         Self {
             name: p.name.clone(),
+            label: p.label.clone().unwrap_or_default(),
             ty: p.ty,
             default: p.default.as_ref().map(value_text).unwrap_or_default(),
             when: p.when.clone().unwrap_or_default(),
@@ -77,6 +81,7 @@ impl PortRow {
     fn to_def(&self) -> Result<PortDef, String> {
         Ok(PortDef {
             name: self.name.trim().to_owned(),
+            label: optional(&self.label),
             ty: self.ty,
             default: parse_signal(self.ty, &self.default)
                 .map_err(|e| format!("«{}»: {e}", self.name))?,
@@ -89,6 +94,7 @@ impl PortRow {
 #[derive(Debug, Clone, PartialEq)]
 struct ParamRow {
     name: String,
+    label: String,
     kind: ParamKind,
     default: String,
     min: String,
@@ -101,6 +107,7 @@ impl ParamRow {
     fn new(name: &str) -> Self {
         Self {
             name: name.to_owned(),
+            label: String::new(),
             kind: ParamKind::Int,
             default: String::new(),
             min: String::new(),
@@ -114,6 +121,7 @@ impl ParamRow {
         let num = |v: Option<f64>| v.map(|v| format!("{v}")).unwrap_or_default();
         Self {
             name: p.name.clone(),
+            label: p.label.clone().unwrap_or_default(),
             kind: p.kind,
             default: p.default.as_ref().map(value_text).unwrap_or_default(),
             min: num(p.min),
@@ -127,6 +135,7 @@ impl ParamRow {
         let err = |e: String| format!("«{}»: {e}", self.name);
         Ok(ParamDef {
             name: self.name.trim().to_owned(),
+            label: optional(&self.label),
             kind: self.kind,
             default: parse_param(self.kind, &self.default).map_err(err)?,
             min: parse_number(&self.min).map_err(err)?,
@@ -450,37 +459,41 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
         ed.update_generated(def);
     }
 
-    ui.horizontal_top(|ui| {
-        ui.vertical(|ui| {
-            ui.label(RichText::new("Вид на плате").strong());
-            match &def {
-                Ok(def) => crate::canvas::block_preview(ui, def, &pal),
-                Err(_) => {
-                    ui.weak("(исправьте ошибки описания)");
+    // Panels inside the window: the footer stays visible and the tab gets the rest.
+    let mut close = false;
+    egui::Panel::bottom("block_editor_footer").show(ui, |ui| {
+        status(ui, ed, &def, &pal);
+        close = footer(app, ui, ed, &def);
+    });
+    egui::Panel::top("block_editor_header").show(ui, |ui| {
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.label(RichText::new("Вид на плате").strong());
+                match &def {
+                    Ok(def) => crate::canvas::block_preview(ui, def, &pal),
+                    Err(_) => {
+                        ui.weak("(исправьте ошибки описания)");
+                    }
                 }
-            }
+            });
+            ui.add_space(16.0);
+            ui.vertical(|ui| header(app, ui, ed));
         });
         ui.separator();
-        ui.vertical(|ui| header(app, ui, ed));
+        ui.horizontal(|ui| {
+            let tabs = [
+                (Tab::Ports, "Входы и выходы"),
+                (Tab::Params, "Параметры"),
+                (Tab::Code, "Код ESP32"),
+                (Tab::Docs, "Описание"),
+                (Tab::Sketch, "Пробная генерация"),
+            ];
+            for (tab, text) in tabs {
+                ui.selectable_value(&mut ed.tab, tab, text);
+            }
+        });
     });
-    ui.separator();
-    ui.horizontal(|ui| {
-        let tabs = [
-            (Tab::Ports, "Входы и выходы"),
-            (Tab::Params, "Параметры"),
-            (Tab::Code, "Код ESP32"),
-            (Tab::Docs, "Описание"),
-            (Tab::Sketch, "Пробная генерация"),
-        ];
-        for (tab, text) in tabs {
-            ui.selectable_value(&mut ed.tab, tab, text);
-        }
-    });
-    ui.separator();
-
-    let reserve = 64.0;
-    let height = (ui.available_height() - reserve).max(120.0);
-    ui.allocate_ui(egui::vec2(ui.available_width(), height), |ui| {
+    egui::CentralPanel::default().show(ui, |ui| {
         ScrollArea::both()
             .id_salt("block_editor_tab")
             .auto_shrink([false, false])
@@ -499,9 +512,7 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
                 Tab::Sketch => sketch_tab(ui, ed, &pal),
             });
     });
-    ui.separator();
-    status(ui, ed, &def, &pal);
-    footer(app, ui, ed, def)
+    close
 }
 
 fn header(app: &EditorApp, ui: &mut Ui, ed: &mut BlockEditor) {
@@ -511,25 +522,24 @@ fn header(app: &EditorApp, ui: &mut Ui, ed: &mut BlockEditor) {
         .spacing([10.0, 4.0])
         .show(ui, |ui| {
             ui.label("Тип");
-            ui.add(TextEdit::singleline(&mut f.kind).desired_width(160.0))
+            ui.add_sized([160.0, 20.0], TextEdit::singleline(&mut f.kind))
                 .on_hover_text(
                     "Имя папки в library/ и поле type в схеме: латиница, цифры и «_». \
                      Новое имя сохраняет блок как новый тип, старый остаётся.",
                 );
             ui.label("Название");
-            ui.add(TextEdit::singleline(&mut f.name).desired_width(220.0));
+            ui.add_sized([220.0, 20.0], TextEdit::singleline(&mut f.name));
             ui.end_row();
 
             ui.label("Обозначение");
-            ui.add(
-                TextEdit::singleline(&mut f.symbol)
-                    .hint_text("как название")
-                    .desired_width(160.0),
+            ui.add_sized(
+                [160.0, 20.0],
+                TextEdit::singleline(&mut f.symbol).hint_text("как название"),
             )
             .on_hover_text("Короткая надпись на блоке: TON, a + b, &");
             ui.label("Группа");
             ui.horizontal(|ui| {
-                ui.add(TextEdit::singleline(&mut f.group).desired_width(180.0));
+                ui.add_sized([180.0, 20.0], TextEdit::singleline(&mut f.group));
                 let groups: BTreeSet<&str> =
                     app.lib.iter().map(|b| b.def.info.group.as_str()).collect();
                 ui.menu_button("▾", |ui| {
@@ -544,7 +554,7 @@ fn header(app: &EditorApp, ui: &mut Ui, ed: &mut BlockEditor) {
             ui.end_row();
 
             ui.label("Описание");
-            ui.add(TextEdit::singleline(&mut f.description).desired_width(160.0));
+            ui.add_sized([160.0, 20.0], TextEdit::singleline(&mut f.description));
             ui.label("");
             ui.horizontal(|ui| {
                 ui.checkbox(&mut f.memory, "Хранит состояние")
@@ -558,17 +568,15 @@ fn header(app: &EditorApp, ui: &mut Ui, ed: &mut BlockEditor) {
             ui.end_row();
 
             ui.label("Заголовки");
-            ui.add(
-                TextEdit::singleline(&mut f.includes)
-                    .hint_text("DHT.h, Wire.h")
-                    .desired_width(160.0),
+            ui.add_sized(
+                [160.0, 20.0],
+                TextEdit::singleline(&mut f.includes).hint_text("DHT.h, Wire.h"),
             )
             .on_hover_text("Файлы для #include через запятую");
             ui.label("Библиотеки");
-            ui.add(
-                TextEdit::singleline(&mut f.libraries)
-                    .hint_text("DHT sensor library")
-                    .desired_width(220.0),
+            ui.add_sized(
+                [220.0, 20.0],
+                TextEdit::singleline(&mut f.libraries).hint_text("DHT sensor library"),
             )
             .on_hover_text(
                 "Библиотеки arduino-cli через запятую, можно с версией: OneWire@2.3.8. \
@@ -651,11 +659,12 @@ fn ports_table(ui: &mut Ui, id: &str, rows: &mut Vec<PortRow>, inputs: bool) {
     let mut op = None;
     let len = rows.len();
     egui::Grid::new(id)
-        .num_columns(6)
+        .num_columns(7)
         .striped(true)
         .spacing([8.0, 4.0])
         .show(ui, |ui| {
             ui.label(RichText::new("Имя").strong());
+            ui.label(RichText::new("Подпись").strong());
             ui.label(RichText::new("Тип").strong());
             ui.label(
                 RichText::new(if inputs {
@@ -670,33 +679,40 @@ fn ports_table(ui: &mut Ui, id: &str, rows: &mut Vec<PortRow>, inputs: bool) {
             ui.label("");
             ui.end_row();
             for (i, row) in rows.iter_mut().enumerate() {
-                ui.add(TextEdit::singleline(&mut row.name).desired_width(90.0));
+                ui.add_sized([90.0, 20.0], TextEdit::singleline(&mut row.name));
+                label_edit(ui, &mut row.label, &row.name);
                 type_combo(ui, (id, i), &mut row.ty);
                 if inputs {
-                    ui.add(
-                        TextEdit::singleline(&mut row.default)
-                            .hint_text("обязателен")
-                            .desired_width(90.0),
+                    ui.add_sized(
+                        [90.0, 20.0],
+                        TextEdit::singleline(&mut row.default).hint_text("обязателен"),
                     )
                     .on_hover_text("Значение неподключённого входа; пусто — вход надо подключить");
                 } else {
                     ui.label("");
                 }
-                ui.add(
-                    TextEdit::singleline(&mut row.when)
-                        .hint_text("всегда")
-                        .desired_width(130.0),
+                ui.add_sized(
+                    [130.0, 20.0],
+                    TextEdit::singleline(&mut row.when).hint_text("всегда"),
                 )
                 .on_hover_text(
                     "Выражение по параметрам, например mode == \"input\": \
                      порт есть, только пока оно выполняется",
                 );
-                ui.add(TextEdit::singleline(&mut row.description).desired_width(220.0));
+                ui.add_sized([220.0, 20.0], TextEdit::singleline(&mut row.description));
                 row_ops(ui, i, len, &mut op);
                 ui.end_row();
             }
         });
     apply_op(rows, op);
+}
+
+/// Caption field of a port or parameter; the name shows through while it is empty.
+fn label_edit(ui: &mut Ui, label: &mut String, name: &str) {
+    ui.add_sized([120.0, 20.0], TextEdit::singleline(label).hint_text(name))
+        .on_hover_text(
+            "Как вход, выход или параметр называется на блоке и в свойствах;              можно по-русски. Пусто — показывается имя.",
+        );
 }
 
 fn ports_tab(ui: &mut Ui, f: &mut Form) {
@@ -719,7 +735,7 @@ fn ports_tab(ui: &mut Ui, f: &mut Form) {
     ports_table(ui, "block_outputs", &mut f.outputs, false);
     ui.add_space(8.0);
     ui.weak(
-        "Имена — латиница, цифры и «_»; входы, выходы и параметры не могут называться \
+        "Имена — латиница, цифры и «_»: по ним блок связан в схеме и в коде,          а русское название пишите в «Подпись». Входы, выходы и параметры не могут называться \
          одинаково, имена id и type заняты. Неявно приводится только int → float.",
     );
 }
@@ -736,12 +752,13 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
     let mut op = None;
     let len = f.params.len();
     egui::Grid::new("block_params")
-        .num_columns(8)
+        .num_columns(9)
         .striped(true)
         .spacing([8.0, 4.0])
         .show(ui, |ui| {
             for h in [
                 "Имя",
+                "Подпись",
                 "Вид",
                 "По умолчанию",
                 "Мин.",
@@ -754,7 +771,8 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
             ui.label("");
             ui.end_row();
             for (i, row) in f.params.iter_mut().enumerate() {
-                ui.add(TextEdit::singleline(&mut row.name).desired_width(90.0));
+                ui.add_sized([90.0, 20.0], TextEdit::singleline(&mut row.name));
+                label_edit(ui, &mut row.label, &row.name);
                 egui::ComboBox::from_id_salt(("param_kind", i))
                     .selected_text(kind_label(row.kind))
                     .width(130.0)
@@ -767,10 +785,9 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
                     ParamKind::Duration => "обязателен (1s, 500ms)",
                     _ => "обязателен",
                 };
-                ui.add(
-                    TextEdit::singleline(&mut row.default)
-                        .hint_text(hint)
-                        .desired_width(110.0),
+                ui.add_sized(
+                    [110.0, 20.0],
+                    TextEdit::singleline(&mut row.default).hint_text(hint),
                 )
                 .on_hover_text("Пусто — параметр надо задать в свойствах блока");
                 let numeric = matches!(
@@ -778,15 +795,17 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
                     ParamKind::Int | ParamKind::Float | ParamKind::Pin | ParamKind::Duration
                 );
                 for bound in [&mut row.min, &mut row.max] {
-                    ui.add_enabled(numeric, TextEdit::singleline(bound).desired_width(50.0))
-                        .on_hover_text("У duration — в миллисекундах");
+                    ui.add_enabled_ui(numeric, |ui| {
+                        ui.add_sized([50.0, 20.0], TextEdit::singleline(bound))
+                    })
+                    .inner
+                    .on_hover_text("У duration — в миллисекундах");
                 }
-                ui.add(
-                    TextEdit::singleline(&mut row.when)
-                        .hint_text("всегда")
-                        .desired_width(130.0),
+                ui.add_sized(
+                    [130.0, 20.0],
+                    TextEdit::singleline(&mut row.when).hint_text("всегда"),
                 );
-                ui.add(TextEdit::singleline(&mut row.description).desired_width(200.0));
+                ui.add_sized([200.0, 20.0], TextEdit::singleline(&mut row.description));
                 row_ops(ui, i, len, &mut op);
                 ui.end_row();
             }
@@ -794,42 +813,204 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
     apply_op(&mut f.params, op);
 }
 
+/// Text inserted into the template from the substitution menu or buttons.
+struct Snippet {
+    label: String,
+    text: String,
+    hint: String,
+}
+
+impl Snippet {
+    fn new(label: impl Into<String>, text: impl Into<String>, hint: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            text: text.into(),
+            hint: hint.into(),
+        }
+    }
+}
+
+/// Name with the caption, for menus: `in (Вход)`.
+fn row_title(name: &str, label: &str) -> String {
+    match label.trim() {
+        "" => name.to_owned(),
+        l => format!("{name} ({l})"),
+    }
+}
+
+/// Port substitutions: `{{ input.x }}` or `{{ output.x }}`.
+fn port_snippets(rows: &[PortRow], kind: &str) -> Vec<Snippet> {
+    rows.iter()
+        .map(|p| {
+            let hint = if p.description.is_empty() {
+                type_name(p.ty).to_owned()
+            } else {
+                format!("{}, {}", type_name(p.ty), p.description)
+            };
+            Snippet::new(
+                row_title(&p.name, &p.label),
+                format!("{{{{ {kind}.{} }}}}", p.name),
+                hint,
+            )
+        })
+        .collect()
+}
+
+/// Submenu of snippets; the chosen text goes to `insert`.
+fn snippet_menu(ui: &mut Ui, title: &str, items: &[Snippet], insert: &mut Option<String>) {
+    ui.add_enabled_ui(!items.is_empty(), |ui| {
+        ui.menu_button(title, |ui| {
+            for s in items {
+                let text = RichText::new(format!("{}   {}", s.label, s.text.trim_end()));
+                if ui.button(text).on_hover_text(&s.hint).clicked() {
+                    *insert = Some(s.text.clone());
+                    ui.close();
+                }
+            }
+        });
+    });
+}
+
+/// Inserts `text` at the cursor of the text edit `id` (replacing the selection,
+/// or at the end without a cursor) and puts the cursor after it.
+fn insert_at_cursor(ctx: &egui::Context, id: Id, template: &mut String, text: &str) {
+    use egui::text::{CCursor, CCursorRange};
+    let mut state = egui::text_edit::TextEditState::load(ctx, id).unwrap_or_default();
+    let chars = template.chars().count();
+    let (start, end) = state
+        .cursor
+        .char_range()
+        .map(|r| {
+            let (a, b) = (r.primary.index.0, r.secondary.index.0);
+            (a.min(b).min(chars), a.max(b).min(chars))
+        })
+        .unwrap_or((chars, chars));
+    let byte = |i: usize| {
+        template
+            .char_indices()
+            .nth(i)
+            .map_or(template.len(), |(b, _)| b)
+    };
+    let (from, to) = (byte(start), byte(end));
+    template.replace_range(from..to, text);
+    let cursor = CCursor::new(start + text.chars().count());
+    state.cursor.set_char_range(Some(CCursorRange::one(cursor)));
+    state.store(ctx, id);
+    ctx.memory_mut(|m| m.request_focus(id));
+}
+
 fn code_tab(ui: &mut Ui, f: &mut Form) {
     ui.weak(SECTIONS_HINT);
+    let inputs = port_snippets(&f.inputs, "input");
+    let outputs = port_snippets(&f.outputs, "output");
+    let literal: Vec<Snippet> = f
+        .params
+        .iter()
+        .map(|p| {
+            let hint = format!("{} — значение как литерал C++", kind_label(p.kind));
+            Snippet::new(
+                row_title(&p.name, &p.label),
+                format!("{{{{ param.{} }}}}", p.name),
+                hint,
+            )
+        })
+        .collect();
+    let conditions: Vec<Snippet> = f
+        .params
+        .iter()
+        .map(|p| {
+            let hint = "Код внутри попадёт в скетч, только если условие выполнено";
+            let text = match p.kind {
+                ParamKind::Bool => format!(
+                    "{{% if value.{} %}}
+
+{{% endif %}}
+",
+                    p.name
+                ),
+                ParamKind::Text => {
+                    format!(
+                        "{{% if value.{} == \"\" %}}
+
+{{% endif %}}
+",
+                        p.name
+                    )
+                }
+                _ => format!(
+                    "{{% if value.{} > 0 %}}
+
+{{% endif %}}
+",
+                    p.name
+                ),
+            };
+            Snippet::new(row_title(&p.name, &p.label), text, hint)
+        })
+        .collect();
+    let sections: Vec<Snippet> = [
+        ("// @global", "Переменные блока, по одной на экземпляр"),
+        ("// @setup", "Код в setup()"),
+        ("// @loop", "Код цикла, в порядке схемы"),
+        ("// @functions", "Функции блока, перед setup()"),
+        ("// @global once", "Общие переменные, один раз на проект"),
+        ("// @setup once", "Общий код в setup(), один раз"),
+        ("// @functions once", "Общие функции, один раз на проект"),
+    ]
+    .into_iter()
+    .map(|(text, hint)| {
+        Snippet::new(
+            "",
+            format!(
+                "{text}
+"
+            ),
+            hint,
+        )
+    })
+    .collect();
+
+    let id = Id::unique("block_template");
+    let mut insert = None;
     ui.horizontal_wrapped(|ui| {
-        ui.label("Подстановки (щелчок копирует):");
-        let mut items = vec!["{{ id }}".to_owned()];
-        items.extend(
-            f.inputs
-                .iter()
-                .map(|p| format!("{{{{ input.{} }}}}", p.name)),
-        );
-        items.extend(
-            f.outputs
-                .iter()
-                .map(|p| format!("{{{{ output.{} }}}}", p.name)),
-        );
-        for p in &f.params {
-            items.push(format!("{{{{ param.{} }}}}", p.name));
-            items.push(format!("{{{{ value.{} }}}}", p.name));
-        }
-        for item in items {
-            if ui.small_button(RichText::new(&item).monospace()).clicked() {
-                ui.ctx().copy_text(item);
+        ui.label("Вставить:");
+        let buttons = inputs.iter().chain(&outputs).chain(&literal);
+        for s in std::iter::once(&Snippet::new("", "{{ id }}", "")).chain(buttons) {
+            if ui
+                .small_button(RichText::new(&s.text).monospace())
+                .clicked()
+            {
+                insert = Some(s.text.clone());
             }
         }
-    })
-    .response
-    .on_hover_text(
-        "input — значение входа, output — переменная выхода (читается значение прошлого цикла), \
-         param — параметр как литерал C++, value — как число или строка для {% if %}",
-    );
-    ui.add(
-        TextEdit::multiline(&mut f.template)
-            .code_editor()
-            .desired_width(f32::INFINITY)
-            .desired_rows(24),
-    );
+    });
+    ui.weak("Правая кнопка в поле кода — меню подстановок; вставка идёт в место курсора.");
+    let output = TextEdit::multiline(&mut f.template)
+        .id(id)
+        .code_editor()
+        .desired_width(f32::INFINITY)
+        .desired_rows(24)
+        .show(ui);
+    output.response.context_menu(|ui| {
+        if ui
+            .button("{{ id }} — префикс переменных блока")
+            .on_hover_text("Имена в разделах без once начинайте с него: {{ id }}_start")
+            .clicked()
+        {
+            insert = Some("{{ id }}".into());
+            ui.close();
+        }
+        ui.separator();
+        snippet_menu(ui, "Вход", &inputs, &mut insert);
+        snippet_menu(ui, "Выход", &outputs, &mut insert);
+        snippet_menu(ui, "Параметр", &literal, &mut insert);
+        snippet_menu(ui, "Условие по параметру", &conditions, &mut insert);
+        ui.separator();
+        snippet_menu(ui, "Раздел", &sections, &mut insert);
+    });
+    if let Some(text) = insert {
+        insert_at_cursor(ui.ctx(), id, &mut f.template, &text);
+    }
 }
 
 fn sketch_tab(ui: &mut Ui, ed: &BlockEditor, pal: &Palette) {
@@ -875,13 +1056,13 @@ fn footer(
     app: &mut EditorApp,
     ui: &mut Ui,
     ed: &mut BlockEditor,
-    def: Result<BlockDef, String>,
+    def: &Result<BlockDef, String>,
 ) -> bool {
     let mut close = false;
     ui.horizontal(|ui| {
         if ed.confirm_close {
             ui.colored_label(app.theme.palette.warning, "Изменения не сохранены.");
-            if ui.button("Сохранить").clicked() && save(app, ed, &def) {
+            if ui.button("Сохранить").clicked() && save(app, ed, def) {
                 close = true;
             }
             if ui.button("Не сохранять").clicked() {
@@ -896,7 +1077,7 @@ fn footer(
             .add_enabled(def.is_ok() && ed.dirty(), egui::Button::new("Сохранить"))
             .clicked()
         {
-            save(app, ed, &def);
+            save(app, ed, def);
         }
         if ui
             .add_enabled(ed.form != ed.clean, egui::Button::new("Отменить правки"))
@@ -976,6 +1157,7 @@ includes = ["A.h", "B.h"]
 
 [[input]]
 name = "k"
+label = "Коэффициент"
 type = "float"
 default = 2.5
 
@@ -997,6 +1179,7 @@ min = 0
         };
         let form = Form::from_block(&block);
         assert_eq!(form.includes, "A.h, B.h");
+        assert_eq!(form.inputs[0].label, "Коэффициент");
         assert_eq!(form.to_def(), Ok(def));
         assert_eq!(form.template, "// @loop\n");
     }
@@ -1017,6 +1200,27 @@ min = 0
         form.kind = "ok".into();
         form.outputs[0].name = "in".into();
         assert!(form.to_def().is_err());
+    }
+
+    #[test]
+    fn insert_at_cursor_replaces_selection() {
+        use egui::text::{CCursor, CCursorRange};
+        let ctx = egui::Context::default();
+        let id = Id::unique("test_template");
+        let mut text = "аб".to_owned();
+        insert_at_cursor(&ctx, id, &mut text, "{{ id }}");
+        assert_eq!(text, "аб{{ id }}");
+
+        let mut state = egui::text_edit::TextEditState::default();
+        let range = CCursorRange::two(CCursor::new(1), CCursor::new(2));
+        state.cursor.set_char_range(Some(range));
+        state.store(&ctx, id);
+        let mut text = "абв".to_owned();
+        insert_at_cursor(&ctx, id, &mut text, "X");
+        assert_eq!(text, "аXв");
+        // The cursor moved after the inserted text.
+        insert_at_cursor(&ctx, id, &mut text, "Y");
+        assert_eq!(text, "аXYв");
     }
 
     #[test]

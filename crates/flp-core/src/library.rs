@@ -119,6 +119,10 @@ fn is_false(v: &bool) -> bool {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PortDef {
     pub name: String,
+    /// Caption in Russian shown on the block and in the properties instead of the
+    /// name; the name stays the identifier used in code and links.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     #[serde(rename = "type")]
     pub ty: SignalType,
     /// Value of an unconnected input. Only inputs may have it; without it
@@ -136,6 +140,10 @@ pub struct PortDef {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParamDef {
     pub name: String,
+    /// Caption in Russian shown on the block and in the properties instead of the
+    /// name; the name stays the identifier used in code and links.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     #[serde(rename = "type")]
     pub kind: ParamKind,
     /// Without a default the parameter is required.
@@ -151,6 +159,20 @@ pub struct ParamDef {
     pub when: Option<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+}
+
+impl PortDef {
+    /// What to show to the user: the caption, or the name without one.
+    pub fn title(&self) -> &str {
+        self.label.as_deref().unwrap_or(&self.name)
+    }
+}
+
+impl ParamDef {
+    /// What to show to the user: the caption, or the name without one.
+    pub fn title(&self) -> &str {
+        self.label.as_deref().unwrap_or(&self.name)
+    }
 }
 
 impl BlockDef {
@@ -674,6 +696,26 @@ type = \"bool\"
         d.inputs[0].name = "id".into();
         assert!(save_block(&lib, &d, "", "").is_err());
         fs::remove_dir_all(&lib).unwrap();
+    }
+
+    #[test]
+    fn labels() {
+        let d = def(&format!(
+            "{HEADER}[[input]]
+name = \"en\"
+label = \"Разрешение\"
+type = \"bool\"
+             [[param]]
+name = \"t\"
+type = \"int\"
+default = 0
+"
+        ));
+        assert_eq!(d.validate("x"), Ok(()));
+        assert_eq!(d.inputs[0].title(), "Разрешение");
+        assert_eq!(d.params[0].title(), "t");
+        let back: BlockDef = toml::from_str(&toml::to_string(&d).unwrap()).unwrap();
+        assert_eq!(back, d);
     }
 
     #[test]

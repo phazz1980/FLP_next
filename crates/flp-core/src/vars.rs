@@ -285,6 +285,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                 ty,
                 default: None,
                 when: None,
+                label: None,
                 description: String::new(),
             };
             let def = BlockDef {
@@ -321,6 +322,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                             ty: SignalType::Bool,
                             default: Some(ParamValue::Bool(true)),
                             when: None,
+                            label: None,
                             description: "Разрешение записи".to_owned(),
                         },
                     ],
@@ -334,6 +336,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                         min: None,
                         max: None,
                         when: None,
+                        label: None,
                         description: "Имя переменной".to_owned(),
                     }];
                     if !get {
@@ -344,6 +347,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                             min: None,
                             max: None,
                             when: None,
+                            label: None,
                             description: "Вход разрешения записи (en)".to_owned(),
                         });
                     }

@@ -255,7 +255,11 @@ fn block_body(app: &EditorApp, ui: &mut Ui, d: &mut BlockDialog) {
             ui.text_edit_singleline(&mut d.new_id);
             ui.end_row();
             for &p in &params {
-                ui.label(&p.name).on_hover_text(&p.description);
+                let hint = match &p.label {
+                    Some(_) => format!("{} ({})", p.description, p.name),
+                    None => p.description.clone(),
+                };
+                ui.label(p.title()).on_hover_text(hint.trim());
                 ui.horizontal(|ui| {
                     param_editor(ui, p, d);
                     let set = d.values.get(&p.name).is_some_and(Option::is_some);

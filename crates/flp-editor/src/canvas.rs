@@ -173,7 +173,7 @@ fn size(block: &Block, def: Option<&BlockDef>) -> Vec2 {
             let longest = |ports: &[&PortDef]| {
                 ports
                     .iter()
-                    .map(|p| text_w(&p.name, 9.5))
+                    .map(|p| text_w(p.title(), 9.5))
                     .fold(0.0, f32::max)
             };
             let ports_w = longest(&ins) + longest(&outs) + 22.0;
@@ -238,7 +238,7 @@ fn paint_box(
             painter.text(
                 p + Vec2::new(5.0 * z, 0.0),
                 Align2::LEFT_CENTER,
-                &port.name,
+                port.title(),
                 font(9.0),
                 pal.weak,
             );
@@ -260,7 +260,7 @@ fn paint_box(
             painter.text(
                 p - Vec2::new(5.0 * z, 0.0),
                 Align2::RIGHT_CENTER,
-                &port.name,
+                port.title(),
                 font(9.0),
                 pal.weak,
             );
@@ -273,7 +273,7 @@ fn paint_box(
                 block
                     .params
                     .get(&p.name)
-                    .map(|v| format!("{}={}", p.name, value_text(v)))
+                    .map(|v| format!("{}={}", p.title(), value_text(v)))
             })
             .collect();
         if !summary.is_empty() {
