@@ -8,6 +8,7 @@ edition.workspace = true
 flp-build = { path = "../flp-build" }
 flp-codegen = { path = "../flp-codegen" }
 flp-core = { path = "../flp-core" }
+flp-pdf = { path = "../flp-pdf" }
 flp-debug = { path = "../flp-debug", features = ["serial"] }
 serde.workspace = true
 serde_json.workspace = true

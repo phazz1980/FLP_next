@@ -174,3 +174,35 @@ fn shared_code_snapshot() {
     assert!(!code.contains("a_raw"), "{code}");
     assert!(code.contains("if (a_ok) b_last"), "{code}");
 }
+
+/// Block ids may be Cyrillic: the sketch keeps them in comments and uses
+/// transliterated C++ names, so it stays plain ASCII code.
+#[test]
+fn cyrillic_ids_give_ascii_code() {
+    let mut project = Project::load(repo_path("examples/thermostat")).unwrap();
+    let ids: Vec<String> = project.logic.blocks.iter().map(|b| b.id.clone()).collect();
+    for (i, id) in ids.iter().enumerate() {
+        project
+            .rename_block(id, &format!("блок_{i}_ё"))
+            .unwrap_or_else(|e| panic!("{id}: {e}"));
+    }
+    let code = generate(&project, &library(), &ArduinoCpp::RELEASE).unwrap();
+    for line in code.lines() {
+        let code_part = line.split("//").next().unwrap();
+        assert!(code_part.is_ascii(), "не ASCII вне комментария: {line}");
+    }
+    assert!(code.contains("// блок_0_ё"), "{code}");
+}
+
+/// Templates can name Cyrillic ports and parameters as attributes.
+#[test]
+fn templates_accept_cyrillic_names() {
+    let env = minijinja::Environment::new();
+    let text = env
+        .render_str(
+            "{{ input.вход }}",
+            minijinja::context! { input => minijinja::context! { вход => "x" } },
+        )
+        .unwrap();
+    assert_eq!(text, "x");
+}

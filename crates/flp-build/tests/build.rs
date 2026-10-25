@@ -21,10 +21,10 @@ fn examples_compile() {
     for name in ["pump", "button"] {
         let project = Project::load(repo_path("examples").join(name)).unwrap();
         let code = generate(&project, &lib, &ArduinoCpp::RELEASE).unwrap();
-        write_sketch(&project.root, &code).unwrap();
+        write_sketch(&project.work_dir(), &code).unwrap();
         let mut log = Vec::new();
         let result = cli.compile(
-            &project.root,
+            &project.work_dir(),
             &project.config.board,
             &CompileOptions {
                 low_priority: true,

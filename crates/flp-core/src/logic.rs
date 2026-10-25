@@ -1,4 +1,4 @@
-//! `logic.toml`: blocks and links of the schema, without coordinates.
+//! Blocks and links of the schema, without coordinates.
 
 use std::collections::BTreeMap;
 use std::fmt;

@@ -117,7 +117,7 @@ fn check_blocks<'a>(
             report.block_error(
                 id,
                 format!(
-                    "недопустимый id блока «{id}»: только латиница, цифры и «_», первой — буква"
+                    "недопустимый id блока «{id}»: только буквы (можно русские), цифры и «_», первой — буква, без пробелов и точек"
                 ),
             );
         }
@@ -491,7 +491,7 @@ fn check_layout(logic: &Logic, layout: &Layout, report: &mut Report) {
                 Severity::Warning,
                 None,
                 None,
-                format!("в layout.toml есть координаты несуществующего блока «{id}»"),
+                format!("в разметке проекта есть координаты несуществующего блока «{id}»"),
             );
         }
     }

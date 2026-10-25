@@ -83,7 +83,7 @@ impl BoardDialog {
         }
     }
 
-    /// Settings to write to `project.toml`: only options that differ from the board defaults.
+    /// Settings to write to the project file: only options that differ from the board defaults.
     pub fn config(&self) -> Result<BoardConfig, String> {
         let fqbn = self.fqbn.trim();
         if fqbn.split(':').count() < 3 {

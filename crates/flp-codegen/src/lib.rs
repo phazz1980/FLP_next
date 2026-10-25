@@ -22,9 +22,6 @@ pub use program::{Input, Instance, Program, Signal, Source};
 
 use flp_core::{Library, Project};
 
-/// Folder inside a project with generated and build files.
-pub const WORK_DIR: &str = ".flp";
-
 /// Output for one target language.
 pub trait Backend {
     /// Template file a block must have to be supported by this backend.
@@ -44,12 +41,13 @@ pub fn generate(
     backend.generate(&program)
 }
 
-/// Writes the Arduino sketch to `<project>/.flp/sketch/sketch.ino`.
+/// Writes the Arduino sketch to `<work_dir>/sketch/sketch.ino`
+/// (`work_dir` is [`Project::work_dir`]).
 ///
 /// The file is rewritten only when its contents change, so the build cache
 /// is not invalidated by a no-op generation. Returns the path and whether it changed.
-pub fn write_sketch(project_root: &Path, code: &str) -> Result<(PathBuf, bool), GenError> {
-    let dir = sketch_dir(project_root);
+pub fn write_sketch(work_dir: &Path, code: &str) -> Result<(PathBuf, bool), GenError> {
+    let dir = sketch_dir(work_dir);
     let path = dir.join("sketch.ino");
     if fs::read_to_string(&path).is_ok_and(|old| old == code) {
         return Ok((path, false));
@@ -64,6 +62,6 @@ pub fn write_sketch(project_root: &Path, code: &str) -> Result<(PathBuf, bool), 
 }
 
 /// Folder of the generated sketch; arduino-cli requires it to match the `.ino` name.
-pub fn sketch_dir(project_root: &Path) -> PathBuf {
-    project_root.join(WORK_DIR).join("sketch")
+pub fn sketch_dir(work_dir: &Path) -> PathBuf {
+    work_dir.join("sketch")
 }

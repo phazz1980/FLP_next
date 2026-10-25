@@ -31,6 +31,19 @@ pub enum Error {
         source: toml::ser::Error,
     },
 
+    #[error("в папке {} нет проекта (файла .flpn)", .path.display())]
+    NoProject { path: PathBuf },
+
+    #[error("{} — не архив проекта: {}", .path.display(), .source)]
+    Archive {
+        path: PathBuf,
+        #[source]
+        source: zip::result::ZipError,
+    },
+
+    #[error("в архиве {} нет {}", .path.display(), .entry)]
+    MissingEntry { path: PathBuf, entry: &'static str },
+
     #[error("неверное описание блока {}: {}", .path.display(), .message)]
     InvalidBlockDef { path: PathBuf, message: String },
 }

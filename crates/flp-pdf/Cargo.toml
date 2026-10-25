@@ -1,0 +1,10 @@
+[package]
+name = "flp-pdf"
+description = "Picture of all sheets of an FLP_next project as PDF"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+flp-core = { path = "../flp-core" }
+printpdf = { version = "=0.7.0", features = ["font_subsetting"] }
+thiserror.workspace = true

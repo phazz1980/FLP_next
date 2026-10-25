@@ -1,4 +1,4 @@
-//! `layout.toml`: block coordinates, used only by the editor.
+//! `[layout]` of the project file: block coordinates, used only by the editor.
 
 use std::collections::BTreeMap;
 
@@ -24,6 +24,10 @@ pub struct SheetInfo {
 }
 
 impl Layout {
+    pub fn is_empty(&self) -> bool {
+        self.sheets.is_empty() && self.blocks.is_empty()
+    }
+
     pub fn sheet(&self, number: u32) -> Option<&SheetInfo> {
         self.sheets.iter().find(|s| s.number == number)
     }

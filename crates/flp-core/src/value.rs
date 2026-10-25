@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Value of a block parameter as written in `logic.toml` (or JSON for AI).
+/// Value of a block parameter as written in the project file (or JSON for AI).
 ///
 /// The meaning (pin, duration, ...) comes from the parameter kind in `block.toml`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

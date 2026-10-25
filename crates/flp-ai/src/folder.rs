@@ -1,4 +1,4 @@
-//! [`Context`] over a project folder on disk: used by the MCP server and usable
+//! [`Context`] over a project file on disk: used by the MCP server and usable
 //! without the editor. The project is re-read before each command so changes
 //! saved by the editor are seen, and saved after each edit.
 
@@ -13,26 +13,28 @@ use flp_core::{Library, Project};
 use crate::Context;
 
 pub struct FolderContext {
-    root: PathBuf,
     lib_dir: PathBuf,
     project: Project,
     lib: Library,
 }
 
 impl FolderContext {
-    pub fn open(root: &Path, lib_dir: &Path) -> Result<Self, String> {
+    /// Opens a project file, or a folder holding one (see [`Project::load`]).
+    pub fn open(path: &Path, lib_dir: &Path) -> Result<Self, String> {
         let (lib, _) = Library::load_with_user(lib_dir).map_err(|e| e.to_string())?;
         Ok(Self {
-            root: root.to_owned(),
             lib_dir: lib_dir.to_owned(),
-            project: Project::load(root).map_err(|e| e.to_string())?,
+            project: Project::load(path).map_err(|e| e.to_string())?,
             lib,
         })
     }
 
     /// Re-reads the project from disk (call before each command).
     pub fn refresh(&mut self) -> Result<(), String> {
-        self.project = Project::load(&self.root).map_err(|e| e.to_string())?;
+        // A converted old-format folder has no file until the first edit.
+        if self.project.path.is_file() {
+            self.project = Project::load(&self.project.path).map_err(|e| e.to_string())?;
+        }
         Ok(())
     }
 }
@@ -56,7 +58,11 @@ impl Context for FolderContext {
     ) -> Result<(), String> {
         let mut changed = self.project.clone();
         edit(&mut changed)?;
-        changed.save().map_err(|e| e.to_string())?;
+        if let Some(warning) =
+            flp_pdf::save_project(&changed, &self.lib).map_err(|e| e.to_string())?
+        {
+            eprintln!("{warning}");
+        }
         self.project = changed;
         Ok(())
     }
@@ -72,7 +78,7 @@ impl Context for FolderContext {
             .board
             .port
             .clone()
-            .ok_or("порт платы не задан в project.toml ([board] port = \"COM3\")")?;
+            .ok_or("порт платы не задан в файле проекта ([board] port = \"COM3\")")?;
         let program = Program::build(&self.project, &self.lib).map_err(|e| e.to_string())?;
         let table = flp_codegen::debug::debug_table(&program);
         let session =
@@ -131,7 +137,7 @@ pub fn build_project(
     let code = ArduinoCpp { debug }
         .generate(&program)
         .map_err(|e| e.to_string())?;
-    flp_codegen::write_sketch(&project.root, &code).map_err(|e| e.to_string())?;
+    flp_codegen::write_sketch(&project.work_dir(), &code).map_err(|e| e.to_string())?;
     let cli = ArduinoCli::locate().map_err(|e| e.to_string())?;
     let mut log = Vec::new();
     let mut collect = |line: &str| log.push(line.to_owned());
@@ -147,7 +153,7 @@ pub fn build_project(
         ..Default::default()
     };
     let tail = |log: &[String]| log[log.len().saturating_sub(15)..].join("\n");
-    if let Err(e) = cli.compile(&project.root, board, &opts, &mut collect) {
+    if let Err(e) = cli.compile(&project.work_dir(), board, &opts, &mut collect) {
         return Err(format!("{e}\n{}", tail(&log)));
     }
     if !upload {
@@ -156,7 +162,7 @@ pub fn build_project(
     let port = cli
         .choose_port(port.as_deref(), board)
         .map_err(|e| e.to_string())?;
-    if let Err(e) = cli.upload(&project.root, board, &port, &mut collect) {
+    if let Err(e) = cli.upload(&project.work_dir(), board, &port, &mut collect) {
         return Err(format!("{e}\n{}", tail(&log)));
     }
     Ok(format!("Прошивка залита на {port}\n{}", tail(&log)))

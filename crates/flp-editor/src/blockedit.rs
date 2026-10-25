@@ -397,7 +397,7 @@ impl BlockEditor {
     }
 
     fn dirty(&self) -> bool {
-        !self.read_only && (self.form != self.clean || self.original.is_none())
+        !self.read_only && self.form != self.clean
     }
 
     /// Regenerates the trial sketch when the definition or template changed.
@@ -455,8 +455,56 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
     } else if !open {
         close = true;
     }
+    if ed.confirm_close && !close {
+        close = confirm_close(app, ctx, &mut ed);
+    }
     if !close {
         app.block_editor = Some(ed);
+    }
+}
+
+/// Modal question on closing with unsaved changes; returns true when the window
+/// should close (saved or changes dropped).
+fn confirm_close(app: &mut EditorApp, ctx: &egui::Context, ed: &mut BlockEditor) -> bool {
+    let def = ed.form.to_def();
+    let name = ed.form.name.trim().to_owned();
+    let error = app.theme.palette.error;
+    let mut answer = None;
+    egui::Modal::new(Id::unique("block_editor_close")).show(ctx, |ui| {
+        ui.label(RichText::new("Сохранить изменения?").strong());
+        ui.label(format!("В блоке «{name}» есть несохранённые изменения."));
+        if let Err(e) = &def {
+            ui.colored_label(error, format!("Сохранить нельзя: {e}"));
+        }
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(def.is_ok(), egui::Button::new("Сохранить"))
+                .clicked()
+            {
+                answer = Some(1);
+            }
+            if ui.button("Выйти без сохранения").clicked() {
+                answer = Some(2);
+            }
+            if ui.button("Отмена").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape))
+            {
+                answer = Some(0);
+            }
+        });
+    });
+    match answer {
+        Some(1) => {
+            let saved = save(app, ed, &def);
+            ed.confirm_close = saved;
+            saved
+        }
+        Some(2) => true,
+        Some(_) => {
+            ed.confirm_close = false;
+            false
+        }
+        None => false,
     }
 }
 
@@ -540,7 +588,7 @@ fn header(app: &EditorApp, ui: &mut Ui, ed: &mut BlockEditor) {
             ui.label("Тип");
             ui.add_sized([160.0, 20.0], TextEdit::singleline(&mut f.kind))
                 .on_hover_text(
-                    "Имя папки в user_library/ и поле type в схеме: латиница, цифры и «_». \
+                    "Имя папки в user_library/ и поле type в схеме: буквы (можно русские), цифры и «_». \
                      Новое имя сохраняет блок как новый тип, старый остаётся.",
                 );
             ui.label("Название");
@@ -751,7 +799,8 @@ fn ports_tab(ui: &mut Ui, f: &mut Form) {
     ports_table(ui, "block_outputs", &mut f.outputs, false);
     ui.add_space(8.0);
     ui.weak(
-        "Имена — латиница, цифры и «_»: по ним блок связан в схеме и в коде,          а русское название пишите в «Подпись». Входы, выходы и параметры не могут называться \
+        "Имена — буквы (можно русские), цифры и «_», без пробелов: по ним блок связан в схеме \
+         и в коде; название с пробелами пишите в «Подпись». Входы, выходы и параметры не могут называться \
          одинаково, имена id и type заняты. Неявно приводится только int → float.",
     );
 }
@@ -1102,21 +1151,10 @@ fn footer(
         return close;
     }
     ui.horizontal(|ui| {
-        if ed.confirm_close {
-            ui.colored_label(app.theme.palette.warning, "Изменения не сохранены.");
-            if ui.button("Сохранить").clicked() && save(app, ed, def) {
-                close = true;
-            }
-            if ui.button("Не сохранять").clicked() {
-                close = true;
-            }
-            if ui.button("Отмена").clicked() {
-                ed.confirm_close = false;
-            }
-            return;
-        }
+        // A new block can be saved untouched; an opened one only after changes.
+        let savable = ed.dirty() || ed.original.is_none();
         if ui
-            .add_enabled(def.is_ok() && ed.dirty(), egui::Button::new("Сохранить"))
+            .add_enabled(def.is_ok() && savable, egui::Button::new("Сохранить"))
             .clicked()
         {
             save(app, ed, def);

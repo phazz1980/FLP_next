@@ -109,10 +109,12 @@ impl Doc {
         }
     }
 
-    pub fn save(&mut self) -> flp_core::Result<()> {
-        self.project.save()?;
+    /// Saves the project archive with the PDF of all sheets; returns a warning
+    /// if the PDF could not be made.
+    pub fn save(&mut self, lib: &Library) -> flp_core::Result<Option<String>> {
+        let warning = flp_pdf::save_project(&self.project, lib)?;
         self.dirty = false;
-        Ok(())
+        Ok(warning)
     }
 
     fn after_history(&mut self, lib: &Library) {

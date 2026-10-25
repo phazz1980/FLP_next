@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use flp_core::ident::c_ident;
 use flp_core::{check, Block, Library, LibraryBlock, ParamValue, PortRef, Project, SignalType};
 
 use crate::GenError;
@@ -97,7 +98,8 @@ impl<'a> Program<'a> {
         for &bi in &report.order {
             let block = &logic.blocks[bi];
             for out in lib_block(block).def.active_outputs(&block.params) {
-                let name = format!("{}_{}", block.id, out.name);
+                // Ids and port names may be Cyrillic; the C++ name is transliterated.
+                let name = format!("{}_{}", c_ident(&block.id), c_ident(&out.name));
                 let port = PortRef::new(&block.id, &out.name);
                 if let Some(a) = names.insert(name.clone(), port.clone()) {
                     return Err(GenError::NameClash { name, a, b: port });

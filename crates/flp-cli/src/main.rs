@@ -37,12 +37,12 @@ struct Cli {
 enum Command {
     /// Проверить схему проекта
     Check {
-        /// Папка проекта
+        /// Файл проекта .flpn (или папка с ним)
         project: PathBuf,
     },
-    /// Сгенерировать скетч Arduino в <проект>/.flp/sketch/sketch.ino
+    /// Сгенерировать скетч Arduino в .flp/<проект>/sketch/sketch.ino рядом с проектом
     Gen {
-        /// Папка проекта
+        /// Файл проекта .flpn (или папка с ним)
         project: PathBuf,
         /// Вывести скетч в консоль вместо записи в файл
         #[arg(long)]
@@ -53,7 +53,7 @@ enum Command {
     },
     /// Сгенерировать скетч и собрать прошивку через arduino-cli
     Build {
-        /// Папка проекта
+        /// Файл проекта .flpn (или папка с ним)
         project: PathBuf,
         /// Отладочная сборка: модуль онлайн-отладки, без сильной оптимизации
         #[arg(long)]
@@ -61,22 +61,28 @@ enum Command {
     },
     /// Показывать живые значения с платы (прошивка собрана с --debug)
     Monitor {
-        /// Папка проекта
+        /// Файл проекта .flpn (или папка с ним)
         project: PathBuf,
-        /// Порт платы, например COM3 (по умолчанию из project.toml)
+        /// Порт платы, например COM3 (по умолчанию из настроек проекта)
         #[arg(long, short)]
         port: Option<String>,
     },
     /// Собрать прошивку и залить её на плату
     Upload {
-        /// Папка проекта
+        /// Файл проекта .flpn (или папка с ним)
         project: PathBuf,
-        /// Порт платы, например COM3 (по умолчанию из project.toml или единственный найденный)
+        /// Порт платы, например COM3 (по умолчанию из настроек проекта или единственный найденный)
         #[arg(long, short)]
         port: Option<String>,
         /// Отладочная сборка: модуль онлайн-отладки, без сильной оптимизации
         #[arg(long)]
         debug: bool,
+    },
+    /// Перевести проект из старого формата (папка с project.toml, logic.toml,
+    /// layout.toml) в один файл <папка>/<папка>.flpn; старые файлы не удаляются
+    Convert {
+        /// Папка проекта в старом формате
+        project: PathBuf,
     },
 }
 
@@ -98,6 +104,33 @@ fn main() -> ExitCode {
             debug,
         } => run_build(&project, cli.library.as_deref(), debug, Some(port)),
         Command::Monitor { project, port } => run_monitor(&project, cli.library.as_deref(), port),
+        Command::Convert { project } => run_convert(&project, cli.library.as_deref()),
+    }
+}
+
+fn run_convert(dir: &Path, library: Option<&Path>) -> ExitCode {
+    let result = Project::load(dir).and_then(|p| {
+        if p.path.exists() {
+            println!("Проект уже в одном файле: {}", p.path.display());
+            return Ok(());
+        }
+        // Without the library the archive is written without the PDF of sheets.
+        let warning = match load_library(dir, library) {
+            Some(lib) => flp_pdf::save_project(&p, &lib)?,
+            None => p.save().map(|()| None)?,
+        };
+        println!("Записан {}", p.path.display());
+        if let Some(w) = warning {
+            println!("предупреждение: {w}");
+        }
+        Ok(())
+    });
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            ExitCode::from(EXIT_LOAD_FAILED)
+        }
     }
 }
 
@@ -204,13 +237,13 @@ fn run_build(
         Err(e) => return build_failed(e),
     }
     println!("Сборка для {}...", board.fqbn);
-    if let Err(e) = cli.compile(&project.root, board, &opts, &mut print) {
+    if let Err(e) = cli.compile(&project.work_dir(), board, &opts, &mut print) {
         return build_failed(e);
     }
     let Some(port) = upload else {
         println!(
             "Сборка готова: {}",
-            flp_build::build_dir(&project.root).display()
+            flp_build::build_dir(&project.work_dir()).display()
         );
         return ExitCode::SUCCESS;
     };
@@ -219,7 +252,7 @@ fn run_build(
         Err(e) => return build_failed(e),
     };
     println!("Заливка на {port}...");
-    if let Err(e) = cli.upload(&project.root, board, &port, &mut print) {
+    if let Err(e) = cli.upload(&project.work_dir(), board, &port, &mut print) {
         return build_failed(e);
     }
     println!("Прошивка залита на {port}");
@@ -253,7 +286,7 @@ fn generate(
 }
 
 fn write_sketch(project: &Project, code: &str) -> Result<(), ExitCode> {
-    match flp_codegen::write_sketch(&project.root, code) {
+    match flp_codegen::write_sketch(&project.work_dir(), code) {
         Ok((path, true)) => println!("Скетч записан: {}", path.display()),
         Ok((path, false)) => println!("Скетч не изменился: {}", path.display()),
         Err(e) => {
@@ -282,7 +315,9 @@ fn run_monitor(project_dir: &Path, library: Option<&Path>, port: Option<String>)
         }
     };
     let Some(port) = port.or_else(|| project.config.board.port.clone()) else {
-        eprintln!("ошибка: укажите порт через --port или в project.toml ([board] port = \"COM3\")");
+        eprintln!(
+            "ошибка: укажите порт через --port или в файле проекта ([board] port = \"COM3\")"
+        );
         return ExitCode::from(EXIT_BUILD_FAILED);
     };
     let table = flp_codegen::debug::debug_table(&program);

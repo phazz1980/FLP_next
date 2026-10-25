@@ -51,7 +51,7 @@ pub fn preview_block(def: &BlockDef, template: &str) -> Result<String, GenError>
         inline_templates: [(ESP32_CPP_TEMPLATE, template.to_owned())].into(),
     });
     let project = Project {
-        root: PathBuf::new(),
+        path: PathBuf::new(),
         config: ProjectConfig {
             project: ProjectInfo {
                 name: def.info.name.clone(),

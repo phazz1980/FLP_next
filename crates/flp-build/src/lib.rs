@@ -1,6 +1,6 @@
 //! Building and uploading firmware with arduino-cli.
 //!
-//! Each project keeps a persistent build folder `<project>/.flp/build`, so
+//! Each project keeps a persistent build folder `<dir>/.flp/<project>/build`, so
 //! repeated builds only recompile the changed sketch.
 
 use std::collections::BTreeMap;
@@ -9,10 +9,12 @@ use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
+use std::time::Duration;
 
-use flp_codegen::{sketch_dir, WORK_DIR};
+use flp_codegen::sketch_dir;
 use flp_core::BoardConfig;
 use serde::Deserialize;
 
@@ -21,6 +23,9 @@ pub use output::{classify, OutputLine};
 
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
+    #[error("отменено")]
+    Cancelled,
+
     #[error(
         "arduino-cli не найден. Установите его (`winget install ArduinoSA.CLI`) \
          или укажите путь в переменной FLP_ARDUINO_CLI"
@@ -51,7 +56,7 @@ pub enum BuildError {
 
     #[error(
         "найдено несколько портов ({}); укажите нужный через --port \
-         или в project.toml ([board] port = \"COM3\")",
+         или в файле проекта ([board] port = \"COM3\")",
         .0.join(", ")
     )]
     AmbiguousPort(Vec<String>),
@@ -164,20 +169,58 @@ fn plain_path(path: &Path) -> PathBuf {
     }
 }
 
-/// Persistent build folder of a project.
-pub fn build_dir(project_root: &Path) -> PathBuf {
-    project_root.join(WORK_DIR).join("build")
+/// Persistent build folder inside the project work folder ([`flp_core::Project::work_dir`]).
+pub fn build_dir(work_dir: &Path) -> PathBuf {
+    work_dir.join("build")
+}
+
+/// Shared control of a running arduino-cli: cancellation and priority, set from
+/// another thread (e.g. the editor UI).
+#[derive(Debug, Default)]
+pub struct BuildControl {
+    cancel: AtomicBool,
+    raise: AtomicBool,
+}
+
+impl BuildControl {
+    /// Kills the running command; it ends with [`BuildError::Cancelled`].
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+
+    /// Raises a low-priority build to normal priority.
+    pub fn raise_priority(&self) {
+        self.raise.store(true, Ordering::Relaxed);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+
+    fn raised(&self) -> bool {
+        self.raise.load(Ordering::Relaxed)
+    }
 }
 
 /// Handle to the arduino-cli executable.
 #[derive(Debug, Clone)]
 pub struct ArduinoCli {
     exe: PathBuf,
+    control: Option<Arc<BuildControl>>,
 }
 
 impl ArduinoCli {
     pub fn new(exe: impl Into<PathBuf>) -> Self {
-        Self { exe: exe.into() }
+        Self {
+            exe: exe.into(),
+            control: None,
+        }
+    }
+
+    /// Commands run under `control`: they can be cancelled and reprioritized.
+    pub fn with_control(mut self, control: Arc<BuildControl>) -> Self {
+        self.control = Some(control);
+        self
     }
 
     /// Finds arduino-cli: `FLP_ARDUINO_CLI`, then `PATH`, then the default
@@ -211,19 +254,19 @@ impl ArduinoCli {
     /// Compiles the generated sketch of the project. Output lines go to `on_line`.
     pub fn compile(
         &self,
-        project_root: &Path,
+        work_dir: &Path,
         board: &BoardConfig,
         opts: &CompileOptions,
         on_line: &mut dyn FnMut(&str),
     ) -> Result<(), BuildError> {
-        let project_root = &plain_path(project_root);
+        let work_dir = &plain_path(work_dir);
         let mut opts = opts.clone();
-        for dir in bundled_libraries(project_root) {
+        for dir in bundled_libraries(work_dir) {
             if !opts.libraries.contains(&dir) {
                 opts.libraries.push(dir);
             }
         }
-        let args = compile_args(project_root, board, &opts);
+        let args = compile_args(work_dir, board, &opts);
         let status = self.run(&args, opts.low_priority, on_line)?;
         check_status("сборка", status)
     }
@@ -231,12 +274,12 @@ impl ArduinoCli {
     /// Uploads the last build to the board on `port`.
     pub fn upload(
         &self,
-        project_root: &Path,
+        work_dir: &Path,
         board: &BoardConfig,
         port: &str,
         on_line: &mut dyn FnMut(&str),
     ) -> Result<(), BuildError> {
-        let args = upload_args(&plain_path(project_root), board, port);
+        let args = upload_args(&plain_path(work_dir), board, port);
         let status = self.run(&args, false, on_line)?;
         check_status("заливка", status)
     }
@@ -295,7 +338,7 @@ impl ArduinoCli {
         parse_board_details(&String::from_utf8_lossy(&output.stdout))
     }
 
-    /// Port for upload: explicit, from `project.toml`, or the only serial port found.
+    /// Port for upload: explicit, from the project settings, or the only serial port found.
     pub fn choose_port(
         &self,
         explicit: Option<&str>,
@@ -326,7 +369,12 @@ impl ArduinoCli {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        set_low_priority(&mut cmd, low_priority);
+        let control = self.control.clone().unwrap_or_default();
+        if control.is_cancelled() {
+            return Err(BuildError::Cancelled);
+        }
+        let mut low = low_priority && !control.raised();
+        set_low_priority(&mut cmd, low);
         if args.iter().any(|a| a == "-v") {
             // `classify` matches the English stage messages.
             cmd.env("ARDUINO_LOCALE", "en");
@@ -354,10 +402,27 @@ impl ArduinoCli {
             });
         }
         drop(tx);
-        for line in rx {
-            on_line(&line);
+        loop {
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(line) => on_line(&line),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+            if control.is_cancelled() {
+                kill_tree(&mut child);
+                let _ = child.wait();
+                return Err(BuildError::Cancelled);
+            }
+            if low && control.raised() {
+                raise_priority(&child);
+                low = false;
+            }
         }
-        child.wait().map_err(|source| self.spawn_error(source))
+        let status = child.wait().map_err(|source| self.spawn_error(source))?;
+        if control.is_cancelled() {
+            return Err(BuildError::Cancelled);
+        }
+        Ok(status)
     }
 }
 
@@ -372,6 +437,44 @@ fn set_low_priority(cmd: &mut Command, low: bool) {
 
 #[cfg(not(windows))]
 fn set_low_priority(_cmd: &mut Command, _low: bool) {}
+
+/// Sets normal priority for arduino-cli; compilers it starts afterwards inherit it.
+#[cfg(windows)]
+fn raise_priority(child: &std::process::Child) {
+    use std::os::windows::io::AsRawHandle;
+    const NORMAL_PRIORITY_CLASS: u32 = 0x0000_0020;
+    extern "system" {
+        fn SetPriorityClass(process: *mut std::ffi::c_void, class: u32) -> i32;
+    }
+    // SAFETY: the handle belongs to the live child process.
+    unsafe {
+        SetPriorityClass(child.as_raw_handle(), NORMAL_PRIORITY_CLASS);
+    }
+}
+
+#[cfg(not(windows))]
+fn raise_priority(_child: &std::process::Child) {}
+
+/// Kills arduino-cli together with the compilers it started.
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let killed = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if killed {
+            return;
+        }
+    }
+    let _ = child.kill();
+}
 
 fn check_status(what: &'static str, status: ExitStatus) -> Result<(), BuildError> {
     if status.success() {
@@ -412,11 +515,11 @@ fn board_args(board: &BoardConfig) -> Vec<OsString> {
     args
 }
 
-fn compile_args(project_root: &Path, board: &BoardConfig, opts: &CompileOptions) -> Vec<OsString> {
+fn compile_args(work_dir: &Path, board: &BoardConfig, opts: &CompileOptions) -> Vec<OsString> {
     let mut args: Vec<OsString> = vec!["compile".into()];
     args.extend(board_args(board));
     args.push("--build-path".into());
-    args.push(build_dir(project_root).into());
+    args.push(build_dir(work_dir).into());
     // Debug firmware differs only by the debugging module in the sketch. Compiler flags
     // stay the same, so the cached core is shared and switching modes rebuilds just
     // the sketch (`--optimize-for-debug` would recompile the whole ESP32 core).
@@ -431,18 +534,18 @@ fn compile_args(project_root: &Path, board: &BoardConfig, opts: &CompileOptions)
     }
     args.push("--jobs".into());
     args.push(opts.jobs.unwrap_or(0).to_string().into());
-    args.push(sketch_dir(project_root).into());
+    args.push(sketch_dir(work_dir).into());
     args
 }
 
-fn upload_args(project_root: &Path, board: &BoardConfig, port: &str) -> Vec<OsString> {
+fn upload_args(work_dir: &Path, board: &BoardConfig, port: &str) -> Vec<OsString> {
     let mut args: Vec<OsString> = vec!["upload".into()];
     args.extend(board_args(board));
     args.push("--port".into());
     args.push(port.into());
     args.push("--input-dir".into());
-    args.push(build_dir(project_root).into());
-    args.push(sketch_dir(project_root).into());
+    args.push(build_dir(work_dir).into());
+    args.push(sketch_dir(work_dir).into());
     args
 }
 

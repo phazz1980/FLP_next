@@ -1,7 +1,7 @@
 //! `flp-mcp` — MCP server: exposes the FLP_next command set to any MCP client
 //! (Claude Desktop, Claude Code, ...) over stdio, one JSON-RPC message per line.
 //!
-//! Usage: `flp-mcp [project folder] [--library <dir>]`. Without a folder the
+//! Usage: `flp-mcp [project file] [--library <dir>]`. Without a project the
 //! client opens one with the `open_project` tool (also used to switch).
 //! Only JSON-RPC goes to stdout; diagnostics go to stderr.
 
@@ -17,9 +17,9 @@ const PROTOCOL_VERSIONS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 const INSTRUCTIONS: &str = "Сервер проекта FLP_next — визуального программирования ESP32 \
 (FBD, как в FLProg). Схема — блоки с понятными id и связи «блок.порт» → «блок.порт». \
-Если проект не открыт или пользователь называет другую папку — вызовите open_project. \
+Если проект не открыт или пользователь называет другой — вызовите open_project. \
 Начните с get_schema и list_block_types; после правок смотрите поле check в ответе. \
-Правки сразу сохраняются в папку проекта.";
+Правки сразу сохраняются в файл проекта .flpn.";
 
 const OPEN_PROJECT: &str = "open_project";
 
@@ -31,10 +31,10 @@ struct Server {
 }
 
 impl Server {
-    /// Opens (or switches to) the project folder `path`.
+    /// Opens (or switches to) the project file `path` (or a folder holding one).
     fn open(&mut self, path: &Path) -> Result<Value, String> {
-        if !path.join("project.toml").is_file() {
-            return Err(format!("в папке {} нет project.toml", path.display()));
+        if !flp_core::project::is_project(path) {
+            return Err(format!("{} — не проект FLP_next (.flpn)", path.display()));
         }
         let library = self
             .library
@@ -56,13 +56,13 @@ impl Server {
             let path = args
                 .get("path")
                 .and_then(Value::as_str)
-                .ok_or("нужен аргумент path — папка проекта")?;
+                .ok_or("нужен аргумент path — файл проекта .flpn")?;
             return self.open(Path::new(path));
         }
         let ctx = self
             .ctx
             .as_mut()
-            .ok_or("проект не открыт: сначала вызовите open_project с папкой проекта")?;
+            .ok_or("проект не открыт: сначала вызовите open_project с файлом проекта")?;
         // See edits made in the editor since the last call.
         ctx.refresh().and_then(|()| flp_ai::call(ctx, name, args))
     }
@@ -71,11 +71,11 @@ impl Server {
 fn open_project_tool() -> Value {
     json!({
         "name": OPEN_PROJECT,
-        "description": "Открыть папку проекта FLP_next (с project.toml) или переключиться на другую. \
+        "description": "Открыть проект FLP_next (файл .flpn или папку с ним) или переключиться на другой. \
     Остальные команды работают с открытым проектом.",
         "inputSchema": {
             "type": "object",
-            "properties": {"path": {"type": "string", "description": "Абсолютный путь к папке проекта"}},
+            "properties": {"path": {"type": "string", "description": "Абсолютный путь к файлу проекта .flpn"}},
             "required": ["path"],
         },
     })

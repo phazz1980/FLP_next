@@ -9,7 +9,11 @@ use std::time::{Duration, Instant, SystemTime};
 
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText};
 use flp_build::{ArduinoCli, SerialPort};
-use flp_core::{BlockPos, Fragment, Library, PortRef, Severity};
+use flp_core::project::PROJECT_EXT;
+use flp_core::{
+    BlockPos, BoardConfig, Fragment, Library, PortRef, Project, ProjectConfig, ProjectInfo,
+    Severity,
+};
 
 use crate::canvas::{self, CanvasState};
 use crate::debugview::{self, DebugState};
@@ -186,8 +190,7 @@ impl EditorApp {
         app.lib_dir = find_library(project.as_deref());
         app.reload_library();
         // Start with a project: the given one, the last one or a fresh one.
-        let last =
-            theme::last_project().filter(|p| p.join(flp_core::project::PROJECT_FILE).is_file());
+        let last = theme::last_project().filter(|p| flp_core::project::is_project(p));
         match project.or(last) {
             Some(path) => app.open(&path),
             None => app.create_default_project(),
@@ -321,67 +324,99 @@ impl EditorApp {
     }
 
     fn new_project(&mut self) {
-        let Some(dir) = rfd::FileDialog::new()
-            .set_title("Папка нового проекта")
-            .pick_folder()
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Новый проект")
+            .add_filter("Проект FLP_next", &[PROJECT_EXT])
+            .set_file_name(format!("Новый проект.{PROJECT_EXT}"));
+        if let Some(dir) = theme::default_projects_dir().filter(|d| d.is_dir()) {
+            dialog = dialog.set_directory(dir);
+        }
+        let Some(mut path) = dialog.save_file() else {
+            return;
+        };
+        if !flp_core::project::is_project_file(&path) {
+            path.set_extension(PROJECT_EXT);
+        }
+        if path.exists() {
+            self.request_open(path);
+            return;
+        }
+        self.create_project(&path);
+    }
+
+    /// Asks for a project file; an old-format project is opened by its `project.toml`.
+    fn pick_project(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Открыть проект")
+            .add_filter("Проект FLP_next", &[PROJECT_EXT])
+            .add_filter("Проект старого формата (project.toml)", &["toml"])
+            .pick_file()
         else {
             return;
         };
-        if dir.join(flp_core::project::PROJECT_FILE).exists() {
-            self.request_open(dir);
-            return;
-        }
-        self.create_project(&dir);
+        let path = match path.parent() {
+            Some(dir) if !flp_core::project::is_project_file(&path) => dir.to_path_buf(),
+            _ => path,
+        };
+        self.request_open(path);
     }
 
-    /// Creates "Новый проект N" in the default projects folder and opens it.
+    /// Creates "Новый проект N.flpn" in the default projects folder and opens it.
     fn create_default_project(&mut self) {
         let Some(base) = theme::default_projects_dir() else {
             return;
         };
-        let dir = (1..)
-            .map(|n| base.join(format!("Новый проект {n}")))
-            .find(|d| !d.exists())
-            .expect("unbounded range");
-        if let Err(e) = fs::create_dir_all(&dir) {
-            self.info(LogLevel::Error, format!("{}: {e}", dir.display()));
+        if let Err(e) = fs::create_dir_all(&base) {
+            self.info(LogLevel::Error, format!("{}: {e}", base.display()));
             return;
         }
-        self.create_project(&dir);
+        let path = (1..)
+            .map(|n| base.join(format!("Новый проект {n}.{PROJECT_EXT}")))
+            .find(|p| !p.exists())
+            .expect("unbounded range");
+        self.create_project(&path);
     }
 
-    /// Writes an empty ESP32 project into `dir` and opens it.
-    fn create_project(&mut self, dir: &Path) {
-        let name = dir
-            .file_name()
+    /// Writes an empty ESP32 project to `path` and opens it.
+    fn create_project(&mut self, path: &Path) {
+        let name = path
+            .file_stem()
             .and_then(|n| n.to_str())
             .unwrap_or("project")
             .to_owned();
-        let config = format!(
-            "[project]\nname = \"{name}\"\n\n[board]\nfqbn = \"esp32:esp32:esp32\"   # ESP32 DevKit\n"
-        );
-        let files = [
-            (flp_core::project::PROJECT_FILE, config.as_str()),
-            (flp_core::project::LOGIC_FILE, "# Блоки и связи схемы.\n"),
-        ];
-        for (file, text) in files {
-            if let Err(e) = fs::write(dir.join(file), text) {
-                self.info(
-                    LogLevel::Error,
-                    format!("{}: {e}", dir.join(file).display()),
-                );
-                return;
-            }
+        let project = Project {
+            path: path.to_owned(),
+            config: ProjectConfig {
+                project: ProjectInfo {
+                    name,
+                    description: String::new(),
+                },
+                board: BoardConfig {
+                    fqbn: "esp32:esp32:esp32".into(),
+                    port: None,
+                    options: Default::default(),
+                },
+                diagnostics: Default::default(),
+            },
+            logic: Default::default(),
+            layout: Default::default(),
+        };
+        if let Err(e) = flp_pdf::save_project(&project, &self.lib) {
+            self.info(LogLevel::Error, e.to_string());
+            return;
         }
-        self.open(dir);
+        self.open(path);
     }
 
     pub fn save(&mut self) {
         let Some(doc) = &mut self.doc else { return };
-        match doc.save() {
-            Ok(()) => {
-                let root = doc.project.root.display().to_string();
-                self.info(LogLevel::Ok, format!("Сохранено: {root}"));
+        match doc.save(&self.lib) {
+            Ok(warning) => {
+                let path = doc.project.path.display().to_string();
+                self.info(LogLevel::Ok, format!("Сохранено: {path}"));
+                if let Some(w) = warning {
+                    self.info(LogLevel::Warning, w);
+                }
             }
             Err(e) => self.info(LogLevel::Error, e.to_string()),
         }
@@ -513,7 +548,9 @@ impl EditorApp {
     pub fn start_job(&mut self, kind: JobKind, ctx: &egui::Context) {
         if let Some(job) = &self.job {
             // The user's build waits for precompilation, which shares the build folder.
+            // It is raised to normal priority: the user waits for it now.
             if job.background && !matches!(kind, JobKind::Precompile) && self.queued.is_none() {
+                job.raise_priority();
                 self.info(LogLevel::Info, "Ждём окончания фоновой сборки...");
                 self.queued = Some(kind);
             }
@@ -529,7 +566,7 @@ impl EditorApp {
             self.info(LogLevel::Error, "Сначала исправьте ошибки схемы");
             return;
         }
-        self.job_rev = Some((doc.project.root.clone(), doc.revision, self.debug_firmware));
+        self.job_rev = Some((doc.project.path.clone(), doc.revision, self.debug_firmware));
         let ctx = ctx.clone();
         let job = Job::start(
             kind,
@@ -542,6 +579,19 @@ impl EditorApp {
             self.info(LogLevel::Info, format!("{}...", job.title));
         }
         self.job = Some(job);
+    }
+
+    /// Cancels the running job together with the queued one.
+    pub fn cancel_job(&mut self) {
+        if let Some(job) = &self.job {
+            job.cancel();
+            self.queued = None;
+        }
+    }
+
+    /// Any job runs, background precompilation included.
+    pub fn has_job(&self) -> bool {
+        self.job.is_some()
     }
 
     /// A foreground job runs; precompilation does not block build buttons.
@@ -559,7 +609,7 @@ impl EditorApp {
             Some((seen, _)) if seen == rev => {}
             _ => self.seen_rev = Some((rev, now)),
         }
-        let current = Some((doc.project.root.clone(), rev, self.debug_firmware));
+        let current = Some((doc.project.path.clone(), rev, self.debug_firmware));
         let quiet = self.seen_rev.is_some_and(|(_, t)| now - t >= PAUSE);
         if self.job.is_some()
             || self.debug.is_some()
@@ -577,11 +627,17 @@ impl EditorApp {
     fn poll_job(&mut self, ctx: &egui::Context) {
         let Some(job) = &self.job else { return };
         let background = job.background;
+        let cancelled = job.is_cancelled();
+        let title = job.title;
         let mut done = false;
         let mut connect = None;
         for event in job.poll() {
             match event {
-                JobEvent::Line(..) if background => {}
+                JobEvent::Line(..) if background || cancelled => {}
+                JobEvent::Done(Err(_)) if cancelled => {
+                    self.info(LogLevel::Warning, format!("{title}: отменено"));
+                    done = true;
+                }
                 JobEvent::Line(level, text) => self.info(level, text),
                 JobEvent::Done(Ok(_)) if background => done = true,
                 JobEvent::Done(Err(_)) if background => {
@@ -800,12 +856,7 @@ impl EditorApp {
                     self.new_project();
                 }
                 if ui.button("Открыть...").clicked() {
-                    if let Some(dir) = rfd::FileDialog::new()
-                        .set_title("Папка проекта")
-                        .pick_folder()
-                    {
-                        self.request_open(dir);
-                    }
+                    self.pick_project();
                 }
                 let has_doc = self.doc.is_some();
                 if ui
@@ -816,6 +867,21 @@ impl EditorApp {
                     .clicked()
                 {
                     self.save();
+                }
+                if ui
+                    .button("Открывать .flpn двойным щелчком")
+                    .on_hover_text("Связать файлы проектов с этим редактором в Проводнике")
+                    .clicked()
+                {
+                    match crate::assoc::register() {
+                        Ok(()) => self.info(
+                            LogLevel::Ok,
+                            "Файлы .flpn теперь открываются этим редактором",
+                        ),
+                        Err(e) => {
+                            self.info(LogLevel::Error, format!("Не удалось связать .flpn: {e}"))
+                        }
+                    }
                 }
                 ui.menu_button("Автосохранение", |ui| {
                     let mut minutes = self.autosave_minutes;
@@ -951,13 +1017,14 @@ impl EditorApp {
         self.scan_ports(ctx);
     }
 
-    /// Port typed in the toolbar, or `None` to use project.toml / autodetect.
+    /// Port typed in the toolbar, or `None` to use the project settings / autodetect.
     pub fn port_choice(&self) -> Option<String> {
         let port = self.port.trim();
         (!port.is_empty()).then(|| port.to_owned())
     }
 
-    fn status_bar(&self, ui: &mut egui::Ui) {
+    fn status_bar(&mut self, ui: &mut egui::Ui) {
+        let mut cancel = false;
         ui.horizontal(|ui| match &self.doc {
             Some(doc) => {
                 let p = &doc.project;
@@ -984,6 +1051,9 @@ impl EditorApp {
                     ui.separator();
                     ui.spinner();
                     ui.label(job.title);
+                    if ui.small_button("Отменить").clicked() {
+                        cancel = true;
+                    }
                 }
                 if let Some(d) = &self.debug {
                     ui.separator();
@@ -1006,6 +1076,9 @@ impl EditorApp {
                 ui.label("Проект не открыт");
             }
         });
+        if cancel {
+            self.cancel_job();
+        }
     }
 
     fn unsaved_dialog(&mut self, ctx: &egui::Context) {

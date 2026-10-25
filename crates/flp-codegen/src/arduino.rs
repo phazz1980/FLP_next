@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
+use flp_core::ident::c_ident;
 use flp_core::library::ESP32_CPP_TEMPLATE;
 use flp_core::value::parse_duration_ms;
 use flp_core::vars::VAR_SET;
@@ -120,7 +121,8 @@ fn render_block(
     let name = format!("{kind}/{ESP32_CPP_TEMPLATE}");
     // Storage of the variable a `var_get` / `var_set` block accesses.
     let var = inst.block.var_name().map(flp_core::vars::storage_name);
-    let ctx = context! { id => inst.block.id, input, output, param, value, var };
+    let id = c_ident(&inst.block.id);
+    let ctx = context! { id, input, output, param, value, var };
     let text = env
         .render_named_str(&name, &source, ctx)
         .map_err(|source| GenError::Render {

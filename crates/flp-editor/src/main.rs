@@ -6,6 +6,7 @@
 
 mod ai;
 mod app;
+mod assoc;
 mod blockedit;
 mod boardcfg;
 mod canvas;
@@ -20,6 +21,7 @@ mod themeedit;
 use std::path::PathBuf;
 
 fn main() -> eframe::Result {
+    // A project file given on the command line, e.g. by double click in Explorer.
     let project = std::env::args_os().nth(1).map(PathBuf::from);
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()

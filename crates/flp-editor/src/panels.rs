@@ -63,6 +63,13 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
             let port = app.port_choice();
             app.start_job(JobKind::Upload { port }, ui.ctx());
         }
+        if ui
+            .add_enabled(app.has_job(), egui::Button::new("Стоп"))
+            .on_hover_text("Отменить сборку или заливку")
+            .clicked()
+        {
+            app.cancel_job();
+        }
         ui.checkbox(&mut app.debug_firmware, "С отладкой").on_hover_text(
             "Собирать прошивку с модулем онлайн-отладки (и фоновую сборку тоже);              после заливки редактор подключится к плате",
         );
@@ -78,7 +85,7 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
             .width(110.0)
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut app.port, String::new(), "авто")
-                    .on_hover_text("Порт из project.toml или единственный найденный");
+                    .on_hover_text("Порт из настроек проекта или единственный найденный");
                 for p in &app.ports {
                     let text = if p.description.is_empty() || p.description == p.address {
                         p.address.clone()

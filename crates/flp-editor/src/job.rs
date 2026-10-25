@@ -1,9 +1,10 @@
 //! Background build and upload, so the editor stays responsive.
 
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::thread;
 
-use flp_build::{ArduinoCli, BuildMode, CompileOptions, OutputLine};
+use flp_build::{ArduinoCli, BuildControl, BuildMode, CompileOptions, OutputLine};
 use flp_codegen::{ArduinoCpp, Backend, Program};
 use flp_core::{Library, Project};
 
@@ -34,6 +35,7 @@ pub struct Job {
     pub title: &'static str,
     /// Precompilation: no log output, buttons stay enabled.
     pub background: bool,
+    control: Arc<BuildControl>,
     rx: Receiver<JobEvent>,
 }
 
@@ -56,13 +58,15 @@ impl Job {
             JobKind::Upload { .. } => "Заливка",
         };
         let background = matches!(kind, JobKind::Precompile);
+        let control = Arc::new(BuildControl::default());
+        let worker = control.clone();
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
             let send = |e: JobEvent| {
                 let _ = tx.send(e);
                 wake();
             };
-            let result = run(kind, debug, &project, &lib, &mut |level, line| {
+            let result = run(kind, debug, &project, &lib, worker, &mut |level, line| {
                 send(JobEvent::Line(level, line.to_owned()))
             });
             send(JobEvent::Done(result));
@@ -70,8 +74,23 @@ impl Job {
         Self {
             title,
             background,
+            control,
             rx,
         }
+    }
+
+    /// Stops the job; it ends with an error soon after.
+    pub fn cancel(&self) {
+        self.control.cancel();
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.control.is_cancelled()
+    }
+
+    /// Runs a background build at normal priority (the user waits for it now).
+    pub fn raise_priority(&self) {
+        self.control.raise_priority();
     }
 
     /// Events received since the last call.
@@ -85,6 +104,7 @@ fn run(
     debug: bool,
     project: &Project,
     lib: &Library,
+    control: Arc<BuildControl>,
     out: &mut dyn FnMut(LogLevel, &str),
 ) -> Result<Done, String> {
     let background = matches!(kind, JobKind::Precompile);
@@ -92,10 +112,13 @@ fn run(
     let code = ArduinoCpp { debug }
         .generate(&program)
         .map_err(|e| e.to_string())?;
-    let (path, _) = flp_codegen::write_sketch(&project.root, &code).map_err(|e| e.to_string())?;
+    let (path, _) =
+        flp_codegen::write_sketch(&project.work_dir(), &code).map_err(|e| e.to_string())?;
     out(LogLevel::Info, &format!("Скетч: {}", path.display()));
 
-    let cli = ArduinoCli::locate().map_err(|e| e.to_string())?;
+    let cli = ArduinoCli::locate()
+        .map_err(|e| e.to_string())?
+        .with_control(control);
     let board = &project.config.board;
     let installed = cli
         .ensure_libraries(&program.libraries(), &mut |l| out(LogLevel::Info, l))
@@ -119,7 +142,7 @@ fn run(
     };
     // Only build stages and diagnostics; compiler command lines stay hidden.
     cli.compile(
-        &project.root,
+        &project.work_dir(),
         board,
         &opts,
         &mut |line| match flp_build::classify(line) {
@@ -144,8 +167,10 @@ fn run(
                 .choose_port(port.as_deref(), board)
                 .map_err(|e| e.to_string())?;
             out(LogLevel::Info, &format!("Заливка на {port}..."));
-            cli.upload(&project.root, board, &port, &mut |l| out(LogLevel::Info, l))
-                .map_err(|e| e.to_string())?;
+            cli.upload(&project.work_dir(), board, &port, &mut |l| {
+                out(LogLevel::Info, l)
+            })
+            .map_err(|e| e.to_string())?;
             Ok(Done {
                 message: format!("Прошивка залита на {port}"),
                 port: Some(port),

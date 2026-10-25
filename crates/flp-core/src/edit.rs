@@ -15,7 +15,7 @@ pub enum EditError {
     NoBlock(String),
     #[error("неизвестный тип блока «{0}»")]
     UnknownType(String),
-    #[error("недопустимый id «{0}»: только латиница, цифры и «_», первой — буква")]
+    #[error("недопустимый id «{0}»: только буквы (можно русские), цифры и «_», первой — буква, без пробелов и точек")]
     InvalidId(String),
     #[error("id «{0}» уже занят")]
     DuplicateId(String),
@@ -572,7 +572,7 @@ mod tests {
         let config: ProjectConfig =
             toml::from_str("[project]\nname = \"t\"\n[board]\nfqbn = \"x:y:z\"\n").unwrap();
         Project {
-            root: Default::default(),
+            path: Default::default(),
             config,
             logic: Logic::default(),
             layout: Default::default(),

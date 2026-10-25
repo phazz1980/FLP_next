@@ -11,20 +11,22 @@ pub(crate) fn read_toml<T: DeserializeOwned>(path: &Path) -> Result<T> {
         path: path.to_owned(),
         source,
     })?;
+    parse_toml(&text, path)
+}
+
+/// Parses TOML text; `path` is only for error messages.
+pub(crate) fn parse_toml<T: DeserializeOwned>(text: &str, path: &Path) -> Result<T> {
     // Files may be edited in Notepad, which can add a BOM.
-    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     toml::from_str(text).map_err(|source| Error::Parse {
         path: path.to_owned(),
         source: Box::new(source),
     })
 }
 
-pub(crate) fn write_toml<T: Serialize>(path: &Path, value: &T) -> Result<()> {
-    let text = toml::to_string_pretty(value).map_err(|source| Error::Serialize {
-        path: path.to_owned(),
-        source,
-    })?;
-    fs::write(path, text).map_err(|source| Error::Write {
+/// Serializes to TOML text; `path` is only for error messages.
+pub(crate) fn to_toml<T: Serialize>(value: &T, path: &Path) -> Result<String> {
+    toml::to_string_pretty(value).map_err(|source| Error::Serialize {
         path: path.to_owned(),
         source,
     })

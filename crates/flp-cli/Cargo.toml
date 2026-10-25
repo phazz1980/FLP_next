@@ -13,4 +13,5 @@ clap = { version = "4", features = ["derive", "env"] }
 flp-build = { path = "../flp-build" }
 flp-codegen = { path = "../flp-codegen" }
 flp-core = { path = "../flp-core" }
+flp-pdf = { path = "../flp-pdf" }
 flp-debug = { path = "../flp-debug", features = ["serial"] }

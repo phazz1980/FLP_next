@@ -73,7 +73,7 @@ pub fn tools() -> Vec<Tool> {
             description: "Добавить блок. Без id он придумывается сам; без координат блок ставится на свободное место платы.",
             input_schema: json!({"type": "object", "properties": {
                 "type": {"type": "string", "description": "тип блока из библиотеки"},
-                "id": {"type": "string", "description": "понятный id: латиница, цифры, _"},
+                "id": {"type": "string", "description": "понятный id: буквы (можно русские), цифры, _; без пробелов и точек"},
                 "params": {"type": "object", "description": "значения параметров"},
                 "sheet": {"type": "integer", "description": "номер платы, по умолчанию 1"},
                 "x": {"type": "number"}, "y": {"type": "number"}
