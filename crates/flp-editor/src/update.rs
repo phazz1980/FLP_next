@@ -4,9 +4,11 @@
 //! (`FLP_GITHUB_TOKEN`, `GITHUB_TOKEN`, `GH_TOKEN`) or from `gh auth token`.
 //! The token is never stored by the editor and is only sent to `api.github.com`.
 
+use std::cmp::Ordering;
 use std::process::Command;
 use std::time::Duration;
 
+use eframe::egui;
 use serde::Deserialize;
 
 /// Version of this build.
@@ -15,17 +17,34 @@ pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 /// Repository checked when `update_repo` is not set in the editor settings.
 pub const DEFAULT_REPO: &str = "phazz1980/FLP_next";
 
+/// Newest releases requested from GitHub: enough to tell what changed.
+const RELEASES_PER_PAGE: usize = 30;
+/// Releases listed in the notes, items per release and characters per item.
+const MAX_RELEASES: usize = 10;
+const MAX_ITEMS: usize = 6;
+const MAX_LEN: usize = 110;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Release {
+    /// Newest version.
     pub version: String,
     pub url: String,
+    /// Notes of every release newer than the running version, newest first.
+    pub changes: Vec<Change>,
+}
+
+/// Brief notes of one release.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Change {
+    pub version: String,
+    pub items: Vec<String>,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Check {
     Newer(Release),
     UpToDate,
-    /// No published release is visible (none yet, or the token has no access).
+    /// No published release in the repository yet.
     NoReleases,
 }
 
@@ -39,9 +58,16 @@ enum Failure {
 struct ApiRelease {
     tag_name: String,
     html_url: String,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
 }
 
-/// Asks GitHub for the latest published release of `repo` ("owner/name").
+/// Asks GitHub for the published releases of `repo` ("owner/name") and compares
+/// them with the running version.
 pub fn check(repo: &str) -> Result<Check, String> {
     if !valid_repo(repo) {
         return Err(format!(
@@ -69,7 +95,7 @@ pub fn check(repo: &str) -> Result<Check, String> {
             e => Failure::Network(e.to_string()),
         })
     };
-    let release: ApiRelease = match get("/releases/latest") {
+    let releases: Vec<ApiRelease> = match get(&format!("/releases?per_page={RELEASES_PER_PAGE}")) {
         Ok(r) => r
             .into_json()
             .map_err(|e| format!("ответ GitHub не прочитан: {e}"))?,
@@ -79,8 +105,8 @@ pub fn check(repo: &str) -> Result<Check, String> {
         Err(Failure::Status(403 | 429)) => {
             return Err("GitHub ограничил число запросов, попробуйте позже".to_owned())
         }
-        // No release yet, unless the repository itself is not visible.
-        Err(Failure::Status(404)) if get("").is_ok() => return Ok(Check::NoReleases),
+        // A repository without releases answers with an empty list, so 404 means
+        // the repository itself is missing or hidden.
         Err(Failure::Status(404)) => {
             return Err(format!(
                 "репозиторий {repo} не найден или закрытый: задайте токен GitHub \
@@ -90,15 +116,150 @@ pub fn check(repo: &str) -> Result<Check, String> {
         Err(Failure::Status(code)) => return Err(format!("ошибка GitHub {code}")),
         Err(Failure::Network(e)) => return Err(format!("нет связи с GitHub: {e}")),
     };
-    let version = release.tag_name.trim_start_matches(['v', 'V']).to_owned();
-    Ok(if is_newer(&version, CURRENT) {
-        Check::Newer(Release {
-            version,
-            url: release.html_url,
-        })
-    } else {
-        Check::UpToDate
+    Ok(pick(releases, CURRENT))
+}
+
+/// Finds the published releases newer than `current` and collects their notes.
+fn pick(releases: Vec<ApiRelease>, current: &str) -> Check {
+    let mut published: Vec<(String, ApiRelease)> = releases
+        .into_iter()
+        .filter(|r| !r.draft && !r.prerelease)
+        .map(|r| (r.tag_name.trim_start_matches(['v', 'V']).to_owned(), r))
+        .collect();
+    if published.is_empty() {
+        return Check::NoReleases;
+    }
+    published.retain(|(version, _)| compare(version, current).is_gt());
+    published.sort_by(|a, b| compare(&b.0, &a.0));
+    let Some((version, newest)) = published.first() else {
+        return Check::UpToDate;
+    };
+    Check::Newer(Release {
+        version: version.clone(),
+        url: newest.html_url.clone(),
+        changes: published
+            .iter()
+            .take(MAX_RELEASES)
+            .map(|(version, r)| Change {
+                version: version.clone(),
+                items: summarize(r.body.as_deref().unwrap_or_default()),
+            })
+            .collect(),
     })
+}
+
+/// Short list of what a release changed, taken from its notes: the bullet points
+/// (or, without bullets, the plain lines) with the markdown marks removed.
+/// A bullet continued on indented lines is joined into one item.
+fn summarize(notes: &str) -> Vec<String> {
+    let mut bullets: Vec<String> = Vec::new();
+    let mut plain: Vec<String> = Vec::new();
+    let mut continuing = false;
+    for line in notes.lines() {
+        let text = line.trim();
+        let skipped = text.is_empty()
+            || text.starts_with('#')
+            || text
+                .trim_start_matches('*')
+                .to_lowercase()
+                .starts_with("full changelog");
+        if skipped {
+            continuing = false;
+        } else if let Some(item) = strip_bullet(text) {
+            bullets.push(item.to_owned());
+            continuing = true;
+        } else if continuing && line.starts_with(char::is_whitespace) {
+            if let Some(last) = bullets.last_mut() {
+                last.push(' ');
+                last.push_str(text);
+            }
+        } else {
+            plain.push(text.to_owned());
+        }
+    }
+    let chosen = if bullets.is_empty() { plain } else { bullets };
+    let mut items: Vec<String> = chosen
+        .iter()
+        .map(|l| clean(l))
+        .filter(|l| !l.is_empty())
+        .collect();
+    if items.len() > MAX_ITEMS {
+        let more = items.len() - MAX_ITEMS;
+        items.truncate(MAX_ITEMS);
+        items.push(format!("…и ещё {more}"));
+    }
+    items
+}
+
+fn strip_bullet(line: &str) -> Option<&str> {
+    ["- ", "* ", "+ "]
+        .iter()
+        .find_map(|mark| line.strip_prefix(mark))
+}
+
+/// `[text](address)` becomes `text`.
+fn strip_links(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(open) = rest.find('[') {
+        let after = &rest[open + 1..];
+        let link = after
+            .find("](")
+            .filter(|&mid| !after[..mid].contains(['[', ']']));
+        if let Some((mid, end)) = link.and_then(|mid| Some((mid, after[mid + 2..].find(')')?))) {
+            out.push_str(&rest[..open]);
+            out.push_str(&after[..mid]);
+            rest = &after[mid + 2 + end + 1..];
+        } else {
+            out.push_str(&rest[..=open]);
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Drops markdown emphasis, code marks and link addresses, and shortens a long line.
+fn clean(line: &str) -> String {
+    let plain = strip_links(line).replace("**", "").replace('`', "");
+    let plain = plain.trim();
+    if plain.chars().count() > MAX_LEN {
+        let cut: String = plain.chars().take(MAX_LEN).collect();
+        format!("{}…", cut.trim_end())
+    } else {
+        plain.to_owned()
+    }
+}
+
+/// Window with what changed since the running version and the download link.
+pub fn window(ctx: &egui::Context, release: &Release, open: &mut bool) {
+    egui::Window::new("Доступно обновление")
+        .open(open)
+        .collapsible(false)
+        .resizable(true)
+        .default_width(480.0)
+        .show(ctx, |ui| {
+            ui.label(format!(
+                "Новая версия {} (установлена {CURRENT})",
+                release.version
+            ));
+            ui.hyperlink_to("Открыть страницу загрузки", &release.url);
+            ui.separator();
+            egui::ScrollArea::vertical()
+                .max_height(360.0)
+                .show(ui, |ui| {
+                    for change in &release.changes {
+                        ui.strong(&change.version);
+                        if change.items.is_empty() {
+                            ui.weak("описание не указано");
+                        }
+                        for item in &change.items {
+                            ui.label(format!("• {item}"));
+                        }
+                        ui.add_space(6.0);
+                    }
+                });
+        });
 }
 
 fn valid_repo(repo: &str) -> bool {
@@ -142,26 +303,36 @@ fn parts(version: &str) -> Vec<u64> {
         .collect()
 }
 
-fn is_newer(candidate: &str, current: &str) -> bool {
-    let (mut a, mut b) = (parts(candidate), parts(current));
+fn compare(a: &str, b: &str) -> Ordering {
+    let (mut a, mut b) = (parts(a), parts(b));
     let len = a.len().max(b.len());
     a.resize(len, 0);
     b.resize(len, 0);
-    a > b
+    a.cmp(&b)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn release(tag: &str, body: &str) -> ApiRelease {
+        ApiRelease {
+            tag_name: tag.to_owned(),
+            html_url: format!("https://example.test/{tag}"),
+            body: Some(body.to_owned()),
+            draft: false,
+            prerelease: false,
+        }
+    }
+
     #[test]
     fn compares_versions_numerically() {
-        assert!(is_newer("0.2.0", "0.1.0"));
-        assert!(is_newer("0.10.0", "0.9.5"));
-        assert!(is_newer("1.0", "0.9.9"));
-        assert!(!is_newer("0.1.0", "0.1.0"));
-        assert!(!is_newer("0.1", "0.1.0"));
-        assert!(!is_newer("0.1.0", "0.2.0"));
+        assert!(compare("0.2.0", "0.1.0").is_gt());
+        assert!(compare("0.10.0", "0.9.5").is_gt());
+        assert!(compare("1.0", "0.9.9").is_gt());
+        assert!(compare("0.1.0", "0.1.0").is_eq());
+        assert!(compare("0.1", "0.1.0").is_eq());
+        assert!(compare("0.1.0", "0.2.0").is_lt());
     }
 
     #[test]
@@ -171,5 +342,59 @@ mod tests {
         assert!(!valid_repo("a/b/c"));
         assert!(!valid_repo("a/b?x=1"));
         assert!(!valid_repo("/b"));
+    }
+
+    #[test]
+    fn lists_notes_of_all_newer_releases() {
+        let releases = vec![
+            release(
+                "v0.3.0",
+                "## Что нового\n- **Таймеры** получили `reset`\n- Новый блок\n",
+            ),
+            release("v0.2.0", "Просто текст\n\nFull Changelog: https://x"),
+            release("v0.1.0", "- старое"),
+        ];
+        let Check::Newer(r) = pick(releases, "0.1.0") else {
+            panic!("expected a newer release");
+        };
+        assert_eq!(r.version, "0.3.0");
+        assert_eq!(r.url, "https://example.test/v0.3.0");
+        assert_eq!(r.changes.len(), 2);
+        assert_eq!(r.changes[0].items, ["Таймеры получили reset", "Новый блок"]);
+        assert_eq!(r.changes[1].version, "0.2.0");
+        assert_eq!(r.changes[1].items, ["Просто текст"]);
+    }
+
+    #[test]
+    fn skips_drafts_and_prereleases() {
+        let mut draft = release("v9.0.0", "- x");
+        draft.draft = true;
+        let mut pre = release("v8.0.0", "- x");
+        pre.prerelease = true;
+        assert_eq!(pick(vec![draft, pre], "0.1.0"), Check::NoReleases);
+        assert_eq!(pick(vec![release("v0.1.0", "")], "0.1.0"), Check::UpToDate);
+    }
+
+    #[test]
+    fn notes_are_short() {
+        let body: String = (1..=10).map(|i| format!("- пункт {i}\n")).collect();
+        let items = summarize(&body);
+        assert_eq!(items.len(), MAX_ITEMS + 1);
+        assert_eq!(items.last().unwrap(), "…и ещё 4");
+        let long = format!("- {}", "я".repeat(300));
+        assert!(summarize(&long)[0].chars().count() <= MAX_LEN + 1);
+        assert!(summarize("").is_empty());
+    }
+
+    #[test]
+    fn notes_of_wrapped_bullets_with_links() {
+        let body = "* [BUG #1](https://x/1):
+  Fixed the **crash** in `rg` [a] here.
+* Second [one](u)
+";
+        assert_eq!(
+            summarize(body),
+            ["BUG #1: Fixed the crash in rg [a] here.", "Second one"]
+        );
     }
 }

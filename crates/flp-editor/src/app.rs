@@ -163,6 +163,8 @@ pub struct EditorApp {
     update_rx: Option<Receiver<(bool, Result<Check, String>)>>,
     /// Newer release found on GitHub.
     new_release: Option<Release>,
+    /// The window with the changes of the newer releases is shown.
+    update_window: bool,
 }
 
 impl EditorApp {
@@ -210,6 +212,7 @@ impl EditorApp {
             update_check: theme::update_check(),
             update_rx: None,
             new_release: None,
+            update_window: false,
         };
         match LocalValues::open_default() {
             Ok(local) => app.local = local,
@@ -311,6 +314,8 @@ impl EditorApp {
                     ),
                 );
                 self.new_release = Some(release);
+                // The window opens by itself only when the user asked for the check.
+                self.update_window = manual;
             }
             Ok(Check::UpToDate) if manual => self.info(
                 LogLevel::Info,
@@ -1298,6 +1303,13 @@ impl EditorApp {
                 }
                 if let Some(release) = &self.new_release {
                     ui.separator();
+                    if ui
+                        .button(format!("Что нового в {}", release.version))
+                        .clicked()
+                    {
+                        self.update_window = true;
+                        ui.close();
+                    }
                     ui.hyperlink_to(format!("Скачать версию {}", release.version), &release.url);
                 }
             });
@@ -1337,7 +1349,13 @@ impl EditorApp {
             self.status_items(ui, &mut cancel);
             if let Some(release) = &self.new_release {
                 ui.separator();
-                ui.hyperlink_to(format!("Доступна версия {}", release.version), &release.url);
+                if ui
+                    .link(format!("Доступна версия {}", release.version))
+                    .on_hover_text("Показать, что изменилось")
+                    .clicked()
+                {
+                    self.update_window = true;
+                }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.weak(format!("v{}", update::CURRENT));
@@ -1482,6 +1500,9 @@ impl eframe::App for EditorApp {
         self.poll_console(&ctx);
         self.poll_ports();
         self.poll_update();
+        if let Some(release) = &self.new_release {
+            update::window(&ctx, release, &mut self.update_window);
+        }
         self.watch_library();
         self.autosave(&ctx);
         self.shortcuts(&ctx);
