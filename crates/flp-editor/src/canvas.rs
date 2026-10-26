@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+use eframe::egui::containers::menu::{MenuConfig, SubMenuButton};
 use eframe::egui::{
     self, Align2, Color32, CornerRadius, FontId, Id, Pos2, Rect, Sense, Stroke, StrokeKind, Ui,
     Vec2,
@@ -1328,7 +1329,10 @@ fn port_context_menu(
             } else {
                 "Вставить константу"
             };
-            ui.menu_button(title, |ui| {
+            // A click in the input field must not close the submenu.
+            let config =
+                MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+            SubMenuButton::new(title).config(config).ui(ui, |ui| {
                 if ty == SignalType::Bool {
                     for b in [true, false] {
                         if ui.button(b.to_string()).clicked() {
