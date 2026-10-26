@@ -805,30 +805,14 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                     border,
                     StrokeKind::Inside,
                 );
-                // A write already shows the value on its incoming link.
-                let live = block
-                    .var_name()
-                    .filter(|_| !write)
-                    .and_then(|v| dbg.and_then(|d| d.var(v)));
-                let live_text = block
-                    .var_name()
-                    .filter(|_| !write)
-                    .and_then(|v| dbg.and_then(|d| d.text_var(v)));
-                let (text, color) = match (live, live_text) {
-                    (Some((v, true)), _) => (format!("{} = {v} F", label(block, def)), pal.warning),
-                    (Some((v, false)), _) => (format!("{} = {v}", label(block, def)), pal.text),
-                    (None, Some(s)) => (
-                        format!("{} = {}", label(block, def), debugview::quoted(s)),
-                        pal.text,
-                    ),
-                    (None, None) => (label(block, def), pal.text),
-                };
+                // The live value is drawn at the output pin, like for any block.
+                let text = label(block, def);
                 let center = if en {
                     Pos2::new(r.center().x, r.min.y + r.height() * 0.25)
                 } else {
                     r.center()
                 };
-                painter.text(center, Align2::CENTER_CENTER, text, font(11.0), color);
+                painter.text(center, Align2::CENTER_CENTER, text, font(11.0), pal.text);
                 if en {
                     let p = port_pos(r, kind, 1, false);
                     painter.text(
@@ -970,6 +954,15 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                     font(9.5),
                     pal.text,
                 );
+            }
+            if let (true, true, Kind::Tag { write: false, .. }, Some(var)) =
+                (output, real, kind, block.var_name())
+            {
+                if let Some((v, forced)) = dbg.and_then(|d| d.var(var)) {
+                    debugview::value_label(&painter, &pal, pos, v, forced, z, Place::Right);
+                } else if let Some(text) = dbg.and_then(|d| d.text_var(var)) {
+                    debugview::text_label(&painter, &pal, pos, text, z, Place::Right);
+                }
             }
             if output && kind == Kind::Box {
                 let port = PortRef::new(&block.id, &q.name);
