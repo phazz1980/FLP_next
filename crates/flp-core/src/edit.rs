@@ -799,6 +799,7 @@ mod tests {
             init: Some(ParamValue::Float(1.5)),
             description: String::new(),
             retain: false,
+            service: false,
         };
         p.add_var(var("t")).unwrap();
         assert_eq!(
@@ -834,6 +835,7 @@ mod tests {
             init: None,
             description: String::new(),
             retain: false,
+            service: false,
         })
         .unwrap();
         let src = p.add_block(&lib, "src", POS).unwrap();
@@ -864,6 +866,7 @@ mod tests {
             init: None,
             description: String::new(),
             retain: false,
+            service: false,
         })
         .unwrap();
         let tag = p.add_var_block("on", false, POS).unwrap();

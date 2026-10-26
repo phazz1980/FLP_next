@@ -444,7 +444,7 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
                                 if ui.selectable_label(false, "+ Добавить переменную").clicked() {
                                     new_var = true;
                                 }
-                                for var in &logic.vars {
+                                for var in logic.vars.iter().filter(|v| !v.service) {
                                     let used = logic
                                         .blocks
                                         .iter()

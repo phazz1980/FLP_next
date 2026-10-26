@@ -454,6 +454,7 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
                     .unwrap_or("")
                     .to_owned(),
                 retain: args.get("retain").and_then(Value::as_bool).unwrap_or(false),
+                service: false,
             };
             let retain = args.get("retain").and_then(Value::as_bool);
             ctx.edit(&mut |p| {
@@ -461,6 +462,7 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
                     // Omitted `retain` keeps the current setting.
                     let var = Var {
                         retain: retain.unwrap_or(old.retain),
+                        service: old.service,
                         ..var.clone()
                     };
                     p.update_var(&name, var)

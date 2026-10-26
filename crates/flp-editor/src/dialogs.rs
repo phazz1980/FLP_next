@@ -115,6 +115,7 @@ impl Dialog {
                 init: None,
                 description: String::new(),
                 retain: false,
+                service: false,
             },
         };
         Some(Self::Var(VarDialog {
@@ -756,6 +757,7 @@ fn apply(app: &mut EditorApp, dialog: &Dialog) -> Result<(), String> {
                 init: parse_init(d.ty, &d.init)?,
                 description: d.description.trim().to_owned(),
                 retain: d.retain,
+                service: false,
             };
             match &d.original {
                 Some(name) => doc.edit(&lib, None, |p| p.update_var(name, var)),

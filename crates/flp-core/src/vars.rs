@@ -184,6 +184,10 @@ pub struct Var {
     /// after power-on, saved when the value changes.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub retain: bool,
+    /// Created for a setting taken out of a service block (Wi-Fi...): not listed with
+    /// the user's variables.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub service: bool,
 }
 
 impl Logic {
