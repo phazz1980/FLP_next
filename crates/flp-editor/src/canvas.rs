@@ -334,11 +334,14 @@ pub fn block_preview(ui: &mut Ui, def: &BlockDef, pal: &Palette) {
 /// variable (a setting pulled out of Wi-Fi...) has its side fixed from the start: a
 /// read-only value gets no writing side.
 fn tag_linked(logic: &Logic, id: &str) -> bool {
-    let service = logic
-        .block(id)
-        .and_then(|b| b.var_name())
-        .and_then(|v| logic.var(v))
-        .is_some_and(|v| v.service);
+    // A variable bound to a block setting (service or not) is taken out from the panel.
+    let service = logic.block(id).and_then(|b| b.var_name()).is_some_and(|v| {
+        logic.var(v).is_some_and(|x| x.service)
+            || logic
+                .blocks
+                .iter()
+                .any(|b| b.bound.values().any(|n| n == v))
+    });
     service
         || logic
             .links

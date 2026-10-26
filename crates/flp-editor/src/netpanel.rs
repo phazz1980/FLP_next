@@ -455,3 +455,31 @@ fn switch_port(
         None => Ok(()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flp_core::{BlockPos, Library, Project};
+
+    const POS: BlockPos = BlockPos {
+        sheet: 1,
+        x: 0.0,
+        y: 0.0,
+    };
+
+    #[test]
+    fn pulled_output_reads_and_input_writes() {
+        let (lib, _) =
+            Library::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library")).unwrap();
+        let mut p = Project::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/wifi_bound"
+        ))
+        .unwrap();
+        let id = "wifi".to_owned();
+        let out = pull_out(&mut p, &lib, &id, "address", SignalType::String, false, POS).unwrap();
+        assert_eq!(p.logic.block(&out).unwrap().kind, flp_core::vars::VAR_GET);
+        let inp = pull_out(&mut p, &lib, &id, "en", SignalType::Bool, true, POS).unwrap();
+        assert_eq!(p.logic.block(&inp).unwrap().kind, flp_core::vars::VAR_SET);
+    }
+}
