@@ -389,6 +389,8 @@ $("addHost").onclick = () => act(async () => { await api("add_block", { type: "w
     say("Готово. Изменения сохраняются в проект сразу; прошивку соберите в редакторе схемы или командой flp build.");
   } catch (e) { say(e.message, true); }
 })();
+// keeps the server alive while the page is open
+setInterval(() => fetch("/ping").catch(() => {}), 10000);
 </script>
 </body>
 </html>

@@ -563,6 +563,8 @@ $("search").oninput = loadTypes;
   try { await loadTypes(); await load(); fit(); }
   catch (e) { say("Не удалось загрузить проект: " + e.message, "err"); }
 })();
+// keeps the server alive while the page is open
+setInterval(() => fetch("/ping").catch(() => {}), 10000);
 </script>
 </body>
 </html>

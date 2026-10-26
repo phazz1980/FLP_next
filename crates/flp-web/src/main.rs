@@ -11,6 +11,8 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use flp_ai::folder::FolderContext;
 use serde_json::{json, Value};
@@ -20,6 +22,9 @@ const DESIGNER: &str = include_str!("designer.html");
 const DEFAULT_PORT: u16 = 8080;
 /// Largest request body accepted (commands are small JSON objects).
 const MAX_BODY: usize = 1 << 20;
+/// The pages ping the server every few seconds; with no request for this long the
+/// server exits, so it never outlives the browser tab (or the editor that started it).
+const IDLE_LIMIT: Duration = Duration::from_secs(300);
 
 fn main() -> ExitCode {
     match run() {
@@ -61,7 +66,21 @@ fn run() -> Result<(), String> {
         "Веб-редактор: http://127.0.0.1:{port}/  (проект {})",
         project.display()
     );
+    let started = Instant::now();
+    let last_seen = std::sync::Arc::new(AtomicU64::new(0));
+    let watch = last_seen.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(10));
+        let idle = started
+            .elapsed()
+            .saturating_sub(Duration::from_secs(watch.load(Ordering::Relaxed)));
+        if idle > IDLE_LIMIT {
+            println!("flp-web: нет запросов {} с, выход.", idle.as_secs());
+            std::process::exit(0);
+        }
+    });
     for stream in listener.incoming().flatten() {
+        last_seen.store(started.elapsed().as_secs(), Ordering::Relaxed);
         // One user: requests are handled one at a time, edits never race.
         if let Err(e) = handle(stream, &mut ctx, &library, port) {
             eprintln!("flp-web: {e}");
