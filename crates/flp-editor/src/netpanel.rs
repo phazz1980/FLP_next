@@ -24,12 +24,6 @@ pub enum NetAction {
         value: ParamValue,
     },
     Settings(String),
-    /// Takes a port or a parameter from a variable (`None` releases it).
-    Bind {
-        id: String,
-        name: String,
-        var: Option<String>,
-    },
     Designer,
     AddWidget(String),
     Focus(String),
@@ -99,7 +93,6 @@ fn service(
                                 Some(SignalType::Int),
                                 true,
                                 b.bound.get("mode"),
-                                actions,
                             );
                         } else {
                             ui.label(label);
@@ -138,7 +131,6 @@ fn service(
                                 ty,
                                 input.is_some(),
                                 b.bound.get(port),
-                                actions,
                             );
                         } else {
                             let mut v = matches!(current, Some(ParamValue::Bool(true)));
@@ -164,7 +156,6 @@ fn service(
                             bindable_type(p.kind, false, p.runtime),
                             true,
                             Some(var),
-                            actions,
                         );
                     } else {
                         pull_label(
@@ -176,7 +167,6 @@ fn service(
                             bindable_type(p.kind, false, p.runtime),
                             true,
                             None,
-                            actions,
                         );
                         let set = |value| NetAction::SetParam {
                             id: b.id.clone(),
@@ -298,7 +288,6 @@ fn pull_label(
     ty: Option<SignalType>,
     feed: bool,
     bound: Option<&String>,
-    actions: &mut Vec<NetAction>,
 ) {
     let Some(ty) = ty else {
         ui.label(label).on_hover_text(hint);
@@ -318,17 +307,6 @@ fn pull_label(
         ));
     if let Some(var) = bound {
         ui.label(format!("↔ {var}"));
-        if ui
-            .small_button("✕")
-            .on_hover_text("Отвязать от переменной")
-            .clicked()
-        {
-            actions.push(NetAction::Bind {
-                id: id.to_owned(),
-                name: name.to_owned(),
-                var: None,
-            });
-        }
     }
 }
 
@@ -450,17 +428,6 @@ pub fn apply(app: &mut EditorApp, actions: Vec<NetAction>) {
                 let key = Some(format!("net:{id}.{name}"));
                 if let Err(e) = doc.edit(&lib, key, |p| p.set_param(&lib, &id, &name, Some(value)))
                 {
-                    app.info(LogLevel::Error, e.to_string());
-                }
-            }
-            NetAction::Bind { id, name, var } => {
-                let Some(doc) = &mut app.doc else { return };
-                let on = var.is_some();
-                let result = doc.edit(&lib, None, |p| {
-                    p.bind(&id, &name, var.as_deref())?;
-                    switch_port(p, &lib, &id, &name, on)
-                });
-                if let Err(e) = result {
                     app.info(LogLevel::Error, e.to_string());
                 }
             }
