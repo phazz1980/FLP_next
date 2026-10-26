@@ -447,8 +447,13 @@ impl BlockEditor {
         }
     }
 
-    fn dirty(&self) -> bool {
+    pub fn dirty(&self) -> bool {
         !self.read_only && self.form != self.clean
+    }
+
+    /// Asks "save changes?" on the next frame, as when its window is closed.
+    pub fn ask_to_close(&mut self) {
+        self.confirm_close = true;
     }
 
     /// Regenerates the trial sketch when the definition or template changed.

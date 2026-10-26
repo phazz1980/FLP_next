@@ -1347,7 +1347,15 @@ impl EditorApp {
 
     fn handle_close(&mut self, ctx: &egui::Context) {
         let close = ctx.input(|i| i.viewport().close_requested());
-        if close && !self.allow_close && self.doc.as_ref().is_some_and(|d| d.dirty) {
+        if !close || self.allow_close {
+            return;
+        }
+        // An open block editor with unsaved changes asks first; the project is
+        // checked on the next close.
+        if let Some(ed) = self.block_editor.as_mut().filter(|e| e.dirty()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ed.ask_to_close();
+        } else if self.doc.as_ref().is_some_and(|d| d.dirty) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.pending = Some(Pending::Close);
         }

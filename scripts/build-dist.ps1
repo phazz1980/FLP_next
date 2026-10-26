@@ -74,7 +74,17 @@ try {
 
 $running = Get-DistProcesses ($bins | ForEach-Object { $_ -replace '\.exe$' })
 if ($running) {
-    Fail "закройте запущенные из dist программы: $(($running.Name | Sort-Object -Unique) -join ', ')."
+    # Helpers (flp-mcp, flp-web, flp) hold no user data: stop them so the files can be replaced.
+    Write-Host "Останавливаю запущенные из dist: $(($running.Name | Sort-Object -Unique) -join ', ')" -ForegroundColor Yellow
+    $running | Stop-Process -Force -ErrorAction SilentlyContinue
+    $deadline = [DateTime]::Now.AddSeconds(10)
+    while ((Get-DistProcesses ($bins | ForEach-Object { $_ -replace '\.exe$' })) -and [DateTime]::Now -lt $deadline) {
+        Start-Sleep -Milliseconds 200
+    }
+    $left = @(Get-DistProcesses ($bins | ForEach-Object { $_ -replace '\.exe$' }))
+    if ($left.Count -gt 0) {
+        Fail "не удалось остановить: $(($left.Name | Sort-Object -Unique) -join ', ')."
+    }
 }
 
 Write-Host '== Сборка папки dist\FLP_next ==' -ForegroundColor Cyan
