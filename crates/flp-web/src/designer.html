@@ -304,11 +304,80 @@ function renderProps() {
       el.appendChild(p);
     }
   }
+  // binding to a project variable: the constructor places and links the var_get / var_set block
+  const port = view.inputs[0] || view.outputs[0];
+  if (port) renderVarBinding(el, b, port, view.inputs.length > 0);
   const del = document.createElement("button");
   del.textContent = "Удалить виджет";
   del.style.marginTop = "14px";
   del.onclick = () => act(async () => { await api("remove_block", { id: b.id }); selected = null; });
   el.appendChild(del);
+}
+
+// Signal type of a variable (`bool`, `String`, anything else is a number).
+const sigType = (t) => (t === "bool" ? "bool" : t === "String" ? "string" : "float");
+const varArduinoType = { bool: "bool", string: "String", float: "float" };
+
+// The variable block linked to the widget port: `var_get` feeds an input, `var_set` takes an output.
+function boundVar(b, port, isInput) {
+  const links = schema.logic.link || [], blocks = schema.logic.block || [];
+  const blockOf = (end) => blocks.find((x) => x.id === end.split(".")[0]);
+  if (isInput) {
+    const l = links.find((x) => x.to === `${b.id}.${port.name}`);
+    const s = l && blockOf(l.from);
+    return s && s.type === "var_get" ? { name: s.var, block: s.id } : null;
+  }
+  for (const l of links.filter((x) => x.from === `${b.id}.${port.name}`)) {
+    const s = blockOf(l.to);
+    if (s && s.type === "var_set") return { name: s.var, block: s.id };
+  }
+  return null;
+}
+
+async function bindVar(b, port, isInput, name, old) {
+  if (old) {
+    const links = schema.logic.link || [];
+    if (isInput) {
+      const others = links.filter((l) => l.from.startsWith(old.block + ".") && l.to !== `${b.id}.${port.name}`);
+      await api("disconnect", { to: `${b.id}.${port.name}` });
+      if (!others.length) await api("remove_block", { id: old.block });
+    } else {
+      await api("remove_block", { id: old.block });
+    }
+  }
+  if (!name) return;
+  const res = await api("add_variable_block", { var: name, write: !isInput });
+  if (isInput) await api("connect", { from: `${res.id}.out`, to: `${b.id}.${port.name}` });
+  else await api("connect", { from: `${b.id}.${port.name}`, to: `${res.id}.in` });
+}
+
+function renderVarBinding(el, b, port, isInput) {
+  const h2 = document.createElement("h2");
+  h2.textContent = "Переменная проекта";
+  const lab = document.createElement("label");
+  lab.className = "f";
+  lab.textContent = isInput ? "Показывать значение переменной" : "Записывать значение в переменную";
+  const cur = boundVar(b, port, isInput);
+  const want = sigType(port.type);
+  const sel = document.createElement("select");
+  sel.appendChild(new Option("— не привязано —", ""));
+  for (const v of schema.logic.var || []) {
+    if (sigType(v.type) === want) sel.appendChild(new Option(`${v.name} (${v.type})`, v.name));
+  }
+  sel.appendChild(new Option("＋ Новая переменная…", "\u0000new"));
+  sel.value = cur ? cur.name : "";
+  sel.onchange = () => act(async () => {
+    let name = sel.value;
+    if (name === "\u0000new") {
+      name = (prompt("Имя новой переменной (тип " + varArduinoType[want] + ")", b.id) || "").trim();
+      if (!name) return;
+      if (!(schema.logic.var || []).some((v) => v.name === name)) {
+        await api("set_variable", { name, type: varArduinoType[want] });
+      }
+    }
+    await bindVar(b, port, isInput, name, cur);
+  });
+  el.append(h2, lab, sel);
 }
 
 function paramField(b, p) {
