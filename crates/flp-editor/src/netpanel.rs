@@ -131,13 +131,48 @@ fn service(
                             actions,
                         );
                     } else {
-                        let text = match current {
-                            Some(_) if p.show == flp_core::ParamShow::Secret => "••••".to_owned(),
-                            Some(v) => value_text(v),
-                            None => "не задан".to_owned(),
+                        ui.label(label).on_hover_text(&p.description);
+                        let set = |value| NetAction::SetParam {
+                            id: b.id.clone(),
+                            name: p.name.clone(),
+                            value,
                         };
-                        ui.label(format!("{label}: {text}"))
-                            .on_hover_text(&p.description);
+                        match p.kind {
+                            ParamKind::Int => {
+                                let mut v = match current {
+                                    Some(ParamValue::Int(i)) => *i,
+                                    _ => 0,
+                                };
+                                if ui.add(egui::DragValue::new(&mut v)).changed() {
+                                    actions.push(set(ParamValue::Int(v)));
+                                }
+                            }
+                            ParamKind::Float => {
+                                let mut v = match current {
+                                    Some(ParamValue::Float(f)) => *f,
+                                    _ => 0.0,
+                                };
+                                if ui.add(egui::DragValue::new(&mut v).speed(0.1)).changed() {
+                                    actions.push(set(ParamValue::Float(v)));
+                                }
+                            }
+                            ParamKind::Text => {
+                                let mut v = match current {
+                                    Some(ParamValue::Text(t)) => t.clone(),
+                                    _ => String::new(),
+                                };
+                                let secret = p.show == flp_core::ParamShow::Secret;
+                                let edit = egui::TextEdit::singleline(&mut v)
+                                    .password(secret)
+                                    .desired_width(110.0);
+                                if ui.add(edit).changed() {
+                                    actions.push(set(ParamValue::Text(v)));
+                                }
+                            }
+                            _ => {
+                                ui.label(current.map_or_else(|| "не задан".to_owned(), value_text));
+                            }
+                        }
                         bind_control(
                             ui,
                             logic,
