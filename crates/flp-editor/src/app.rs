@@ -511,8 +511,11 @@ impl EditorApp {
         }
     }
 
-    pub fn save(&mut self) {
-        let Some(doc) = &mut self.doc else { return };
+    /// Saves the open project; `false` if it could not be saved.
+    pub fn save(&mut self) -> bool {
+        let Some(doc) = &mut self.doc else {
+            return false;
+        };
         match doc.save(&self.lib) {
             Ok(warning) => {
                 let path = doc.project.path.display().to_string();
@@ -520,8 +523,49 @@ impl EditorApp {
                 if let Some(w) = warning {
                     self.info(LogLevel::Warning, w);
                 }
+                true
             }
-            Err(e) => self.info(LogLevel::Error, e.to_string()),
+            Err(e) => {
+                self.info(LogLevel::Error, e.to_string());
+                false
+            }
+        }
+    }
+
+    /// Asks for a new file and saves the project there; the editor then works with
+    /// the new file. Also converts an old-format project folder into a `.flpn`.
+    pub fn save_as(&mut self) {
+        let Some(doc) = &self.doc else { return };
+        let old = doc.project.path.clone();
+        let name = doc.project.config.project.name.clone();
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Сохранить проект как")
+            .add_filter("Проект FLP_next", &[PROJECT_EXT]);
+        dialog = match old.parent().filter(|d| d.is_dir()) {
+            Some(dir) => dialog.set_directory(dir),
+            None => dialog,
+        };
+        let file = old
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .map_or(name, str::to_owned);
+        let Some(mut path) = dialog
+            .set_file_name(format!("{file}.{PROJECT_EXT}"))
+            .save_file()
+        else {
+            return;
+        };
+        if !flp_core::project::is_project_file(&path) {
+            path.set_extension(PROJECT_EXT);
+        }
+        if let Some(doc) = &mut self.doc {
+            doc.project.path = path.clone();
+        }
+        if self.save() {
+            theme::save_last_project(&path);
+        } else if let Some(doc) = &mut self.doc {
+            // Saving failed: stay with the previous file.
+            doc.project.path = old;
         }
     }
 
@@ -931,6 +975,10 @@ impl EditorApp {
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let shortcut = |m, k| KeyboardShortcut::new(m, k);
         let pressed = |s: KeyboardShortcut| ctx.input_mut(|i| i.consume_shortcut(&s));
+        // The shortcut with Shift first: `COMMAND` alone would also match it.
+        if pressed(shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::S)) {
+            self.save_as();
+        }
         if pressed(shortcut(Modifiers::COMMAND, Key::S)) {
             self.save();
         }
@@ -996,6 +1044,15 @@ impl EditorApp {
                     .clicked()
                 {
                     self.save();
+                }
+                if ui
+                    .add_enabled(
+                        has_doc,
+                        egui::Button::new("Сохранить как...").shortcut_text("Ctrl+Shift+S"),
+                    )
+                    .clicked()
+                {
+                    self.save_as();
                 }
                 if ui
                     .button("Открывать .flpn двойным щелчком")
