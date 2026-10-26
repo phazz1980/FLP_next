@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $dist = Join-Path $root 'dist\FLP_next'
 $zip = Join-Path $root 'dist\FLP_next.zip'
-$bins = 'flp-editor.exe', 'flp-mcp.exe', 'flp.exe'
+$bins = 'flp-editor.exe', 'flp-mcp.exe', 'flp-web.exe', 'flp.exe'
 
 function Fail($msg) {
     Write-Host "ОШИБКА: $msg" -ForegroundColor Red
