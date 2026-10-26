@@ -1342,7 +1342,13 @@ fn port_context_menu(
                     }
                     return;
                 }
-                let edit = ui.text_edit_singleline(text);
+                // The menu style drops the vertical padding: give the field its own, and
+                // centre the text, or it sticks to the top of a taller field.
+                let edit = ui.add(
+                    egui::TextEdit::singleline(text)
+                        .margin(egui::Margin::symmetric(4, 3))
+                        .align(egui::Align2::LEFT_CENTER),
+                );
                 let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if ui.button("Применить").clicked() || enter {
                     match parse_const(ty, text) {
