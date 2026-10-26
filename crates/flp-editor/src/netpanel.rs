@@ -52,7 +52,10 @@ pub fn show(app: &EditorApp, ui: &mut Ui) -> Vec<NetAction> {
     for (kind, title) in NETWORKS {
         service(app, ui, kind, title, true, &mut actions);
     }
-    service(app, ui, WEB_UI, "Веб-интерфейс", has_net, &mut actions);
+    // The web interface is served by a network service: its section appears with one.
+    if has_net {
+        service(app, ui, WEB_UI, "Веб-интерфейс", true, &mut actions);
+    }
     actions
 }
 
