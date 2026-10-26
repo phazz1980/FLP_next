@@ -123,12 +123,30 @@ fn service(
                                 value: ParamValue::Bool(v),
                             });
                         }
+                        // `use_<port>` / `out_<port>` switch a port on: pull it out to the board.
+                        let port = p
+                            .name
+                            .strip_prefix("use_")
+                            .or_else(|| p.name.strip_prefix("out_"));
+                        if let (true, Some(port)) = (v, port) {
+                            let input = def.input(port).map(|d| d.ty);
+                            let output = def.output(port).map(|d| d.ty);
+                            if let Some(ty) = input.or(output) {
+                                bind_control(
+                                    ui,
+                                    &b.id,
+                                    port,
+                                    Some(ty),
+                                    input.is_some(),
+                                    b.bound.get(port),
+                                    actions,
+                                );
+                            }
+                        }
                     } else if let Some(var) = b.bound.get(&p.name) {
-                        ui.label(format!("{label}: ↔ {var}"))
-                            .on_hover_text(&p.description);
+                        ui.label(label).on_hover_text(&p.description);
                         bind_control(
                             ui,
-                            logic,
                             &b.id,
                             &p.name,
                             bindable_type(p.kind, false),
@@ -181,7 +199,6 @@ fn service(
                         }
                         bind_control(
                             ui,
-                            logic,
                             &b.id,
                             &p.name,
                             bindable_type(p.kind, false),
@@ -203,7 +220,6 @@ fn service(
                     actions.push(NetAction::Designer);
                 }
             }
-            ports(ui, b, def, logic, actions);
         });
 }
 
@@ -250,45 +266,10 @@ fn widget_list(app: &EditorApp, ui: &mut Ui, actions: &mut Vec<NetAction>) {
     }
 }
 
-/// Ports of the service; each can be taken out to the sheet as a variable.
-fn ports(
-    ui: &mut Ui,
-    b: &flp_core::Block,
-    def: &flp_core::BlockDef,
-    logic: &flp_core::Logic,
-    actions: &mut Vec<NetAction>,
-) {
-    let inputs: Vec<_> = def.active_inputs(&b.params).collect();
-    let outputs: Vec<_> = def.active_outputs(&b.params).collect();
-    if inputs.is_empty() && outputs.is_empty() {
-        return;
-    }
-    ui.separator();
-    for (input, name, label, ty, description) in inputs
-        .iter()
-        .map(|p| (true, &p.name, p.label.as_deref(), p.ty, &p.description))
-        .chain(
-            outputs
-                .iter()
-                .map(|p| (false, &p.name, p.label.as_deref(), p.ty, &p.description)),
-        )
-    {
-        let bound = b.bound.get(name.as_str());
-        ui.horizontal(|ui| {
-            let arrow = if input { "вход" } else { "выход" };
-            let text = format!("{arrow} {} · {}", label.unwrap_or(name), ty_name(ty));
-            ui.label(text).on_hover_text(description);
-            bind_control(ui, logic, &b.id, name, Some(ty), input, bound, actions);
-        });
-    }
-}
-
 /// Button that takes a value from a variable of the type: the menu lists the
 /// matching variables and offers a new one; a bound value shows a release button.
-#[allow(clippy::too_many_arguments)]
 fn bind_control(
     ui: &mut Ui,
-    logic: &flp_core::Logic,
     id: &str,
     name: &str,
     ty: Option<SignalType>,
@@ -297,7 +278,8 @@ fn bind_control(
     actions: &mut Vec<NetAction>,
 ) {
     let Some(ty) = ty else { return };
-    if bound.is_some() {
+    if let Some(var) = bound {
+        ui.label(format!("↔ {var}"));
         if ui
             .small_button("✕")
             .on_hover_text("Отвязать от переменной")
@@ -311,37 +293,18 @@ fn bind_control(
         }
         return;
     }
-    ui.menu_button("→ переменная", |ui| {
-        for v in &logic.vars {
-            let vt = v.ty.signal();
-            if (ty == SignalType::Any || vt == ty) && ui.button(&v.name).clicked() {
-                actions.push(NetAction::Bind {
-                    id: id.to_owned(),
-                    name: name.to_owned(),
-                    var: Some(v.name.clone()),
-                });
-                ui.close();
-            }
-        }
-        if ty != SignalType::Any && ui.button("＋ Новая переменная").clicked() {
-            actions.push(NetAction::BindNew {
-                id: id.to_owned(),
-                name: name.to_owned(),
-                ty,
-                feed,
-            });
-            ui.close();
-        }
-    });
-}
-
-fn ty_name(ty: SignalType) -> &'static str {
-    match ty {
-        SignalType::Bool => "bool",
-        SignalType::Int => "int",
-        SignalType::Float => "float",
-        SignalType::String => "String",
-        SignalType::Any => "любой",
+    // The first pull creates the variable and puts its block on the sheet.
+    if ui
+        .small_button("→ переменная")
+        .on_hover_text("Вытянуть на плату: переменная создаётся автоматически")
+        .clicked()
+    {
+        actions.push(NetAction::BindNew {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            ty,
+            feed,
+        });
     }
 }
 
