@@ -209,6 +209,19 @@ impl Block {
     }
 }
 
+/// Whether a variable is read-only: it is bound to an output of a block. A variable
+/// bound to an input or a parameter works both ways, like an ordinary one.
+pub fn var_fixed(logic: &Logic, lib: &crate::Library, var: &str) -> bool {
+    logic.blocks.iter().any(|b| {
+        b.bound.iter().any(|(name, v)| {
+            v == var
+                && lib
+                    .get(&b.kind)
+                    .is_some_and(|l| l.def.output(name).is_some())
+        })
+    })
+}
+
 /// Internal library type of a variable block (`var_get_float`), or `None` for
 /// ordinary blocks.
 pub(crate) fn builtin_kind(logic: &Logic, block: &Block) -> Option<String> {

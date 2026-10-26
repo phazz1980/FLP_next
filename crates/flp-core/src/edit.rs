@@ -246,8 +246,8 @@ impl Project {
     /// Connects an output to an input. An existing link into the same input is replaced.
     pub fn connect(&mut self, lib: &Library, from: PortRef, to: PortRef) -> Result<(), EditError> {
         // A variable block reads or writes depending on the side the link comes to.
-        self.adapt_var_block(&from.block, false)?;
-        self.adapt_var_block(&to.block, true)?;
+        self.adapt_var_block(lib, &from.block, false)?;
+        self.adapt_var_block(lib, &to.block, true)?;
         let out_ty = {
             let def = self.block_def(lib, &from.block)?;
             def.output(&from.port)
@@ -355,13 +355,18 @@ impl Project {
 
     /// Switches the write enable input `en` of one variable block. Turning it on
     /// makes an unconnected read a write; a read with links cannot get it.
-    pub fn set_var_write_enable(&mut self, id: &str, on: bool) -> Result<(), EditError> {
+    pub fn set_var_write_enable(
+        &mut self,
+        lib: &Library,
+        id: &str,
+        on: bool,
+    ) -> Result<(), EditError> {
         let linked = self
             .logic
             .links
             .iter()
             .any(|l| l.from.block == id || l.to.block == id);
-        let service = self.is_service_var(self.logic.block(id).and_then(|b| b.var_name()));
+        let service = self.is_var_fixed(lib, self.logic.block(id).and_then(|b| b.var_name()));
         let block = self
             .logic
             .blocks
@@ -393,13 +398,13 @@ impl Project {
         Ok(())
     }
 
-    fn is_service_var(&self, name: Option<&str>) -> bool {
-        name.is_some_and(|n| self.logic.vars.iter().any(|v| v.service && v.name == n))
+    fn is_var_fixed(&self, lib: &Library, name: Option<&str>) -> bool {
+        name.is_some_and(|n| crate::vars::var_fixed(&self.logic, lib, n))
     }
 
     /// Turns a variable block into a reader or a writer before a link is attached;
     /// allowed only while the block has no links.
-    fn adapt_var_block(&mut self, id: &str, write: bool) -> Result<(), EditError> {
+    fn adapt_var_block(&mut self, lib: &Library, id: &str, write: bool) -> Result<(), EditError> {
         let want = if write { VAR_SET } else { VAR_GET };
         let Some(block) = self.logic.block(id) else {
             return Ok(());
@@ -407,7 +412,7 @@ impl Project {
         if (block.kind != VAR_GET && block.kind != VAR_SET) || block.kind == want {
             return Ok(());
         }
-        if self.is_service_var(block.var_name()) {
+        if self.is_var_fixed(lib, block.var_name()) {
             return Err(EditError::VarFixed(id.to_owned()));
         }
         // A write with the enable input stays a write.
@@ -886,6 +891,8 @@ mod tests {
         .unwrap();
         let src = p.add_block(&lib, "src", POS).unwrap();
         let sink = p.add_block(&lib, "sink", POS).unwrap();
+        let bound = p.add_block(&lib, "src", POS).unwrap();
+        p.bind(&bound, "out", Some("svc")).unwrap();
         let tag = p.add_var_block("svc", false, POS).unwrap();
         assert_eq!(
             p.connect(&lib, PortRef::new(&src, "out"), PortRef::new(&tag, "in")),
@@ -915,11 +922,11 @@ mod tests {
             let b = p.logic.block(id).unwrap();
             lib.resolve(&p.logic, b).unwrap().def.inputs.len()
         };
-        p.set_var_write_enable(&tag, true).unwrap();
+        p.set_var_write_enable(&lib, &tag, true).unwrap();
         assert_eq!(p.logic.block(&tag).unwrap().kind, VAR_SET);
         assert_eq!(inputs(&p, &tag), 2);
         assert_eq!(p.logic.block(&other).unwrap().kind, VAR_GET);
-        p.set_var_write_enable(&tag, false).unwrap();
+        p.set_var_write_enable(&lib, &tag, false).unwrap();
         assert_eq!(inputs(&p, &tag), 1);
     }
 

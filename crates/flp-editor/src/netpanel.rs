@@ -330,19 +330,12 @@ pub fn pull_out(
 ) -> Result<String, flp_core::EditError> {
     let block = p.logic.block(id);
     let def = block.and_then(|b| lib.get(&b.kind)).map(|l| &l.def);
-    // A parameter works both ways: one block writes it, the others read what was set.
-    let is_param = def.is_some_and(|d| d.input(name).is_none() && d.output(name).is_none());
     // Already taken out: one more block of the same variable.
     if let Some(var) = block.and_then(|b| b.bound.get(name)).cloned() {
-        let has_writer = p
-            .logic
-            .blocks
-            .iter()
-            .any(|b| b.kind == flp_core::vars::VAR_SET && b.var_name() == Some(var.as_str()));
-        return p.add_var_block(&var, feed && !(is_param && has_writer), pos);
+        return p.add_var_block(&var, feed, pos);
     }
     // The variable starts with the current value of the parameter.
-    let init = def.filter(|_| is_param).and_then(|d| {
+    let init = def.filter(|d| d.output(name).is_none()).and_then(|d| {
         block
             .and_then(|b| b.params.get(name))
             .or_else(|| d.param(name).and_then(|q| q.default.as_ref()))
@@ -506,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn pulled_param_writes_once_then_reads() {
+    fn pulled_param_is_an_ordinary_variable() {
         let (lib, _) =
             Library::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library")).unwrap();
         let mut p = Project::load(concat!(
@@ -535,7 +528,7 @@ mod tests {
             POS,
         )
         .unwrap();
-        assert_eq!(p.logic.block(&again).unwrap().kind, flp_core::vars::VAR_GET);
+        assert_eq!(p.logic.block(&again).unwrap().kind, flp_core::vars::VAR_SET);
         let var = p
             .logic
             .block(&first)

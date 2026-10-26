@@ -765,7 +765,7 @@ fn apply(app: &mut EditorApp, dialog: &Dialog) -> Result<(), String> {
             }
             .map_err(|e| e.to_string())?;
             if let Some((id, en)) = &d.block {
-                doc.edit(&lib, None, |p| p.set_var_write_enable(id, *en))
+                doc.edit(&lib, None, |p| p.set_var_write_enable(&lib, id, *en))
                     .map_err(|e| e.to_string())?;
             }
         }

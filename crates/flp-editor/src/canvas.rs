@@ -330,19 +330,14 @@ pub fn block_preview(ui: &mut Ui, def: &BlockDef, pal: &Palette) {
     paint_box(&painter, r, 1.0, &block, Some(def), pal, border, |_| false);
 }
 
-/// Whether a variable block already has a link on either side. A block of a service
-/// variable (a setting pulled out of Wi-Fi...) has its side fixed from the start: a
-/// read-only value gets no writing side.
-fn tag_linked(logic: &Logic, id: &str) -> bool {
-    // A variable bound to a block setting (service or not) is taken out from the panel.
-    let service = logic.block(id).and_then(|b| b.var_name()).is_some_and(|v| {
-        logic.var(v).is_some_and(|x| x.service)
-            || logic
-                .blocks
-                .iter()
-                .any(|b| b.bound.values().any(|n| n == v))
-    });
-    service
+/// Whether a variable block already has a link on either side. A block of a variable
+/// bound to a port of a service block (Wi-Fi `En`, `IP`...) has its side fixed from the
+/// start: a read-only value gets no writing side. Parameters work both ways.
+fn tag_linked(logic: &Logic, lib: &flp_core::Library, id: &str) -> bool {
+    logic
+        .block(id)
+        .and_then(|b| b.var_name())
+        .is_some_and(|v| flp_core::vars::var_fixed(logic, lib, v))
         || logic
             .links
             .iter()
@@ -852,7 +847,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                     let color = signal_color(&pal, port.ty);
                     painter.circle_filled(port_pos(r, kind, 0, !write), PORT_R * z.sqrt(), color);
                     // Not connected yet: the other side is free too.
-                    if !tag_linked(logic, &block.id) {
+                    if !tag_linked(logic, &app.lib, &block.id) {
                         painter.circle_filled(
                             port_pos(r, kind, 0, write),
                             PORT_R * z.sqrt(),
@@ -904,7 +899,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         let write = block.kind == VAR_SET;
         // With the write enable input the block only writes: no output side.
         let tag_port = (block.var_name().is_some()
-            && !tag_linked(logic, &block.id)
+            && !tag_linked(logic, &app.lib, &block.id)
             && kind
                 != (Kind::Tag {
                     write: true,
