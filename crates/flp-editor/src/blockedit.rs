@@ -178,6 +178,7 @@ impl ParamRow {
                 PinMode::Io
             },
             shared: self.kind == ParamKind::Pin && self.shared,
+            runtime: false,
             choices: self.choices.clone(),
         })
     }

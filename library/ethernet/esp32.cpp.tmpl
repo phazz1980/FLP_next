@@ -169,10 +169,9 @@ void {{ id }}_page(FLProgNetworkHttpServer *server) {
 {% endif %}
 // @setup
 flpEth.mac(0x78, 0xAC, 0xC0, 0x2C, 0x3E, {{ param.mac }});
-{% if value.dhcp %}
-flpEth.setDhcp();
-{% else %}
-{
+if ({{ param.dhcp }}) {
+  flpEth.setDhcp();
+} else {
   IPAddress addr;
   addr.fromString({{ param.ip }});
   flpEth.localIP(addr);
@@ -183,7 +182,6 @@ flpEth.setDhcp();
   flpEth.subnet(addr);
   flpEth.resetDhcp();
 }
-{% endif %}
 {% if value.web %}
 {{ id }}_web.addHandler("/", {{ id }}_page);
 {% endif %}

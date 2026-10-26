@@ -103,7 +103,7 @@ fn service(
                                     }
                                 }
                             });
-                    } else if p.kind == ParamKind::Bool {
+                    } else if p.kind == ParamKind::Bool && !p.runtime {
                         // `use_<port>` / `out_<port>` switch a port on: it is active only
                         // when pulled out to the board, so there is no check box.
                         let port = p
@@ -146,7 +146,7 @@ fn service(
                             &p.name,
                             label,
                             &p.description,
-                            bindable_type(p.kind, false),
+                            bindable_type(p.kind, false, p.runtime),
                             true,
                             Some(var),
                             actions,
@@ -158,7 +158,7 @@ fn service(
                             &p.name,
                             label,
                             &p.description,
-                            bindable_type(p.kind, false),
+                            bindable_type(p.kind, false, p.runtime),
                             true,
                             None,
                             actions,
@@ -198,6 +198,12 @@ fn service(
                                     .desired_width(110.0);
                                 if ui.add(edit).changed() {
                                     actions.push(set(ParamValue::Text(v)));
+                                }
+                            }
+                            ParamKind::Bool => {
+                                let mut v = matches!(current, Some(ParamValue::Bool(true)));
+                                if ui.checkbox(&mut v, "").changed() {
+                                    actions.push(set(ParamValue::Bool(v)));
                                 }
                             }
                             _ => {

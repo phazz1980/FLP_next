@@ -608,7 +608,7 @@ fn check_bindings(logic: &Logic, block: &crate::Block, def: &BlockDef, report: &
             Some(p.ty)
         } else {
             def.param(name)
-                .and_then(|p| bindable_type(p.kind, !p.choices.is_empty()))
+                .and_then(|p| bindable_type(p.kind, !p.choices.is_empty(), p.runtime))
         };
         match want {
             None => report.block_error(
@@ -630,7 +630,7 @@ fn check_bindings(logic: &Logic, block: &crate::Block, def: &BlockDef, report: &
 
 /// Signal type a parameter takes from a variable; `None` if it cannot be bound
 /// (the value is needed while generating: pins, durations, choices, flags).
-pub fn bindable_type(kind: crate::ParamKind, choice: bool) -> Option<SignalType> {
+pub fn bindable_type(kind: crate::ParamKind, choice: bool, runtime: bool) -> Option<SignalType> {
     use crate::ParamKind;
     if choice {
         return None;
@@ -639,6 +639,7 @@ pub fn bindable_type(kind: crate::ParamKind, choice: bool) -> Option<SignalType>
         ParamKind::Text => Some(SignalType::String),
         ParamKind::Int => Some(SignalType::Int),
         ParamKind::Float => Some(SignalType::Float),
+        ParamKind::Bool if runtime => Some(SignalType::Bool),
         _ => None,
     }
 }

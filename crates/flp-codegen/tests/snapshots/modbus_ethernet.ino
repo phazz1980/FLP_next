@@ -176,7 +176,9 @@ void eth_page(FLProgNetworkHttpServer *server) {
 void setup() {
   // eth: ethernet
   flpEth.mac(0x78, 0xAC, 0xC0, 0x2C, 0x3E, 40);
-  {
+  if (False) {
+    flpEth.setDhcp();
+  } else {
     IPAddress addr;
     addr.fromString("192.168.1.50");
     flpEth.localIP(addr);

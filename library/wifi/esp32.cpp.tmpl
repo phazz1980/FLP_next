@@ -186,10 +186,9 @@ void {{ id }}_page(FLProgNetworkHttpServer *server) {
 {% if client %}
 flpWifi.setClientSsid({{ param.ssid }});
 flpWifi.setClientPassword({{ param.password }});
-{% if value.dhcp %}
-flpWifi.setDhcp();
-{% else %}
-{
+if ({{ param.dhcp }}) {
+  flpWifi.setDhcp();
+} else {
   IPAddress addr;
   addr.fromString({{ param.ip }});
   flpWifi.localIP(addr);
@@ -200,7 +199,6 @@ flpWifi.setDhcp();
   flpWifi.subnet(addr);
   flpWifi.resetDhcp();
 }
-{% endif %}
 {% endif %}
 {% if ap %}
 flpWifi.setApSsid({{ param.ap_ssid }});

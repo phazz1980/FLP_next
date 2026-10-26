@@ -194,7 +194,19 @@ void setup() {
   // wifi: wifi
   flpWifi.setClientSsid("MyNetwork");
   flpWifi.setClientPassword("");
-  flpWifi.setDhcp();
+  if (True) {
+    flpWifi.setDhcp();
+  } else {
+    IPAddress addr;
+    addr.fromString("192.168.1.177");
+    flpWifi.localIP(addr);
+    addr.fromString("192.168.1.1");
+    flpWifi.gateway(addr);
+    flpWifi.dns(addr);
+    addr.fromString("255.255.255.0");
+    flpWifi.subnet(addr);
+    flpWifi.resetDhcp();
+  }
   flpWifi.setApSsid("FLP_ESP32");
   flpWifi.setApPassword("");
   wifi_web.addHandler("/", wifi_page);

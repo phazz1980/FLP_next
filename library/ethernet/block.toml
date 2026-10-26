@@ -31,6 +31,7 @@ description = "Последний байт MAC-адреса 78:AC:C0:2C:3E:xx �
 [[param]]
 name = "dhcp"
 type = "bool"
+runtime = true
 default = true
 description = "Получать адрес автоматически (DHCP)"
 

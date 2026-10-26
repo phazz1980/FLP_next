@@ -248,6 +248,10 @@ pub struct ParamDef {
     /// (several DS18B20 on one 1-Wire bus).
     #[serde(default, skip_serializing_if = "is_false")]
     pub shared: bool,
+    /// A `bool` parameter that may come from a variable: the template uses it as a
+    /// run-time condition (`if (...)`), not to choose code while generating.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub runtime: bool,
     /// Allowed values with captions: the properties show a drop-down list
     /// instead of a field (`[[param.choice]]` in `block.toml`).
     #[serde(rename = "choice", default, skip_serializing_if = "Vec::is_empty")]

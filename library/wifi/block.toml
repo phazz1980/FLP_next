@@ -96,6 +96,7 @@ description = "Пароль сети. Хранится в программе о�
 [[param]]
 name = "dhcp"
 type = "bool"
+runtime = true
 default = true
 when = "wifi_mode != 1"
 description = "Получать адрес автоматически (DHCP)"
