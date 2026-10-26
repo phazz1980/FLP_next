@@ -111,36 +111,38 @@ fn service(
                                 }
                             });
                     } else if p.kind == ParamKind::Bool {
-                        let mut v = matches!(current, Some(ParamValue::Bool(true)));
-                        if ui
-                            .checkbox(&mut v, label)
-                            .on_hover_text(&p.description)
-                            .changed()
-                        {
-                            actions.push(NetAction::SetParam {
-                                id: b.id.clone(),
-                                name: p.name.clone(),
-                                value: ParamValue::Bool(v),
-                            });
-                        }
-                        // `use_<port>` / `out_<port>` switch a port on: pull it out to the board.
+                        // `use_<port>` / `out_<port>` switch a port on: it is active only
+                        // when pulled out to the board, so there is no check box.
                         let port = p
                             .name
                             .strip_prefix("use_")
-                            .or_else(|| p.name.strip_prefix("out_"));
-                        if let (true, Some(port)) = (v, port) {
+                            .or_else(|| p.name.strip_prefix("out_"))
+                            .filter(|n| def.input(n).is_some() || def.output(n).is_some());
+                        if let Some(port) = port {
                             let input = def.input(port).map(|d| d.ty);
-                            let output = def.output(port).map(|d| d.ty);
-                            if let Some(ty) = input.or(output) {
-                                bind_control(
-                                    ui,
-                                    &b.id,
-                                    port,
-                                    Some(ty),
-                                    input.is_some(),
-                                    b.bound.get(port),
-                                    actions,
-                                );
+                            let ty = input.or(def.output(port).map(|d| d.ty));
+                            ui.label(label).on_hover_text(&p.description);
+                            bind_control(
+                                ui,
+                                &b.id,
+                                port,
+                                ty,
+                                input.is_some(),
+                                b.bound.get(port),
+                                actions,
+                            );
+                        } else {
+                            let mut v = matches!(current, Some(ParamValue::Bool(true)));
+                            if ui
+                                .checkbox(&mut v, label)
+                                .on_hover_text(&p.description)
+                                .changed()
+                            {
+                                actions.push(NetAction::SetParam {
+                                    id: b.id.clone(),
+                                    name: p.name.clone(),
+                                    value: ParamValue::Bool(v),
+                                });
                             }
                         }
                     } else if let Some(var) = b.bound.get(&p.name) {
@@ -379,7 +381,12 @@ pub fn apply(app: &mut EditorApp, actions: Vec<NetAction>) {
             }
             NetAction::Bind { id, name, var } => {
                 let Some(doc) = &mut app.doc else { return };
-                if let Err(e) = doc.edit(&lib, None, |p| p.bind(&id, &name, var.as_deref())) {
+                let on = var.is_some();
+                let result = doc.edit(&lib, None, |p| {
+                    p.bind(&id, &name, var.as_deref())?;
+                    switch_port(p, &lib, &id, &name, on)
+                });
+                if let Err(e) = result {
                     app.info(LogLevel::Error, e.to_string());
                 }
             }
@@ -402,6 +409,7 @@ pub fn apply(app: &mut EditorApp, actions: Vec<NetAction>) {
                     p.bind(&id, &name, Some(&var))?;
                     // Taken out to the board like an input or a variable.
                     p.add_var_block(&var, feed, pos)?;
+                    switch_port(p, &lib, &id, &name, true)?;
                     Ok::<(), flp_core::EditError>(())
                 });
                 if let Err(e) = result {
@@ -409,5 +417,33 @@ pub fn apply(app: &mut EditorApp, actions: Vec<NetAction>) {
                 }
             }
         }
+    }
+}
+
+/// Turns the `use_<port>` / `out_<port>` switch of a port on or off, when the block has one.
+fn switch_param(
+    p: &flp_core::Project,
+    lib: &flp_core::Library,
+    id: &str,
+    port: &str,
+) -> Option<String> {
+    let block = p.logic.block(id)?;
+    let def = &lib.resolve(&p.logic, block)?.def;
+    ["use_", "out_"]
+        .iter()
+        .map(|prefix| format!("{prefix}{port}"))
+        .find(|n| def.param(n).is_some())
+}
+
+fn switch_port(
+    p: &mut flp_core::Project,
+    lib: &flp_core::Library,
+    id: &str,
+    port: &str,
+    on: bool,
+) -> Result<(), flp_core::EditError> {
+    match switch_param(p, lib, id, port) {
+        Some(name) => p.set_param(lib, id, &name, Some(ParamValue::Bool(on))),
+        None => Ok(()),
     }
 }
