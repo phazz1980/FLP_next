@@ -97,6 +97,8 @@ enum Pending {
 pub struct EditorApp {
     pub lib: Library,
     pub lib_dir: Option<PathBuf>,
+    /// `flp-web` started from the "Конструктор веб-интерфейса" menu item.
+    web_editor: Option<std::process::Child>,
     lib_stamp: Option<SystemTime>,
     lib_checked: Instant,
     pub doc: Option<Doc>,
@@ -161,6 +163,7 @@ impl EditorApp {
         let mut app = Self {
             lib: Library::default(),
             lib_dir: None,
+            web_editor: None,
             lib_stamp: None,
             lib_checked: Instant::now(),
             doc: None,
@@ -456,6 +459,56 @@ impl EditorApp {
             return;
         }
         self.open(path);
+    }
+
+    /// Starts the web interface constructor (`flp-web`) for the open project and shows it
+    /// in the browser. The project is saved first: the constructor edits the file itself.
+    fn open_web_designer(&mut self) {
+        let Some(doc) = &self.doc else { return };
+        let path = doc.project.path.clone();
+        if doc.dirty {
+            self.save();
+        }
+        let running = self
+            .web_editor
+            .as_mut()
+            .is_some_and(|c| matches!(c.try_wait(), Ok(None)));
+        if !running {
+            let sibling = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.join("flp-web.exe")))
+                .filter(|p| p.is_file());
+            let mut cmd = std::process::Command::new(sibling.unwrap_or_else(|| "flp-web".into()));
+            cmd.arg(&path);
+            if let Some(dir) = &self.lib_dir {
+                cmd.arg("--library").arg(dir);
+            }
+            hide_console(&mut cmd);
+            match cmd.spawn() {
+                Ok(child) => self.web_editor = Some(child),
+                Err(e) => {
+                    self.info(
+                        LogLevel::Error,
+                        format!(
+                            "Не удалось запустить flp-web (соберите: cargo build -p flp-web): {e}"
+                        ),
+                    );
+                    return;
+                }
+            }
+        }
+        // The server needs a moment to start listening; the browser retries on its own.
+        std::thread::sleep(Duration::from_millis(500));
+        let mut open = std::process::Command::new("cmd");
+        open.args(["/C", "start", "", "http://127.0.0.1:8080/designer"]);
+        hide_console(&mut open);
+        match open.spawn() {
+            Ok(_) => self.info(
+                LogLevel::Info,
+                "Конструктор веб-интерфейса открыт в браузере. После правок откройте проект заново.",
+            ),
+            Err(e) => self.info(LogLevel::Error, format!("Не удалось открыть браузер: {e}")),
+        }
     }
 
     pub fn save(&mut self) {
@@ -1048,6 +1101,13 @@ impl EditorApp {
                 {
                     self.open_board_settings(ui.ctx());
                 }
+                if ui
+                    .add_enabled(has_doc, egui::Button::new("Конструктор веб-интерфейса..."))
+                    .on_hover_text("Страница управления на ESP32 (/ui): откроется в браузере")
+                    .clicked()
+                {
+                    self.open_web_designer();
+                }
                 ui.separator();
                 if ui
                     .add_enabled(has_doc, egui::Button::new("Проверить").shortcut_text("F7"))
@@ -1318,6 +1378,25 @@ impl eframe::App for EditorApp {
             debugview::diagnostics_window(d, layout, &ctx);
         }
         self.unsaved_dialog(&ctx);
+    }
+}
+
+/// Keeps helper processes from flashing a console window.
+fn hide_console(cmd: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    #[cfg(not(windows))]
+    let _ = cmd;
+}
+
+impl Drop for EditorApp {
+    fn drop(&mut self) {
+        if let Some(child) = &mut self.web_editor {
+            let _ = child.kill();
+        }
     }
 }
 
