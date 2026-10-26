@@ -17,6 +17,7 @@ mod dialogs;
 mod doc;
 mod job;
 mod markdown;
+mod netpanel;
 mod panels;
 mod theme;
 mod themeedit;

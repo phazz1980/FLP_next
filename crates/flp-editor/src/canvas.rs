@@ -225,11 +225,17 @@ fn paint_box(
         font(10.5),
         pal.text,
     );
-    // Block label (id) above the box.
+    // Block label (id) above the box; a web widget also shows its caption.
+    let caption = match block.params.get("caption") {
+        Some(flp_core::ParamValue::Text(c)) if block.kind.starts_with("web_") && !c.is_empty() => {
+            format!("{} · {c}", block.id)
+        }
+        _ => block.id.clone(),
+    };
     painter.text(
         r.left_top() - Vec2::new(0.0, 2.0),
         Align2::LEFT_BOTTOM,
-        &block.id,
+        &caption,
         font(9.5),
         pal.weak,
     );

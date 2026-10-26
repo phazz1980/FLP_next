@@ -349,6 +349,7 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
     let mut new_var = false;
     let mut edit_var = None;
     let mut place_var = None;
+    let mut net_actions = Vec::new();
 
     // Tags: blocks with a pin, split by direction.
     let mut inputs = Vec::new();
@@ -492,6 +493,7 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
                                 }
                             });
                     });
+                net_actions = crate::netpanel::show(app, ui);
                 egui::CollapsingHeader::new("Платы")
                     .default_open(true)
                     .show(ui, |ui| {
@@ -537,6 +539,7 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
     if let Some(kind) = add_kind {
         add_to_schema(app, &kind);
     }
+    crate::netpanel::apply(app, net_actions);
     if new_var {
         app.dialog = Dialog::for_var(app, None);
     }
@@ -698,7 +701,7 @@ fn add_to_schema(app: &mut EditorApp, kind: &str) {
 }
 
 /// Position below the lowest block of the active sheet.
-fn free_spot(app: &EditorApp) -> BlockPos {
+pub fn free_spot(app: &EditorApp) -> BlockPos {
     let sheet = app.sheet;
     let bottom = app.doc.as_ref().map_or(0.0, |d| {
         d.project

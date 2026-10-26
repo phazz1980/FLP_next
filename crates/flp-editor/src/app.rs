@@ -463,7 +463,7 @@ impl EditorApp {
 
     /// Starts the web interface constructor (`flp-web`) for the open project and shows it
     /// in the browser. The project is saved first: the constructor edits the file itself.
-    fn open_web_designer(&mut self) {
+    pub fn open_web_designer(&mut self) {
         let Some(doc) = &self.doc else { return };
         let path = doc.project.path.clone();
         if doc.dirty {
