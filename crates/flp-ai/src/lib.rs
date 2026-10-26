@@ -313,7 +313,10 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
         }
         "remove_block" => {
             let id = s("id")?;
-            ctx.edit(&mut |p| p.remove_block(&id).map_err(|e| e.to_string()))?;
+            ctx.edit(&mut |p| {
+                p.remove_block(&id).map_err(|e| e.to_string())?;
+                p.release_unused_services(&lib).map_err(|e| e.to_string())
+            })?;
             Ok(ok(ctx, &lib))
         }
         "move_block" => {

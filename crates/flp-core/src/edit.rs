@@ -490,6 +490,76 @@ impl Project {
         Ok(())
     }
 
+    /// Name of the `use_<port>` / `out_<port>` switch of a port, when the block has one.
+    pub fn port_switch(&self, lib: &Library, id: &str, port: &str) -> Option<String> {
+        let block = self.logic.block(id)?;
+        let def = &lib.resolve(&self.logic, block)?.def;
+        ["use_", "out_"]
+            .iter()
+            .map(|prefix| format!("{prefix}{port}"))
+            .find(|n| def.param(n).is_some())
+    }
+
+    /// Turns the switch of a port on or off, when the block has one.
+    pub fn switch_port(
+        &mut self,
+        lib: &Library,
+        id: &str,
+        port: &str,
+        on: bool,
+    ) -> Result<(), EditError> {
+        match self.port_switch(lib, id, port) {
+            Some(name) => self.set_param(lib, id, &name, Some(ParamValue::Bool(on))),
+            None => Ok(()),
+        }
+    }
+
+    /// Releases service variables (taken out of Wi-Fi and the like) that no variable
+    /// block uses any more: the binding is dropped, the variable is deleted and the
+    /// port or parameter returns to the setting it had before.
+    pub fn release_unused_services(&mut self, lib: &Library) -> Result<(), EditError> {
+        let unused: Vec<String> = self
+            .logic
+            .vars
+            .iter()
+            .filter(|v| v.service)
+            .filter(|v| {
+                !self
+                    .logic
+                    .blocks
+                    .iter()
+                    .any(|b| b.var_name() == Some(&v.name))
+            })
+            .map(|v| v.name.clone())
+            .collect();
+        for name in unused {
+            let binders: Vec<(String, String)> = self
+                .logic
+                .blocks
+                .iter()
+                .flat_map(|b| {
+                    b.bound
+                        .iter()
+                        .filter(|(_, v)| **v == name)
+                        .map(|(port, _)| (b.id.clone(), port.clone()))
+                })
+                .collect();
+            let init = self.logic.var(&name).and_then(|v| v.init.clone());
+            for (id, port) in binders {
+                self.bind(&id, &port, None)?;
+                self.switch_port(lib, &id, &port, false)?;
+                // The `mode` input replaced the chosen mode: bring it back.
+                if port == "mode" && self.logic.block(&id).is_some_and(|b| b.kind == "wifi") {
+                    let mode = init.clone().filter(|v| matches!(v, ParamValue::Int(0..=2)));
+                    self.set_param(lib, &id, "wifi_mode", mode)?;
+                }
+            }
+            let index = self.var_index(&name)?;
+            self.logic.vars.remove(index);
+        }
+        Ok(())
+    }
+
     /// Moves a block; blocks without a position get one.
     pub fn move_block(&mut self, id: &str, pos: BlockPos) -> Result<(), EditError> {
         self.block_index(id)?;

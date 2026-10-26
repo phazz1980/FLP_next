@@ -351,7 +351,7 @@ pub fn pull_out(
         service: true,
     })?;
     p.bind(id, name, Some(&var))?;
-    switch_port(p, lib, id, name, true)?;
+    p.switch_port(lib, id, name, true)?;
     if name == "mode"
         && p.logic
             .block(id)
@@ -432,34 +432,6 @@ pub fn apply(app: &mut EditorApp, actions: Vec<NetAction>) {
                 }
             }
         }
-    }
-}
-
-/// Turns the `use_<port>` / `out_<port>` switch of a port on or off, when the block has one.
-fn switch_param(
-    p: &flp_core::Project,
-    lib: &flp_core::Library,
-    id: &str,
-    port: &str,
-) -> Option<String> {
-    let block = p.logic.block(id)?;
-    let def = &lib.resolve(&p.logic, block)?.def;
-    ["use_", "out_"]
-        .iter()
-        .map(|prefix| format!("{prefix}{port}"))
-        .find(|n| def.param(n).is_some())
-}
-
-fn switch_port(
-    p: &mut flp_core::Project,
-    lib: &flp_core::Library,
-    id: &str,
-    port: &str,
-    on: bool,
-) -> Result<(), flp_core::EditError> {
-    match switch_param(p, lib, id, port) {
-        Some(name) => p.set_param(lib, id, &name, Some(ParamValue::Bool(on))),
-        None => Ok(()),
     }
 }
 
@@ -545,5 +517,30 @@ mod tests {
             p.logic.block("wifi").unwrap().params.get("wifi_mode"),
             Some(&ParamValue::Int(3))
         );
+    }
+
+    #[test]
+    fn removing_last_block_releases_the_binding() {
+        let (lib, _) =
+            Library::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library")).unwrap();
+        let mut p = Project::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/wifi_bound"
+        ))
+        .unwrap();
+        let before = p.logic.block("wifi").unwrap().clone();
+        let first = pull_out(&mut p, &lib, "wifi", "mode", SignalType::Int, true, POS).unwrap();
+        let second = pull_out(&mut p, &lib, "wifi", "mode", SignalType::Int, true, POS).unwrap();
+        // One block left: the binding stays.
+        p.remove_block(&first).unwrap();
+        p.release_unused_services(&lib).unwrap();
+        assert!(p.logic.block("wifi").unwrap().bound.contains_key("mode"));
+        // The last one gone: everything is back.
+        p.remove_block(&second).unwrap();
+        p.release_unused_services(&lib).unwrap();
+        let after = p.logic.block("wifi").unwrap();
+        assert!(!after.bound.contains_key("mode"));
+        assert_eq!(after.params, before.params);
+        assert!(p.logic.vars.iter().all(|v| !v.service));
     }
 }

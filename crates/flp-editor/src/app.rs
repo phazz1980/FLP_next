@@ -570,7 +570,8 @@ impl EditorApp {
         let result = match &sel {
             Selection::Block(_) | Selection::Blocks(_) => doc
                 .edit(&self.lib, None, |p| {
-                    sel.blocks().iter().try_for_each(|id| p.remove_block(id))
+                    sel.blocks().iter().try_for_each(|id| p.remove_block(id))?;
+                    p.release_unused_services(&self.lib)
                 })
                 .map_err(|e| e.to_string()),
             Selection::Link(to) => doc.edit(&self.lib, None, |p| {
