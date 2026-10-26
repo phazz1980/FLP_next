@@ -330,12 +330,20 @@ pub fn block_preview(ui: &mut Ui, def: &BlockDef, pal: &Palette) {
     paint_box(&painter, r, 1.0, &block, Some(def), pal, border, |_| false);
 }
 
-/// Whether a variable block already has a link on either side.
+/// Whether a variable block already has a link on either side. A block of a service
+/// variable (a setting pulled out of Wi-Fi...) has its side fixed from the start: a
+/// read-only value gets no writing side.
 fn tag_linked(logic: &Logic, id: &str) -> bool {
-    logic
-        .links
-        .iter()
-        .any(|l| l.from.block == id || l.to.block == id)
+    let service = logic
+        .block(id)
+        .and_then(|b| b.var_name())
+        .and_then(|v| logic.var(v))
+        .is_some_and(|v| v.service);
+    service
+        || logic
+            .links
+            .iter()
+            .any(|l| l.from.block == id || l.to.block == id)
 }
 
 fn port_pos(rect: Rect, kind: Kind, index: usize, output: bool) -> Pos2 {
