@@ -1,6 +1,5 @@
-//! `flp-web` — web editors of the project: the schema editor (`/`) and the constructor of
-//! the ESP32 web interface (`/designer`). A tiny local HTTP server (std only):
-//! it serves the pages and forwards `POST /api/<command>` to the same command set
+//! `flp-web` — the web constructor of the ESP32 web interface (`/`, also `/designer`).
+//! A tiny local HTTP server (std only): it serves the page and forwards `POST /api/<command>` to the same command set
 //! that the AI chat and the MCP server use, so every edit is validated and saved
 //! to the project file exactly as there.
 //!
@@ -17,12 +16,12 @@ use std::time::{Duration, Instant};
 use flp_ai::folder::FolderContext;
 use serde_json::{json, Value};
 
-const PAGE: &str = include_str!("index.html");
 const DESIGNER: &str = include_str!("designer.html");
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_PORT: u16 = 8080;
 /// Largest request body accepted (commands are small JSON objects).
 const MAX_BODY: usize = 1 << 20;
-/// The pages ping the server every few seconds; with no request for this long the
+/// The page pings the server every few seconds; with no request for this long the
 /// server exits, so it never outlives the browser tab (or the editor that started it).
 const IDLE_LIMIT: Duration = Duration::from_secs(300);
 
@@ -63,7 +62,7 @@ fn run() -> Result<(), String> {
     let listener = TcpListener::bind(("127.0.0.1", port))
         .map_err(|e| format!("не удалось занять порт {port}: {e}"))?;
     println!(
-        "Веб-редактор: http://127.0.0.1:{port}/  (проект {})",
+        "Конструктор веб-интерфейса: http://127.0.0.1:{port}/  (проект {})",
         project.display()
     );
     let started = Instant::now();
@@ -160,17 +159,11 @@ fn handle(
         return Ok(());
     }
     match (req.method.as_str(), req.path.as_str()) {
-        ("GET", "/" | "/index.html") => respond(
+        ("GET", "/" | "/designer") => respond(
             &mut stream,
             "200 OK",
             "text/html; charset=utf-8",
-            PAGE.as_bytes(),
-        ),
-        ("GET", "/designer") => respond(
-            &mut stream,
-            "200 OK",
-            "text/html; charset=utf-8",
-            DESIGNER.as_bytes(),
+            DESIGNER.replace("{{VERSION}}", VERSION).as_bytes(),
         ),
         ("GET", "/ui_page.html") => match device_page(library) {
             Ok(page) => respond(

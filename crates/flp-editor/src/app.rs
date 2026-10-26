@@ -1339,6 +1339,9 @@ impl EditorApp {
                 ui.separator();
                 ui.hyperlink_to(format!("Доступна версия {}", release.version), &release.url);
             }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.weak(format!("v{}", update::CURRENT));
+            });
         });
         if cancel {
             self.cancel_job();
