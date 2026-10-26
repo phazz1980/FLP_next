@@ -28,6 +28,7 @@ const MAX_LEN: usize = 110;
 pub struct Release {
     /// Newest version.
     pub version: String,
+    /// Direct download of the release archive, or the release page when it has none.
     pub url: String,
     /// Notes of every release newer than the running version, newest first.
     pub changes: Vec<Change>,
@@ -64,6 +65,26 @@ struct ApiRelease {
     draft: bool,
     #[serde(default)]
     prerelease: bool,
+    #[serde(default)]
+    assets: Vec<ApiAsset>,
+}
+
+#[derive(Deserialize)]
+struct ApiAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+impl ApiRelease {
+    /// Where the browser goes to get this release: the archive itself (a `.zip`
+    /// when there are several files) or, without files, the release page.
+    fn download_url(&self) -> &str {
+        self.assets
+            .iter()
+            .find(|a| a.name.to_lowercase().ends_with(".zip"))
+            .or(self.assets.first())
+            .map_or(&self.html_url, |a| &a.browser_download_url)
+    }
 }
 
 /// Asks GitHub for the published releases of `repo` ("owner/name") and compares
@@ -136,7 +157,7 @@ fn pick(releases: Vec<ApiRelease>, current: &str) -> Check {
     };
     Check::Newer(Release {
         version: version.clone(),
-        url: newest.html_url.clone(),
+        url: newest.download_url().to_owned(),
         changes: published
             .iter()
             .take(MAX_RELEASES)
@@ -243,7 +264,7 @@ pub fn window(ctx: &egui::Context, release: &Release, open: &mut bool) {
                 "Новая версия {} (установлена {CURRENT})",
                 release.version
             ));
-            ui.hyperlink_to("Открыть страницу загрузки", &release.url);
+            ui.hyperlink_to(format!("Скачать версию {}", release.version), &release.url);
             ui.separator();
             egui::ScrollArea::vertical()
                 .max_height(360.0)
@@ -322,7 +343,29 @@ mod tests {
             body: Some(body.to_owned()),
             draft: false,
             prerelease: false,
+            assets: Vec::new(),
         }
+    }
+
+    fn asset(name: &str) -> ApiAsset {
+        ApiAsset {
+            name: name.to_owned(),
+            browser_download_url: format!("https://example.test/download/{name}"),
+        }
+    }
+
+    #[test]
+    fn download_goes_straight_to_the_archive() {
+        let mut r = release("v1.0.0", "");
+        // No files: the release page.
+        assert_eq!(r.download_url(), "https://example.test/v1.0.0");
+        r.assets = vec![asset("notes.txt"), asset("FLP_next.ZIP")];
+        assert_eq!(
+            r.download_url(),
+            "https://example.test/download/FLP_next.ZIP"
+        );
+        r.assets = vec![asset("notes.txt")];
+        assert_eq!(r.download_url(), "https://example.test/download/notes.txt");
     }
 
     #[test]
