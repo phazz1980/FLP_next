@@ -24,6 +24,7 @@ mod netpanel;
 mod panels;
 mod theme;
 mod themeedit;
+mod update;
 mod userlib;
 
 use std::path::PathBuf;

@@ -22,6 +22,7 @@ use crate::doc::Doc;
 use crate::job::{Job, JobEvent, JobKind};
 use crate::panels;
 use crate::theme::{self, Theme};
+use crate::update::{self, Check, Release};
 
 /// What a build was made from: project folder, schema revision, debug firmware.
 type BuildKey = (PathBuf, u64, bool);
@@ -156,6 +157,12 @@ pub struct EditorApp {
     /// Values kept by the program instead of the project file: Wi-Fi passwords
     /// for each SSID and the list of entered SSIDs.
     pub local: LocalValues,
+    /// Look for a newer release at startup.
+    update_check: bool,
+    /// Running release check; the flag tells whether the user asked for it.
+    update_rx: Option<Receiver<(bool, Result<Check, String>)>>,
+    /// Newer release found on GitHub.
+    new_release: Option<Release>,
 }
 
 impl EditorApp {
@@ -200,6 +207,9 @@ impl EditorApp {
             precompiled: None,
             seen_rev: None,
             local: LocalValues::default(),
+            update_check: theme::update_check(),
+            update_rx: None,
+            new_release: None,
         };
         match LocalValues::open_default() {
             Ok(local) => app.local = local,
@@ -216,6 +226,9 @@ impl EditorApp {
         }
         theme::apply(&cc.egui_ctx, &app.theme);
         app.scan_ports(&cc.egui_ctx);
+        if app.update_check {
+            app.start_update_check(&cc.egui_ctx, false);
+        }
         app.lib_dir = find_library(project.as_deref());
         app.reload_library();
         // Start with a project: the given one, the last one or a fresh one.
@@ -261,6 +274,54 @@ impl EditorApp {
         match result {
             Ok(ports) => self.ports = ports,
             Err(e) => self.info(LogLevel::Warning, format!("Порты не найдены: {e}")),
+        }
+    }
+
+    /// Asks GitHub for the latest release on a worker thread. A manual check
+    /// reports every outcome in the log, an automatic one only news and failures.
+    fn start_update_check(&mut self, ctx: &egui::Context, manual: bool) {
+        if self.update_rx.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let ctx = ctx.clone();
+        let repo = theme::update_repo();
+        thread::spawn(move || {
+            let _ = tx.send((manual, update::check(&repo)));
+            ctx.request_repaint();
+        });
+        self.update_rx = Some(rx);
+    }
+
+    fn poll_update(&mut self) {
+        let Some(rx) = &self.update_rx else { return };
+        let Ok((manual, result)) = rx.try_recv() else {
+            return;
+        };
+        self.update_rx = None;
+        match result {
+            Ok(Check::Newer(release)) => {
+                self.info(
+                    LogLevel::Info,
+                    format!(
+                        "Доступна версия {} (установлена {}): {}",
+                        release.version,
+                        update::CURRENT,
+                        release.url
+                    ),
+                );
+                self.new_release = Some(release);
+            }
+            Ok(Check::UpToDate) if manual => self.info(
+                LogLevel::Info,
+                format!("Установлена последняя версия ({})", update::CURRENT),
+            ),
+            Ok(Check::NoReleases) if manual => self.info(
+                LogLevel::Info,
+                "Выпущенных версий не найдено (или у токена нет доступа к репозиторию)",
+            ),
+            Ok(_) => {}
+            Err(e) => self.info(LogLevel::Warning, format!("Проверка обновлений: {e}")),
         }
     }
 
@@ -1216,6 +1277,30 @@ impl EditorApp {
                     self.reload_library();
                 }
             });
+            ui.menu_button("Справка", |ui| {
+                ui.weak(format!("FLP_next {}", update::CURRENT));
+                ui.separator();
+                if ui
+                    .add_enabled(
+                        self.update_rx.is_none(),
+                        egui::Button::new("Проверить обновления"),
+                    )
+                    .clicked()
+                {
+                    self.start_update_check(ui.ctx(), true);
+                    ui.close();
+                }
+                if ui
+                    .checkbox(&mut self.update_check, "Проверять при запуске")
+                    .changed()
+                {
+                    theme::save_update_check(self.update_check);
+                }
+                if let Some(release) = &self.new_release {
+                    ui.separator();
+                    ui.hyperlink_to(format!("Скачать версию {}", release.version), &release.url);
+                }
+            });
         });
     }
 
@@ -1248,7 +1333,20 @@ impl EditorApp {
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         let mut cancel = false;
-        ui.horizontal(|ui| match &self.doc {
+        ui.horizontal(|ui| {
+            self.status_items(ui, &mut cancel);
+            if let Some(release) = &self.new_release {
+                ui.separator();
+                ui.hyperlink_to(format!("Доступна версия {}", release.version), &release.url);
+            }
+        });
+        if cancel {
+            self.cancel_job();
+        }
+    }
+
+    fn status_items(&self, ui: &mut egui::Ui, cancel: &mut bool) {
+        match &self.doc {
             Some(doc) => {
                 let p = &doc.project;
                 ui.label(format!("Проект: {}", p.config.project.name));
@@ -1277,7 +1375,7 @@ impl EditorApp {
                     ui.spinner();
                     ui.label(job.title);
                     if ui.small_button("Отменить").clicked() {
-                        cancel = true;
+                        *cancel = true;
                     }
                 }
                 if let Some(d) = &self.debug {
@@ -1300,9 +1398,6 @@ impl EditorApp {
             None => {
                 ui.label("Проект не открыт");
             }
-        });
-        if cancel {
-            self.cancel_job();
         }
     }
 
@@ -1383,6 +1478,7 @@ impl eframe::App for EditorApp {
         self.poll_ai();
         self.poll_console(&ctx);
         self.poll_ports();
+        self.poll_update();
         self.watch_library();
         self.autosave(&ctx);
         self.shortcuts(&ctx);

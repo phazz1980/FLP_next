@@ -269,6 +269,10 @@ struct Settings {
     /// Autosave period in minutes; 0 turns autosave off.
     autosave_minutes: Option<u32>,
     panels: Option<PanelSizes>,
+    /// Look for a newer release at startup (on by default).
+    update_check: Option<bool>,
+    /// GitHub repository "owner/name" the releases are taken from.
+    update_repo: Option<String>,
 }
 
 /// Sizes of the editor panels, kept between runs.
@@ -364,6 +368,22 @@ pub fn autosave_minutes() -> u32 {
 
 pub fn save_autosave_minutes(minutes: u32) {
     update_settings(|s| s.autosave_minutes = Some(minutes));
+}
+
+pub fn update_check() -> bool {
+    load_settings().update_check.unwrap_or(true)
+}
+
+pub fn save_update_check(on: bool) {
+    update_settings(|s| s.update_check = Some(on));
+}
+
+pub fn update_repo() -> String {
+    load_settings()
+        .update_repo
+        .map(|r| r.trim().to_owned())
+        .filter(|r| !r.is_empty())
+        .unwrap_or_else(|| crate::update::DEFAULT_REPO.to_owned())
 }
 
 /// Folder for projects created without asking: `Documents/FLP_next` when it exists.
