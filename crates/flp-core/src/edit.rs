@@ -39,6 +39,8 @@ pub enum EditError {
         "у блока переменной «{0}» включён вход разрешения записи: он только записывает, выхода нет"
     )]
     VarWriteOnly(String),
+    #[error("блок настройки сервиса «{0}» работает только в одну сторону: читает значение или записывает, но не оба")]
+    VarFixed(String),
     #[error("недопустимое имя переменной «{0}»: пустое, с пробелами по краям или с управляющими символами")]
     InvalidVarName(String),
     #[error("переменная «{0}» уже есть")]
@@ -357,6 +359,7 @@ impl Project {
             .links
             .iter()
             .any(|l| l.from.block == id || l.to.block == id);
+        let service = self.is_service_var(self.logic.block(id).and_then(|b| b.var_name()));
         let block = self
             .logic
             .blocks
@@ -368,6 +371,9 @@ impl Project {
         }
         if on {
             if block.kind == VAR_GET {
+                if service {
+                    return Err(EditError::VarFixed(id.to_owned()));
+                }
                 if linked {
                     return Err(EditError::VarBothSides(id.to_owned()));
                 }
@@ -385,6 +391,10 @@ impl Project {
         Ok(())
     }
 
+    fn is_service_var(&self, name: Option<&str>) -> bool {
+        name.is_some_and(|n| self.logic.vars.iter().any(|v| v.service && v.name == n))
+    }
+
     /// Turns a variable block into a reader or a writer before a link is attached;
     /// allowed only while the block has no links.
     fn adapt_var_block(&mut self, id: &str, write: bool) -> Result<(), EditError> {
@@ -394,6 +404,9 @@ impl Project {
         };
         if (block.kind != VAR_GET && block.kind != VAR_SET) || block.kind == want {
             return Ok(());
+        }
+        if self.is_service_var(block.var_name()) {
+            return Err(EditError::VarFixed(id.to_owned()));
         }
         // A write with the enable input stays a write.
         if matches!(block.params.get(WRITE_ENABLE), Some(ParamValue::Bool(true))) {
@@ -851,6 +864,31 @@ mod tests {
             Err(EditError::VarBothSides(tag.clone()))
         );
         p.disconnect(&PortRef::new(&tag, "in"));
+        p.connect(&lib, PortRef::new(&tag, "out"), PortRef::new(&sink, "in"))
+            .unwrap();
+        assert_eq!(p.logic.block(&tag).unwrap().kind, VAR_GET);
+    }
+
+    #[test]
+    fn service_var_block_is_one_directional() {
+        let lib = library();
+        let mut p = project();
+        p.add_var(Var {
+            name: "svc".into(),
+            ty: crate::VarType::Bool,
+            init: None,
+            description: String::new(),
+            retain: false,
+            service: true,
+        })
+        .unwrap();
+        let src = p.add_block(&lib, "src", POS).unwrap();
+        let sink = p.add_block(&lib, "sink", POS).unwrap();
+        let tag = p.add_var_block("svc", false, POS).unwrap();
+        assert_eq!(
+            p.connect(&lib, PortRef::new(&src, "out"), PortRef::new(&tag, "in")),
+            Err(EditError::VarFixed(tag.clone()))
+        );
         p.connect(&lib, PortRef::new(&tag, "out"), PortRef::new(&sink, "in"))
             .unwrap();
         assert_eq!(p.logic.block(&tag).unwrap().kind, VAR_GET);
