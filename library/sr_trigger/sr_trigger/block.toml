@@ -1,0 +1,20 @@
+[block]
+type = "sr_trigger"
+name = "SR-триггер"
+symbol = "SR"
+group = "Триггеры"
+description = "Триггер с приоритетом установки: set = 1 включает выход, reset = 1 выключает (если set = 0)."
+memory = true
+
+[[input]]
+name = "set"
+type = "bool"
+
+[[input]]
+name = "reset"
+type = "bool"
+
+[[output]]
+name = "out"
+type = "bool"
+

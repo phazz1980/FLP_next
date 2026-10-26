@@ -2,7 +2,7 @@
 type = "div"
 name = "Деление"
 symbol = "a ÷ b"
-group = "Числа"
+group = "Математика"
 description = "Выход out = a ÷ b; при b = 0 выход 0."
 
 [[input]]

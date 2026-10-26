@@ -1,0 +1,30 @@
+[block]
+type = "text_to_ip"
+name = "Строка → IP-адрес"
+symbol = "txt>IP"
+group = "Преобразование типов"
+description = "Разбирает строку «a.b.c.d» на четыре байта; ok = true, если строка корректна (при ошибке значения не меняются)."
+
+[[input]]
+name = "in"
+type = "string"
+
+[[output]]
+name = "a"
+type = "int"
+
+[[output]]
+name = "b"
+type = "int"
+
+[[output]]
+name = "c"
+type = "int"
+
+[[output]]
+name = "d"
+type = "int"
+
+[[output]]
+name = "ok"
+type = "bool"

@@ -2,7 +2,7 @@
 type = "falling_edge"
 name = "Задний фронт"
 symbol = "↓"
-group = "Логика"
+group = "Триггеры"
 description = "Выдаёт true на один цикл программы при переходе true → false входа."
 memory = true
 

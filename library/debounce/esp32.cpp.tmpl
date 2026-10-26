@@ -1,0 +1,11 @@
+// @global
+bool {{ id }}_last = false;
+unsigned long {{ id }}_changed = 0;
+// @loop
+if ({{ input.in }} != {{ id }}_last) {
+  {{ id }}_last = {{ input.in }};
+  {{ id }}_changed = millis();
+}
+if (millis() - {{ id }}_changed >= {{ param.time }}UL) {
+  {{ output.out }} = {{ id }}_last;
+}

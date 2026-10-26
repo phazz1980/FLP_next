@@ -1,0 +1,9 @@
+// @global
+bool {{ id }}_prev = false;
+// @setup once
+randomSeed(esp_random());
+// @loop
+if ({{ input.en }} && !{{ id }}_prev) {
+  {{ output.out }} = {{ param.min }} + ({{ param.max }} - {{ param.min }}) * (random(0, 10001) / 10000.0f);
+}
+{{ id }}_prev = {{ input.en }};

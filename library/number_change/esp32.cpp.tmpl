@@ -1,0 +1,13 @@
+// @global
+float {{ id }}_prev = 0.0f;
+bool {{ id }}_init = false;
+// @loop
+if (!{{ id }}_init) {
+  {{ id }}_init = true;
+  {{ id }}_prev = {{ input.in }};
+  {{ output.out }} = false;
+} else {
+  float diff = {{ input.in }} - {{ id }}_prev;
+  {{ output.out }} = (diff < 0 ? -diff : diff) > {{ param.deadband }};
+  if ({{ output.out }}) {{ id }}_prev = {{ input.in }};
+}

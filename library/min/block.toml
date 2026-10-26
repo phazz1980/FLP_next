@@ -2,7 +2,7 @@
 type = "min"
 name = "Минимум"
 symbol = "MIN"
-group = "Числа"
+group = "Алгебра"
 description = "Меньшее из a и b."
 
 [[input]]

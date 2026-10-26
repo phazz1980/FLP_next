@@ -1,0 +1,1061 @@
+# Самопроверка логических блоков: блоки получают константы, результаты (имя=значение) раз в секунду уходят в USB.
+# Ожидается: cmp=1 sr=1 sin=0.5 cos=0.5 tan=1.0 band=8 bor=14 bxor=6 bnot=-1 bread=1 bwrite=8 b0=1 b1=0 b2=1 tobyte=133
+# dec=1 enc=1 any=1 f2i=3 i2f=7 lo=52 hi=18 word=4660 d0=4 d1=3 d2=2 d3=1 dword=16909060 find=6 code=98 ch=b add=abc
+# pid=20 and3=1 xor3=1 mux16=99 dms16=5 chg=0 schg=0 bchg=0 rnd=10…20
+
+[[block]]
+id = "cmp"
+type = "compare"
+op = 4
+const = { a = 5.0, b = 3.0 }
+
+[[block]]
+id = "sr"
+type = "sr_trigger"
+const = { set = true, reset = true }
+
+[[block]]
+id = "sn"
+type = "sin"
+const = { in = 30.0 }
+
+[[block]]
+id = "cs"
+type = "cos"
+const = { in = 60.0 }
+
+[[block]]
+id = "tn"
+type = "tan"
+const = { in = 45.0 }
+
+[[block]]
+id = "band"
+type = "bit_and"
+const = { a = 12, b = 10 }
+
+[[block]]
+id = "bor"
+type = "bit_or"
+const = { a = 12, b = 10 }
+
+[[block]]
+id = "bxor"
+type = "bit_xor"
+const = { a = 12, b = 10 }
+
+[[block]]
+id = "bnot"
+type = "bit_not"
+const = { in = 0 }
+
+[[block]]
+id = "bread"
+type = "bit_read"
+bit = 2
+const = { in = 5 }
+
+[[block]]
+id = "bwrite"
+type = "bit_write"
+bit = 3
+const = { in = 0, value = true }
+
+[[block]]
+id = "bts"
+type = "byte_to_bits"
+const = { in = 5 }
+
+[[block]]
+id = "tby"
+type = "bits_to_byte"
+const = { b0 = true, b2 = true, b7 = true }
+
+[[block]]
+id = "dec"
+type = "decoder"
+count = 4
+const = { in = 2 }
+
+[[block]]
+id = "enc"
+type = "encoder"
+count = 4
+const = { i1 = true, i3 = true }
+
+[[block]]
+id = "f2i"
+type = "float_to_int"
+mode = 0
+const = { in = 2.5 }
+
+[[block]]
+id = "i2f"
+type = "int_to_float"
+const = { in = 7 }
+
+[[block]]
+id = "w2b"
+type = "word_to_bytes"
+const = { in = 4660 }
+
+[[block]]
+id = "b2w"
+type = "bytes_to_word"
+const = { lo = 52, hi = 18 }
+
+[[block]]
+id = "d2b"
+type = "dword_to_bytes"
+const = { in = 16909060 }
+
+[[block]]
+id = "b2d"
+type = "bytes_to_dword"
+const = { b0 = 4, b1 = 3, b2 = 2, b3 = 1 }
+
+[[block]]
+id = "fnd"
+type = "text_find"
+const = { text = "hello world", sub = "wor" }
+
+[[block]]
+id = "chr"
+type = "text_char"
+const = { text = "abc", index = 1 }
+
+[[block]]
+id = "addc"
+type = "text_add_char"
+const = { text = "ab", code = 99 }
+
+[[block]]
+id = "pid1"
+type = "pid"
+kp = 2.0
+const = { sp = 10.0, pv = 0.0 }
+
+[[block]]
+id = "and3"
+type = "and"
+count = 3
+const = { a = true, b = true, c = true }
+
+[[block]]
+id = "xor3"
+type = "xor"
+count = 3
+const = { a = true, b = true, c = true }
+
+[[block]]
+id = "mux16"
+type = "mux"
+count = 16
+const = { sel = 15.0, p = 99.0 }
+
+[[block]]
+id = "dms16"
+type = "dms"
+count = 16
+const = { sel = 15.0, in = 5.0 }
+
+[[block]]
+id = "chg"
+type = "number_change"
+const = { in = 1.0 }
+
+[[block]]
+id = "schg"
+type = "string_change"
+const = { in = "x" }
+
+[[block]]
+id = "bchg"
+type = "bit_change"
+bit = 1
+const = { in = 2 }
+
+[[block]]
+id = "rt"
+type = "generator"
+time_on = "300ms"
+time_off = "300ms"
+
+[[block]]
+id = "rnd"
+type = "random"
+min = 10.0
+max = 20.0
+
+[[link]]
+from = "rt.out"
+to   = "rnd.en"
+
+[[block]]
+id = "tick"
+type = "generator"
+time_on = "100ms"
+time_off = "900ms"
+
+[[block]]
+id = "n_cmp"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[link]]
+from = "cmp.out"
+to   = "n_cmp.sel"
+
+[[block]]
+id = "n_sr"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[link]]
+from = "sr.out"
+to   = "n_sr.sel"
+
+[[block]]
+id = "n_bread"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[link]]
+from = "bread.out"
+to   = "n_bread.sel"
+
+[[block]]
+id = "n_b0"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[link]]
+from = "bts.b0"
+to   = "n_b0.sel"
+
+[[block]]
+id = "n_b1"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[link]]
+from = "bts.b1"
+to   = "n_b1.sel"
+
+[[block]]
+id = "n_b2"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[link]]
+from = "bts.b2"
+to   = "n_b2.sel"
+
+[[block]]
+id = "n_dec"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[link]]
+from = "dec.o2"
+to   = "n_dec.sel"
+
+[[block]]
+id = "n_any"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[link]]
+from = "enc.any"
+to   = "n_any.sel"
+
+[[block]]
+id = "n_and3"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[link]]
+from = "and3.out"
+to   = "n_and3.sel"
+
+[[block]]
+id = "n_xor3"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[link]]
+from = "xor3.out"
+to   = "n_xor3.sel"
+
+[[block]]
+id = "n_chg"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[link]]
+from = "chg.out"
+to   = "n_chg.sel"
+
+[[block]]
+id = "n_schg"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[link]]
+from = "schg.out"
+to   = "n_schg.sel"
+
+[[block]]
+id = "n_bchg"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[link]]
+from = "bchg.out"
+to   = "n_bchg.sel"
+
+[[block]]
+id = "t_cmp"
+type = "num_to_text"
+decimals = 1
+prefix = "cmp="
+
+[[link]]
+from = "n_cmp.out"
+to   = "t_cmp.in"
+
+[[block]]
+id = "t_sr"
+type = "num_to_text"
+decimals = 1
+prefix = "sr="
+
+[[link]]
+from = "n_sr.out"
+to   = "t_sr.in"
+
+[[block]]
+id = "t_sin"
+type = "num_to_text"
+decimals = 1
+prefix = "sin="
+
+[[link]]
+from = "sn.out"
+to   = "t_sin.in"
+
+[[block]]
+id = "t_cos"
+type = "num_to_text"
+decimals = 1
+prefix = "cos="
+
+[[link]]
+from = "cs.out"
+to   = "t_cos.in"
+
+[[block]]
+id = "t_tan"
+type = "num_to_text"
+decimals = 1
+prefix = "tan="
+
+[[link]]
+from = "tn.out"
+to   = "t_tan.in"
+
+[[block]]
+id = "t_band"
+type = "num_to_text"
+decimals = 1
+prefix = "band="
+
+[[link]]
+from = "band.out"
+to   = "t_band.in"
+
+[[block]]
+id = "t_bor"
+type = "num_to_text"
+decimals = 1
+prefix = "bor="
+
+[[link]]
+from = "bor.out"
+to   = "t_bor.in"
+
+[[block]]
+id = "t_bxor"
+type = "num_to_text"
+decimals = 1
+prefix = "bxor="
+
+[[link]]
+from = "bxor.out"
+to   = "t_bxor.in"
+
+[[block]]
+id = "t_bnot"
+type = "num_to_text"
+decimals = 1
+prefix = "bnot="
+
+[[link]]
+from = "bnot.out"
+to   = "t_bnot.in"
+
+[[block]]
+id = "t_bread"
+type = "num_to_text"
+decimals = 1
+prefix = "bread="
+
+[[link]]
+from = "n_bread.out"
+to   = "t_bread.in"
+
+[[block]]
+id = "t_bwrite"
+type = "num_to_text"
+decimals = 1
+prefix = "bwrite="
+
+[[link]]
+from = "bwrite.out"
+to   = "t_bwrite.in"
+
+[[block]]
+id = "t_b0"
+type = "num_to_text"
+decimals = 1
+prefix = "b0="
+
+[[link]]
+from = "n_b0.out"
+to   = "t_b0.in"
+
+[[block]]
+id = "t_b1"
+type = "num_to_text"
+decimals = 1
+prefix = "b1="
+
+[[link]]
+from = "n_b1.out"
+to   = "t_b1.in"
+
+[[block]]
+id = "t_b2"
+type = "num_to_text"
+decimals = 1
+prefix = "b2="
+
+[[link]]
+from = "n_b2.out"
+to   = "t_b2.in"
+
+[[block]]
+id = "t_tobyte"
+type = "num_to_text"
+decimals = 1
+prefix = "tobyte="
+
+[[link]]
+from = "tby.out"
+to   = "t_tobyte.in"
+
+[[block]]
+id = "t_dec"
+type = "num_to_text"
+decimals = 1
+prefix = "dec="
+
+[[link]]
+from = "n_dec.out"
+to   = "t_dec.in"
+
+[[block]]
+id = "t_enc"
+type = "num_to_text"
+decimals = 1
+prefix = "enc="
+
+[[link]]
+from = "enc.out"
+to   = "t_enc.in"
+
+[[block]]
+id = "t_any"
+type = "num_to_text"
+decimals = 1
+prefix = "any="
+
+[[link]]
+from = "n_any.out"
+to   = "t_any.in"
+
+[[block]]
+id = "t_f2i"
+type = "num_to_text"
+decimals = 1
+prefix = "f2i="
+
+[[link]]
+from = "f2i.out"
+to   = "t_f2i.in"
+
+[[block]]
+id = "t_i2f"
+type = "num_to_text"
+decimals = 1
+prefix = "i2f="
+
+[[link]]
+from = "i2f.out"
+to   = "t_i2f.in"
+
+[[block]]
+id = "t_lo"
+type = "num_to_text"
+decimals = 1
+prefix = "lo="
+
+[[link]]
+from = "w2b.lo"
+to   = "t_lo.in"
+
+[[block]]
+id = "t_hi"
+type = "num_to_text"
+decimals = 1
+prefix = "hi="
+
+[[link]]
+from = "w2b.hi"
+to   = "t_hi.in"
+
+[[block]]
+id = "t_word"
+type = "num_to_text"
+decimals = 1
+prefix = "word="
+
+[[link]]
+from = "b2w.out"
+to   = "t_word.in"
+
+[[block]]
+id = "t_d0"
+type = "num_to_text"
+decimals = 1
+prefix = "d0="
+
+[[link]]
+from = "d2b.b0"
+to   = "t_d0.in"
+
+[[block]]
+id = "t_d1"
+type = "num_to_text"
+decimals = 1
+prefix = "d1="
+
+[[link]]
+from = "d2b.b1"
+to   = "t_d1.in"
+
+[[block]]
+id = "t_d2"
+type = "num_to_text"
+decimals = 1
+prefix = "d2="
+
+[[link]]
+from = "d2b.b2"
+to   = "t_d2.in"
+
+[[block]]
+id = "t_d3"
+type = "num_to_text"
+decimals = 1
+prefix = "d3="
+
+[[link]]
+from = "d2b.b3"
+to   = "t_d3.in"
+
+[[block]]
+id = "t_dword"
+type = "num_to_text"
+decimals = 1
+prefix = "dword="
+
+[[link]]
+from = "b2d.out"
+to   = "t_dword.in"
+
+[[block]]
+id = "t_find"
+type = "num_to_text"
+decimals = 1
+prefix = "find="
+
+[[link]]
+from = "fnd.pos"
+to   = "t_find.in"
+
+[[block]]
+id = "t_code"
+type = "num_to_text"
+decimals = 1
+prefix = "code="
+
+[[link]]
+from = "chr.code"
+to   = "t_code.in"
+
+[[block]]
+id = "t_and3"
+type = "num_to_text"
+decimals = 1
+prefix = "and3="
+
+[[link]]
+from = "n_and3.out"
+to   = "t_and3.in"
+
+[[block]]
+id = "t_xor3"
+type = "num_to_text"
+decimals = 1
+prefix = "xor3="
+
+[[link]]
+from = "n_xor3.out"
+to   = "t_xor3.in"
+
+[[block]]
+id = "t_pid"
+type = "num_to_text"
+decimals = 1
+prefix = "pid="
+
+[[link]]
+from = "pid1.out"
+to   = "t_pid.in"
+
+[[block]]
+id = "t_mux16"
+type = "num_to_text"
+decimals = 1
+prefix = "mux16="
+
+[[link]]
+from = "mux16.out"
+to   = "t_mux16.in"
+
+[[block]]
+id = "t_dms16"
+type = "num_to_text"
+decimals = 1
+prefix = "dms16="
+
+[[link]]
+from = "dms16.o16"
+to   = "t_dms16.in"
+
+[[block]]
+id = "t_chg"
+type = "num_to_text"
+decimals = 1
+prefix = "chg="
+
+[[link]]
+from = "n_chg.out"
+to   = "t_chg.in"
+
+[[block]]
+id = "t_schg"
+type = "num_to_text"
+decimals = 1
+prefix = "schg="
+
+[[link]]
+from = "n_schg.out"
+to   = "t_schg.in"
+
+[[block]]
+id = "t_bchg"
+type = "num_to_text"
+decimals = 1
+prefix = "bchg="
+
+[[link]]
+from = "n_bchg.out"
+to   = "t_bchg.in"
+
+[[block]]
+id = "t_rnd"
+type = "num_to_text"
+decimals = 1
+prefix = "rnd="
+
+[[link]]
+from = "rnd.out"
+to   = "t_rnd.in"
+
+[[block]]
+id = "line1"
+type = "text_concat"
+count = 4
+separator = " "
+
+[[block]]
+id = "tx1"
+type = "uart_send"
+port = -1
+trigger = 0
+
+[[link]]
+from = "line1.out"
+to   = "tx1.value"
+
+[[link]]
+from = "tick.out"
+to   = "tx1.en"
+
+[[link]]
+from = "t_cmp.out"
+to   = "line1.a"
+
+[[link]]
+from = "t_sr.out"
+to   = "line1.b"
+
+[[link]]
+from = "t_sin.out"
+to   = "line1.c"
+
+[[link]]
+from = "t_cos.out"
+to   = "line1.d"
+
+[[block]]
+id = "line2"
+type = "text_concat"
+count = 4
+separator = " "
+
+[[block]]
+id = "tx2"
+type = "uart_send"
+port = -1
+trigger = 0
+
+[[link]]
+from = "line2.out"
+to   = "tx2.value"
+
+[[link]]
+from = "tick.out"
+to   = "tx2.en"
+
+[[link]]
+from = "t_tan.out"
+to   = "line2.a"
+
+[[link]]
+from = "t_band.out"
+to   = "line2.b"
+
+[[link]]
+from = "t_bor.out"
+to   = "line2.c"
+
+[[link]]
+from = "t_bxor.out"
+to   = "line2.d"
+
+[[block]]
+id = "line3"
+type = "text_concat"
+count = 4
+separator = " "
+
+[[block]]
+id = "tx3"
+type = "uart_send"
+port = -1
+trigger = 0
+
+[[link]]
+from = "line3.out"
+to   = "tx3.value"
+
+[[link]]
+from = "tick.out"
+to   = "tx3.en"
+
+[[link]]
+from = "t_bnot.out"
+to   = "line3.a"
+
+[[link]]
+from = "t_bread.out"
+to   = "line3.b"
+
+[[link]]
+from = "t_bwrite.out"
+to   = "line3.c"
+
+[[link]]
+from = "t_b0.out"
+to   = "line3.d"
+
+[[block]]
+id = "line4"
+type = "text_concat"
+count = 4
+separator = " "
+
+[[block]]
+id = "tx4"
+type = "uart_send"
+port = -1
+trigger = 0
+
+[[link]]
+from = "line4.out"
+to   = "tx4.value"
+
+[[link]]
+from = "tick.out"
+to   = "tx4.en"
+
+[[link]]
+from = "t_b1.out"
+to   = "line4.a"
+
+[[link]]
+from = "t_b2.out"
+to   = "line4.b"
+
+[[link]]
+from = "t_tobyte.out"
+to   = "line4.c"
+
+[[link]]
+from = "t_dec.out"
+to   = "line4.d"
+
+[[block]]
+id = "line5"
+type = "text_concat"
+count = 4
+separator = " "
+
+[[block]]
+id = "tx5"
+type = "uart_send"
+port = -1
+trigger = 0
+
+[[link]]
+from = "line5.out"
+to   = "tx5.value"
+
+[[link]]
+from = "tick.out"
+to   = "tx5.en"
+
+[[link]]
+from = "t_enc.out"
+to   = "line5.a"
+
+[[link]]
+from = "t_any.out"
+to   = "line5.b"
+
+[[link]]
+from = "t_f2i.out"
+to   = "line5.c"
+
+[[link]]
+from = "t_i2f.out"
+to   = "line5.d"
+
+[[block]]
+id = "line6"
+type = "text_concat"
+count = 4
+separator = " "
+
+[[block]]
+id = "tx6"
+type = "uart_send"
+port = -1
+trigger = 0
+
+[[link]]
+from = "line6.out"
+to   = "tx6.value"
+
+[[link]]
+from = "tick.out"
+to   = "tx6.en"
+
+[[link]]
+from = "t_lo.out"
+to   = "line6.a"
+
+[[link]]
+from = "t_hi.out"
+to   = "line6.b"
+
+[[link]]
+from = "t_word.out"
+to   = "line6.c"
+
+[[link]]
+from = "t_d0.out"
+to   = "line6.d"
+
+[[block]]
+id = "line7"
+type = "text_concat"
+count = 4
+separator = " "
+
+[[block]]
+id = "tx7"
+type = "uart_send"
+port = -1
+trigger = 0
+
+[[link]]
+from = "line7.out"
+to   = "tx7.value"
+
+[[link]]
+from = "tick.out"
+to   = "tx7.en"
+
+[[link]]
+from = "t_d1.out"
+to   = "line7.a"
+
+[[link]]
+from = "t_d2.out"
+to   = "line7.b"
+
+[[link]]
+from = "t_d3.out"
+to   = "line7.c"
+
+[[link]]
+from = "t_dword.out"
+to   = "line7.d"
+
+[[block]]
+id = "line8"
+type = "text_concat"
+count = 4
+separator = " "
+
+[[block]]
+id = "tx8"
+type = "uart_send"
+port = -1
+trigger = 0
+
+[[link]]
+from = "line8.out"
+to   = "tx8.value"
+
+[[link]]
+from = "tick.out"
+to   = "tx8.en"
+
+[[link]]
+from = "t_find.out"
+to   = "line8.a"
+
+[[link]]
+from = "t_code.out"
+to   = "line8.b"
+
+[[link]]
+from = "t_and3.out"
+to   = "line8.c"
+
+[[link]]
+from = "t_xor3.out"
+to   = "line8.d"
+
+[[block]]
+id = "line9"
+type = "text_concat"
+count = 4
+separator = " "
+
+[[block]]
+id = "tx9"
+type = "uart_send"
+port = -1
+trigger = 0
+
+[[link]]
+from = "line9.out"
+to   = "tx9.value"
+
+[[link]]
+from = "tick.out"
+to   = "tx9.en"
+
+[[link]]
+from = "t_pid.out"
+to   = "line9.a"
+
+[[link]]
+from = "t_mux16.out"
+to   = "line9.b"
+
+[[link]]
+from = "t_dms16.out"
+to   = "line9.c"
+
+[[link]]
+from = "t_chg.out"
+to   = "line9.d"
+
+[[block]]
+id = "line10"
+type = "text_concat"
+count = 4
+separator = " "
+
+[[block]]
+id = "tx10"
+type = "uart_send"
+port = -1
+trigger = 0
+
+[[link]]
+from = "line10.out"
+to   = "tx10.value"
+
+[[link]]
+from = "tick.out"
+to   = "tx10.en"
+
+[[link]]
+from = "t_schg.out"
+to   = "line10.a"
+
+[[link]]
+from = "t_bchg.out"
+to   = "line10.b"
+
+[[link]]
+from = "t_rnd.out"
+to   = "line10.c"

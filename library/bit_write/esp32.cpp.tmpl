@@ -1,0 +1,2 @@
+// @loop
+{{ output.out }} = {{ input.value }} ? ({{ input.in }} | (1 << {{ param.bit }})) : ({{ input.in }} & ~(1 << {{ param.bit }}));

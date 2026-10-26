@@ -1,0 +1,22 @@
+[block]
+type = "debounce"
+name = "Защита от дребезга"
+symbol = "DEB"
+group = "Базовые элементы"
+description = "Пропускает новое значение входа, только если оно держится дольше заданного времени."
+memory = true
+
+[[input]]
+name = "in"
+type = "bool"
+
+[[output]]
+name = "out"
+type = "bool"
+
+[[param]]
+name = "time"
+label = "время"
+type = "duration"
+default = "20ms"
+description = "Сколько вход должен не меняться: 20ms, 50ms"

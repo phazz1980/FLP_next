@@ -1,0 +1,7 @@
+[project]
+name = "selftest_logic3"
+description = "Самопроверка нелинейного масштабирования и преобразований IP-адреса на плате"
+
+[board]
+fqbn = "esp32:esp32:esp32c3:CDCOnBoot=cdc"
+model = "esp32c3_supermini"   # ESP32-C3 Super Mini: GPIO0–10, 20, 21

@@ -1,0 +1,46 @@
+[block]
+type = "web_text"
+name = "Веб-текст"
+symbol = "STR"
+group = "Веб-интерфейс"
+description = "Строка на веб-странице: показывает текст со входа."
+memory = true
+
+[[input]]
+name = "in"
+type = "string"
+
+[[param]]
+name = "caption"
+type = "string"
+label = "Подпись"
+default = "Веб-текст"
+description = "Подпись виджета на странице"
+
+[[param]]
+name = "col"
+type = "int"
+label = "Колонка"
+default = 1
+description = "Левая колонка сетки страницы (1–12)"
+
+[[param]]
+name = "row"
+type = "int"
+label = "Строка"
+default = 1
+description = "Верхняя строка сетки страницы (1, 2, …)"
+
+[[param]]
+name = "w"
+type = "int"
+label = "Ширина"
+default = 6
+description = "Ширина в колонках сетки (1–12)"
+
+[[param]]
+name = "h"
+type = "int"
+label = "Высота"
+default = 1
+description = "Высота в строках сетки"

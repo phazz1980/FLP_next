@@ -2,7 +2,7 @@
 type = "abs"
 name = "Модуль"
 symbol = "ABS"
-group = "Числа"
+group = "Алгебра"
 description = "Абсолютное значение: out = |in|."
 
 [[input]]

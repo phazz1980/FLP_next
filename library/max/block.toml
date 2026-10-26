@@ -2,7 +2,7 @@
 type = "max"
 name = "Максимум"
 symbol = "MAX"
-group = "Числа"
+group = "Алгебра"
 description = "Большее из a и b."
 
 [[input]]

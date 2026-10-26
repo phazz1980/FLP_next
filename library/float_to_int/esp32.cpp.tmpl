@@ -1,0 +1,2 @@
+// @loop
+{{ output.out }} = (int32_t){% if value.mode == 0 %}roundf({{ input.in }}){% elif value.mode == 1 %}floorf({{ input.in }}){% elif value.mode == 2 %}ceilf({{ input.in }}){% else %}{{ input.in }}{% endif %};

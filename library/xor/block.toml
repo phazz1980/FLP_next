@@ -2,8 +2,8 @@
 type = "xor"
 name = "Исключающее ИЛИ"
 symbol = "=1"
-group = "Логика"
-description = "Выход true, если входы различаются."
+group = "Базовые элементы"
+description = "Выход true, если нечётное число входов (2–16) равно true; для двух входов — «входы различаются»."
 
 [[input]]
 name = "a"
@@ -13,6 +13,85 @@ type = "bool"
 name = "b"
 type = "bool"
 
+[[input]]
+name = "c"
+type = "bool"
+when = "count >= 3"
+
+[[input]]
+name = "d"
+type = "bool"
+when = "count >= 4"
+
+[[input]]
+name = "e"
+type = "bool"
+when = "count >= 5"
+
+[[input]]
+name = "f"
+type = "bool"
+when = "count >= 6"
+
+[[input]]
+name = "g"
+type = "bool"
+when = "count >= 7"
+
+[[input]]
+name = "h"
+type = "bool"
+when = "count >= 8"
+
+[[input]]
+name = "i"
+type = "bool"
+when = "count >= 9"
+
+[[input]]
+name = "j"
+type = "bool"
+when = "count >= 10"
+
+[[input]]
+name = "k"
+type = "bool"
+when = "count >= 11"
+
+[[input]]
+name = "l"
+type = "bool"
+when = "count >= 12"
+
+[[input]]
+name = "m"
+type = "bool"
+when = "count >= 13"
+
+[[input]]
+name = "n"
+type = "bool"
+when = "count >= 14"
+
+[[input]]
+name = "o"
+type = "bool"
+when = "count >= 15"
+
+[[input]]
+name = "p"
+type = "bool"
+when = "count >= 16"
+
 [[output]]
 name = "out"
 type = "bool"
+
+[[param]]
+name = "count"
+label = "входов"
+type = "int"
+default = 2
+min = 2
+max = 16
+description = "Выход true, если нечётное число входов (2–16) равно true; для двух входов — «входы различаются»."

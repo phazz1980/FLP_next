@@ -1,0 +1,63 @@
+[block]
+type = "pid"
+name = "ПИД-регулятор"
+symbol = "PID"
+group = "Прочее"
+description = "ПИД: по заданию sp и измерению pv вычисляет управляющее значение, ограниченное диапазоном."
+memory = true
+
+[[input]]
+name = "sp"
+type = "float"
+label = "Задание"
+
+[[input]]
+name = "pv"
+type = "float"
+label = "Измерение"
+
+[[input]]
+name = "en"
+type = "bool"
+label = "Вкл"
+default = true
+
+[[output]]
+name = "out"
+type = "float"
+
+[[param]]
+name = "kp"
+label = "Kp"
+type = "float"
+default = 1.0
+description = "Пропорциональный коэффициент"
+
+[[param]]
+name = "ki"
+label = "Ki, 1/с"
+type = "float"
+default = 0.0
+description = "Интегральный коэффициент"
+
+[[param]]
+name = "kd"
+label = "Kd, с"
+type = "float"
+default = 0.0
+description = "Дифференциальный коэффициент"
+
+[[param]]
+name = "out_min"
+label = "мин. выхода"
+type = "float"
+default = 0.0
+description = "Нижняя граница выхода"
+
+[[param]]
+name = "out_max"
+label = "макс. выхода"
+type = "float"
+default = 100.0
+description = "Верхняя граница выхода"
+

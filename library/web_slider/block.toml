@@ -1,0 +1,81 @@
+[block]
+type = "web_slider"
+name = "Веб-ползунок"
+symbol = "SLD"
+group = "Веб-интерфейс"
+description = "Ползунок на веб-странице: выход — выбранное число между min и max."
+memory = true
+
+[[output]]
+name = "out"
+type = "float"
+
+[[param]]
+name = "caption"
+type = "string"
+label = "Подпись"
+default = "Веб-ползунок"
+description = "Подпись виджета на странице"
+
+[[param]]
+name = "min"
+type = "float"
+label = "Минимум"
+default = 0.0
+description = "Значение у левого края"
+
+[[param]]
+name = "max"
+type = "float"
+label = "Максимум"
+default = 100.0
+description = "Значение у правого края"
+
+[[param]]
+name = "step"
+type = "float"
+label = "Шаг"
+default = 1.0
+description = "Шаг изменения значения"
+
+[[param]]
+name = "initial"
+type = "float"
+label = "Начальное"
+default = 0.0
+description = "Значение после включения питания"
+
+[[param]]
+name = "unit"
+type = "string"
+label = "Единица"
+default = ""
+description = "Единица измерения рядом со значением"
+
+[[param]]
+name = "col"
+type = "int"
+label = "Колонка"
+default = 1
+description = "Левая колонка сетки страницы (1–12)"
+
+[[param]]
+name = "row"
+type = "int"
+label = "Строка"
+default = 1
+description = "Верхняя строка сетки страницы (1, 2, …)"
+
+[[param]]
+name = "w"
+type = "int"
+label = "Ширина"
+default = 6
+description = "Ширина в колонках сетки (1–12)"
+
+[[param]]
+name = "h"
+type = "int"
+label = "Высота"
+default = 1
+description = "Высота в строках сетки"

@@ -1,0 +1,15 @@
+[block]
+type = "sq"
+name = "Квадрат"
+symbol = "SQ"
+group = "Алгебра"
+description = "out = in × in."
+
+[[input]]
+name = "in"
+type = "float"
+
+[[output]]
+name = "out"
+type = "float"
+

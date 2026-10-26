@@ -1,0 +1,34 @@
+# Кнопка замыкает вывод на землю; каждое нажатие переключает светодиод
+
+[[block]]
+id = "button"
+type = "digital_in"
+pin = 12
+pullup = true
+inverted = true
+
+[[block]]
+id = "clean"
+type = "debounce"
+time = "30ms"
+
+[[block]]
+id = "toggle"
+type = "t_trigger"
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 25
+
+[[link]]
+from = "button.out"
+to   = "clean.in"
+
+[[link]]
+from = "clean.out"
+to   = "toggle.in"
+
+[[link]]
+from = "toggle.out"
+to   = "led.in"

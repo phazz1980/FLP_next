@@ -283,3 +283,24 @@ fn live_values_and_unknown_tool() {
     assert_eq!(v[0]["name"], "button.out");
     assert!(run(&mut c, "fly", json!({})).is_err());
 }
+
+#[test]
+fn moves_a_block_and_reports_the_ports_in_view() {
+    let mut c = ctx("move");
+    run(
+        &mut c,
+        "add_block",
+        json!({"type": "timer_on", "id": "delay"}),
+    )
+    .unwrap();
+    run(
+        &mut c,
+        "move_block",
+        json!({"id": "delay", "x": 300.0, "y": 120.0}),
+    )
+    .unwrap();
+    let schema = run(&mut c, "get_schema", json!({})).unwrap();
+    assert_eq!(schema["placement"]["delay"]["x"], 300.0);
+    assert_eq!(schema["view"]["delay"]["inputs"][0]["name"], "in");
+    assert!(run(&mut c, "move_block", json!({"id": "nope", "x": 1, "y": 1})).is_err());
+}

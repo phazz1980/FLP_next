@@ -1,0 +1,27 @@
+[block]
+type = "dword_to_bytes"
+name = "Двойное слово → байты"
+symbol = "D>B"
+group = "Преобразование типов"
+description = "Делит 32-битное число на четыре байта b0 (младший) … b3."
+
+[[input]]
+name = "in"
+type = "int"
+
+[[output]]
+name = "b0"
+type = "int"
+
+[[output]]
+name = "b1"
+type = "int"
+
+[[output]]
+name = "b2"
+type = "int"
+
+[[output]]
+name = "b3"
+type = "int"
+

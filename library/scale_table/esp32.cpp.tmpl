@@ -1,0 +1,29 @@
+// @loop
+{
+  // points are parsed from the "x:y;x:y" string once
+  static float xs[32], ys[32];
+  static int n = 0;
+  if (n == 0) {
+    const char *p = "{{ value.points }}";
+    while (*p && n < 32) {
+      char *end;
+      xs[n] = strtof(p, &end);
+      if (*end != ':') break;
+      p = end + 1;
+      ys[n] = strtof(p, &end);
+      n++;
+      p = (*end == ';') ? end + 1 : end;
+    }
+    if (n == 0) { xs[0] = 0; ys[0] = 0; n = 1; }
+  }
+  float v = {{ input.in }};
+  if (v <= xs[0]) {
+    {{ output.out }} = ys[0];
+  } else if (v >= xs[n - 1]) {
+    {{ output.out }} = ys[n - 1];
+  } else {
+    int i = 1;
+    while (v > xs[i]) i++;
+    {{ output.out }} = ys[i - 1] + (ys[i] - ys[i - 1]) * (v - xs[i - 1]) / (xs[i] - xs[i - 1]);
+  }
+}

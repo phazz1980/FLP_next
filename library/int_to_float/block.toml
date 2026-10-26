@@ -1,0 +1,15 @@
+[block]
+type = "int_to_float"
+name = "Целое → дробное"
+symbol = "I>F"
+group = "Преобразование типов"
+description = "Преобразует целое число в дробное."
+
+[[input]]
+name = "in"
+type = "int"
+
+[[output]]
+name = "out"
+type = "float"
+

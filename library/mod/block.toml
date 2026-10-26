@@ -1,0 +1,18 @@
+[block]
+type = "mod"
+name = "Остаток от деления"
+symbol = "a mod b"
+group = "Алгебра"
+description = "Остаток от деления a на b (fmod); при b = 0 выход 0."
+
+[[input]]
+name = "a"
+type = "float"
+
+[[input]]
+name = "b"
+type = "float"
+
+[[output]]
+name = "out"
+type = "float"

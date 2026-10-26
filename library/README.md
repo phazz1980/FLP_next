@@ -237,14 +237,23 @@ var = "setpoint"
 | --- | --- |
 | Входы и выходы | `digital_in`, `digital_out`, `analog_in`, `pwm_out` |
 | Датчики | `ds18b20`, `dht22` |
-| Логика | `and`, `or`, `xor`, `not`, `rs_trigger`, `rising_edge`, `falling_edge` |
-| Время | `timer_on`, `timer_off`, `pulse`, `generator` |
-| Числа | `less`, `greater`, `add`, `sub`, `mul`, `div`, `constant`, `scale`, `hysteresis`, `abs`, `min`, `max`, `limit` |
-| Переключатели | `switch` |
-| Счёт и память | `counter`, `flash_store` |
-| Строки | `text_const`, `num_to_text`, `text_to_num`, `text_concat`, `text_compare`, `text_length`, `text_substring` |
+| Базовые элементы | `and`, `or`, `xor`, `not`, `debounce`, `constant`, `number_change`, `string_change`, `bit_change` |
+| Масштабирование | `scale`, `scale_table` |
+| Триггеры | `rs_trigger`, `sr_trigger`, `t_trigger`, `rising_edge`, `falling_edge` |
+| Таймеры | `timer_on`, `timer_off`, `pulse`, `generator` |
+| Счётчики | `counter` |
+| Математика | `add`, `sub`, `mul`, `div` |
+| Алгебра | `abs`, `min`, `max`, `limit`, `pow`, `sqrt`, `sq`, `mod`, `random`, `sin`, `cos`, `tan` |
+| Сравнение | `less`, `greater`, `hysteresis`, `compare` |
+| Переключатели | `switch`, `mux`, `dms` |
+| Строки | `text_const`, `num_to_text`, `text_to_num`, `text_concat`, `text_compare`, `text_length`, `text_substring`, `text_find`, `text_char`, `text_add_char` |
+| Преобразование типов | `float_to_int`, `int_to_float`, `word_to_bytes`, `bytes_to_word`, `dword_to_bytes`, `bytes_to_dword`, `ip_to_text`, `text_to_ip` |
+| Операции с битами | `bit_read`, `bit_write`, `byte_to_bits`, `bits_to_byte`, `decoder`, `encoder` |
+| Побитовые операции | `bit_and`, `bit_or`, `bit_xor`, `bit_not` |
+| Прочее | `pid`, `flash_store` |
 | UART | `uart_config`, `uart_send`, `uart_read` |
 | Сеть | Modbus RTU и TCP, Wi-Fi, Ethernet |
+| Веб-интерфейс | страница управления на ESP32: блок «Веб-интерфейс» и виджеты (кнопка, переключатель, ползунок, ввод, индикатор, значение, шкала, текст, заголовок) |
 
 Каждый блок встречается хотя бы в одном примере из `examples/`; это проверяет
 тест `every_block_has_an_example`, а снимки кода лежат в

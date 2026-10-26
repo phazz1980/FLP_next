@@ -2,7 +2,7 @@
 type = "sub"
 name = "Вычитание"
 symbol = "a − b"
-group = "Числа"
+group = "Математика"
 description = "Выход out = a − b."
 
 [[input]]

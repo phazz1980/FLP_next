@@ -211,6 +211,10 @@ fn build_stamp(exe: &Path, work_dir: &Path, board: &BoardConfig, opts: &CompileO
         h.write(file.file_name().unwrap_or_default().as_encoded_bytes());
         h.write(&std::fs::read(&file).unwrap_or_default());
     }
+    // Flags chosen from the sketch (see `compile_args`) are part of the firmware too.
+    if uses_web_ui(work_dir) {
+        h.write(WEBUI_RESPONSE_DEFINE.as_bytes());
+    }
     format!("{:016x}", h.0)
 }
 
@@ -596,6 +600,15 @@ fn board_args(board: &BoardConfig) -> Vec<OsString> {
     args
 }
 
+/// Response buffer size of the library HTTP server for the web interface page.
+const WEBUI_RESPONSE_DEFINE: &str = "FLPROG_HTTP_SERVER_MAX_RESPONSE_BYTES=6144U";
+
+/// The sketch contains the `web_ui` block (it defines `FLP_WEBUI`).
+fn uses_web_ui(work_dir: &Path) -> bool {
+    std::fs::read_to_string(sketch_dir(work_dir).join("sketch.ino"))
+        .is_ok_and(|s| s.contains("#define FLP_WEBUI"))
+}
+
 fn compile_args(work_dir: &Path, board: &BoardConfig, opts: &CompileOptions) -> Vec<OsString> {
     let mut args: Vec<OsString> = vec!["compile".into()];
     args.extend(board_args(board));
@@ -607,6 +620,12 @@ fn compile_args(work_dir: &Path, board: &BoardConfig, opts: &CompileOptions) -> 
     for dir in &opts.libraries {
         args.push("--libraries".into());
         args.push(dir.into());
+    }
+    // The web interface page does not fit into the library's default response buffer
+    // (2 KiB, answer 500), so a sketch with the `web_ui` block raises the limit.
+    if uses_web_ui(work_dir) {
+        args.push("--build-property".into());
+        args.push(format!("compiler.cpp.extra_flags=-D{WEBUI_RESPONSE_DEFINE}").into());
     }
     if opts.verbose {
         args.push("-v".into());

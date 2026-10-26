@@ -2,7 +2,7 @@
 type = "add"
 name = "Сложение"
 symbol = "a + b"
-group = "Числа"
+group = "Математика"
 description = "Выход out = a + b."
 
 [[input]]

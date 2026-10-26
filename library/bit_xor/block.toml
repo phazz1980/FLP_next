@@ -1,0 +1,19 @@
+[block]
+type = "bit_xor"
+name = "Побитовое исключающее ИЛИ"
+symbol = "a ^ b"
+group = "Побитовые операции"
+description = "Выход out = a ^ b, над каждым битом целых чисел."
+
+[[input]]
+name = "a"
+type = "int"
+
+[[input]]
+name = "b"
+type = "int"
+
+[[output]]
+name = "out"
+type = "int"
+

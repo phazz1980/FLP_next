@@ -1,0 +1,155 @@
+# Веб-интерфейс: откройте http://<адрес платы>/ui. Переключатель или кнопка зажигают светодиод на GPIO8,
+# ползунок и поле уставки показываются на шкале, числом и текстом.
+
+[[block]]
+id = "wifi"
+type = "wifi"
+ssid = "MyNetwork"
+
+[[block]]
+id = "ui"
+type = "web_ui"
+title = "Панель ESP32"
+
+[[block]]
+id = "head"
+type = "web_label"
+caption = "Управление"
+col = 1
+row = 1
+w = 12
+h = 1
+
+[[block]]
+id = "sw"
+type = "web_switch"
+caption = "Свет"
+col = 1
+row = 2
+w = 4
+h = 1
+
+[[block]]
+id = "btn"
+type = "web_button"
+caption = "Нажать"
+col = 5
+row = 2
+w = 4
+h = 1
+
+[[block]]
+id = "lamp"
+type = "web_led"
+caption = "Светодиод"
+col = 9
+row = 2
+w = 4
+h = 1
+
+[[block]]
+id = "sld"
+type = "web_slider"
+caption = "Ползунок"
+min = 0.0
+max = 100.0
+step = 5.0
+initial = 25.0
+unit = "%"
+col = 1
+row = 3
+w = 8
+h = 1
+
+[[block]]
+id = "inp"
+type = "web_input"
+caption = "Уставка"
+min = -50.0
+max = 150.0
+step = 0.5
+initial = 21.5
+unit = "°C"
+col = 9
+row = 3
+w = 4
+h = 1
+
+[[block]]
+id = "val"
+type = "web_value"
+caption = "Ползунок"
+unit = "%"
+decimals = 0
+col = 1
+row = 4
+w = 4
+h = 2
+
+[[block]]
+id = "bar"
+type = "web_gauge"
+caption = "Шкала"
+min = 0.0
+max = 100.0
+unit = "%"
+col = 5
+row = 4
+w = 8
+h = 2
+
+[[block]]
+id = "info"
+type = "web_text"
+caption = "Состояние"
+col = 1
+row = 6
+w = 12
+h = 1
+
+[[block]]
+id = "any"
+type = "or"
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 8
+
+[[block]]
+id = "txt"
+type = "num_to_text"
+decimals = 1
+prefix = "Уставка: "
+
+[[link]]
+from = "sw.out"
+to   = "any.a"
+
+[[link]]
+from = "btn.out"
+to   = "any.b"
+
+[[link]]
+from = "any.out"
+to   = "led.in"
+
+[[link]]
+from = "any.out"
+to   = "lamp.in"
+
+[[link]]
+from = "sld.out"
+to   = "val.in"
+
+[[link]]
+from = "sld.out"
+to   = "bar.in"
+
+[[link]]
+from = "inp.out"
+to   = "txt.in"
+
+[[link]]
+from = "txt.out"
+to   = "info.in"

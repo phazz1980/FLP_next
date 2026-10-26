@@ -1,0 +1,7 @@
+[project]
+name = "selftest_logic2"
+description = "Самопроверка остальных логических блоков на плате: результаты уходят в USB раз в секунду"
+
+[board]
+fqbn = "esp32:esp32:esp32c3:CDCOnBoot=cdc"
+model = "esp32c3_supermini"   # ESP32-C3 Super Mini: GPIO0–10, 20, 21

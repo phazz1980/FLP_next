@@ -1,0 +1,16 @@
+[block]
+type = "string_change"
+name = "Детектор изменения строки"
+symbol = "d txt"
+group = "Базовые элементы"
+description = "Выдаёт true на один цикл, когда строка на входе изменилась."
+memory = true
+
+[[input]]
+name = "in"
+type = "string"
+
+[[output]]
+name = "out"
+type = "bool"
+

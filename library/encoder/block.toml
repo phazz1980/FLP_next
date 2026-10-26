@@ -1,0 +1,118 @@
+[block]
+type = "encoder"
+name = "Шифратор"
+symbol = "EN"
+group = "Операции с битами"
+description = "Выдаёт номер первого включённого входа; any = true, если включён хоть один."
+
+[[input]]
+name = "i0"
+type = "bool"
+default = false
+
+[[input]]
+name = "i1"
+type = "bool"
+default = false
+
+[[input]]
+name = "i2"
+type = "bool"
+default = false
+when = "count > 2"
+
+[[input]]
+name = "i3"
+type = "bool"
+default = false
+when = "count > 3"
+
+[[input]]
+name = "i4"
+type = "bool"
+default = false
+when = "count > 4"
+
+[[input]]
+name = "i5"
+type = "bool"
+default = false
+when = "count > 5"
+
+[[input]]
+name = "i6"
+type = "bool"
+default = false
+when = "count > 6"
+
+[[input]]
+name = "i7"
+type = "bool"
+default = false
+when = "count > 7"
+
+[[input]]
+name = "i8"
+type = "bool"
+default = false
+when = "count > 8"
+
+[[input]]
+name = "i9"
+type = "bool"
+default = false
+when = "count > 9"
+
+[[input]]
+name = "i10"
+type = "bool"
+default = false
+when = "count > 10"
+
+[[input]]
+name = "i11"
+type = "bool"
+default = false
+when = "count > 11"
+
+[[input]]
+name = "i12"
+type = "bool"
+default = false
+when = "count > 12"
+
+[[input]]
+name = "i13"
+type = "bool"
+default = false
+when = "count > 13"
+
+[[input]]
+name = "i14"
+type = "bool"
+default = false
+when = "count > 14"
+
+[[input]]
+name = "i15"
+type = "bool"
+default = false
+when = "count > 15"
+
+[[output]]
+name = "out"
+type = "int"
+
+[[output]]
+name = "any"
+type = "bool"
+
+[[param]]
+name = "count"
+label = "входов"
+type = "int"
+default = 4
+description = "Число входов"
+min = 2
+max = 16
+

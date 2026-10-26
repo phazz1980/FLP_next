@@ -1,0 +1,7 @@
+[project]
+name = "web_ui"
+description = "Веб-интерфейс на ESP32: страница /ui с кнопкой, переключателем, ползунком, уставкой и индикаторами"
+
+[board]
+fqbn = "esp32:esp32:esp32c3"
+model = "esp32c3_supermini"   # ESP32-C3 Super Mini: GPIO0–10, 20, 21

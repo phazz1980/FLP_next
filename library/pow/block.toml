@@ -1,0 +1,18 @@
+[block]
+type = "pow"
+name = "Степень"
+symbol = "a ^ b"
+group = "Алгебра"
+description = "out = a в степени b."
+
+[[input]]
+name = "a"
+type = "float"
+
+[[input]]
+name = "b"
+type = "float"
+
+[[output]]
+name = "out"
+type = "float"

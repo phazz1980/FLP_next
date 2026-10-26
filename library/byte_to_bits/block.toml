@@ -1,0 +1,43 @@
+[block]
+type = "byte_to_bits"
+name = "Байт → биты"
+symbol = "B>bits"
+group = "Операции с битами"
+description = "Раскладывает младший байт числа на восемь битов b0…b7."
+
+[[input]]
+name = "in"
+type = "int"
+
+[[output]]
+name = "b0"
+type = "bool"
+
+[[output]]
+name = "b1"
+type = "bool"
+
+[[output]]
+name = "b2"
+type = "bool"
+
+[[output]]
+name = "b3"
+type = "bool"
+
+[[output]]
+name = "b4"
+type = "bool"
+
+[[output]]
+name = "b5"
+type = "bool"
+
+[[output]]
+name = "b6"
+type = "bool"
+
+[[output]]
+name = "b7"
+type = "bool"
+

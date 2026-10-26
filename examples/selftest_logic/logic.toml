@@ -1,0 +1,421 @@
+# Самопроверка: блоки получают константы, результаты (тест=значение) раз в секунду печатаются в USB
+# Ожидается: abs=3.5 min=2 max=5 lim=100 sqrt=4 sq=9 pow=1024 mod=2 sw=2 mux=30 dms=0/7/0 tt=0/1 deb=gen (через 100 мс после gen)
+
+[[block]]
+id = "abs"
+type = "abs"
+const = { in = -3.5 }
+
+[[block]]
+id = "mn"
+type = "min"
+const = { a = 2.0, b = 5.0 }
+
+[[block]]
+id = "mx"
+type = "max"
+const = { a = 2.0, b = 5.0 }
+
+[[block]]
+id = "lim"
+type = "limit"
+const = { in = 150.0 }
+lo = 0.0
+hi = 100.0
+
+[[block]]
+id = "rt"
+type = "sqrt"
+const = { in = 16.0 }
+
+[[block]]
+id = "sqr"
+type = "sq"
+const = { in = -3.0 }
+
+[[block]]
+id = "pw"
+type = "pow"
+const = { a = 2.0, b = 10.0 }
+
+[[block]]
+id = "md"
+type = "mod"
+const = { a = 17.0, b = 5.0 }
+
+[[block]]
+id = "sw"
+type = "switch"
+const = { sel = true, a = 1.0, b = 2.0 }
+
+[[block]]
+id = "mx4"
+type = "mux"
+count = 3
+const = { sel = 2.0, a = 10.0, b = 20.0, c = 30.0 }
+
+[[block]]
+id = "dm"
+type = "dms"
+count = 3
+const = { sel = 1.0, in = 7.0 }
+
+[[block]]
+id = "gen"
+type = "generator"
+time_on = "700ms"
+time_off = "700ms"
+
+[[block]]
+id = "tog"
+type = "t_trigger"
+
+[[block]]
+id = "deb"
+type = "debounce"
+time = "100ms"
+
+[[block]]
+id = "tt_n"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[block]]
+id = "deb_n"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[block]]
+id = "tick"
+type = "generator"
+time_on = "100ms"
+time_off = "900ms"
+
+[[link]]
+from = "gen.out"
+to   = "tog.in"
+
+[[link]]
+from = "gen.out"
+to   = "deb.in"
+
+[[link]]
+from = "tog.out"
+to   = "tt_n.sel"
+
+[[link]]
+from = "deb.out"
+to   = "deb_n.sel"
+
+[[block]]
+id = "t_abs"
+type = "num_to_text"
+decimals = 1
+prefix = "abs="
+
+[[link]]
+from = "abs.out"
+to   = "t_abs.in"
+
+[[block]]
+id = "t_min"
+type = "num_to_text"
+decimals = 1
+prefix = "min="
+
+[[link]]
+from = "mn.out"
+to   = "t_min.in"
+
+[[block]]
+id = "t_max"
+type = "num_to_text"
+decimals = 1
+prefix = "max="
+
+[[link]]
+from = "mx.out"
+to   = "t_max.in"
+
+[[block]]
+id = "t_lim"
+type = "num_to_text"
+decimals = 1
+prefix = "lim="
+
+[[link]]
+from = "lim.out"
+to   = "t_lim.in"
+
+[[block]]
+id = "t_sqrt"
+type = "num_to_text"
+decimals = 1
+prefix = "sqrt="
+
+[[link]]
+from = "rt.out"
+to   = "t_sqrt.in"
+
+[[block]]
+id = "t_sq"
+type = "num_to_text"
+decimals = 1
+prefix = "sq="
+
+[[link]]
+from = "sqr.out"
+to   = "t_sq.in"
+
+[[block]]
+id = "t_pow"
+type = "num_to_text"
+decimals = 1
+prefix = "pow="
+
+[[link]]
+from = "pw.out"
+to   = "t_pow.in"
+
+[[block]]
+id = "t_mod"
+type = "num_to_text"
+decimals = 1
+prefix = "mod="
+
+[[link]]
+from = "md.out"
+to   = "t_mod.in"
+
+[[block]]
+id = "t_sw"
+type = "num_to_text"
+decimals = 1
+prefix = "sw="
+
+[[link]]
+from = "sw.out"
+to   = "t_sw.in"
+
+[[block]]
+id = "t_mux"
+type = "num_to_text"
+decimals = 1
+prefix = "mux="
+
+[[link]]
+from = "mx4.out"
+to   = "t_mux.in"
+
+[[block]]
+id = "t_dms1"
+type = "num_to_text"
+decimals = 1
+prefix = "dms1="
+
+[[link]]
+from = "dm.o1"
+to   = "t_dms1.in"
+
+[[block]]
+id = "t_dms2"
+type = "num_to_text"
+decimals = 1
+prefix = "dms2="
+
+[[link]]
+from = "dm.o2"
+to   = "t_dms2.in"
+
+[[block]]
+id = "t_dms3"
+type = "num_to_text"
+decimals = 1
+prefix = "dms3="
+
+[[link]]
+from = "dm.o3"
+to   = "t_dms3.in"
+
+[[block]]
+id = "t_tt"
+type = "num_to_text"
+decimals = 1
+prefix = "tt="
+
+[[link]]
+from = "tt_n.out"
+to   = "t_tt.in"
+
+[[block]]
+id = "t_deb"
+type = "num_to_text"
+decimals = 1
+prefix = "deb="
+
+[[link]]
+from = "deb_n.out"
+to   = "t_deb.in"
+
+[[block]]
+id = "gn"
+type = "switch"
+const = { a = 0.0, b = 1.0 }
+
+[[link]]
+from = "gen.out"
+to   = "gn.sel"
+
+[[block]]
+id = "t_gen"
+type = "num_to_text"
+decimals = 1
+prefix = "gen="
+
+[[link]]
+from = "gn.out"
+to   = "t_gen.in"
+
+[[block]]
+id = "line1"
+type = "text_concat"
+count = 4
+separator = " "
+
+[[block]]
+id = "tx1"
+type = "uart_send"
+port = -1
+trigger = 0
+
+[[link]]
+from = "line1.out"
+to   = "tx1.value"
+
+[[link]]
+from = "tick.out"
+to   = "tx1.en"
+
+[[block]]
+id = "line2"
+type = "text_concat"
+count = 4
+separator = " "
+
+[[block]]
+id = "tx2"
+type = "uart_send"
+port = -1
+trigger = 0
+
+[[link]]
+from = "line2.out"
+to   = "tx2.value"
+
+[[link]]
+from = "tick.out"
+to   = "tx2.en"
+
+[[block]]
+id = "line3"
+type = "text_concat"
+count = 4
+separator = " "
+
+[[block]]
+id = "tx3"
+type = "uart_send"
+port = -1
+trigger = 0
+
+[[link]]
+from = "line3.out"
+to   = "tx3.value"
+
+[[link]]
+from = "tick.out"
+to   = "tx3.en"
+
+[[block]]
+id = "line4"
+type = "text_concat"
+count = 4
+separator = " "
+
+[[block]]
+id = "tx4"
+type = "uart_send"
+port = -1
+trigger = 0
+
+[[link]]
+from = "line4.out"
+to   = "tx4.value"
+
+[[link]]
+from = "tick.out"
+to   = "tx4.en"
+
+[[link]]
+from = "t_abs.out"
+to   = "line1.a"
+
+[[link]]
+from = "t_min.out"
+to   = "line1.b"
+
+[[link]]
+from = "t_max.out"
+to   = "line1.c"
+
+[[link]]
+from = "t_lim.out"
+to   = "line1.d"
+
+[[link]]
+from = "t_sqrt.out"
+to   = "line2.a"
+
+[[link]]
+from = "t_sq.out"
+to   = "line2.b"
+
+[[link]]
+from = "t_pow.out"
+to   = "line2.c"
+
+[[link]]
+from = "t_mod.out"
+to   = "line2.d"
+
+[[link]]
+from = "t_sw.out"
+to   = "line3.a"
+
+[[link]]
+from = "t_mux.out"
+to   = "line3.b"
+
+[[link]]
+from = "t_dms1.out"
+to   = "line3.c"
+
+[[link]]
+from = "t_dms2.out"
+to   = "line3.d"
+
+[[link]]
+from = "t_dms3.out"
+to   = "line4.a"
+
+[[link]]
+from = "t_tt.out"
+to   = "line4.b"
+
+[[link]]
+from = "t_deb.out"
+to   = "line4.c"
+
+[[link]]
+from = "t_gen.out"
+to   = "line4.d"

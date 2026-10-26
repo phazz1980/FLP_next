@@ -1,0 +1,52 @@
+[block]
+type = "compare"
+name = "Компаратор"
+symbol = "a ? b"
+group = "Сравнение"
+description = "Сравнивает два числа выбранной операцией: =, ≠, <, ≤, >, ≥."
+
+[[input]]
+name = "a"
+type = "float"
+
+[[input]]
+name = "b"
+type = "float"
+
+[[output]]
+name = "out"
+type = "bool"
+
+[[param]]
+name = "op"
+label = "операция"
+type = "int"
+default = 4
+description = "Какое сравнение выполнять"
+min = 0
+max = 5
+
+[[param.choice]]
+value = 0
+label = "a = b"
+
+[[param.choice]]
+value = 1
+label = "a ≠ b"
+
+[[param.choice]]
+value = 2
+label = "a < b"
+
+[[param.choice]]
+value = 3
+label = "a ≤ b"
+
+[[param.choice]]
+value = 4
+label = "a > b"
+
+[[param.choice]]
+value = 5
+label = "a ≥ b"
+

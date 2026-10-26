@@ -1,0 +1,24 @@
+[block]
+type = "text_char"
+name = "Символ из строки"
+symbol = "CHAR"
+group = "Строки"
+description = "Берёт символ строки по номеру: сам символ и его код."
+
+[[input]]
+name = "text"
+type = "string"
+
+[[input]]
+name = "index"
+type = "int"
+default = 0
+
+[[output]]
+name = "char"
+type = "string"
+
+[[output]]
+name = "code"
+type = "int"
+

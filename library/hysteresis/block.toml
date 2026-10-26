@@ -2,7 +2,7 @@
 type = "hysteresis"
 name = "Гистерезис"
 symbol = "HYST"
-group = "Числа"
+group = "Сравнение"
 description = "Двухпозиционный регулятор: включает выход на пороге on и выключает на пороге off."
 memory = true
 

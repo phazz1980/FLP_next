@@ -2,7 +2,7 @@
 type = "greater"
 name = "Больше"
 symbol = "a > b"
-group = "Числа"
+group = "Сравнение"
 description = "Сравнивает вход с порогом: выход true, если a > b."
 
 [[input]]

@@ -1,0 +1,40 @@
+[block]
+type = "float_to_int"
+name = "Дробное → целое"
+symbol = "F>I"
+group = "Преобразование типов"
+description = "Преобразует дробное число в целое выбранным способом."
+
+[[input]]
+name = "in"
+type = "float"
+
+[[output]]
+name = "out"
+type = "int"
+
+[[param]]
+name = "mode"
+label = "способ"
+type = "int"
+default = 0
+description = "Как округлять"
+min = 0
+max = 3
+
+[[param.choice]]
+value = 0
+label = "к ближайшему"
+
+[[param.choice]]
+value = 1
+label = "вниз"
+
+[[param.choice]]
+value = 2
+label = "вверх"
+
+[[param.choice]]
+value = 3
+label = "отбросить дробную часть"
+

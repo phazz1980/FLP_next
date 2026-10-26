@@ -1,0 +1,10 @@
+// @global
+bool {{ id }}_prev = false;
+bool {{ id }}_init = false;
+// @loop
+{
+  bool now = (({{ input.in }} >> {{ param.bit }}) & 1) != 0;
+  {{ output.out }} = {{ id }}_init && now != {{ id }}_prev;
+  {{ id }}_prev = now;
+  {{ id }}_init = true;
+}

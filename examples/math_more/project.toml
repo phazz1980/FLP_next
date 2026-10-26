@@ -1,0 +1,6 @@
+[project]
+name = "math_more"
+description = "Мультиплексор, демультиплексор, степень, корень, квадрат и остаток от деления"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

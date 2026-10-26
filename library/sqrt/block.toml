@@ -1,0 +1,15 @@
+[block]
+type = "sqrt"
+name = "Квадратный корень"
+symbol = "SQRT"
+group = "Алгебра"
+description = "out = √in; для отрицательного входа выход 0."
+
+[[input]]
+name = "in"
+type = "float"
+
+[[output]]
+name = "out"
+type = "float"
+

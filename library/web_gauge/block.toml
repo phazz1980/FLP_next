@@ -1,0 +1,67 @@
+[block]
+type = "web_gauge"
+name = "Веб-шкала"
+symbol = "BAR"
+group = "Веб-интерфейс"
+description = "Шкала на веб-странице: заполняется по значению входа между min и max."
+memory = true
+
+[[input]]
+name = "in"
+type = "float"
+
+[[param]]
+name = "caption"
+type = "string"
+label = "Подпись"
+default = "Веб-шкала"
+description = "Подпись виджета на странице"
+
+[[param]]
+name = "min"
+type = "float"
+label = "Минимум"
+default = 0.0
+description = "Значение пустой шкалы"
+
+[[param]]
+name = "max"
+type = "float"
+label = "Максимум"
+default = 100.0
+description = "Значение полной шкалы"
+
+[[param]]
+name = "unit"
+type = "string"
+label = "Единица"
+default = ""
+description = "Единица измерения рядом со значением"
+
+[[param]]
+name = "col"
+type = "int"
+label = "Колонка"
+default = 1
+description = "Левая колонка сетки страницы (1–12)"
+
+[[param]]
+name = "row"
+type = "int"
+label = "Строка"
+default = 1
+description = "Верхняя строка сетки страницы (1, 2, …)"
+
+[[param]]
+name = "w"
+type = "int"
+label = "Ширина"
+default = 4
+description = "Ширина в колонках сетки (1–12)"
+
+[[param]]
+name = "h"
+type = "int"
+label = "Высота"
+default = 2
+description = "Высота в строках сетки"

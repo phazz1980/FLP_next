@@ -38,7 +38,7 @@ crates/
   flp-build/    вызов arduino-cli: сборка, заливка, кэш, фоновая сборка
   flp-pdf/      картинка всех плат проекта в PDF (кладётся в архив проекта)
   flp-cli/      командная строка: check / gen / build / upload / convert
-  (позже) flp-debug, flp-ai, flp-mcp, flp-editor
+  (позже) flp-debug, flp-ai, flp-mcp, flp-web, flp-editor
 library/        блоки-файлы
 examples/       примеры проектов (начать с насоса из плана)
 ```

@@ -1,0 +1,23 @@
+[block]
+type = "number_change"
+name = "Детектор изменения числа"
+symbol = "d#"
+group = "Базовые элементы"
+description = "Выдаёт true на один цикл, когда число на входе изменилось."
+memory = true
+
+[[input]]
+name = "in"
+type = "float"
+
+[[output]]
+name = "out"
+type = "bool"
+
+[[param]]
+name = "deadband"
+label = "мёртвая зона"
+type = "float"
+default = 0.0
+description = "Изменения меньше этого значения не считаются"
+

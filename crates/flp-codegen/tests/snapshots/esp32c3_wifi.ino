@@ -24,6 +24,8 @@ uint8_t wifi_state = 255;
 uint32_t wifi_ip_raw = 0;
 // Stub web page: technical data of the device (port 80).
 FLProgWebServer wifi_web(&flpWifi, 80);
+// Shared web server: the web_ui block adds its pages to it.
+FLProgWebServer &flpWebSrv = wifi_web;
 // Update over the network (ArduinoOTA through the shared interface).
 FLProgNetworkOta wifi_ota;
 // Firmware upload from the web page: raw HTTP POST streamed into Update (port 8080).
@@ -173,6 +175,9 @@ void wifi_page(FLProgNetworkHttpServer *server) {
   page += F("<tr><td>Сборка</td><td>" __DATE__ " " __TIME__ "</td></tr>");
   page += F("<tr><td>Обновление</td><td>по сети (OTA), имя: "); page += wifi_ota.getName(); page += F("</td></tr>");
   page += F("</table>");
+#ifdef FLP_WEBUI
+  page += F("<p><a href=\"/ui\">Панель управления</a></p>");
+#endif
   page += F("<h2>Обновление прошивки</h2><input type=file id=f accept=.bin><button onclick=\"u()\">Загрузить</button> <span id=s></span><script>function u(){var f=f.files[0];if(!f)return;var p=prompt('Пароль','');s.textContent='...';fetch('http://'+location.hostname+':8080/update?p='+encodeURIComponent(p||''),{method:'POST',headers:{'Content-Type':'text/plain'},body:f}).then(function(r){return r.text()}).then(function(x){s.textContent=x}).catch(function(){s.textContent='ошибка'})}</script>");
   page += F("</body></html>");
   server->send(200, "text/html", page);

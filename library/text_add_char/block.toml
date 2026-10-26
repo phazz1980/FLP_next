@@ -1,0 +1,20 @@
+[block]
+type = "text_add_char"
+name = "Добавить символ"
+symbol = "+CHAR"
+group = "Строки"
+description = "Добавляет в конец строки символ с заданным кодом."
+
+[[input]]
+name = "text"
+type = "string"
+
+[[input]]
+name = "code"
+type = "int"
+default = 0
+
+[[output]]
+name = "out"
+type = "string"
+

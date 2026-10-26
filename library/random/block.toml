@@ -1,0 +1,30 @@
+[block]
+type = "random"
+name = "Случайное число"
+symbol = "RND"
+group = "Алгебра"
+description = "При фронте на входе en выдаёт новое случайное число от min до max."
+memory = true
+
+[[input]]
+name = "en"
+type = "bool"
+
+[[output]]
+name = "out"
+type = "float"
+
+[[param]]
+name = "min"
+label = "от"
+type = "float"
+default = 0.0
+description = "Нижняя граница"
+
+[[param]]
+name = "max"
+label = "до"
+type = "float"
+default = 100.0
+description = "Верхняя граница"
+

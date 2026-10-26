@@ -1,0 +1,21 @@
+[block]
+type = "t_trigger"
+name = "T-триггер"
+symbol = "TFF"
+group = "Триггеры"
+description = "Меняет выход на противоположный при каждом переднем фронте входа (кнопка «нажал — включил, нажал — выключил»)."
+memory = true
+
+[[input]]
+name = "in"
+type = "bool"
+
+[[input]]
+name = "reset"
+type = "bool"
+default = false
+label = "Сброс"
+
+[[output]]
+name = "out"
+type = "bool"

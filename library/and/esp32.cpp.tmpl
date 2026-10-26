@@ -1,2 +1,2 @@
 // @loop
-{{ output.out }} = {{ input.a }} && {{ input.b }};
+{{ output.out }} = {% for port in ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p"][:value.count] %}{{ input[port] }}{% if not loop.last %} && {% endif %}{% endfor %};

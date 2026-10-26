@@ -1,0 +1,30 @@
+[block]
+type = "ip_to_text"
+name = "IP-адрес → строка"
+symbol = "IP>txt"
+group = "Преобразование типов"
+description = "Собирает строку «a.b.c.d» из четырёх байтов адреса."
+
+[[input]]
+name = "a"
+type = "int"
+default = 0
+
+[[input]]
+name = "b"
+type = "int"
+default = 0
+
+[[input]]
+name = "c"
+type = "int"
+default = 0
+
+[[input]]
+name = "d"
+type = "int"
+default = 0
+
+[[output]]
+name = "out"
+type = "string"

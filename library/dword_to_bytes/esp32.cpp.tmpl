@@ -1,0 +1,5 @@
+// @loop
+{{ output.b0 }} = ((uint32_t){{ input.in }} >> 0) & 0xFF;
+{{ output.b1 }} = ((uint32_t){{ input.in }} >> 8) & 0xFF;
+{{ output.b2 }} = ((uint32_t){{ input.in }} >> 16) & 0xFF;
+{{ output.b3 }} = ((uint32_t){{ input.in }} >> 24) & 0xFF;

@@ -2,7 +2,7 @@
 type = "pulse"
 name = "Импульс"
 symbol = "TP"
-group = "Время"
+group = "Таймеры"
 description = "Таймер TP: по переднему фронту входа выдаёт импульс заданной длительности."
 memory = true
 

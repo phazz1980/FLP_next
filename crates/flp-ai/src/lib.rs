@@ -87,6 +87,14 @@ pub fn tools() -> Vec<Tool> {
             input_schema: json!({"type": "object", "properties": {"id": id}, "required": ["id"]}),
         },
         Tool {
+            name: "move_block",
+            description: "Передвинуть блок на схеме (координаты и плата нужны только редактору).",
+            input_schema: json!({"type": "object", "properties": {
+                "id": id, "x": {"type": "number"}, "y": {"type": "number"},
+                "sheet": {"type": "integer", "description": "номер платы, по умолчанию прежний"}
+            }, "required": ["id", "x", "y"]}),
+        },
+        Tool {
             name: "rename_block",
             description: "Переименовать блок; связи обновятся.",
             input_schema: json!({"type": "object", "properties": {
@@ -223,6 +231,7 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
                 "logic": p.logic,
                 "sheets": p.layout.sheets,
                 "placement": p.layout.blocks,
+                "view": block_view(p, &lib),
                 "pins": pins(p, &lib),
                 "check": report(p, &lib),
             }))
@@ -296,6 +305,34 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
         "remove_block" => {
             let id = s("id")?;
             ctx.edit(&mut |p| p.remove_block(&id).map_err(|e| e.to_string()))?;
+            Ok(ok(ctx, &lib))
+        }
+        "move_block" => {
+            let id = s("id")?;
+            let x = args
+                .get("x")
+                .and_then(Value::as_f64)
+                .ok_or("нужен числовой x")? as f32;
+            let y = args
+                .get("y")
+                .and_then(Value::as_f64)
+                .ok_or("нужен числовой y")? as f32;
+            let sheet = args.get("sheet").and_then(Value::as_u64).map(|n| n as u32);
+            ctx.edit(&mut |p| {
+                if !p.logic.blocks.iter().any(|b| b.id == id) {
+                    return Err(format!("нет блока «{id}»"));
+                }
+                let old = p.layout.blocks.get(&id).map_or(1, |b| b.sheet);
+                p.layout.blocks.insert(
+                    id.clone(),
+                    BlockPos {
+                        sheet: sheet.unwrap_or(old),
+                        x,
+                        y,
+                    },
+                );
+                Ok(())
+            })?;
             Ok(ok(ctx, &lib))
         }
         "rename_block" => {
@@ -514,11 +551,32 @@ pub fn report(project: &Project, lib: &Library) -> Value {
     json!({"errors": list(Severity::Error), "warnings": list(Severity::Warning), "order": order})
 }
 
+/// Ports and parameters that are present on each block instance (conditions
+/// `when` evaluated), for drawing the block: id → {inputs, outputs, params}.
+fn block_view(p: &Project, lib: &Library) -> Value {
+    let mut view = serde_json::Map::new();
+    for b in &p.logic.blocks {
+        let Some(def) = lib.get(&b.kind).map(|l| &l.def) else {
+            continue;
+        };
+        let port = |d: &flp_core::PortDef| json!({"name": d.name, "label": d.label, "type": d.ty, "default": d.default});
+        view.insert(
+            b.id.clone(),
+            json!({
+                "inputs": def.active_inputs(&b.params).map(port).collect::<Vec<_>>(),
+                "outputs": def.active_outputs(&b.params).map(port).collect::<Vec<_>>(),
+                "params": def.active_params(&b.params).map(|d| &d.name).collect::<Vec<_>>(),
+            }),
+        );
+    }
+    Value::Object(view)
+}
+
 fn block_summary(b: &LibraryBlock) -> Value {
     let d = &b.def;
     let ports = |ps: &Vec<flp_core::PortDef>| -> Vec<Value> {
         ps.iter()
-            .map(|p| json!({"name": p.name, "type": p.ty, "default": p.default, "description": p.description}))
+            .map(|p| json!({"name": p.name, "label": p.label, "type": p.ty, "default": p.default, "description": p.description}))
             .collect()
     };
     json!({
@@ -529,8 +587,8 @@ fn block_summary(b: &LibraryBlock) -> Value {
         "inputs": ports(&d.inputs),
         "outputs": ports(&d.outputs),
         "params": d.params.iter().map(|p| json!({
-            "name": p.name, "kind": p.kind, "default": p.default,
-            "min": p.min, "max": p.max, "description": p.description
+            "name": p.name, "label": p.label, "kind": p.kind, "default": p.default,
+            "min": p.min, "max": p.max, "description": p.description, "choices": p.choices
         })).collect::<Vec<_>>(),
     })
 }

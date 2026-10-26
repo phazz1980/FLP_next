@@ -1,0 +1,21 @@
+[block]
+type = "bytes_to_word"
+name = "Байты → слово"
+symbol = "B>W"
+group = "Преобразование типов"
+description = "Собирает 16-битное число из младшего и старшего байтов."
+
+[[input]]
+name = "lo"
+type = "int"
+default = 0
+
+[[input]]
+name = "hi"
+type = "int"
+default = 0
+
+[[output]]
+name = "out"
+type = "int"
+

@@ -2,7 +2,7 @@
 type = "generator"
 name = "Генератор"
 symbol = "GEN"
-group = "Время"
+group = "Таймеры"
 description = "Мигает выходом: time_on включён, time_off выключен, пока разрешён входом en."
 memory = true
 

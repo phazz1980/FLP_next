@@ -13,6 +13,8 @@ uint32_t {{ id }}_ip_raw = 0;
 {% if value.web %}
 // Stub web page: technical data of the device (port 80).
 FLProgWebServer {{ id }}_web(&flpWifi, 80);
+// Shared web server: the web_ui block adds its pages to it.
+FLProgWebServer &flpWebSrv = {{ id }}_web;
 {% endif %}
 {% if value.ota %}
 // Update over the network (ArduinoOTA through the shared interface).
@@ -170,6 +172,9 @@ void {{ id }}_page(FLProgNetworkHttpServer *server) {
   page += F("<tr><td>Обновление</td><td>выключено</td></tr>");
 {% endif %}
   page += F("</table>");
+#ifdef FLP_WEBUI
+  page += F("<p><a href=\"/ui\">Панель управления</a></p>");
+#endif
 {% if value.web_update %}
   page += F("<h2>Обновление прошивки</h2><input type=file id=f accept=.bin><button onclick=\"u()\">Загрузить</button> <span id=s></span><script>function u(){var f=f.files[0];if(!f)return;var p=prompt('Пароль','');s.textContent='...';fetch('http://'+location.hostname+':8080/update?p='+encodeURIComponent(p||''),{method:'POST',headers:{'Content-Type':'text/plain'},body:f}).then(function(r){return r.text()}).then(function(x){s.textContent=x}).catch(function(){s.textContent='ошибка'})}</script>");
 {% endif %}

@@ -2,7 +2,7 @@
 type = "flash_store"
 name = "Сохранение во флеш"
 symbol = "FLASH"
-group = "Счёт и память"
+group = "Прочее"
 description = "Сохраняет число во флеш-память по фронту save и восстанавливает его после перезагрузки. Не пишет во флеш, если значение не изменилось."
 memory = true
 includes = ["Preferences.h"]

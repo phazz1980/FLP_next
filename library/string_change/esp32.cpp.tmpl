@@ -1,0 +1,7 @@
+// @global
+String {{ id }}_prev;
+bool {{ id }}_init = false;
+// @loop
+{{ output.out }} = {{ id }}_init && {{ input.in }} != {{ id }}_prev;
+{{ id }}_prev = {{ input.in }};
+{{ id }}_init = true;

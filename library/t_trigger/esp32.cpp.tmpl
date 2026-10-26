@@ -1,0 +1,9 @@
+// @global
+bool {{ id }}_prev = false;
+// @loop
+if ({{ input.reset }}) {
+  {{ output.out }} = false;
+} else if ({{ input.in }} && !{{ id }}_prev) {
+  {{ output.out }} = !{{ output.out }};
+}
+{{ id }}_prev = {{ input.in }};

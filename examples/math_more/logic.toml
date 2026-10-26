@@ -1,0 +1,112 @@
+# Датчик 0…100 %: нелинейные функции, выбор режима и раздача значения по номеру
+
+[[block]]
+id = "adc"
+type = "analog_in"
+pin = 34
+
+[[block]]
+id = "level"
+type = "scale"
+out_max = 100.0
+
+[[block]]
+id = "root"
+type = "sqrt"
+
+[[block]]
+id = "square"
+type = "sq"
+
+[[block]]
+id = "cube"
+type = "pow"
+const = { b = 3.0 }
+
+[[block]]
+id = "rest"
+type = "mod"
+const = { b = 7.0 }
+
+[[block]]
+id = "mode"
+type = "constant"
+value = 1.0
+
+[[block]]
+id = "choose"
+type = "mux"
+count = 4
+const = { c = 10.0, d = 20.0 }
+
+[[block]]
+id = "route"
+type = "dms"
+count = 3
+
+[[block]]
+id = "out1"
+type = "pwm_out"
+pin = 25
+
+[[block]]
+id = "out2"
+type = "pwm_out"
+pin = 26
+
+[[block]]
+id = "out3"
+type = "pwm_out"
+pin = 27
+
+[[link]]
+from = "adc.out"
+to   = "level.in"
+
+[[link]]
+from = "level.out"
+to   = "root.in"
+
+[[link]]
+from = "level.out"
+to   = "square.in"
+
+[[link]]
+from = "level.out"
+to   = "cube.a"
+
+[[link]]
+from = "level.out"
+to   = "rest.a"
+
+[[link]]
+from = "mode.out"
+to   = "choose.sel"
+
+[[link]]
+from = "root.out"
+to   = "choose.a"
+
+[[link]]
+from = "rest.out"
+to   = "choose.b"
+
+[[link]]
+from = "mode.out"
+to   = "route.sel"
+
+[[link]]
+from = "choose.out"
+to   = "route.in"
+
+[[link]]
+from = "route.o1"
+to   = "out1.in"
+
+[[link]]
+from = "route.o2"
+to   = "out2.in"
+
+[[link]]
+from = "route.o3"
+to   = "out3.in"

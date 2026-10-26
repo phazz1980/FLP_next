@@ -1,0 +1,28 @@
+// @loop
+{
+  int v[4] = {0, 0, 0, 0};
+  int part = 0;
+  bool digits = false;
+  bool good = true;
+  for (unsigned int i = 0; i < {{ input.in }}.length() && good; i++) {
+    char ch = {{ input.in }}[i];
+    if (ch >= '0' && ch <= '9') {
+      v[part] = v[part] * 10 + (ch - '0');
+      digits = true;
+      if (v[part] > 255) good = false;
+    } else if (ch == '.' && digits && part < 3) {
+      part++;
+      digits = false;
+    } else {
+      good = false;
+    }
+  }
+  good = good && digits && part == 3;
+  if (good) {
+    {{ output.a }} = v[0];
+    {{ output.b }} = v[1];
+    {{ output.c }} = v[2];
+    {{ output.d }} = v[3];
+  }
+  {{ output.ok }} = good;
+}

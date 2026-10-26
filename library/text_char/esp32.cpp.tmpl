@@ -1,0 +1,8 @@
+// @loop
+if ({{ input.index }} >= 0 && {{ input.index }} < (int){{ input.text }}.length()) {
+  {{ output.code }} = (uint8_t){{ input.text }}[{{ input.index }}];
+  {{ output.char }} = {{ input.text }}.substring({{ input.index }}, {{ input.index }} + 1);
+} else {
+  {{ output.code }} = 0;
+  {{ output.char }} = "";
+}

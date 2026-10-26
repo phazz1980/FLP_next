@@ -1,0 +1,13 @@
+[package]
+name = "flp-web"
+description = "Web editor of FLP_next: a local HTTP server over the shared AI command set"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "flp-web"
+path = "src/main.rs"
+
+[dependencies]
+flp-ai = { path = "../flp-ai" }
+serde_json.workspace = true

@@ -2,7 +2,7 @@
 type = "not"
 name = "НЕ"
 symbol = "NOT"
-group = "Логика"
+group = "Базовые элементы"
 description = "Инвертирует вход: true становится false и наоборот."
 
 [[input]]

@@ -2,7 +2,7 @@
 type = "limit"
 name = "Ограничение"
 symbol = "LIMIT"
-group = "Числа"
+group = "Алгебра"
 description = "Ограничивает значение диапазоном: не меньше lo и не больше hi."
 
 [[input]]

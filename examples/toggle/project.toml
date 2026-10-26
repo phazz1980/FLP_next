@@ -1,0 +1,6 @@
+[project]
+name = "toggle"
+description = "Кнопка с защитой от дребезга переключает светодиод (T-триггер)"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

@@ -1,0 +1,30 @@
+// @global
+float {{ id }}_i = 0.0f;
+float {{ id }}_prev_err = 0.0f;
+unsigned long {{ id }}_t = 0;
+bool {{ id }}_run = false;
+// @loop
+if ({{ input.en }}) {
+  unsigned long now = millis();
+  float err = {{ input.sp }} - {{ input.pv }};
+  if ({{ id }}_run) {
+    float dt = (now - {{ id }}_t) / 1000.0f;
+    if (dt > 0.0f) {
+      {{ id }}_i += err * dt * {{ param.ki }};
+      {{ id }}_i = constrain({{ id }}_i, {{ param.out_min }}, {{ param.out_max }});
+      float d = (err - {{ id }}_prev_err) / dt;
+      {{ output.out }} = constrain({{ param.kp }} * err + {{ id }}_i + {{ param.kd }} * d, {{ param.out_min }}, {{ param.out_max }});
+      {{ id }}_prev_err = err;
+      {{ id }}_t = now;
+    }
+  } else {
+    {{ id }}_run = true;
+    {{ id }}_t = now;
+    {{ id }}_prev_err = err;
+    {{ output.out }} = constrain({{ param.kp }} * err, {{ param.out_min }}, {{ param.out_max }});
+  }
+} else {
+  {{ id }}_run = false;
+  {{ id }}_i = 0.0f;
+  {{ output.out }} = {{ param.out_min }};
+}

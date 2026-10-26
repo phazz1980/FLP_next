@@ -3,7 +3,7 @@ type = "text_concat"
 name = "Сцепление строк"
 symbol = "A+B"
 group = "Строки"
-description = "Склеивает от двух до четырёх строк по порядку a, b, c, d; между ними можно вставить разделитель."
+description = "Склеивает от двух до шестнадцати строк по порядку a, b, c…; между ними можно вставить разделитель."
 
 [[input]]
 name = "a"
@@ -27,6 +27,78 @@ type = "string"
 default = ""
 when = "count >= 4"
 
+[[input]]
+name = "e"
+type = "string"
+default = ""
+when = "count >= 5"
+
+[[input]]
+name = "f"
+type = "string"
+default = ""
+when = "count >= 6"
+
+[[input]]
+name = "g"
+type = "string"
+default = ""
+when = "count >= 7"
+
+[[input]]
+name = "h"
+type = "string"
+default = ""
+when = "count >= 8"
+
+[[input]]
+name = "i"
+type = "string"
+default = ""
+when = "count >= 9"
+
+[[input]]
+name = "j"
+type = "string"
+default = ""
+when = "count >= 10"
+
+[[input]]
+name = "k"
+type = "string"
+default = ""
+when = "count >= 11"
+
+[[input]]
+name = "l"
+type = "string"
+default = ""
+when = "count >= 12"
+
+[[input]]
+name = "m"
+type = "string"
+default = ""
+when = "count >= 13"
+
+[[input]]
+name = "n"
+type = "string"
+default = ""
+when = "count >= 14"
+
+[[input]]
+name = "o"
+type = "string"
+default = ""
+when = "count >= 15"
+
+[[input]]
+name = "p"
+type = "string"
+default = ""
+when = "count >= 16"
+
 [[output]]
 name = "out"
 type = "string"
@@ -37,7 +109,7 @@ label = "входов"
 type = "int"
 default = 2
 min = 2
-max = 4
+max = 16
 description = "Число входов"
 
 [[param]]

@@ -1,0 +1,7 @@
+[project]
+name = "selftest_logic"
+description = "Самопроверка логических блоков на плате: результаты уходят в USB раз в секунду"
+
+[board]
+fqbn = "esp32:esp32:esp32c3:CDCOnBoot=cdc"
+model = "esp32c3_supermini"

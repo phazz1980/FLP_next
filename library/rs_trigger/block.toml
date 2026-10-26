@@ -2,7 +2,7 @@
 type = "rs_trigger"
 name = "RS-триггер"
 symbol = "RS"
-group = "Логика"
+group = "Триггеры"
 description = "Запоминает состояние: вход s включает выход, вход r выключает. Сброс важнее установки."
 memory = true
 

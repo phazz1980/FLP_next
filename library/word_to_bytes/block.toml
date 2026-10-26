@@ -1,0 +1,19 @@
+[block]
+type = "word_to_bytes"
+name = "Слово → байты"
+symbol = "W>B"
+group = "Преобразование типов"
+description = "Делит 16-битное число на младший и старший байты."
+
+[[input]]
+name = "in"
+type = "int"
+
+[[output]]
+name = "lo"
+type = "int"
+
+[[output]]
+name = "hi"
+type = "int"
+

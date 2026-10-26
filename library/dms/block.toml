@@ -1,0 +1,102 @@
+[block]
+type = "dms"
+name = "Демультиплексор"
+symbol = "DMS"
+group = "Переключатели"
+description = "Направляет in на один из 2–16 выходов по номеру sel (0 — o1, 1 — o2…); остальные выходы равны 0."
+
+[[input]]
+name = "sel"
+type = "float"
+label = "Номер"
+
+[[input]]
+name = "in"
+type = "float"
+
+[[output]]
+name = "o1"
+type = "float"
+
+[[output]]
+name = "o2"
+type = "float"
+
+[[output]]
+name = "o3"
+type = "float"
+when = "count >= 3"
+
+[[output]]
+name = "o4"
+type = "float"
+when = "count >= 4"
+
+[[output]]
+name = "o5"
+type = "float"
+when = "count >= 5"
+
+[[output]]
+name = "o6"
+type = "float"
+when = "count >= 6"
+
+[[output]]
+name = "o7"
+type = "float"
+when = "count >= 7"
+
+[[output]]
+name = "o8"
+type = "float"
+when = "count >= 8"
+
+[[output]]
+name = "o9"
+type = "float"
+when = "count >= 9"
+
+[[output]]
+name = "o10"
+type = "float"
+when = "count >= 10"
+
+[[output]]
+name = "o11"
+type = "float"
+when = "count >= 11"
+
+[[output]]
+name = "o12"
+type = "float"
+when = "count >= 12"
+
+[[output]]
+name = "o13"
+type = "float"
+when = "count >= 13"
+
+[[output]]
+name = "o14"
+type = "float"
+when = "count >= 14"
+
+[[output]]
+name = "o15"
+type = "float"
+when = "count >= 15"
+
+[[output]]
+name = "o16"
+type = "float"
+when = "count >= 16"
+
+[[param]]
+name = "count"
+label = "выходов"
+type = "int"
+default = 2
+min = 2
+max = 16
+description = "Число выходов"

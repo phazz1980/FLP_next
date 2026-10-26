@@ -1,0 +1,6 @@
+// @global
+FlpUiItem {{ id }}_ui = {"web_slider", {{ param.caption }}, {{ param.unit }}, {{ value.col }}, {{ value.row }}, {{ value.w }}, {{ value.h }}, true, {{ param.initial }}, {{ param.min }}, {{ param.max }}, {{ param.step }}, 3};
+// @setup
+flpUiAdd(&{{ id }}_ui);
+// @loop
+{{ output.out }} = {{ id }}_ui.value;

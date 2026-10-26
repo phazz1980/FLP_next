@@ -1,0 +1,15 @@
+[block]
+type = "bit_not"
+name = "Побитовое НЕ"
+symbol = "~a"
+group = "Побитовые операции"
+description = "Инвертирует все биты целого числа."
+
+[[input]]
+name = "in"
+type = "int"
+
+[[output]]
+name = "out"
+type = "int"
+

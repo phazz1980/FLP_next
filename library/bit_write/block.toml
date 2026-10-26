@@ -1,0 +1,28 @@
+[block]
+type = "bit_write"
+name = "Запись бита"
+symbol = "bit="
+group = "Операции с битами"
+description = "Выдаёт число со значением выбранного бита, взятым с входа value."
+
+[[input]]
+name = "in"
+type = "int"
+
+[[input]]
+name = "value"
+type = "bool"
+
+[[output]]
+name = "out"
+type = "int"
+
+[[param]]
+name = "bit"
+label = "бит"
+type = "int"
+default = 0
+description = "Номер бита, 0 — младший"
+min = 0
+max = 31
+

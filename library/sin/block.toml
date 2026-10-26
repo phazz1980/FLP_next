@@ -1,0 +1,32 @@
+[block]
+type = "sin"
+name = "SIN"
+symbol = "SIN"
+group = "Алгебра"
+description = "Тригонометрия: out = sin(in); угол в градусах или радианах."
+
+[[input]]
+name = "in"
+type = "float"
+
+[[output]]
+name = "out"
+type = "float"
+
+[[param]]
+name = "unit"
+label = "единицы"
+type = "int"
+default = 0
+description = "Единицы угла"
+min = 0
+max = 1
+
+[[param.choice]]
+value = 0
+label = "градусы"
+
+[[param.choice]]
+value = 1
+label = "радианы"
+

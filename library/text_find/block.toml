@@ -1,0 +1,32 @@
+[block]
+type = "text_find"
+name = "Поиск подстроки"
+symbol = "FIND"
+group = "Строки"
+description = "Позиция первого вхождения подстроки (с 0) или -1, если не найдена."
+
+[[input]]
+name = "text"
+type = "string"
+
+[[input]]
+name = "sub"
+type = "string"
+
+[[output]]
+name = "pos"
+type = "int"
+
+[[output]]
+name = "found"
+type = "bool"
+
+[[param]]
+name = "from"
+label = "с позиции"
+type = "int"
+default = 0
+description = "С какой позиции искать"
+min = 0
+max = 255
+

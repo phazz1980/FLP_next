@@ -1,0 +1,98 @@
+[block]
+type = "decoder"
+name = "Дешифратор"
+symbol = "DC"
+group = "Операции с битами"
+description = "Включает выход с номером, равным входу; остальные выключены."
+
+[[input]]
+name = "in"
+type = "int"
+
+[[output]]
+name = "o0"
+type = "bool"
+
+[[output]]
+name = "o1"
+type = "bool"
+
+[[output]]
+name = "o2"
+type = "bool"
+when = "count > 2"
+
+[[output]]
+name = "o3"
+type = "bool"
+when = "count > 3"
+
+[[output]]
+name = "o4"
+type = "bool"
+when = "count > 4"
+
+[[output]]
+name = "o5"
+type = "bool"
+when = "count > 5"
+
+[[output]]
+name = "o6"
+type = "bool"
+when = "count > 6"
+
+[[output]]
+name = "o7"
+type = "bool"
+when = "count > 7"
+
+[[output]]
+name = "o8"
+type = "bool"
+when = "count > 8"
+
+[[output]]
+name = "o9"
+type = "bool"
+when = "count > 9"
+
+[[output]]
+name = "o10"
+type = "bool"
+when = "count > 10"
+
+[[output]]
+name = "o11"
+type = "bool"
+when = "count > 11"
+
+[[output]]
+name = "o12"
+type = "bool"
+when = "count > 12"
+
+[[output]]
+name = "o13"
+type = "bool"
+when = "count > 13"
+
+[[output]]
+name = "o14"
+type = "bool"
+when = "count > 14"
+
+[[output]]
+name = "o15"
+type = "bool"
+when = "count > 15"
+
+[[param]]
+name = "count"
+label = "выходов"
+type = "int"
+default = 4
+description = "Число выходов"
+min = 2
+max = 16
+

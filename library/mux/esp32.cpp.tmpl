@@ -1,0 +1,13 @@
+// @loop
+{
+  int idx = (int){{ input.sel }};
+{% for port in ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p"][:value.count] %}
+{% if loop.last %}
+  {{ output.out }} = {{ input[port] }};
+{% else %}
+  if (idx <= {{ loop.index0 }}) {
+    {{ output.out }} = {{ input[port] }};
+  } else
+{% endif %}
+{% endfor %}
+}

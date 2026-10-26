@@ -1,0 +1,145 @@
+// @global once
+// Web interface registry: widget blocks register their items, the web_ui block serves them.
+struct FlpUiItem {
+  const char *kind;
+  const char *caption;
+  const char *unit;
+  uint8_t col, row, w, h;
+  bool rw;      // the page may change the value
+  float value;
+  float lo, hi, step;
+  uint8_t dec;  // digits after the point on the page
+  String text;
+};
+#define FLP_UI_MAX 32
+FlpUiItem *flpUiItems[FLP_UI_MAX];
+uint8_t flpUiCount = 0;
+void flpUiAdd(FlpUiItem *item) {
+  if (flpUiCount < FLP_UI_MAX) flpUiItems[flpUiCount++] = item;
+}
+#define FLP_WEBUI 1
+// @global
+const char {{ id }}_html[] PROGMEM = R"FLPUI(<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FLP_next</title>
+<style>
+:root{color-scheme:light dark;--b:#fff;--f:#222;--c:#f1f3f6;--a:#2f7de1;--g:#2da44e}
+@media(prefers-color-scheme:dark){:root{--b:#14171c;--f:#e6e8eb;--c:#222831;--a:#5aa0f5;--g:#3fb950}}
+body{margin:0;padding:12px;background:var(--b);color:var(--f);font:15px system-ui,sans-serif}
+h1{font-size:18px;margin:0 0 10px}
+#g{display:grid;grid-template-columns:repeat(12,1fr);grid-auto-rows:56px;gap:8px}
+.w{background:var(--c);border-radius:8px;padding:6px 10px;display:flex;flex-direction:column;justify-content:center;min-width:0;overflow:hidden}
+.w small{opacity:.7;font-size:12px}
+.w b{font-size:22px;font-weight:600}
+.w.p{padding:0}
+button,input{font:inherit;color:inherit}
+.btn{border:0;border-radius:8px;background:var(--a);color:#fff;width:100%;height:100%;touch-action:manipulation;user-select:none}
+.btn.on{background:var(--g)}
+.led{width:22px;height:22px;border-radius:50%;background:#888;flex:none}
+.led.on{background:var(--g);box-shadow:0 0 8px var(--g)}
+.r{display:flex;align-items:center;gap:8px}
+.bar{height:10px;border-radius:5px;background:#8884;overflow:hidden;margin-top:4px}
+.bar i{display:block;height:100%;background:var(--a)}
+input[type=range]{width:100%}
+input[type=number]{width:100%;box-sizing:border-box;background:transparent;border:1px solid #8886;border-radius:6px;padding:4px}
+</style></head><body><h1 id="t"></h1><div id="g"></div><script>
+var G=document.getElementById('g'),T=document.getElementById('t'),E=[];
+function S(i,v){fetch('/ui/set?i='+i+'&v='+v).catch(function(){})}
+function h(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}
+function mk(d,i){
+ var w=h('div','w'),k=d.k,u=d.u?' '+d.u:'',dn=false;
+ w.style.gridColumn=d.c+' / span '+d.w;w.style.gridRow=d.r+' / span '+d.h;
+ if(k=='label'){w.appendChild(h('b','',d.l));return[w,function(){}]}
+ if(k=='button'||k=='switch'){
+  var b=h('button','btn',d.l);w.className='w p';w.appendChild(b);
+  if(k=='switch')b.onclick=function(){var n=b.classList.contains('on')?0:1;b.classList.toggle('on',n==1);S(i,n)};
+  else{
+   b.onpointerdown=function(){dn=true;S(i,1)};
+   b.onpointerup=b.onpointerleave=b.onpointercancel=function(){if(dn){dn=false;S(i,0)}}}
+  return[w,function(v){b.classList.toggle('on',v!=0)}]}
+ if(k=='slider'){
+  var s=h('input'),o=h('b','','');s.type='range';s.min=d.a;s.max=d.b;s.step=d.s;
+  w.appendChild(h('small','',d.l));w.appendChild(o);w.appendChild(s);
+  s.oninput=function(){o.textContent=s.value+u;S(i,s.value)};
+  return[w,function(v){if(document.activeElement!=s){s.value=v;o.textContent=(+v)+u}}]}
+ if(k=='input'){
+  var n=h('input');n.type='number';n.step=d.s;if(d.b>d.a){n.min=d.a;n.max=d.b}
+  w.appendChild(h('small','',d.l+u));w.appendChild(n);
+  n.onchange=function(){S(i,n.value)};
+  return[w,function(v){if(document.activeElement!=n)n.value=v}]}
+ if(k=='led'){
+  var r=h('div','r'),l=h('div','led');r.appendChild(l);r.appendChild(h('span','',d.l));w.appendChild(r);
+  return[w,function(v){l.classList.toggle('on',v!=0)}]}
+ if(k=='gauge'){
+  var q=h('b','',''),a=h('i'),z=h('div','bar');z.appendChild(a);
+  w.appendChild(h('small','',d.l));w.appendChild(q);w.appendChild(z);
+  return[w,function(v){q.textContent=(+v).toFixed(d.d)+u;a.style.width=Math.max(0,Math.min(100,(v-d.a)/(d.b-d.a)*100))+'%'}]}
+ var x=h('b','','');w.appendChild(h('small','',d.l));w.appendChild(x);
+ return[w,function(v){x.textContent=(k=='value'?(+v).toFixed(d.d)+u:v)}]}
+function poll(){fetch('/ui/state').then(function(r){return r.json()}).then(function(a){a.forEach(function(v,i){if(E[i])E[i](v)})}).catch(function(){}).then(function(){setTimeout(poll,500)})}
+fetch('/ui/layout').then(function(r){return r.json()}).then(function(d){
+ T.textContent=d.t;document.title=d.t;
+ d.i.forEach(function(x,i){var m=mk(x,i);G.appendChild(m[0]);E.push(m[1])});poll()})
+</script></body></html>)FLPUI";
+// @functions
+void {{ id }}_esc(String &o, const char *s) {
+  for (; *s; s++) {
+    if (*s == '"' || *s == '\\') o += '\\';
+    if ((uint8_t)*s >= 32) o += *s;
+  }
+}
+void {{ id }}_page(FLProgNetworkHttpServer *server) {
+  server->sendProgmem(200, "text/html; charset=utf-8", {{ id }}_html);
+}
+void {{ id }}_layout(FLProgNetworkHttpServer *server) {
+  String o = "{\"t\":\"";
+  {{ id }}_esc(o, {{ param.title }});
+  o += "\",\"i\":[";
+  for (uint8_t i = 0; i < flpUiCount; i++) {
+    FlpUiItem *it = flpUiItems[i];
+    if (i) o += ',';
+    o += "{\"k\":\""; o += (it->kind + 4);
+    o += "\",\"l\":\""; {{ id }}_esc(o, it->caption);
+    o += "\",\"u\":\""; {{ id }}_esc(o, it->unit);
+    o += "\",\"c\":"; o += it->col;
+    o += ",\"r\":"; o += it->row;
+    o += ",\"w\":"; o += it->w;
+    o += ",\"h\":"; o += it->h;
+    o += ",\"d\":"; o += it->dec;
+    o += ",\"a\":"; o += String(it->lo, 3);
+    o += ",\"b\":"; o += String(it->hi, 3);
+    o += ",\"s\":"; o += String(it->step, 3);
+    o += '}';
+  }
+  o += "]}";
+  server->send(200, "application/json", o);
+}
+void {{ id }}_state(FLProgNetworkHttpServer *server) {
+  String o = "[";
+  for (uint8_t i = 0; i < flpUiCount; i++) {
+    FlpUiItem *it = flpUiItems[i];
+    if (i) o += ',';
+    if (!strcmp(it->kind, "web_text")) {
+      o += '"'; {{ id }}_esc(o, it->text.c_str()); o += '"';
+    } else {
+      o += String(it->value, (unsigned int)it->dec);
+    }
+  }
+  o += ']';
+  server->send(200, "application/json", o);
+}
+void {{ id }}_set(FLProgNetworkHttpServer *server) {
+  if (server->hasArgumentKey("i") && server->hasArgumentKey("v")) {
+    int i = server->argumentValueAtKey("i").toInt();
+    float v = server->argumentValueAtKey("v").toFloat();
+    if (i >= 0 && i < flpUiCount && flpUiItems[i]->rw) {
+      FlpUiItem *it = flpUiItems[i];
+      if (it->hi > it->lo) v = constrain(v, it->lo, it->hi);
+      it->value = v;
+    }
+  }
+  server->send(200, "text/plain", "ok");
+}
+// @setup
+flpWebSrv.addHandler("/ui", {{ id }}_page);
+flpWebSrv.addHandler("/ui/layout", {{ id }}_layout);
+flpWebSrv.addHandler("/ui/state", {{ id }}_state);
+flpWebSrv.addHandler("/ui/set", {{ id }}_set);

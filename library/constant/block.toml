@@ -2,7 +2,7 @@
 type = "constant"
 name = "Константа"
 symbol = "CONST"
-group = "Числа"
+group = "Базовые элементы"
 description = "Постоянное число на выходе."
 
 [[output]]

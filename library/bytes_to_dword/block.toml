@@ -1,0 +1,31 @@
+[block]
+type = "bytes_to_dword"
+name = "Байты → двойное слово"
+symbol = "B>D"
+group = "Преобразование типов"
+description = "Собирает 32-битное число из четырёх байтов."
+
+[[input]]
+name = "b0"
+type = "int"
+default = 0
+
+[[input]]
+name = "b1"
+type = "int"
+default = 0
+
+[[input]]
+name = "b2"
+type = "int"
+default = 0
+
+[[input]]
+name = "b3"
+type = "int"
+default = 0
+
+[[output]]
+name = "out"
+type = "int"
+

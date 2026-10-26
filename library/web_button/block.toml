@@ -1,0 +1,46 @@
+[block]
+type = "web_button"
+name = "Веб-кнопка"
+symbol = "BTN"
+group = "Веб-интерфейс"
+description = "Кнопка на веб-странице: выход true, пока кнопка нажата."
+memory = true
+
+[[output]]
+name = "out"
+type = "bool"
+
+[[param]]
+name = "caption"
+type = "string"
+label = "Подпись"
+default = "Веб-кнопка"
+description = "Подпись виджета на странице"
+
+[[param]]
+name = "col"
+type = "int"
+label = "Колонка"
+default = 1
+description = "Левая колонка сетки страницы (1–12)"
+
+[[param]]
+name = "row"
+type = "int"
+label = "Строка"
+default = 1
+description = "Верхняя строка сетки страницы (1, 2, …)"
+
+[[param]]
+name = "w"
+type = "int"
+label = "Ширина"
+default = 3
+description = "Ширина в колонках сетки (1–12)"
+
+[[param]]
+name = "h"
+type = "int"
+label = "Высота"
+default = 1
+description = "Высота в строках сетки"

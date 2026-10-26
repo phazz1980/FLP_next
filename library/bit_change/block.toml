@@ -1,0 +1,25 @@
+[block]
+type = "bit_change"
+name = "Детектор изменения бита"
+symbol = "d bit"
+group = "Базовые элементы"
+description = "Выдаёт true на один цикл, когда выбранный бит целого числа изменился."
+memory = true
+
+[[input]]
+name = "in"
+type = "int"
+
+[[output]]
+name = "out"
+type = "bool"
+
+[[param]]
+name = "bit"
+label = "бит"
+type = "int"
+default = 0
+description = "Номер бита, 0 — младший"
+min = 0
+max = 31
+

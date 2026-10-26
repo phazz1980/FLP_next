@@ -1,0 +1,119 @@
+[block]
+type = "mux"
+name = "Мультиплексор"
+symbol = "MUX"
+group = "Переключатели"
+description = "Выбор из 2–16 входов по номеру sel: 0 — a, 1 — b, 2 — c … 15 — p. Номер за пределами берётся с ближайшего края."
+
+[[input]]
+name = "sel"
+type = "float"
+default = 0.0
+label = "Номер"
+
+[[input]]
+name = "a"
+type = "float"
+default = 0.0
+
+[[input]]
+name = "b"
+type = "float"
+default = 0.0
+
+[[input]]
+name = "c"
+type = "float"
+default = 0.0
+when = "count >= 3"
+
+[[input]]
+name = "d"
+type = "float"
+default = 0.0
+when = "count >= 4"
+
+[[input]]
+name = "e"
+type = "float"
+default = 0.0
+when = "count >= 5"
+
+[[input]]
+name = "f"
+type = "float"
+default = 0.0
+when = "count >= 6"
+
+[[input]]
+name = "g"
+type = "float"
+default = 0.0
+when = "count >= 7"
+
+[[input]]
+name = "h"
+type = "float"
+default = 0.0
+when = "count >= 8"
+
+[[input]]
+name = "i"
+type = "float"
+default = 0.0
+when = "count >= 9"
+
+[[input]]
+name = "j"
+type = "float"
+default = 0.0
+when = "count >= 10"
+
+[[input]]
+name = "k"
+type = "float"
+default = 0.0
+when = "count >= 11"
+
+[[input]]
+name = "l"
+type = "float"
+default = 0.0
+when = "count >= 12"
+
+[[input]]
+name = "m"
+type = "float"
+default = 0.0
+when = "count >= 13"
+
+[[input]]
+name = "n"
+type = "float"
+default = 0.0
+when = "count >= 14"
+
+[[input]]
+name = "o"
+type = "float"
+default = 0.0
+when = "count >= 15"
+
+[[input]]
+name = "p"
+type = "float"
+default = 0.0
+when = "count >= 16"
+
+[[output]]
+name = "out"
+type = "float"
+
+[[param]]
+name = "count"
+label = "входов"
+type = "int"
+default = 2
+min = 2
+max = 16
+description = "Число входов"
