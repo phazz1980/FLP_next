@@ -149,7 +149,33 @@ fn render_block(
         .iter()
         .map(|(&port, i)| (port, i.ty.name()))
         .collect();
-    let ctx = context! { id, input, input_type, output, param, value, var, uart };
+    // Parameters taken from variables: templates build their code in and switch it at run time.
+    let bound: BTreeMap<&str, bool> = inst
+        .lib
+        .def
+        .params
+        .iter()
+        .map(|p| {
+            (
+                p.name.as_str(),
+                inst.param_vars.contains_key(p.name.as_str()),
+            )
+        })
+        .collect();
+    // Boolean parameters as C++ expressions: a variable or `true` / `false`.
+    let flag: BTreeMap<&str, String> = inst
+        .params
+        .iter()
+        .filter_map(|(&n, v)| {
+            let ParamValue::Bool(b) = v else { return None };
+            let text = match inst.param_vars.get(n) {
+                Some(var) => flp_core::vars::storage_name(var),
+                None => b.to_string(),
+            };
+            Some((n, text))
+        })
+        .collect();
+    let ctx = context! { id, input, input_type, output, param, value, bound, flag, var, uart };
     let text = env
         .render_named_str(&name, &source, ctx)
         .map_err(|source| GenError::Render {

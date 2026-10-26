@@ -195,6 +195,7 @@ description = "Показать выход кода ошибки"
 [[param]]
 name = "web"
 type = "bool"
+runtime = true
 label = "Веб-страница"
 default = true
 description = "Страница-заглушка на порту 80: IP, MAC, аптайм, версия сборки и состояние обновления"
@@ -202,6 +203,7 @@ description = "Страница-заглушка на порту 80: IP, MAC, а
 [[param]]
 name = "web_update"
 type = "bool"
+runtime = true
 label = "Загрузка прошивки"
 default = true
 when = "web"
@@ -210,6 +212,7 @@ description = "Форма на странице для загрузки прош
 [[param]]
 name = "ota"
 type = "bool"
+runtime = true
 label = "Обновление по сети"
 default = true
 description = "Прошивку можно обновить по сети (OTA) — менеджером OTA FLProg или Arduino IDE. Имя устройства — id блока"

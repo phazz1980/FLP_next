@@ -88,7 +88,22 @@ fn service(
                     if !p.choices.is_empty() {
                         let selected =
                             current.map_or_else(|| "не задан".to_owned(), |v| p.value_label(v));
-                        ui.label(label);
+                        if p.name == "wifi_mode" && def.input("mode").is_some() {
+                            // Pulled out as the `mode` input: the choice becomes «set by input».
+                            pull_label(
+                                ui,
+                                &b.id,
+                                "mode",
+                                label,
+                                &p.description,
+                                Some(SignalType::Int),
+                                true,
+                                b.bound.get("mode"),
+                                actions,
+                            );
+                        } else {
+                            ui.label(label);
+                        }
                         egui::ComboBox::from_id_salt(("net_param", &b.id, &p.name))
                             .selected_text(selected)
                             .show_ui(ui, |ui| {
@@ -336,9 +351,12 @@ pub fn pull_out(
     }
     // The variable starts with the current value of the parameter.
     let init = def.filter(|d| d.output(name).is_none()).and_then(|d| {
+        // The `mode` input continues the chosen mode.
+        let source = if name == "mode" { "wifi_mode" } else { name };
         block
-            .and_then(|b| b.params.get(name))
-            .or_else(|| d.param(name).and_then(|q| q.default.as_ref()))
+            .and_then(|b| b.params.get(source))
+            .or_else(|| d.param(source).and_then(|q| q.default.as_ref()))
+            .filter(|v| name != "mode" || matches!(v, ParamValue::Int(0..=2)))
             .cloned()
     });
     let base = format!("{id}_{name}");
@@ -356,6 +374,13 @@ pub fn pull_out(
     })?;
     p.bind(id, name, Some(&var))?;
     switch_port(p, lib, id, name, true)?;
+    if name == "mode"
+        && p.logic
+            .block(id)
+            .is_some_and(|b| b.params.contains_key("wifi_mode") || b.kind == "wifi")
+    {
+        p.set_param(lib, id, "wifi_mode", Some(ParamValue::Int(3)))?;
+    }
     p.add_var_block(&var, feed, pos)
 }
 
@@ -537,5 +562,21 @@ mod tests {
             .unwrap()
             .to_owned();
         assert!(p.logic.var(&var).unwrap().init.is_some());
+    }
+
+    #[test]
+    fn pulled_mode_switches_to_input() {
+        let (lib, _) =
+            Library::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library")).unwrap();
+        let mut p = Project::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/wifi_bound"
+        ))
+        .unwrap();
+        pull_out(&mut p, &lib, "wifi", "mode", SignalType::Int, true, POS).unwrap();
+        assert_eq!(
+            p.logic.block("wifi").unwrap().params.get("wifi_mode"),
+            Some(&ParamValue::Int(3))
+        );
     }
 }

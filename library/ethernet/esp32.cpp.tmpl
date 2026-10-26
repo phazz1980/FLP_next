@@ -1,16 +1,40 @@
+{# A setting taken from a variable (bound.*) is switched while running: its code is always built in. #}
+{% set w_on = value.web or bound.web %}
+{% set u_on = w_on and (value.web_update or bound.web_update) %}
+{% set o_on = value.ota or bound.ota %}
+{% set dyn = bound.dhcp or bound.ip or bound.gateway or bound.subnet %}
+{% macro apply_net() %}
+if ({{ flag.dhcp }}) {
+  flpEth.setDhcp();
+} else {
+  IPAddress addr;
+  addr.fromString({{ param.ip }});
+  flpEth.localIP(addr);
+  addr.fromString({{ param.gateway }});
+  flpEth.gateway(addr);
+  flpEth.dns(addr);
+  addr.fromString({{ param.subnet }});
+  flpEth.subnet(addr);
+  flpEth.resetDhcp();
+}
+{% endmacro %}
 // @global
+{% if dyn %}
+String {{ id }}_cfg;
+{% endif %}
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgWiznetInterface flpEth({{ param.cs }});
-{% if value.web %}
+{% if w_on %}
 // Stub web page: technical data of the device (port 80).
 FLProgWebServer {{ id }}_web(&flpEth, 80);
 {% endif %}
-{% if value.ota %}
+{% if o_on %}
 // Update over the network (ArduinoOTA through the shared interface).
 FLProgNetworkOta {{ id }}_ota;
+bool {{ id }}_ota_on = false;
 {% endif %}
-{% if value.web %}
-{% if value.web and value.web_update %}
+{% if w_on %}
+{% if u_on %}
 // Firmware upload from the web page: raw HTTP POST streamed into Update (port 8080).
 FLProgNetworkTcpServer {{ id }}_up;
 FLProgNetworkTcpServerClient *{{ id }}_up_c = nullptr;
@@ -22,7 +46,7 @@ uint32_t {{ id }}_up_len = 0, {{ id }}_up_got = 0, {{ id }}_up_t = 0, {{ id }}_u
 bool {{ id }}_up_auth = false;
 {% endif %}
 // @functions
-{% if value.web_update %}
+{% if u_on %}
 void {{ id }}_up_reply(const char *status, const char *text) {
   String r = String("HTTP/1.1 ") + status + "\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\nContent-Length: " + String(strlen(text)) + "\r\n\r\n" + text;
   {{ id }}_up_c->write((const uint8_t *)r.c_str(), r.length());
@@ -154,14 +178,20 @@ void {{ id }}_page(FLProgNetworkHttpServer *server) {
   page += F("<tr><td>MAC</td><td>"); page += mac; page += F("</td></tr>");
   page += F("<tr><td>Аптайм</td><td>"); page += String(sec / 3600); page += F(" ч "); page += String(sec / 60 % 60); page += F(" мин</td></tr>");
   page += F("<tr><td>Сборка</td><td>" __DATE__ " " __TIME__ "</td></tr>");
-{% if value.ota %}
-  page += F("<tr><td>Обновление</td><td>по сети (OTA), имя: "); page += {{ id }}_ota.getName(); page += F("</td></tr>");
+{% if o_on %}
+  if ({{ flag.ota }}) {
+    page += F("<tr><td>Обновление</td><td>по сети (OTA), имя: "); page += {{ id }}_ota.getName(); page += F("</td></tr>");
+  } else {
+    page += F("<tr><td>Обновление</td><td>выключено</td></tr>");
+  }
 {% else %}
   page += F("<tr><td>Обновление</td><td>выключено</td></tr>");
 {% endif %}
   page += F("</table>");
-{% if value.web_update %}
-  page += F("<h2>Обновление прошивки</h2><input type=file id=f accept=.bin><button onclick=\"u()\">Загрузить</button> <span id=s></span><script>function u(){var f=f.files[0];if(!f)return;var p=prompt('Пароль','');s.textContent='...';fetch('http://'+location.hostname+':8080/update?p='+encodeURIComponent(p||''),{method:'POST',headers:{'Content-Type':'text/plain'},body:f}).then(function(r){return r.text()}).then(function(x){s.textContent=x}).catch(function(){s.textContent='ошибка'})}</script>");
+{% if u_on %}
+  if ({{ flag.web_update }}) {
+    page += F("<h2>Обновление прошивки</h2><input type=file id=f accept=.bin><button onclick=\"u()\">Загрузить</button> <span id=s></span><script>function u(){var f=f.files[0];if(!f)return;var p=prompt('Пароль','');s.textContent='...';fetch('http://'+location.hostname+':8080/update?p='+encodeURIComponent(p||''),{method:'POST',headers:{'Content-Type':'text/plain'},body:f}).then(function(r){return r.text()}).then(function(x){s.textContent=x}).catch(function(){s.textContent='ошибка'})}</script>");
+  }
 {% endif %}
   page += F("</body></html>");
   server->send(200, "text/html", page);
@@ -169,38 +199,46 @@ void {{ id }}_page(FLProgNetworkHttpServer *server) {
 {% endif %}
 // @setup
 flpEth.mac(0x78, 0xAC, 0xC0, 0x2C, 0x3E, {{ param.mac }});
-if ({{ param.dhcp }}) {
-  flpEth.setDhcp();
-} else {
-  IPAddress addr;
-  addr.fromString({{ param.ip }});
-  flpEth.localIP(addr);
-  addr.fromString({{ param.gateway }});
-  flpEth.gateway(addr);
-  flpEth.dns(addr);
-  addr.fromString({{ param.subnet }});
-  flpEth.subnet(addr);
-  flpEth.resetDhcp();
-}
-{% if value.web %}
+{% if not dyn %}
+{{ apply_net() }}{% endif %}
+{% if w_on %}
 {{ id }}_web.addHandler("/", {{ id }}_page);
 {% endif %}
-{% if value.ota %}
+{% if o_on %}
 {{ id }}_ota.setHostname("{{ id }}");
-{% if value.ota_password != "" %}
-{{ id }}_ota.setPasswordValue({{ param.ota_password }});
-{% endif %}
-{{ id }}_ota.begin(flpEth);
 {% endif %}
 // @loop
+{% if dyn %}
+{
+  // Settings written while running are applied when they change.
+  String cfg = String(({{ flag.dhcp }}) ? "1" : "0") + "|" + {{ param.ip }} + "|" + {{ param.gateway }} + "|" + {{ param.subnet }};
+  if (cfg != {{ id }}_cfg) {
+    {{ id }}_cfg = cfg;
+{{ apply_net()|indent(4, true) }}
+  }
+}
+{% endif %}
 flpEth.pool();
 {{ output.ready }} = flpEth.ethernetIsReady();
-{% if value.web %}
-{{ id }}_web.pool();
+{% if w_on %}
+if ({{ flag.web }}) {
+  {{ id }}_web.pool();
+}
 {% endif %}
-{% if value.web and value.web_update %}
-{{ id }}_up_poll();
+{% if u_on %}
+if ({{ flag.web }} && {{ flag.web_update }}) {
+  {{ id }}_up_poll();
+}
 {% endif %}
-{% if value.ota %}
-{{ id }}_ota.pool();
+{% if o_on %}
+if ({{ flag.ota }}) {
+  if (!{{ id }}_ota_on) {
+    {{ id }}_ota_on = true;
+    if ({{ param.ota_password }}[0] != 0) {
+      {{ id }}_ota.setPasswordValue({{ param.ota_password }});
+    }
+    {{ id }}_ota.begin(flpEth);
+  }
+  {{ id }}_ota.pool();
+}
 {% endif %}

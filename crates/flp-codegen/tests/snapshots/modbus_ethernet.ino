@@ -21,6 +21,7 @@ FLProgWiznetInterface flpEth(5);
 FLProgWebServer eth_web(&flpEth, 80);
 // Update over the network (ArduinoOTA through the shared interface).
 FLProgNetworkOta eth_ota;
+bool eth_ota_on = false;
 // Firmware upload from the web page: raw HTTP POST streamed into Update (port 8080).
 FLProgNetworkTcpServer eth_up;
 FLProgNetworkTcpServerClient *eth_up_c = nullptr;
@@ -166,9 +167,15 @@ void eth_page(FLProgNetworkHttpServer *server) {
   page += F("<tr><td>MAC</td><td>"); page += mac; page += F("</td></tr>");
   page += F("<tr><td>Аптайм</td><td>"); page += String(sec / 3600); page += F(" ч "); page += String(sec / 60 % 60); page += F(" мин</td></tr>");
   page += F("<tr><td>Сборка</td><td>" __DATE__ " " __TIME__ "</td></tr>");
-  page += F("<tr><td>Обновление</td><td>по сети (OTA), имя: "); page += eth_ota.getName(); page += F("</td></tr>");
+  if (true) {
+    page += F("<tr><td>Обновление</td><td>по сети (OTA), имя: "); page += eth_ota.getName(); page += F("</td></tr>");
+  } else {
+    page += F("<tr><td>Обновление</td><td>выключено</td></tr>");
+  }
   page += F("</table>");
-  page += F("<h2>Обновление прошивки</h2><input type=file id=f accept=.bin><button onclick=\"u()\">Загрузить</button> <span id=s></span><script>function u(){var f=f.files[0];if(!f)return;var p=prompt('Пароль','');s.textContent='...';fetch('http://'+location.hostname+':8080/update?p='+encodeURIComponent(p||''),{method:'POST',headers:{'Content-Type':'text/plain'},body:f}).then(function(r){return r.text()}).then(function(x){s.textContent=x}).catch(function(){s.textContent='ошибка'})}</script>");
+  if (true) {
+    page += F("<h2>Обновление прошивки</h2><input type=file id=f accept=.bin><button onclick=\"u()\">Загрузить</button> <span id=s></span><script>function u(){var f=f.files[0];if(!f)return;var p=prompt('Пароль','');s.textContent='...';fetch('http://'+location.hostname+':8080/update?p='+encodeURIComponent(p||''),{method:'POST',headers:{'Content-Type':'text/plain'},body:f}).then(function(r){return r.text()}).then(function(x){s.textContent=x}).catch(function(){s.textContent='ошибка'})}</script>");
+  }
   page += F("</body></html>");
   server->send(200, "text/html", page);
 }
@@ -176,7 +183,7 @@ void eth_page(FLProgNetworkHttpServer *server) {
 void setup() {
   // eth: ethernet
   flpEth.mac(0x78, 0xAC, 0xC0, 0x2C, 0x3E, 40);
-  if (False) {
+  if (false) {
     flpEth.setDhcp();
   } else {
     IPAddress addr;
@@ -191,7 +198,6 @@ void setup() {
   }
   eth_web.addHandler("/", eth_page);
   eth_ota.setHostname("eth");
-  eth_ota.begin(flpEth);
 
   // slave: modbus_tcp_slave
   flpModbus.setSlaveAddress(1);
@@ -211,9 +217,22 @@ void loop() {
   // eth: ethernet
   flpEth.pool();
   eth_ready = flpEth.ethernetIsReady();
-  eth_web.pool();
-  eth_up_poll();
-  eth_ota.pool();
+  if (true) {
+    eth_web.pool();
+  }
+  if (true && true) {
+    eth_up_poll();
+  }
+  if (true) {
+    if (!eth_ota_on) {
+      eth_ota_on = true;
+      if (""[0] != 0) {
+        eth_ota.setPasswordValue("");
+      }
+      eth_ota.begin(flpEth);
+    }
+    eth_ota.pool();
+  }
 
   // slave: modbus_tcp_slave
   flpModbus.pool();

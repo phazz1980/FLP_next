@@ -32,6 +32,7 @@ FLProgWebServer wifi_web(&flpWifi, 80);
 FLProgWebServer &flpWebSrv = wifi_web;
 // Update over the network (ArduinoOTA through the shared interface).
 FLProgNetworkOta wifi_ota;
+bool wifi_ota_on = false;
 // Firmware upload from the web page: raw HTTP POST streamed into Update (port 8080).
 FLProgNetworkTcpServer wifi_up;
 FLProgNetworkTcpServerClient *wifi_up_c = nullptr;
@@ -174,12 +175,18 @@ void wifi_page(FLProgNetworkHttpServer *server) {
   page += F("<tr><td>Сигнал Wi-Fi</td><td>"); page += String(flpWifi.rssi()); page += F(" дБм</td></tr>");
   page += F("<tr><td>Аптайм</td><td>"); page += String(sec / 3600); page += F(" ч "); page += String(sec / 60 % 60); page += F(" мин</td></tr>");
   page += F("<tr><td>Сборка</td><td>" __DATE__ " " __TIME__ "</td></tr>");
-  page += F("<tr><td>Обновление</td><td>по сети (OTA), имя: "); page += wifi_ota.getName(); page += F("</td></tr>");
+  if (true) {
+    page += F("<tr><td>Обновление</td><td>по сети (OTA), имя: "); page += wifi_ota.getName(); page += F("</td></tr>");
+  } else {
+    page += F("<tr><td>Обновление</td><td>выключено</td></tr>");
+  }
   page += F("</table>");
 #ifdef FLP_WEBUI
   page += F("<p><a href=\"/ui\">Панель управления</a></p>");
 #endif
-  page += F("<h2>Обновление прошивки</h2><input type=file id=f accept=.bin><button onclick=\"u()\">Загрузить</button> <span id=s></span><script>function u(){var f=f.files[0];if(!f)return;var p=prompt('Пароль','');s.textContent='...';fetch('http://'+location.hostname+':8080/update?p='+encodeURIComponent(p||''),{method:'POST',headers:{'Content-Type':'text/plain'},body:f}).then(function(r){return r.text()}).then(function(x){s.textContent=x}).catch(function(){s.textContent='ошибка'})}</script>");
+  if (true) {
+    page += F("<h2>Обновление прошивки</h2><input type=file id=f accept=.bin><button onclick=\"u()\">Загрузить</button> <span id=s></span><script>function u(){var f=f.files[0];if(!f)return;var p=prompt('Пароль','');s.textContent='...';fetch('http://'+location.hostname+':8080/update?p='+encodeURIComponent(p||''),{method:'POST',headers:{'Content-Type':'text/plain'},body:f}).then(function(r){return r.text()}).then(function(x){s.textContent=x}).catch(function(){s.textContent='ошибка'})}</script>");
+  }
   page += F("</body></html>");
   server->send(200, "text/html", page);
 }
@@ -194,7 +201,7 @@ void setup() {
   // wifi: wifi
   flpWifi.setClientSsid("MyNetwork");
   flpWifi.setClientPassword("");
-  if (True) {
+  if (true) {
     flpWifi.setDhcp();
   } else {
     IPAddress addr;
@@ -211,7 +218,6 @@ void setup() {
   flpWifi.setApPassword("");
   wifi_web.addHandler("/", wifi_page);
   wifi_ota.setHostname("wifi");
-  wifi_ota.begin(flpWifi);
 
   // led: digital_out
   pinMode(2, OUTPUT);
@@ -263,9 +269,22 @@ void loop() {
       wifi_address = ip ? IPAddress(ip).toString() : String();
     }
   }
-  wifi_web.pool();
-  wifi_up_poll();
-  wifi_ota.pool();
+  if (true) {
+    wifi_web.pool();
+  }
+  if (true && true) {
+    wifi_up_poll();
+  }
+  if (true) {
+    if (!wifi_ota_on) {
+      wifi_ota_on = true;
+      if (""[0] != 0) {
+        wifi_ota.setPasswordValue("");
+      }
+      wifi_ota.begin(flpWifi);
+    }
+    wifi_ota.pool();
+  }
 
   // led: digital_out
   digitalWrite(2, (wifi_ready) ? HIGH : LOW);

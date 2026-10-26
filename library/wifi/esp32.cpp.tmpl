@@ -1,3 +1,31 @@
+{# A setting taken from a variable (bound.*) is switched while running: its code is always built in. #}
+{% set w_on = value.web or bound.web %}
+{% set u_on = w_on and (value.web_update or bound.web_update) %}
+{% set o_on = value.ota or bound.ota %}
+{% set dyn = bound.ssid or bound.password or bound.dhcp or bound.ip or bound.gateway or bound.subnet or bound.ap_ssid or bound.ap_password %}
+{% macro apply_cfg() %}
+{% if client %}
+flpWifi.setClientSsid({{ param.ssid }});
+flpWifi.setClientPassword({{ param.password }});
+if ({{ flag.dhcp }}) {
+  flpWifi.setDhcp();
+} else {
+  IPAddress addr;
+  addr.fromString({{ param.ip }});
+  flpWifi.localIP(addr);
+  addr.fromString({{ param.gateway }});
+  flpWifi.gateway(addr);
+  flpWifi.dns(addr);
+  addr.fromString({{ param.subnet }});
+  flpWifi.subnet(addr);
+  flpWifi.resetDhcp();
+}
+{% endif %}
+{% if ap %}
+flpWifi.setApSsid({{ param.ap_ssid }});
+flpWifi.setApPassword({{ param.ap_password }});
+{% endif %}
+{% endmacro %}
 {# 0 client, 1 access point, 2 both, 3 chosen by the mode input #}
 {% set client = value.wifi_mode != 1 %}
 {% set ap = value.wifi_mode != 0 %}
@@ -6,22 +34,26 @@
 FLProgOnBoardWifiInterface flpWifi;
 // Applied radio state: 0 off, 1 client, 2 access point, 3 both; 255 not yet.
 uint8_t {{ id }}_state = 255;
+{% if dyn %}
+String {{ id }}_cfg;
+{% endif %}
 {% if value.out_address %}
 // Address shown on the address output; the text is rebuilt only when it changes.
 uint32_t {{ id }}_ip_raw = 0;
 {% endif %}
-{% if value.web %}
+{% if w_on %}
 // Stub web page: technical data of the device (port 80).
 FLProgWebServer {{ id }}_web(&flpWifi, 80);
 // Shared web server: the web_ui block adds its pages to it.
 FLProgWebServer &flpWebSrv = {{ id }}_web;
 {% endif %}
-{% if value.ota %}
+{% if o_on %}
 // Update over the network (ArduinoOTA through the shared interface).
 FLProgNetworkOta {{ id }}_ota;
+bool {{ id }}_ota_on = false;
 {% endif %}
-{% if value.web %}
-{% if value.web and value.web_update %}
+{% if w_on %}
+{% if u_on %}
 // Firmware upload from the web page: raw HTTP POST streamed into Update (port 8080).
 FLProgNetworkTcpServer {{ id }}_up;
 FLProgNetworkTcpServerClient *{{ id }}_up_c = nullptr;
@@ -33,7 +65,7 @@ uint32_t {{ id }}_up_len = 0, {{ id }}_up_got = 0, {{ id }}_up_t = 0, {{ id }}_u
 bool {{ id }}_up_auth = false;
 {% endif %}
 // @functions
-{% if value.web_update %}
+{% if u_on %}
 void {{ id }}_up_reply(const char *status, const char *text) {
   String r = String("HTTP/1.1 ") + status + "\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\nContent-Length: " + String(strlen(text)) + "\r\n\r\n" + text;
   {{ id }}_up_c->write((const uint8_t *)r.c_str(), r.length());
@@ -166,8 +198,12 @@ void {{ id }}_page(FLProgNetworkHttpServer *server) {
   page += F("<tr><td>Сигнал Wi-Fi</td><td>"); page += String(flpWifi.rssi()); page += F(" дБм</td></tr>");
   page += F("<tr><td>Аптайм</td><td>"); page += String(sec / 3600); page += F(" ч "); page += String(sec / 60 % 60); page += F(" мин</td></tr>");
   page += F("<tr><td>Сборка</td><td>" __DATE__ " " __TIME__ "</td></tr>");
-{% if value.ota %}
-  page += F("<tr><td>Обновление</td><td>по сети (OTA), имя: "); page += {{ id }}_ota.getName(); page += F("</td></tr>");
+{% if o_on %}
+  if ({{ flag.ota }}) {
+    page += F("<tr><td>Обновление</td><td>по сети (OTA), имя: "); page += {{ id }}_ota.getName(); page += F("</td></tr>");
+  } else {
+    page += F("<tr><td>Обновление</td><td>выключено</td></tr>");
+  }
 {% else %}
   page += F("<tr><td>Обновление</td><td>выключено</td></tr>");
 {% endif %}
@@ -175,46 +211,41 @@ void {{ id }}_page(FLProgNetworkHttpServer *server) {
 #ifdef FLP_WEBUI
   page += F("<p><a href=\"/ui\">Панель управления</a></p>");
 #endif
-{% if value.web_update %}
-  page += F("<h2>Обновление прошивки</h2><input type=file id=f accept=.bin><button onclick=\"u()\">Загрузить</button> <span id=s></span><script>function u(){var f=f.files[0];if(!f)return;var p=prompt('Пароль','');s.textContent='...';fetch('http://'+location.hostname+':8080/update?p='+encodeURIComponent(p||''),{method:'POST',headers:{'Content-Type':'text/plain'},body:f}).then(function(r){return r.text()}).then(function(x){s.textContent=x}).catch(function(){s.textContent='ошибка'})}</script>");
+{% if u_on %}
+  if ({{ flag.web_update }}) {
+    page += F("<h2>Обновление прошивки</h2><input type=file id=f accept=.bin><button onclick=\"u()\">Загрузить</button> <span id=s></span><script>function u(){var f=f.files[0];if(!f)return;var p=prompt('Пароль','');s.textContent='...';fetch('http://'+location.hostname+':8080/update?p='+encodeURIComponent(p||''),{method:'POST',headers:{'Content-Type':'text/plain'},body:f}).then(function(r){return r.text()}).then(function(x){s.textContent=x}).catch(function(){s.textContent='ошибка'})}</script>");
+  }
 {% endif %}
   page += F("</body></html>");
   server->send(200, "text/html", page);
 }
 {% endif %}
 // @setup
-{% if client %}
-flpWifi.setClientSsid({{ param.ssid }});
-flpWifi.setClientPassword({{ param.password }});
-if ({{ param.dhcp }}) {
-  flpWifi.setDhcp();
-} else {
-  IPAddress addr;
-  addr.fromString({{ param.ip }});
-  flpWifi.localIP(addr);
-  addr.fromString({{ param.gateway }});
-  flpWifi.gateway(addr);
-  flpWifi.dns(addr);
-  addr.fromString({{ param.subnet }});
-  flpWifi.subnet(addr);
-  flpWifi.resetDhcp();
-}
-{% endif %}
-{% if ap %}
-flpWifi.setApSsid({{ param.ap_ssid }});
-flpWifi.setApPassword({{ param.ap_password }});
-{% endif %}
-{% if value.web %}
+{% if not dyn %}
+{{ apply_cfg() }}{% endif %}
+{% if w_on %}
 {{ id }}_web.addHandler("/", {{ id }}_page);
 {% endif %}
-{% if value.ota %}
+{% if o_on %}
 {{ id }}_ota.setHostname("{{ id }}");
-{% if value.ota_password != "" %}
-{{ id }}_ota.setPasswordValue({{ param.ota_password }});
-{% endif %}
-{{ id }}_ota.begin(flpWifi);
 {% endif %}
 // @loop
+{% if dyn %}
+{
+  // Settings written while running are applied when they change.
+  String cfg = String({{ param.ssid }}) + "|" + {{ param.password }} + "|" + (({{ flag.dhcp }}) ? "1" : "0") + "|" + {{ param.ip }} + "|" + {{ param.gateway }} + "|" + {{ param.subnet }} + "|" + {{ param.ap_ssid }} + "|" + {{ param.ap_password }};
+  if (cfg != {{ id }}_cfg) {
+    bool first = {{ id }}_cfg.length() == 0;
+    {{ id }}_cfg = cfg;
+{{ apply_cfg()|indent(4, true) }}
+    if (!first) {
+      flpWifi.clientOff();
+      flpWifi.apOff();
+      {{ id }}_state = 255;
+    }
+  }
+}
+{% endif %}
 {
   // Client and access point follow the inputs; switched only when they change.
 {% if value.wifi_mode == 3 %}
@@ -271,12 +302,25 @@ flpWifi.pool();
   }
 }
 {% endif %}
-{% if value.web %}
-{{ id }}_web.pool();
+{% if w_on %}
+if ({{ flag.web }}) {
+  {{ id }}_web.pool();
+}
 {% endif %}
-{% if value.web and value.web_update %}
-{{ id }}_up_poll();
+{% if u_on %}
+if ({{ flag.web }} && {{ flag.web_update }}) {
+  {{ id }}_up_poll();
+}
 {% endif %}
-{% if value.ota %}
-{{ id }}_ota.pool();
+{% if o_on %}
+if ({{ flag.ota }}) {
+  if (!{{ id }}_ota_on) {
+    {{ id }}_ota_on = true;
+    if ({{ param.ota_password }}[0] != 0) {
+      {{ id }}_ota.setPasswordValue({{ param.ota_password }});
+    }
+    {{ id }}_ota.begin(flpWifi);
+  }
+  {{ id }}_ota.pool();
+}
 {% endif %}
