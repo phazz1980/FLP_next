@@ -291,6 +291,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                     includes: Vec::new(),
                     libraries: Vec::new(),
                     single: false,
+                    hidden: false,
                     uart: None,
                 },
                 inputs: match (get, en) {

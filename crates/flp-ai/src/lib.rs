@@ -129,6 +129,15 @@ pub fn tools() -> Vec<Tool> {
             }, "required": ["input", "value"]}),
         },
         Tool {
+            name: "bind",
+            description: "Привязать порт или параметр блока (текст, целое, число) к переменной проекта без блоков на листе: вход читает переменную, выход пишет в неё, параметр берётся из неё. variable = null снимает привязку. Так настраивают служебные блоки Wi-Fi/Ethernet.",
+            input_schema: json!({"type": "object", "properties": {
+                "block": {"type": "string", "description": "id блока"},
+                "name": {"type": "string", "description": "имя порта или параметра"},
+                "variable": {"description": "имя переменной; null снимает привязку"}
+            }, "required": ["block", "name", "variable"]}),
+        },
+        Tool {
             name: "invert_port",
             description: "Инвертировать логический (bool) вход или выход блока, как кружок инверсии в FLProg. Инверсию выхода видят все его связи.",
             input_schema: json!({"type": "object", "properties": {
@@ -383,6 +392,25 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
             };
             ctx.edit(&mut |p| {
                 p.set_input_const(&lib, &input, value.clone())
+                    .map_err(|e| e.to_string())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "bind" => {
+            let text = |key: &str| {
+                args.get(key)
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .ok_or_else(|| format!("нужен аргумент «{key}»"))
+            };
+            let (block, name) = (text("block")?, text("name")?);
+            let var = match args.get("variable") {
+                Some(Value::Null) => None,
+                Some(Value::String(v)) => Some(v.clone()),
+                _ => return Err("нужен аргумент «variable» (null снимает привязку)".to_owned()),
+            };
+            ctx.edit(&mut |p| {
+                p.bind(&block, &name, var.as_deref())
                     .map_err(|e| e.to_string())
             })?;
             Ok(ok(ctx, &lib))

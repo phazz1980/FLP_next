@@ -489,6 +489,10 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         .blocks
         .iter()
         .filter_map(|b| {
+            // Service blocks (Wi-Fi, web interface) live in the left panel only.
+            if defs[b.id.as_str()].is_some_and(|d| d.info.hidden) {
+                return None;
+            }
             let pos = project.layout.blocks.get(&b.id)?;
             let band = band_of(pos.sheet)?;
             let min = Pos2::new(pos.x, band.body_top() + pos.y);

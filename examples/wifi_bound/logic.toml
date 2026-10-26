@@ -1,0 +1,49 @@
+# Wi-Fi, настроенный из переменных: имя сети и пароль, включение, статус и адрес.
+# Блока Wi-Fi на плате нет — он задаётся в панели слева; привязки лежат в [block.bind].
+# Переменные с retain можно менять со страницы управления и хранить во флеше.
+
+[[var]]
+name = "Сеть"
+type = "String"
+init = "MyNetwork"
+retain = true
+
+[[var]]
+name = "Wi-Fi включён"
+type = "bool"
+init = true
+
+[[var]]
+name = "Wi-Fi готов"
+type = "bool"
+
+[[var]]
+name = "IP-адрес"
+type = "String"
+
+[[block]]
+id = "wifi"
+type = "wifi"
+use_en = true
+out_ready = true
+out_address = true
+
+[block.bind]
+ssid = "Сеть"
+en = "Wi-Fi включён"
+ready = "Wi-Fi готов"
+address = "IP-адрес"
+
+[[block]]
+id = "ready"
+type = "var_get"
+var = "Wi-Fi готов"
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[link]]
+from = "ready.out"
+to = "led.in"

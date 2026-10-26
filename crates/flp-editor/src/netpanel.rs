@@ -1,10 +1,10 @@
 //! Network services in the left panel: Wi-Fi, Ethernet and the web interface.
-//! A service is a single block of the schema: the check box adds or removes it,
-//! the settings are its parameters, and a port can be taken out to the sheet as a
-//! variable.
+//! A service is a hidden block of the schema: the check box adds or removes it,
+//! the settings are its parameters, and every port or text/number parameter can
+//! be taken out to the board as a variable (a binding stored in the block).
 
-use eframe::egui::{self, RichText, Ui};
-use flp_core::{ParamKind, ParamValue, PortRef, SignalType, Var, VarType};
+use eframe::egui::{self, Ui};
+use flp_core::{bindable_type, ParamKind, ParamValue, SignalType, Var, VarType};
 
 use crate::app::{EditorApp, LogLevel};
 use crate::dialogs::{value_text, Dialog};
@@ -23,10 +23,17 @@ pub enum NetAction {
         value: ParamValue,
     },
     Settings(String),
-    Expose {
+    /// Takes a port or a parameter from a variable (`None` releases it).
+    Bind {
         id: String,
-        port: String,
-        input: bool,
+        name: String,
+        var: Option<String>,
+    },
+    /// Creates a variable of the type and binds it.
+    BindNew {
+        id: String,
+        name: String,
+        ty: SignalType,
     },
     Designer,
     AddWidget(String),
@@ -111,6 +118,18 @@ fn service(
                                 value: ParamValue::Bool(v),
                             });
                         }
+                    } else if let Some(var) = b.bound.get(&p.name) {
+                        ui.label(format!("{label}: ↔ {var}"))
+                            .on_hover_text(&p.description);
+                        bind_control(
+                            ui,
+                            logic,
+                            &b.id,
+                            &p.name,
+                            bindable_type(p.kind, false),
+                            Some(var),
+                            actions,
+                        );
                     } else {
                         let text = match current {
                             Some(_) if p.show == flp_core::ParamShow::Secret => "••••".to_owned(),
@@ -119,6 +138,15 @@ fn service(
                         };
                         ui.label(format!("{label}: {text}"))
                             .on_hover_text(&p.description);
+                        bind_control(
+                            ui,
+                            logic,
+                            &b.id,
+                            &p.name,
+                            bindable_type(p.kind, false),
+                            None,
+                            actions,
+                        );
                     }
                 });
             }
@@ -203,48 +231,63 @@ fn ports(
                 .map(|p| (false, &p.name, p.label.as_deref(), p.ty, &p.description)),
         )
     {
-        let bound = if input {
-            logic
-                .links
-                .iter()
-                .find(|l| l.to.block == b.id && l.to.port == *name)
-                .map(|l| l.from.to_string())
-        } else {
-            logic
-                .links
-                .iter()
-                .find(|l| l.from.block == b.id && l.from.port == *name)
-                .map(|l| l.to.to_string())
-        };
+        let bound = b.bound.get(name.as_str());
         ui.horizontal(|ui| {
             let arrow = if input { "вход" } else { "выход" };
-            ui.label(format!(
-                "{arrow} {} · {}",
-                label.unwrap_or(name),
-                ty_name(ty)
-            ))
-            .on_hover_text(description);
-            match bound {
-                Some(to) => {
-                    ui.label(RichText::new(format!("↔ {to}")).weak());
-                }
-                None => {
-                    if ty != SignalType::Any
-                        && ui
-                            .small_button("→ переменная")
-                            .on_hover_text("Создать переменную и поставить её блок на плату")
-                            .clicked()
-                    {
-                        actions.push(NetAction::Expose {
-                            id: b.id.clone(),
-                            port: name.clone(),
-                            input,
-                        });
-                    }
-                }
-            }
+            let text = format!("{arrow} {} · {}", label.unwrap_or(name), ty_name(ty));
+            ui.label(text).on_hover_text(description);
+            bind_control(ui, logic, &b.id, name, Some(ty), bound, actions);
         });
     }
+}
+
+/// Button that takes a value from a variable of the type: the menu lists the
+/// matching variables and offers a new one; a bound value shows a release button.
+fn bind_control(
+    ui: &mut Ui,
+    logic: &flp_core::Logic,
+    id: &str,
+    name: &str,
+    ty: Option<SignalType>,
+    bound: Option<&String>,
+    actions: &mut Vec<NetAction>,
+) {
+    let Some(ty) = ty else { return };
+    if bound.is_some() {
+        if ui
+            .small_button("✕")
+            .on_hover_text("Отвязать от переменной")
+            .clicked()
+        {
+            actions.push(NetAction::Bind {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                var: None,
+            });
+        }
+        return;
+    }
+    ui.menu_button("→ переменная", |ui| {
+        for v in &logic.vars {
+            let vt = v.ty.signal();
+            if (ty == SignalType::Any || vt == ty) && ui.button(&v.name).clicked() {
+                actions.push(NetAction::Bind {
+                    id: id.to_owned(),
+                    name: name.to_owned(),
+                    var: Some(v.name.clone()),
+                });
+                ui.close();
+            }
+        }
+        if ty != SignalType::Any && ui.button("＋ Новая переменная").clicked() {
+            actions.push(NetAction::BindNew {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                ty,
+            });
+            ui.close();
+        }
+    });
 }
 
 fn ty_name(ty: SignalType) -> &'static str {
@@ -326,42 +369,28 @@ pub fn apply(app: &mut EditorApp, actions: Vec<NetAction>) {
                     app.info(LogLevel::Error, e.to_string());
                 }
             }
-            NetAction::Expose { id, port, input } => {
+            NetAction::Bind { id, name, var } => {
                 let Some(doc) = &mut app.doc else { return };
-                let ty = {
-                    let logic = &doc.project.logic;
-                    logic
-                        .block(&id)
-                        .and_then(|b| app.lib.resolve(logic, b))
-                        .and_then(|l| {
-                            if input {
-                                l.def.input(&port).map(|p| p.ty)
-                            } else {
-                                l.def.output(&port).map(|p| p.ty)
-                            }
-                        })
-                };
-                let Some(ty) = ty else { continue };
+                if let Err(e) = doc.edit(&lib, None, |p| p.bind(&id, &name, var.as_deref())) {
+                    app.info(LogLevel::Error, e.to_string());
+                }
+            }
+            NetAction::BindNew { id, name, ty } => {
+                let Some(doc) = &mut app.doc else { return };
                 let result = doc.edit(&lib, None, |p| {
-                    let base = format!("{id}_{port}");
-                    let name = std::iter::once(base.clone())
+                    let base = format!("{id}_{name}");
+                    let var = std::iter::once(base.clone())
                         .chain((2..).map(|n| format!("{base}_{n}")))
                         .find(|n| p.logic.var(n).is_none())
                         .expect("infinite range");
                     p.add_var(Var {
-                        name: name.clone(),
+                        name: var.clone(),
                         ty: var_type(ty),
                         init: None,
-                        description: format!("{id}.{port}"),
+                        description: format!("{id}.{name}"),
                         retain: false,
                     })?;
-                    let block = p.add_var_block(&name, !input, pos)?;
-                    let (from, to) = if input {
-                        (PortRef::new(&block, "out"), PortRef::new(&id, &port))
-                    } else {
-                        (PortRef::new(&id, &port), PortRef::new(&block, "in"))
-                    };
-                    p.connect(&lib, from, to)
+                    p.bind(&id, &name, Some(&var))
                 });
                 if let Err(e) = result {
                     app.info(LogLevel::Error, e.to_string());

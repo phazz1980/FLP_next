@@ -451,6 +451,25 @@ impl Project {
         Ok(())
     }
 
+    /// Takes a port or a parameter of the block from a variable; `None` releases it.
+    pub fn bind(&mut self, id: &str, name: &str, var: Option<&str>) -> Result<(), EditError> {
+        let index = self.block_index(id)?;
+        match var {
+            Some(v) => {
+                if self.logic.var(v).is_none() {
+                    return Err(EditError::NoVar(v.to_owned()));
+                }
+                self.logic.blocks[index]
+                    .bound
+                    .insert(name.to_owned(), v.to_owned());
+            }
+            None => {
+                self.logic.blocks[index].bound.remove(name);
+            }
+        }
+        Ok(())
+    }
+
     /// Moves a block; blocks without a position get one.
     pub fn move_block(&mut self, id: &str, pos: BlockPos) -> Result<(), EditError> {
         self.block_index(id)?;

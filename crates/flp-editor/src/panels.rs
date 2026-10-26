@@ -606,7 +606,7 @@ fn library(app: &mut EditorApp, ui: &mut Ui) {
     for b in app.lib.iter() {
         let info = &b.def.info;
         // Board inputs and outputs are added from the tag tree on the left.
-        if app.lib.is_user(&info.kind) || info.group == IO_GROUP {
+        if app.lib.is_user(&info.kind) || info.group == IO_GROUP || info.hidden {
             continue;
         }
         let hay = format!("{} {} {}", info.kind, info.name, info.description).to_lowercase();

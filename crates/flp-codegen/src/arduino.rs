@@ -41,6 +41,8 @@ impl Backend for ArduinoCpp {
     }
 }
 
+const NL: char = char::from_u32(10).unwrap();
+
 fn environment() -> Environment<'static> {
     let mut env = Environment::new();
     env.set_auto_escape_callback(|_| AutoEscape::None);
@@ -105,6 +107,7 @@ fn render_block(
                     }
                 }
                 Source::Default(value) => constant_literal(i.ty, value),
+                Source::Var(name) => flp_core::vars::storage_name(name),
             };
             let expr = if inst.block.inverted_inputs.contains(port) {
                 format!("!({expr})")
@@ -123,7 +126,15 @@ fn render_block(
     let mut value = BTreeMap::new();
     for (&name, v) in &inst.params {
         let kind = inst.lib.def.param(name).expect("param from def").kind;
-        param.insert(name, param_value(kind, v));
+        let literal = match inst.param_vars.get(name) {
+            // A text parameter is used as `const char *` in the templates.
+            Some(var) if kind == ParamKind::Text => {
+                Value::from(format!("{}.c_str()", flp_core::vars::storage_name(var)))
+            }
+            Some(var) => Value::from(flp_core::vars::storage_name(var)),
+            None => param_value(kind, v),
+        };
+        param.insert(name, literal);
         value.insert(name, raw_value(kind, v));
     }
 
@@ -145,7 +156,21 @@ fn render_block(
             block: inst.block.id.clone(),
             source,
         })?;
-    split_sections(&text).map_err(|message| GenError::BadTemplate { path, message })
+    let mut sections =
+        split_sections(&text).map_err(|message| GenError::BadTemplate { path, message })?;
+    // Outputs bound to variables are copied right after the block.
+    for (port, var) in &inst.output_vars {
+        if let Some(name) = output.get(port) {
+            if !sections.looped.is_empty() && !sections.looped.ends_with(NL) {
+                sections.looped.push(NL);
+            }
+            sections.looped.push_str(&format!(
+                "{} = {name};{NL}",
+                flp_core::vars::storage_name(var)
+            ));
+        }
+    }
+    Ok(sections)
 }
 
 /// UART of a block with `[block.uart]`, with its settings (checked to exist).

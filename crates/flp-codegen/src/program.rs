@@ -37,6 +37,10 @@ pub struct Instance<'a> {
     pub outputs: BTreeMap<&'a str, usize>,
     /// Every parameter that has a value, with defaults filled in.
     pub params: BTreeMap<&'a str, ParamValue>,
+    /// Output port → variable it is copied to after the block ran.
+    pub output_vars: BTreeMap<&'a str, &'a str>,
+    /// Parameter → variable whose value replaces the constant.
+    pub param_vars: BTreeMap<&'a str, &'a str>,
 }
 
 /// Header of the flash storage used by variables with `retain`.
@@ -66,6 +70,8 @@ pub enum Source {
     Signal { index: usize, invert: bool },
     /// Constant on the input, or the default value of an unconnected input.
     Default(ParamValue),
+    /// Input bound to a variable of the project.
+    Var(String),
 }
 
 impl<'a> Program<'a> {
@@ -127,17 +133,22 @@ impl<'a> Program<'a> {
                     .iter()
                     .find(|l| l.to.block == block.id && l.to.port == port.name);
                 let constant = block.consts.get(&port.name).or(port.default.as_ref());
-                let source = match (link, constant) {
-                    (Some(l), _) => Source::Signal {
+                let bound = block.bound.get(&port.name);
+                let source = match (bound, link, constant) {
+                    (Some(var), _, _) => Source::Var(var.clone()),
+                    (None, Some(l), _) => Source::Signal {
                         index: by_port[&(l.from.block.as_str(), l.from.port.as_str())],
                         invert: logic
                             .block(&l.from.block)
                             .is_some_and(|b| b.inverted.contains(&l.from.port)),
                     },
-                    (None, Some(value)) => Source::Default(value.clone()),
-                    (None, None) => unreachable!("unconnected inputs checked"),
+                    (None, None, Some(value)) => Source::Default(value.clone()),
+                    (None, None, None) => unreachable!("unconnected inputs checked"),
                 };
                 let ty = match (&source, port.ty) {
+                    (Source::Var(name), SignalType::Any) => {
+                        logic.var(name).map_or(SignalType::Any, |v| v.ty.signal())
+                    }
                     (Source::Signal { index, .. }, SignalType::Any) => signals[*index].ty,
                     (Source::Default(value), SignalType::Any) => SignalType::of_value(value),
                     (_, ty) => ty,
@@ -158,9 +169,27 @@ impl<'a> Program<'a> {
                 .params
                 .iter()
                 .filter_map(|p| {
-                    let value = block.params.get(&p.name).or(p.default.as_ref())?;
-                    Some((p.name.as_str(), value.clone()))
+                    let value = block.params.get(&p.name).or(p.default.as_ref());
+                    let value = match value {
+                        Some(v) => v.clone(),
+                        // Taken from a variable: the constant is not needed.
+                        None if block.bound.contains_key(&p.name) => match p.kind {
+                            flp_core::ParamKind::Int => ParamValue::Int(0),
+                            flp_core::ParamKind::Float => ParamValue::Float(0.0),
+                            _ => ParamValue::Text(String::new()),
+                        },
+                        None => return None,
+                    };
+                    Some((p.name.as_str(), value))
                 })
+                .collect();
+            let output_vars = def
+                .active_outputs(&block.params)
+                .filter_map(|o| Some((o.name.as_str(), block.bound.get(&o.name)?.as_str())))
+                .collect();
+            let param_vars = def
+                .active_params(&block.params)
+                .filter_map(|p| Some((p.name.as_str(), block.bound.get(&p.name)?.as_str())))
                 .collect();
             blocks.push(Instance {
                 block,
@@ -168,6 +197,8 @@ impl<'a> Program<'a> {
                 inputs,
                 outputs,
                 params,
+                output_vars,
+                param_vars,
             });
         }
 

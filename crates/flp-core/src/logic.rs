@@ -46,6 +46,10 @@ pub struct Block {
         skip_serializing_if = "BTreeSet::is_empty"
     )]
     pub inverted_inputs: BTreeSet<String>,
+    /// Ports and parameters taken from a variable: name → variable. An input
+    /// reads it, an output writes it, a parameter takes its value at start.
+    #[serde(rename = "bind", default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bound: BTreeMap<String, String>,
     /// All other keys of the table are parameter values.
     #[serde(flatten)]
     pub params: BTreeMap<String, ParamValue>,

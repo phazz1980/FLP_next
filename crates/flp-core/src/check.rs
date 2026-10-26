@@ -222,6 +222,7 @@ fn check_blocks<'a>(
                 ),
             }
         }
+        check_bindings(logic, block, def, report);
         for (port, value) in &block.consts {
             match def.input(port) {
                 Some(p) if !p.ty.accepts(value) => report.block_error(
@@ -278,6 +279,7 @@ fn check_blocks<'a>(
         for p in &def.params {
             if p.default.is_none()
                 && !block.params.contains_key(&p.name)
+                && !block.bound.contains_key(&p.name)
                 && def
                     .enabled(p.when.as_deref(), &block.params)
                     .unwrap_or(true)
@@ -567,10 +569,9 @@ fn check_vars(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) ->
         }
     }
     for var in &logic.vars {
-        let used = logic
-            .blocks
-            .iter()
-            .any(|b| b.var_name() == Some(var.name.as_str()));
+        let used = logic.blocks.iter().any(|b| {
+            b.var_name() == Some(var.name.as_str()) || b.bound.values().any(|v| *v == var.name)
+        });
         if !used {
             report.push(
                 Severity::Warning,
@@ -590,6 +591,56 @@ fn check_vars(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) ->
             })
         })
         .collect()
+}
+
+/// Checks the ports and parameters a block takes from variables.
+fn check_bindings(logic: &Logic, block: &crate::Block, def: &BlockDef, report: &mut Report) {
+    let id = block.id.as_str();
+    for (name, var) in &block.bound {
+        let Some(v) = logic.var(var) else {
+            report.block_error(
+                id,
+                format!("блок «{id}»: «{name}» связан с несуществующей переменной «{var}»"),
+            );
+            continue;
+        };
+        let want = if let Some(p) = def.input(name).or_else(|| def.output(name)) {
+            Some(p.ty)
+        } else {
+            def.param(name)
+                .and_then(|p| bindable_type(p.kind, !p.choices.is_empty()))
+        };
+        match want {
+            None => report.block_error(
+                id,
+                format!("блок «{id}»: «{name}» нельзя связать с переменной"),
+            ),
+            Some(ty) if ty != SignalType::Any && ty != v.ty.signal() => report.block_error(
+                id,
+                format!(
+                    "блок «{id}»: «{name}» — {}, а переменная «{var}» — {}",
+                    type_name(ty),
+                    v.ty.name()
+                ),
+            ),
+            Some(_) => {}
+        }
+    }
+}
+
+/// Signal type a parameter takes from a variable; `None` if it cannot be bound
+/// (the value is needed while generating: pins, durations, choices, flags).
+pub fn bindable_type(kind: crate::ParamKind, choice: bool) -> Option<SignalType> {
+    use crate::ParamKind;
+    if choice {
+        return None;
+    }
+    match kind {
+        ParamKind::Text => Some(SignalType::String),
+        ParamKind::Int => Some(SignalType::Int),
+        ParamKind::Float => Some(SignalType::Float),
+        _ => None,
+    }
 }
 
 fn type_name(ty: SignalType) -> &'static str {
@@ -614,7 +665,10 @@ fn check_unconnected_inputs(logic: &Logic, defs: &[Option<&BlockDef>], report: &
                 .links
                 .iter()
                 .any(|l| l.to.block == block.id && l.to.port == input.name);
-            if !fed && !block.consts.contains_key(&input.name) {
+            if !fed
+                && !block.consts.contains_key(&input.name)
+                && !block.bound.contains_key(&input.name)
+            {
                 report.block_error(
                     &block.id,
                     format!(
@@ -806,6 +860,45 @@ mod tests {
 
     fn ids(logic: &Logic, order: &[usize]) -> Vec<String> {
         order.iter().map(|&i| logic.blocks[i].id.clone()).collect()
+    }
+
+    fn bound(var_type: &str, port: &str) -> Report {
+        let src = format!(
+            "[[var]]
+name = \"v\"
+type = \"{var_type}\"
+             [[block]]
+id = \"n\"
+type = \"not\"
+[block.bind]
+{port} = \"v\"
+"
+        );
+        let logic: Logic = toml::from_str(&src).unwrap();
+        check(&logic, &library(), None)
+    }
+
+    #[test]
+    fn bound_input_counts_as_fed() {
+        let r = bound("bool", "in");
+        assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    }
+
+    #[test]
+    fn bound_type_mismatch_is_error() {
+        assert!(bound("float", "in").has_errors());
+    }
+
+    #[test]
+    fn bound_unknown_var_is_error() {
+        let src = "[[block]]
+id = \"n\"
+type = \"not\"
+[block.bind]
+in = \"zz\"
+";
+        let logic: Logic = toml::from_str(src).unwrap();
+        assert!(check(&logic, &library(), None).has_errors());
     }
 
     #[test]

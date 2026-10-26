@@ -1,0 +1,6 @@
+[project]
+name = "wifi_modes"
+description = "Wi-Fi со всеми входами и выходами: тумблер включает радио, переменная задаёт режим (клиент / точка доступа / оба)"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

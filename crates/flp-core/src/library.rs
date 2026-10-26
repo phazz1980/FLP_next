@@ -176,6 +176,10 @@ pub struct BlockInfo {
     /// Only one instance per project (Wi-Fi, NTP, deep sleep).
     #[serde(default, skip_serializing_if = "is_false")]
     pub single: bool,
+    /// A service of the project (Wi-Fi, web interface): set up in the side panel,
+    /// not drawn on the sheets and not offered in the library.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
     /// The block works through a hardware UART set up in the board settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uart: Option<crate::uart::UartUse>,

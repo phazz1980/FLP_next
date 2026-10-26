@@ -18,7 +18,7 @@ pub mod vars;
 
 mod toml_io;
 
-pub use check::{check, check_project, Diagnostic, Report, Severity};
+pub use check::{bindable_type, check, check_project, Diagnostic, Report, Severity};
 pub use edit::{EditError, Fragment};
 pub use error::{Error, Result};
 pub use layout::{BlockPos, Layout, SheetInfo};

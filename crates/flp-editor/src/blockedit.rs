@@ -279,6 +279,7 @@ impl Form {
                 includes: list(&self.includes),
                 libraries: list(&self.libraries),
                 single: self.single,
+                hidden: false,
                 uart: self.uart.clone(),
             },
             inputs: self
