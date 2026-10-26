@@ -283,22 +283,6 @@ fn pull_label(
         ui.label(label).on_hover_text(hint);
         return;
     };
-    if let Some(var) = bound {
-        ui.label(label).on_hover_text(hint);
-        ui.label(format!("↔ {var}"));
-        if ui
-            .small_button("✕")
-            .on_hover_text("Отвязать от переменной")
-            .clicked()
-        {
-            actions.push(NetAction::Bind {
-                id: id.to_owned(),
-                name: name.to_owned(),
-                var: None,
-            });
-        }
-        return;
-    }
     let item = DragItem::Setting {
         id: id.to_owned(),
         name: name.to_owned(),
@@ -311,6 +295,20 @@ fn pull_label(
             "{hint}
 Перетащите на плату"
         ));
+    if let Some(var) = bound {
+        ui.label(format!("↔ {var}"));
+        if ui
+            .small_button("✕")
+            .on_hover_text("Отвязать от переменной")
+            .clicked()
+        {
+            actions.push(NetAction::Bind {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                var: None,
+            });
+        }
+    }
 }
 
 /// Takes a setting out to the board: creates a service variable, binds it, puts its block
@@ -324,6 +322,10 @@ pub fn pull_out(
     feed: bool,
     pos: flp_core::BlockPos,
 ) -> Result<String, flp_core::EditError> {
+    // Already taken out: one more block of the same variable.
+    if let Some(var) = p.logic.block(id).and_then(|b| b.bound.get(name)).cloned() {
+        return p.add_var_block(&var, feed, pos);
+    }
     let base = format!("{id}_{name}");
     let var = std::iter::once(base.clone())
         .chain((2..).map(|n| format!("{base}_{n}")))
