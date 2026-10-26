@@ -149,6 +149,15 @@ fn run(
         ..Default::default()
     };
     // Only build stages and diagnostics; compiler command lines stay hidden.
+    let sketch = std::fs::read_to_string(&path).unwrap_or_default();
+    let blocks: Vec<(String, String)> = project
+        .logic
+        .blocks
+        .iter()
+        .map(|b| (b.id.clone(), b.kind.clone()))
+        .collect();
+    let mut errors = 0;
+    let mut first_error: Option<String> = None;
     let compiled = cli
         .compile(
             &project.work_dir(),
@@ -159,11 +168,30 @@ fn run(
                     out(LogLevel::Info, &s)
                 }
                 OutputLine::Warning(s) => out(LogLevel::Warning, &s),
-                OutputLine::Error(s) => out(LogLevel::Error, &s),
+                OutputLine::Error(s) => {
+                    out(LogLevel::Error, &s);
+                    errors += 1;
+                    let note = explain_error(&s, &sketch, &blocks);
+                    for n in &note {
+                        out(LogLevel::Error, &format!("    ↳ {n}"));
+                    }
+                    if first_error.is_none() {
+                        first_error = Some(note.join("; "));
+                    }
+                }
                 OutputLine::Detail => {}
             },
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| match (&e, errors) {
+            (flp_build::BuildError::Failed { .. }, 1..) => {
+                let first = first_error.as_deref().filter(|f| !f.is_empty());
+                format!(
+                    "Ошибка компиляции ({errors}): подробности в журнале{}",
+                    first.map(|f| format!(". Первая: {f}")).unwrap_or_default()
+                )
+            }
+            _ => e.to_string(),
+        })?;
     if compiled == Compiled::UpToDate {
         out(LogLevel::Info, "Прошивка уже собрана, схема не менялась");
     }
@@ -178,16 +206,72 @@ fn run(
             let port = cli
                 .choose_port(port.as_deref(), board)
                 .map_err(|e| e.to_string())?;
+            warn_if_other_board(&cli, &port, &board.fqbn, out);
             out(LogLevel::Info, &format!("Заливка на {port}..."));
-            cli.upload(&project.work_dir(), board, &port, &mut |l| {
-                out(LogLevel::Info, l)
-            })
-            .map_err(|e| e.to_string())?;
+            let mut explained = None;
+            let result = cli.upload(&project.work_dir(), board, &port, &mut |l| {
+                match flp_build::explain_upload(l, &board.fqbn) {
+                    Some(text) => {
+                        out(LogLevel::Info, l);
+                        out(LogLevel::Error, &text);
+                        explained.get_or_insert(text);
+                    }
+                    None => out(LogLevel::Info, l),
+                }
+            });
+            result.map_err(|e| explained.unwrap_or_else(|| e.to_string()))?;
             Ok(Done {
                 message: format!("Прошивка залита на {port}"),
                 port: Some(port),
                 debug,
             })
         }
+    }
+}
+
+/// What a compiler error means and which block's code it is in.
+fn explain_error(line: &str, sketch: &str, blocks: &[(String, String)]) -> Vec<String> {
+    let mut notes = Vec::new();
+    let Some((number, message)) = flp_build::parse_diagnostic(line) else {
+        if let Some(hint) = flp_build::explain_compile(line) {
+            notes.push(format!("Пояснение: {hint}"));
+        }
+        return notes;
+    };
+    if let Some((id, kind)) = flp_build::locate_block(sketch, number, blocks) {
+        notes.push(format!(
+            "Ошибка в коде блока «{id}» ({kind}), строка {number} скетча"
+        ));
+    } else {
+        notes.push(format!("Строка {number} скетча (вне кода блоков)"));
+    }
+    if let Some(hint) = flp_build::explain_compile(&message) {
+        notes.push(format!("Пояснение: {hint}"));
+    }
+    notes
+}
+
+/// Warns before upload when arduino-cli recognized another board on the port.
+fn warn_if_other_board(
+    cli: &ArduinoCli,
+    port: &str,
+    fqbn: &str,
+    out: &mut dyn FnMut(LogLevel, &str),
+) {
+    let short = |f: &str| f.split(':').take(3).collect::<Vec<_>>().join(":");
+    let Ok(ports) = cli.serial_ports() else {
+        return;
+    };
+    let Some(found) = ports.iter().find(|p| p.address == port && p.has_board) else {
+        return;
+    };
+    if !found.fqbns.iter().any(|f| short(f) == short(fqbn)) {
+        out(
+            LogLevel::Warning,
+            &format!(
+                "Возможно, выбрана неверная плата: на {port} опознано «{}», а в проекте — {fqbn}",
+                found.description
+            ),
+        );
     }
 }

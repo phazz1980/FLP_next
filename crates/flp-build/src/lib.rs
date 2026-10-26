@@ -19,7 +19,9 @@ use flp_core::BoardConfig;
 use serde::Deserialize;
 
 mod output;
-pub use output::{classify, OutputLine};
+pub use output::{
+    classify, explain_compile, explain_upload, locate_block, parse_diagnostic, OutputLine,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
@@ -106,6 +108,8 @@ pub struct SerialPort {
     pub has_board: bool,
     /// USB serial adapter (has VID/PID), unlike built-in COM ports.
     pub usb: bool,
+    /// Boards recognized on the port (`vendor:arch:board`).
+    pub fqbns: Vec<String>,
 }
 
 /// Picks the port for automatic upload: the only port with a recognized board,
@@ -770,6 +774,8 @@ fn parse_board_list(json: &str) -> Result<Vec<SerialPort>, BuildError> {
     #[derive(Deserialize)]
     struct MatchingBoard {
         name: String,
+        #[serde(default)]
+        fqbn: String,
     }
 
     let list: BoardList =
@@ -779,8 +785,15 @@ fn parse_board_list(json: &str) -> Result<Vec<SerialPort>, BuildError> {
         .into_iter()
         .filter(|d| d.port.protocol == "serial")
         .map(|d| {
+            let fqbns: Vec<String> = d
+                .matching_boards
+                .iter()
+                .map(|b| b.fqbn.clone())
+                .filter(|f| !f.is_empty())
+                .collect();
             let names: Vec<String> = d.matching_boards.into_iter().map(|b| b.name).collect();
             SerialPort {
+                fqbns,
                 has_board: !names.is_empty(),
                 usb: d.port.properties.contains_key("vid"),
                 description: if names.is_empty() {
@@ -962,18 +975,21 @@ mod tests {
                     description: "COM1".into(),
                     has_board: false,
                     usb: false,
+                    fqbns: vec![],
                 },
                 SerialPort {
                     address: "COM5".into(),
                     description: "ESP32 Dev Module".into(),
                     has_board: true,
                     usb: true,
+                    fqbns: vec!["esp32:esp32:esp32".into()],
                 },
                 SerialPort {
                     address: "COM10".into(),
                     description: "COM10".into(),
                     has_board: false,
                     usb: true,
+                    fqbns: vec![],
                 },
             ]
         );
