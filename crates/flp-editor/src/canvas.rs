@@ -37,6 +37,13 @@ pub enum DragItem {
     Block(String),
     /// Variable: the side the first link comes to decides read or write.
     Var(String),
+    /// Setting or port of a service block (Wi-Fi...) taken out to the board.
+    Setting {
+        id: String,
+        name: String,
+        ty: SignalType,
+        feed: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1200,6 +1207,9 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             let result = match item {
                 DragItem::Block(kind) => doc.edit(&lib, None, |p| p.add_block(&lib, &kind, pos)),
                 DragItem::Var(name) => doc.edit(&lib, None, |p| p.add_var_block(&name, false, pos)),
+                DragItem::Setting { id, name, ty, feed } => doc.edit(&lib, None, |p| {
+                    crate::netpanel::pull_out(p, &lib, &id, &name, ty, feed, pos)
+                }),
             };
             match result {
                 Ok(id) => added = Some(id),

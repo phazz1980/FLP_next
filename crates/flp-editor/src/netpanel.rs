@@ -3,10 +3,11 @@
 //! the settings are its parameters, and every port or text/number parameter can
 //! be taken out to the board as a variable (a binding stored in the block).
 
-use eframe::egui::{self, Ui};
+use eframe::egui::{self, Id, Ui};
 use flp_core::{bindable_type, ParamKind, ParamValue, SignalType, Var, VarType};
 
 use crate::app::{EditorApp, LogLevel};
+use crate::canvas::DragItem;
 use crate::dialogs::{value_text, Dialog};
 
 const NETWORKS: [(&str, &str); 2] = [("wifi", "Wi-Fi"), ("ethernet", "Ethernet")];
@@ -28,14 +29,6 @@ pub enum NetAction {
         id: String,
         name: String,
         var: Option<String>,
-    },
-    /// Creates a variable of the type and binds it.
-    BindNew {
-        id: String,
-        name: String,
-        ty: SignalType,
-        /// The setting is fed by the board (the sheet gets a writing variable block).
-        feed: bool,
     },
     Designer,
     AddWidget(String),
@@ -121,11 +114,12 @@ fn service(
                         if let Some(port) = port {
                             let input = def.input(port).map(|d| d.ty);
                             let ty = input.or(def.output(port).map(|d| d.ty));
-                            ui.label(label).on_hover_text(&p.description);
-                            bind_control(
+                            pull_label(
                                 ui,
                                 &b.id,
                                 port,
+                                label,
+                                &p.description,
                                 ty,
                                 input.is_some(),
                                 b.bound.get(port),
@@ -146,18 +140,29 @@ fn service(
                             }
                         }
                     } else if let Some(var) = b.bound.get(&p.name) {
-                        ui.label(label).on_hover_text(&p.description);
-                        bind_control(
+                        pull_label(
                             ui,
                             &b.id,
                             &p.name,
+                            label,
+                            &p.description,
                             bindable_type(p.kind, false),
                             true,
                             Some(var),
                             actions,
                         );
                     } else {
-                        ui.label(label).on_hover_text(&p.description);
+                        pull_label(
+                            ui,
+                            &b.id,
+                            &p.name,
+                            label,
+                            &p.description,
+                            bindable_type(p.kind, false),
+                            true,
+                            None,
+                            actions,
+                        );
                         let set = |value| NetAction::SetParam {
                             id: b.id.clone(),
                             name: p.name.clone(),
@@ -199,15 +204,6 @@ fn service(
                                 ui.label(current.map_or_else(|| "не задан".to_owned(), value_text));
                             }
                         }
-                        bind_control(
-                            ui,
-                            &b.id,
-                            &p.name,
-                            bindable_type(p.kind, false),
-                            true,
-                            None,
-                            actions,
-                        );
                     }
                 });
             }
@@ -268,19 +264,27 @@ fn widget_list(app: &EditorApp, ui: &mut Ui, actions: &mut Vec<NetAction>) {
     }
 }
 
-/// Button that takes a value from a variable of the type: the menu lists the
-/// matching variables and offers a new one; a bound value shows a release button.
-fn bind_control(
+/// Name of a setting or port: dragging it onto the sheet takes the value out to the
+/// board (a variable is created automatically); a bound one shows its variable and a
+/// release button.
+#[allow(clippy::too_many_arguments)]
+fn pull_label(
     ui: &mut Ui,
     id: &str,
     name: &str,
+    label: &str,
+    hint: &str,
     ty: Option<SignalType>,
     feed: bool,
     bound: Option<&String>,
     actions: &mut Vec<NetAction>,
 ) {
-    let Some(ty) = ty else { return };
+    let Some(ty) = ty else {
+        ui.label(label).on_hover_text(hint);
+        return;
+    };
     if let Some(var) = bound {
+        ui.label(label).on_hover_text(hint);
         ui.label(format!("↔ {var}"));
         if ui
             .small_button("✕")
@@ -295,19 +299,47 @@ fn bind_control(
         }
         return;
     }
-    // The first pull creates the variable and puts its block on the sheet.
-    if ui
-        .small_button("→ переменная")
-        .on_hover_text("Вытянуть на плату: переменная создаётся автоматически")
-        .clicked()
-    {
-        actions.push(NetAction::BindNew {
-            id: id.to_owned(),
-            name: name.to_owned(),
-            ty,
-            feed,
-        });
-    }
+    let item = DragItem::Setting {
+        id: id.to_owned(),
+        name: name.to_owned(),
+        ty,
+        feed,
+    };
+    ui.dnd_drag_source(Id::unique(("pull", id, name)), item, |ui| ui.label(label))
+        .response
+        .on_hover_text(format!(
+            "{hint}
+Перетащите на плату"
+        ));
+}
+
+/// Takes a setting out to the board: creates a service variable, binds it, puts its block
+/// on the sheet and switches the port on. Returns the id of the block.
+pub fn pull_out(
+    p: &mut flp_core::Project,
+    lib: &flp_core::Library,
+    id: &str,
+    name: &str,
+    ty: SignalType,
+    feed: bool,
+    pos: flp_core::BlockPos,
+) -> Result<String, flp_core::EditError> {
+    let base = format!("{id}_{name}");
+    let var = std::iter::once(base.clone())
+        .chain((2..).map(|n| format!("{base}_{n}")))
+        .find(|n| p.logic.var(n).is_none())
+        .expect("infinite range");
+    p.add_var(Var {
+        name: var.clone(),
+        ty: var_type(ty),
+        init: None,
+        description: format!("{id}.{name}"),
+        retain: false,
+        service: true,
+    })?;
+    p.bind(id, name, Some(&var))?;
+    switch_port(p, lib, id, name, true)?;
+    p.add_var_block(&var, feed, pos)
 }
 
 fn var_type(ty: SignalType) -> VarType {
@@ -385,32 +417,6 @@ pub fn apply(app: &mut EditorApp, actions: Vec<NetAction>) {
                 let result = doc.edit(&lib, None, |p| {
                     p.bind(&id, &name, var.as_deref())?;
                     switch_port(p, &lib, &id, &name, on)
-                });
-                if let Err(e) = result {
-                    app.info(LogLevel::Error, e.to_string());
-                }
-            }
-            NetAction::BindNew { id, name, ty, feed } => {
-                let Some(doc) = &mut app.doc else { return };
-                let result = doc.edit(&lib, None, |p| {
-                    let base = format!("{id}_{name}");
-                    let var = std::iter::once(base.clone())
-                        .chain((2..).map(|n| format!("{base}_{n}")))
-                        .find(|n| p.logic.var(n).is_none())
-                        .expect("infinite range");
-                    p.add_var(Var {
-                        name: var.clone(),
-                        ty: var_type(ty),
-                        init: None,
-                        description: format!("{id}.{name}"),
-                        retain: false,
-                        service: true,
-                    })?;
-                    p.bind(&id, &name, Some(&var))?;
-                    // Taken out to the board like an input or a variable.
-                    p.add_var_block(&var, feed, pos)?;
-                    switch_port(p, &lib, &id, &name, true)?;
-                    Ok::<(), flp_core::EditError>(())
                 });
                 if let Err(e) = result {
                     app.info(LogLevel::Error, e.to_string());
