@@ -4,6 +4,9 @@
 //! block library and the AI tab on the right, numbered sheets in the centre,
 //! messages and the port monitor at the bottom.
 
+// Release builds are GUI-only: no console window behind the editor.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod ai;
 mod app;
 mod assoc;
