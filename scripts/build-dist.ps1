@@ -8,13 +8,42 @@ $dist = Join-Path $root 'dist\FLP_next'
 $zip = Join-Path $root 'dist\FLP_next.zip'
 $bins = 'flp-editor.exe', 'flp-mcp.exe', 'flp-web.exe', 'flp.exe'
 
+# The editor running from dist is closed before the build and started again afterwards.
+$script:reopen = $false
+
+function Start-Editor {
+    if (-not $script:reopen) { return }
+    $script:reopen = $false
+    Write-Host 'Запускаю редактор снова.' -ForegroundColor Cyan
+    Start-Process (Join-Path $dist 'flp-editor.exe')
+}
+
 function Fail($msg) {
     Write-Host "ОШИБКА: $msg" -ForegroundColor Red
+    Start-Editor
     exit 1
+}
+
+function Get-DistProcesses($names) {
+    Get-Process -Name $names -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and $_.Path.StartsWith($dist, [StringComparison]::OrdinalIgnoreCase) }
 }
 
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
     Fail 'cargo не найден. Установите Rust: https://rustup.rs (toolchain MSVC).'
+}
+
+# Close the editor politely: with unsaved changes it asks to save, so wait for the answer.
+$editors = @(Get-DistProcesses 'flp-editor')
+if ($editors.Count -gt 0) {
+    Write-Host 'Закрываю редактор (если есть несохранённые изменения — ответьте в его окне)...' -ForegroundColor Yellow
+    $script:reopen = $true
+    $editors | ForEach-Object { [void]$_.CloseMainWindow() }
+    $deadline = [DateTime]::Now.AddMinutes(3)
+    while ((Get-DistProcesses 'flp-editor') -and [DateTime]::Now -lt $deadline) {
+        Start-Sleep -Milliseconds 300
+    }
+    if (Get-DistProcesses 'flp-editor') { Fail 'редактор не закрылся за 3 минуты — сборка отменена.' }
 }
 
 # A running exe (e.g. flp-mcp started by Claude) cannot be overwritten but can be renamed:
@@ -43,8 +72,7 @@ try {
     Pop-Location
 }
 
-$running = Get-Process -Name ($bins | ForEach-Object { $_ -replace '\.exe$' }) -ErrorAction SilentlyContinue |
-    Where-Object { $_.Path -and $_.Path.StartsWith($dist, [StringComparison]::OrdinalIgnoreCase) }
+$running = Get-DistProcesses ($bins | ForEach-Object { $_ -replace '\.exe$' })
 if ($running) {
     Fail "закройте запущенные из dist программы: $(($running.Name | Sort-Object -Unique) -join ', ')."
 }
@@ -83,3 +111,4 @@ if (-not $NoZip) {
 Write-Host ''
 Write-Host "Готово: $dist" -ForegroundColor Green
 if (-not $NoZip) { Write-Host "Архив:  $zip" -ForegroundColor Green }
+Start-Editor
