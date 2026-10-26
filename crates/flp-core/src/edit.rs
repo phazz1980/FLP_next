@@ -113,8 +113,10 @@ impl Project {
     /// Replaces a variable declaration (name, type, initial value, description).
     /// Blocks using it follow a rename; links that no longer fit the new type stay
     /// and are reported by the check.
-    pub fn update_var(&mut self, name: &str, var: Var) -> Result<(), EditError> {
+    pub fn update_var(&mut self, name: &str, mut var: Var) -> Result<(), EditError> {
         let index = self.var_index(name)?;
+        // The dialog does not know about service variables: keep the flag.
+        var.service = self.logic.vars[index].service;
         self.validate_var(&var, Some(name))?;
         if var.name != name {
             for block in &mut self.logic.blocks {

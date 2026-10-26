@@ -328,10 +328,26 @@ pub fn pull_out(
     feed: bool,
     pos: flp_core::BlockPos,
 ) -> Result<String, flp_core::EditError> {
+    let block = p.logic.block(id);
+    let def = block.and_then(|b| lib.get(&b.kind)).map(|l| &l.def);
+    // A parameter works both ways: one block writes it, the others read what was set.
+    let is_param = def.is_some_and(|d| d.input(name).is_none() && d.output(name).is_none());
     // Already taken out: one more block of the same variable.
-    if let Some(var) = p.logic.block(id).and_then(|b| b.bound.get(name)).cloned() {
-        return p.add_var_block(&var, feed, pos);
+    if let Some(var) = block.and_then(|b| b.bound.get(name)).cloned() {
+        let has_writer = p
+            .logic
+            .blocks
+            .iter()
+            .any(|b| b.kind == flp_core::vars::VAR_SET && b.var_name() == Some(var.as_str()));
+        return p.add_var_block(&var, feed && !(is_param && has_writer), pos);
     }
+    // The variable starts with the current value of the parameter.
+    let init = def.filter(|_| is_param).and_then(|d| {
+        block
+            .and_then(|b| b.params.get(name))
+            .or_else(|| d.param(name).and_then(|q| q.default.as_ref()))
+            .cloned()
+    });
     let base = format!("{id}_{name}");
     let var = std::iter::once(base.clone())
         .chain((2..).map(|n| format!("{base}_{n}")))
@@ -340,7 +356,7 @@ pub fn pull_out(
     p.add_var(Var {
         name: var.clone(),
         ty: var_type(ty),
-        init: None,
+        init,
         description: format!("{id}.{name}"),
         retain: false,
         service: true,
@@ -487,5 +503,46 @@ mod tests {
         assert_eq!(p.logic.block(&out).unwrap().kind, flp_core::vars::VAR_GET);
         let inp = pull_out(&mut p, &lib, &id, "en", SignalType::Bool, true, POS).unwrap();
         assert_eq!(p.logic.block(&inp).unwrap().kind, flp_core::vars::VAR_SET);
+    }
+
+    #[test]
+    fn pulled_param_writes_once_then_reads() {
+        let (lib, _) =
+            Library::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library")).unwrap();
+        let mut p = Project::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/wifi_bound"
+        ))
+        .unwrap();
+        let first = pull_out(
+            &mut p,
+            &lib,
+            "wifi",
+            "subnet",
+            SignalType::String,
+            true,
+            POS,
+        )
+        .unwrap();
+        assert_eq!(p.logic.block(&first).unwrap().kind, flp_core::vars::VAR_SET);
+        let again = pull_out(
+            &mut p,
+            &lib,
+            "wifi",
+            "subnet",
+            SignalType::String,
+            true,
+            POS,
+        )
+        .unwrap();
+        assert_eq!(p.logic.block(&again).unwrap().kind, flp_core::vars::VAR_GET);
+        let var = p
+            .logic
+            .block(&first)
+            .unwrap()
+            .var_name()
+            .unwrap()
+            .to_owned();
+        assert!(p.logic.var(&var).unwrap().init.is_some());
     }
 }
