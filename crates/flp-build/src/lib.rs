@@ -379,7 +379,8 @@ impl ArduinoCli {
         if required.is_empty() {
             return Ok(Vec::new());
         }
-        let output = Command::new(&self.exe)
+        let output = self
+            .command()
             .args(["lib", "list", "--format", "json"])
             .stdin(Stdio::null())
             .output()
@@ -403,7 +404,8 @@ impl ArduinoCli {
 
     /// Lists serial ports with boards that may be connected to them.
     pub fn serial_ports(&self) -> Result<Vec<SerialPort>, BuildError> {
-        let output = Command::new(&self.exe)
+        let output = self
+            .command()
             .args(["board", "list", "--format", "json"])
             .stdin(Stdio::null())
             .output()
@@ -414,7 +416,8 @@ impl ArduinoCli {
 
     /// Board menu options (CPU frequency, flash size, partitions...) for `fqbn`.
     pub fn board_menus(&self, fqbn: &str) -> Result<Vec<BoardMenu>, BuildError> {
-        let output = Command::new(&self.exe)
+        let output = self
+            .command()
             .args(["board", "details", "--fqbn", fqbn, "--format", "json"])
             .stdin(Stdio::null())
             .output()
@@ -435,6 +438,10 @@ impl ArduinoCli {
         auto_port(&self.serial_ports()?)
     }
 
+    fn command(&self) -> Command {
+        hidden_command(&self.exe)
+    }
+
     fn spawn_error(&self, source: std::io::Error) -> BuildError {
         BuildError::Spawn {
             exe: self.exe.clone(),
@@ -449,7 +456,7 @@ impl ArduinoCli {
         low_priority: bool,
         on_line: &mut dyn FnMut(&str),
     ) -> Result<ExitStatus, BuildError> {
-        let mut cmd = Command::new(&self.exe);
+        let mut cmd = self.command();
         cmd.args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -515,13 +522,21 @@ impl ArduinoCli {
 fn set_low_priority(cmd: &mut Command, low: bool) {
     use std::os::windows::process::CommandExt;
     const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
-    if low {
-        cmd.creation_flags(BELOW_NORMAL_PRIORITY_CLASS);
-    }
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    // The flags are set as a whole: keep the console window hidden either way.
+    let priority = if low { BELOW_NORMAL_PRIORITY_CLASS } else { 0 };
+    cmd.creation_flags(CREATE_NO_WINDOW | priority);
 }
 
 #[cfg(not(windows))]
 fn set_low_priority(_cmd: &mut Command, _low: bool) {}
+
+/// A command that does not flash a console window when started from the editor.
+fn hidden_command(exe: &std::path::Path) -> Command {
+    let mut cmd = Command::new(exe);
+    set_low_priority(&mut cmd, false);
+    cmd
+}
 
 /// Sets normal priority for arduino-cli; compilers it starts afterwards inherit it.
 #[cfg(windows)]
