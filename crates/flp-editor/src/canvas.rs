@@ -1301,11 +1301,19 @@ fn port_context_menu(
     if resp.secondary_clicked() {
         app.canvas.const_text = constant.as_ref().map(value_text).unwrap_or_default();
     }
-    let debug_index = app
-        .debug
-        .as_ref()
-        .filter(|_| output)
-        .and_then(|d| d.table.output_index(port));
+    // An input has no storage of its own: it is forced through its source, which
+    // changes the value for every consumer of that source.
+    let debug_index = app.debug.as_ref().and_then(|d| {
+        if output {
+            return d.table.output_index(port);
+        }
+        let logic = &app.doc.as_ref()?.project.logic;
+        let link = logic.links.iter().find(|l| &l.to == port)?;
+        match logic.block(&link.from.block).and_then(|b| b.var_name()) {
+            Some(var) => d.table.var_index(var),
+            None => d.table.output_index(&link.from),
+        }
+    });
     let mut debug = app.debug.take();
     let mut set_const = None;
     let mut invert = None;
@@ -1314,6 +1322,9 @@ fn port_context_menu(
     resp.context_menu(|ui| {
         if let (Some(d), Some(index)) = (&mut debug, debug_index) {
             debugview::value_menu(ui, d, index);
+            if !output {
+                ui.weak("Форсируется источник входа (у всех потребителей)");
+            }
             ui.separator();
         }
         if !output {
