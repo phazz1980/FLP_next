@@ -29,6 +29,12 @@ pub enum Check {
     NoReleases,
 }
 
+/// Why a GitHub request failed.
+enum Failure {
+    Status(u16),
+    Network(String),
+}
+
 #[derive(Deserialize)]
 struct ApiRelease {
     tag_name: String,
@@ -46,38 +52,43 @@ pub fn check(repo: &str) -> Result<Check, String> {
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(15))
         .build();
-    let mut request = agent
-        .get(&format!(
-            "https://api.github.com/repos/{repo}/releases/latest"
-        ))
-        .set("Accept", "application/vnd.github+json")
-        .set("X-GitHub-Api-Version", "2022-11-28")
-        .set(
-            "User-Agent",
-            concat!("FLP_next/", env!("CARGO_PKG_VERSION")),
-        );
-    if let Some(token) = &token {
-        request = request.set("Authorization", &format!("Bearer {token}"));
-    }
-    let release: ApiRelease = match request.call() {
+    let get = |path: &str| {
+        let mut request = agent
+            .get(&format!("https://api.github.com/repos/{repo}{path}"))
+            .set("Accept", "application/vnd.github+json")
+            .set("X-GitHub-Api-Version", "2022-11-28")
+            .set(
+                "User-Agent",
+                concat!("FLP_next/", env!("CARGO_PKG_VERSION")),
+            );
+        if let Some(token) = &token {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        request.call().map_err(|e| match e {
+            ureq::Error::Status(code, _) => Failure::Status(code),
+            e => Failure::Network(e.to_string()),
+        })
+    };
+    let release: ApiRelease = match get("/releases/latest") {
         Ok(r) => r
             .into_json()
             .map_err(|e| format!("ответ GitHub не прочитан: {e}"))?,
-        Err(ureq::Error::Status(401, _)) => {
+        Err(Failure::Status(401)) => {
             return Err("GitHub отклонил токен (401): проверьте FLP_GITHUB_TOKEN".to_owned())
         }
-        Err(ureq::Error::Status(403 | 429, _)) => {
+        Err(Failure::Status(403 | 429)) => {
             return Err("GitHub ограничил число запросов, попробуйте позже".to_owned())
         }
-        Err(ureq::Error::Status(404, _)) if token.is_some() => return Ok(Check::NoReleases),
-        Err(ureq::Error::Status(404, _)) => {
+        // No release yet, unless the repository itself is not visible.
+        Err(Failure::Status(404)) if get("").is_ok() => return Ok(Check::NoReleases),
+        Err(Failure::Status(404)) => {
             return Err(format!(
                 "репозиторий {repo} не найден или закрытый: задайте токен GitHub \
                  в переменной FLP_GITHUB_TOKEN (право Contents: read) или выполните gh auth login"
             ))
         }
-        Err(ureq::Error::Status(code, _)) => return Err(format!("ошибка GitHub {code}")),
-        Err(e) => return Err(format!("нет связи с GitHub: {e}")),
+        Err(Failure::Status(code)) => return Err(format!("ошибка GitHub {code}")),
+        Err(Failure::Network(e)) => return Err(format!("нет связи с GitHub: {e}")),
     };
     let version = release.tag_name.trim_start_matches(['v', 'V']).to_owned();
     Ok(if is_newer(&version, CURRENT) {
