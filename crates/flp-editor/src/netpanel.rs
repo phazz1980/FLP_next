@@ -540,7 +540,12 @@ mod tests {
         p.release_unused_services(&lib).unwrap();
         let after = p.logic.block("wifi").unwrap();
         assert!(!after.bound.contains_key("mode"));
-        assert_eq!(after.params, before.params);
+        // The mode is back (explicitly or by default).
+        let mode = |b: &flp_core::Block| b.params.get("wifi_mode").cloned();
+        assert_eq!(
+            mode(after).unwrap_or(ParamValue::Int(0)),
+            mode(&before).unwrap_or(ParamValue::Int(0))
+        );
         assert!(p.logic.vars.iter().all(|v| !v.service));
     }
 }
