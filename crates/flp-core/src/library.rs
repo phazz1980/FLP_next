@@ -161,6 +161,10 @@ pub struct BlockInfo {
     pub symbol: Option<String>,
     /// Library folder in the editor ("Входы и выходы", "Время", ...).
     pub group: String,
+    /// Block revision, raised by `save_block` on every change. A project carries the
+    /// revision of the user blocks it was saved with, so a newer copy can be offered.
+    #[serde(default = "first_version", skip_serializing_if = "is_first_version")]
+    pub version: u32,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
     /// The block keeps state between scans (timers, triggers, counters).
@@ -187,6 +191,14 @@ pub struct BlockInfo {
 
 fn is_false(v: &bool) -> bool {
     !v
+}
+
+fn first_version() -> u32 {
+    1
+}
+
+fn is_first_version(v: &u32) -> bool {
+    *v == 1
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -656,7 +668,18 @@ pub fn save_block(lib_dir: &Path, def: &BlockDef, template: &str, docs: &str) ->
     fs::create_dir_all(&dir).map_err(write_err(&dir))?;
 
     let toml_path = dir.join(BLOCK_FILE);
-    let same_def = read_toml::<BlockDef>(&toml_path).is_ok_and(|old| old == *def);
+    let old_def = read_toml::<BlockDef>(&toml_path).ok();
+    let mut def = def.clone();
+    if let Some(old) = &old_def {
+        // A changed block gets a newer revision than the one it replaces.
+        let mut same = def.clone();
+        same.info.version = old.info.version;
+        if same != *old && def.info.version <= old.info.version {
+            def.info.version = old.info.version + 1;
+        }
+    }
+    let def = &def;
+    let same_def = old_def.is_some_and(|old| old == *def);
     if !same_def {
         let text = toml::to_string_pretty(def).map_err(|source| Error::Serialize {
             path: toml_path.clone(),

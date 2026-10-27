@@ -275,6 +275,7 @@ impl Form {
                 name: self.name.trim().to_owned(),
                 symbol: optional(&self.symbol),
                 group: self.group.trim().to_owned(),
+                version: 1,
                 description: self.description.trim().to_owned(),
                 memory: self.memory,
                 includes: list(&self.includes),

@@ -105,6 +105,12 @@ pub struct EditorApp {
     web_editor: Option<std::process::Child>,
     lib_stamp: Option<SystemTime>,
     lib_checked: Instant,
+    /// Modification time of the project file as the editor last read or wrote it; a
+    /// different time means another program (MCP server, web designer) changed it.
+    disk_stamp: Option<SystemTime>,
+    disk_checked: Instant,
+    /// The changed-on-disk warning for unsaved work was already shown for this stamp.
+    disk_warned: bool,
     pub doc: Option<Doc>,
     pub selection: Option<Selection>,
     /// Active sheet: where blocks added from the library go.
@@ -168,6 +174,8 @@ pub struct EditorApp {
     new_release: Option<Release>,
     /// The window with the changes of the newer releases is shown.
     update_window: bool,
+    /// User blocks whose revision differs between the project and the program.
+    block_diffs: Vec<flp_core::packed::VersionDiff>,
     /// arduino-cli is missing: the window offers to install it.
     cli_prompt: CliPrompt,
     /// Update download in progress, or the error of the last attempt.
@@ -199,6 +207,9 @@ impl EditorApp {
             web_editor: None,
             lib_stamp: None,
             lib_checked: Instant::now(),
+            disk_stamp: None,
+            disk_checked: Instant::now(),
+            disk_warned: false,
             doc: None,
             selection: None,
             sheet: 1,
@@ -237,6 +248,7 @@ impl EditorApp {
             update_rx: None,
             new_release: None,
             update_window: false,
+            block_diffs: Vec::new(),
             self_update: SelfUpdate::Idle(None),
             cli_prompt: if ArduinoCli::locate().is_ok() {
                 CliPrompt::Hidden
@@ -558,6 +570,172 @@ impl EditorApp {
         }
     }
 
+    fn project_stamp(&self) -> Option<SystemTime> {
+        let doc = self.doc.as_ref()?;
+        fs::metadata(&doc.project.path)
+            .and_then(|m| m.modified())
+            .ok()
+    }
+
+    /// Picks up changes made to the open project file by other programs. Unsaved work in
+    /// the editor is kept (only a warning is logged); otherwise the project is reloaded.
+    fn watch_project(&mut self) {
+        if self.disk_checked.elapsed() < Duration::from_secs(1) {
+            return;
+        }
+        self.disk_checked = Instant::now();
+        let Some(doc) = &self.doc else { return };
+        let stamp = self.project_stamp();
+        if stamp.is_none() || stamp == self.disk_stamp {
+            return;
+        }
+        if doc.dirty {
+            if !self.disk_warned {
+                self.disk_warned = true;
+                self.info(
+                    LogLevel::Warning,
+                    "Файл проекта изменён другой программой, а в редакторе есть несохранённые правки:                      сохранение перезапишет внешние изменения",
+                );
+            }
+            return;
+        }
+        let path = doc.project.path.clone();
+        match Doc::open(&path, &self.lib) {
+            Ok(new) => {
+                self.doc = Some(new);
+                self.disk_stamp = stamp;
+                self.selection = None;
+                self.info(LogLevel::Info, "Проект обновлён: файл изменён снаружи");
+            }
+            Err(e) => {
+                self.disk_stamp = stamp;
+                self.info(LogLevel::Error, e.to_string());
+            }
+        }
+    }
+
+    /// User blocks packed into the project file but missing on this computer are put into
+    /// `user_library/` before the project is checked.
+    fn restore_packed_blocks(&mut self, path: &Path) {
+        let Some(dir) = self.user_lib_dir() else {
+            return;
+        };
+        if !flp_core::project::is_project_file(path) {
+            return;
+        }
+        let written = flp_core::packed::unpack_missing_blocks(path, &dir, &self.lib);
+        if !written.is_empty() {
+            self.info(
+                LogLevel::Info,
+                format!(
+                    "Из проекта добавлены пользовательские блоки: {}",
+                    written.join(", ")
+                ),
+            );
+            self.reload_library();
+        }
+    }
+
+    /// Offers to sync user blocks whose revision differs between the project and the
+    /// program: take the project's newer copy, or save the project with the program's.
+    fn block_versions_window(&mut self, ctx: &egui::Context) {
+        if self.block_diffs.is_empty() {
+            return;
+        }
+        let mut take: Vec<String> = Vec::new();
+        let mut repack = false;
+        let mut close = false;
+        egui::Window::new("Версии блоков")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("Пользовательские блоки в проекте и в программе отличаются версией.");
+                ui.add_space(6.0);
+                let (newer_project, newer_program): (Vec<_>, Vec<_>) = self
+                    .block_diffs
+                    .iter()
+                    .filter(|d| !d.diverged())
+                    .partition(|d| d.project > d.program);
+                let diverged: Vec<_> = self.block_diffs.iter().filter(|d| d.diverged()).collect();
+                if !diverged.is_empty() {
+                    ui.strong("Версия одна, а содержимое разное (правили на разных компьютерах)");
+                    for d in &diverged {
+                        ui.label(format!("{} (v{})", d.kind, d.project));
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("Взять из проекта").clicked() {
+                            take.extend(diverged.iter().map(|d| d.kind.clone()));
+                        }
+                        if ui
+                            .button("Оставить блоки программы и сохранить проект")
+                            .clicked()
+                        {
+                            repack = true;
+                        }
+                    });
+                    ui.add_space(6.0);
+                }
+                if !newer_project.is_empty() {
+                    ui.strong("В проекте блоки новее, чем в программе");
+                    for d in &newer_project {
+                        ui.label(format!(
+                            "{}: в проекте v{}, в программе v{}",
+                            d.kind, d.project, d.program
+                        ));
+                    }
+                    if ui.button("Обновить блоки программы из проекта").clicked()
+                    {
+                        take = newer_project.iter().map(|d| d.kind.clone()).collect();
+                    }
+                    ui.add_space(6.0);
+                }
+                if !newer_program.is_empty() {
+                    ui.strong("В программе блоки новее, чем в проекте");
+                    for d in &newer_program {
+                        ui.label(format!(
+                            "{}: в проекте v{}, в программе v{}",
+                            d.kind, d.project, d.program
+                        ));
+                    }
+                    if ui.button("Обновить блоки проекта из программы").clicked()
+                    {
+                        repack = true;
+                    }
+                    ui.add_space(6.0);
+                }
+                if ui.button("Оставить как есть").clicked() {
+                    close = true;
+                }
+            });
+        if !take.is_empty() {
+            if let (Some(dir), Some(doc)) = (self.user_lib_dir(), &self.doc) {
+                let written =
+                    flp_core::packed::adopt_project_blocks(&doc.project.path, &dir, &take);
+                self.info(
+                    LogLevel::Ok,
+                    format!(
+                        "Блоки программы обновлены из проекта: {}",
+                        written.join(", ")
+                    ),
+                );
+                self.reload_library();
+            }
+            self.block_diffs.retain(|d| !take.contains(&d.kind));
+        }
+        if repack {
+            // Saving packs the program's copies of the blocks the schema uses.
+            if self.save() {
+                self.info(LogLevel::Ok, "Блоки проекта обновлены из программы");
+            }
+            self.block_diffs
+                .retain(|d| d.program <= d.project && !d.diverged());
+        }
+        if close {
+            self.block_diffs.clear();
+        }
+    }
+
     fn request_open(&mut self, path: PathBuf) {
         if self.doc.as_ref().is_some_and(|d| d.dirty) {
             self.pending = Some(Pending::Open(path));
@@ -573,12 +751,20 @@ impl EditorApp {
         }
         // Debugging belongs to the previous project's firmware.
         self.stop_debug();
+        self.restore_packed_blocks(path);
+        self.block_diffs = if flp_core::project::is_project_file(path) {
+            flp_core::packed::version_diffs(path, &self.lib)
+        } else {
+            Vec::new()
+        };
         match Doc::open(path, &self.lib) {
             Ok(doc) => {
                 self.info(LogLevel::Info, format!("Открыт проект {}", path.display()));
                 theme::save_last_project(path);
                 self.port = doc.project.config.board.port.clone().unwrap_or_default();
                 self.doc = Some(doc);
+                self.disk_stamp = self.project_stamp();
+                self.disk_warned = false;
                 self.selection = None;
                 self.sheet = 1;
                 self.extra_sheets.clear();
@@ -720,7 +906,7 @@ impl EditorApp {
         match open.spawn() {
             Ok(_) => self.info(
                 LogLevel::Info,
-                "Конструктор веб-интерфейса открыт в браузере. После правок откройте проект заново.",
+                "Конструктор веб-интерфейса открыт в браузере.",
             ),
             Err(e) => self.info(LogLevel::Error, format!("Не удалось открыть браузер: {e}")),
         }
@@ -738,6 +924,8 @@ impl EditorApp {
                 if let Some(w) = warning {
                     self.info(LogLevel::Warning, w);
                 }
+                self.disk_stamp = self.project_stamp();
+                self.disk_warned = false;
                 true
             }
             Err(e) => {
@@ -1666,6 +1854,9 @@ impl eframe::App for EditorApp {
             }
         }
         self.watch_library();
+        self.watch_project();
+        self.block_versions_window(&ctx);
+        ctx.request_repaint_after(Duration::from_secs(1));
         self.autosave(&ctx);
         self.shortcuts(&ctx);
         self.handle_close(&ctx);

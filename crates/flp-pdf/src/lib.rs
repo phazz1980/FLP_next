@@ -168,10 +168,19 @@ pub fn save_project(project: &Project, lib: &Library) -> flp_core::Result<Option
         store.save()?;
     }
     let project = &clean;
+    // The user blocks the schema uses travel inside the project file.
+    let packed = flp_core::packed::pack_user_blocks(&project.logic, lib);
+    let mut extra: Vec<(&str, &[u8])> = packed
+        .iter()
+        .map(|(n, d)| (n.as_str(), d.as_slice()))
+        .collect();
     match render(project, lib) {
-        Ok(pdf) => project.save_with(&[(BOARDS_PDF, &pdf)]).map(|()| None),
+        Ok(pdf) => {
+            extra.push((BOARDS_PDF, &pdf));
+            project.save_with(&extra).map(|()| None)
+        }
         Err(e) => project
-            .save()
+            .save_with(&extra)
             .map(|()| Some(format!("{BOARDS_PDF} не обновлён: {e}"))),
     }
 }

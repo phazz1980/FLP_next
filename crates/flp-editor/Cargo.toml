@@ -26,3 +26,6 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
+
+[build-dependencies]
+embed-resource = "3"

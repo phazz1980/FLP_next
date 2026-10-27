@@ -402,6 +402,16 @@ fn load_library(project_dir: &Path, explicit: Option<&Path>) -> Option<Library> 
         );
         return None;
     };
+    // User blocks packed into the project file but missing here are restored first.
+    if flp_core::project::is_project_file(project_dir) {
+        if let Ok((lib, _)) = Library::load_with_user(&dir) {
+            let user = flp_core::user_library_dir(&dir);
+            let written = flp_core::packed::unpack_missing_blocks(project_dir, &user, &lib);
+            if !written.is_empty() {
+                println!("из проекта добавлены блоки: {}", written.join(", "));
+            }
+        }
+    }
     match Library::load_with_user(&dir) {
         Ok((lib, errors)) => {
             for e in errors {
