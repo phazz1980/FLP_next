@@ -411,8 +411,8 @@ window.fetch=function(u){u=String(u);
  if(u.indexOf('/ui/layout')==0)return Promise.resolve({json:function(){return Promise.resolve(L)}});
  if(u.indexOf('/ui/state')==0)return Promise.resolve({json:function(){return Promise.resolve(S)}});
  if(u.indexOf('/ui/hist')==0){var a=[];for(var j=0;j<60;j++)a.push(Math.round(50+30*Math.sin(j/6)+8*Math.sin(j*1.7)));return Promise.resolve({json:function(){return Promise.resolve(a)}})}
- if(u.indexOf('/ui/scan')==0)return Promise.resolve({text:function(){return Promise.resolve('HomeNet'+String.fromCharCode(9)+'-48'+String.fromCharCode(10)+'Guest'+String.fromCharCode(9)+'-71'+String.fromCharCode(10))}})
- if(u.indexOf('/ui/info')==0)return Promise.resolve({json:function(){return Promise.resolve({ip:'192.168.1.50',mac:'AA:BB:CC:DD:EE:FF',rssi:-58,up:93784,chip:'ESP32',cpu:240,heap:210000,heapAll:320000,flash:4194304,sketch:900000,free:1000000,build:'предпросмотр',u:true})}})}
+ if(u.indexOf('/ui/scan')==0)return Promise.resolve({text:function(){return Promise.resolve('HomeNet'+String.fromCharCode(9)+'-48'+String.fromCharCode(10)+'Guest'+String.fromCharCode(9)+'-71'+String.fromCharCode(10))}});
+ if(u.indexOf('/ui/info')==0)return Promise.resolve({json:function(){return Promise.resolve({ip:'192.168.1.50',mac:'AA:BB:CC:DD:EE:FF',rssi:-58,up:93784,chip:'ESP32',cpu:240,heap:210000,heapAll:320000,flash:4194304,sketch:900000,free:1000000,build:'предпросмотр',u:true})}})
  var m=/[?&]i=(\\d+)&v=([^&]*)/.exec(u);if(m)S[+m[1]]=+m[2];
  return Promise.resolve({})};
 <\/script>`;
