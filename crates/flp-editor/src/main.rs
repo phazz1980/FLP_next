@@ -22,6 +22,7 @@ mod job;
 mod markdown;
 mod netpanel;
 mod panels;
+mod selfupdate;
 mod theme;
 mod themeedit;
 mod update;
@@ -30,6 +31,12 @@ mod userlib;
 use std::path::PathBuf;
 
 fn main() -> eframe::Result {
+    // The copy of this exe that installs a downloaded update after the editor exits.
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    if args.first().is_some_and(|a| a == selfupdate::APPLY_FLAG) {
+        selfupdate::run_helper(&args[1..]);
+        return Ok(());
+    }
     // A project file given on the command line, e.g. by double click in Explorer.
     let project = std::env::args_os().nth(1).map(PathBuf::from);
     let options = eframe::NativeOptions {

@@ -253,7 +253,23 @@ fn clean(line: &str) -> String {
 }
 
 /// Window with what changed since the running version and the download link.
-pub fn window(ctx: &egui::Context, release: &Release, open: &mut bool) {
+/// What the window shows next to the install button.
+pub enum Install<'a> {
+    /// Not started (the button is shown when the editor can update itself in place).
+    Idle(Option<&'a str>),
+    /// Downloading: bytes received and the archive size (0 when unknown).
+    Busy(u64, u64),
+}
+
+/// Returns true when the user pressed "Обновить и перезапустить".
+pub fn window(
+    ctx: &egui::Context,
+    release: &Release,
+    open: &mut bool,
+    install: Install,
+    can_install: bool,
+) -> bool {
+    let mut start = false;
     egui::Window::new("Доступно обновление")
         .open(open)
         .collapsible(false)
@@ -265,6 +281,34 @@ pub fn window(ctx: &egui::Context, release: &Release, open: &mut bool) {
                 release.version
             ));
             ui.hyperlink_to(format!("Скачать версию {}", release.version), &release.url);
+            match install {
+                Install::Busy(done, total) => {
+                    let mb = |n: u64| n as f32 / 1_048_576.0;
+                    let fraction = if total > 0 { done as f32 / total as f32 } else { 0.0 };
+                    ui.add(
+                        egui::ProgressBar::new(fraction)
+                            .text(format!("Скачивание: {:.1} из {:.1} МБ", mb(done), mb(total))),
+                    );
+                }
+                Install::Idle(error) => {
+                    if can_install {
+                        start = ui
+                            .button("Обновить и перезапустить")
+                            .on_hover_text(
+                                "Скачать архив, заменить файлы программы и открыть её заново;                                  несохранённый проект будет сохранён",
+                            )
+                            .clicked();
+                    }
+                    if can_install {
+                        ui.weak(
+                            "Другие открытые окна FLP_next закройте вручную, чтобы они                              обновились: они продолжат работать на старой версии, пока их не                              перезапустят.",
+                        );
+                    }
+                    if let Some(e) = error {
+                        ui.colored_label(ui.visuals().error_fg_color, e);
+                    }
+                }
+            }
             ui.separator();
             egui::ScrollArea::vertical()
                 .max_height(360.0)
@@ -281,6 +325,7 @@ pub fn window(ctx: &egui::Context, release: &Release, open: &mut bool) {
                     }
                 });
         });
+    start
 }
 
 fn valid_repo(repo: &str) -> bool {

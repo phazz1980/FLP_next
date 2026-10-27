@@ -3,7 +3,9 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -21,6 +23,7 @@ use crate::dialogs::{self, Dialog};
 use crate::doc::Doc;
 use crate::job::{Job, JobEvent, JobKind};
 use crate::panels;
+use crate::selfupdate;
 use crate::theme::{self, Theme};
 use crate::update::{self, Check, Release};
 
@@ -167,6 +170,17 @@ pub struct EditorApp {
     update_window: bool,
     /// arduino-cli is missing: the window offers to install it.
     cli_prompt: CliPrompt,
+    /// Update download in progress, or the error of the last attempt.
+    self_update: SelfUpdate,
+}
+
+enum SelfUpdate {
+    Idle(Option<String>),
+    Downloading {
+        done: Arc<AtomicU64>,
+        total: Arc<AtomicU64>,
+        rx: Receiver<Result<PathBuf, String>>,
+    },
 }
 
 /// State of the "arduino-cli not found" offer.
@@ -223,6 +237,7 @@ impl EditorApp {
             update_rx: None,
             new_release: None,
             update_window: false,
+            self_update: SelfUpdate::Idle(None),
             cli_prompt: if ArduinoCli::locate().is_ok() {
                 CliPrompt::Hidden
             } else {
@@ -244,6 +259,19 @@ impl EditorApp {
         }
         theme::apply(&cc.egui_ctx, &app.theme);
         app.scan_ports(&cc.egui_ctx);
+        if let Some(text) = selfupdate::take_last_result() {
+            let level = if text == "ok" {
+                LogLevel::Info
+            } else {
+                LogLevel::Error
+            };
+            let text = if text == "ok" {
+                "Программа обновлена".to_owned()
+            } else {
+                format!("Обновление не удалось, возвращена прежняя версия ({text})")
+            };
+            app.info(level, text);
+        }
         if app.update_check {
             app.start_update_check(&cc.egui_ctx, false);
         }
@@ -374,6 +402,46 @@ impl EditorApp {
                     }
                 }
             }
+        }
+    }
+
+    fn start_self_update(&mut self, url: String) {
+        let (done, total) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+        let (tx, rx) = mpsc::channel();
+        let (d, t) = (done.clone(), total.clone());
+        thread::spawn(move || {
+            let _ = tx.send(selfupdate::download_and_stage(&url, &d, &t));
+        });
+        self.self_update = SelfUpdate::Downloading { done, total, rx };
+    }
+
+    fn poll_self_update(&mut self, ctx: &egui::Context) {
+        let SelfUpdate::Downloading { rx, .. } = &self.self_update else {
+            return;
+        };
+        ctx.request_repaint_after(Duration::from_millis(200));
+        let Ok(result) = rx.try_recv() else { return };
+        self.self_update = SelfUpdate::Idle(None);
+        let staged = match result {
+            Ok(staged) => staged,
+            Err(e) => {
+                self.self_update = SelfUpdate::Idle(Some(e));
+                return;
+            }
+        };
+        // The new version opens the project again from its file: save it first.
+        if self.doc.as_ref().is_some_and(|d| d.dirty) && !self.save() {
+            self.self_update =
+                SelfUpdate::Idle(Some("проект не сохранён, обновление отменено".into()));
+            return;
+        }
+        let project = self.doc.as_ref().map(|d| d.project.path.clone());
+        match selfupdate::launch_helper(&staged, project.as_deref()) {
+            Ok(()) => {
+                self.allow_close = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            Err(e) => self.self_update = SelfUpdate::Idle(Some(e)),
         }
     }
 
@@ -1582,8 +1650,20 @@ impl eframe::App for EditorApp {
         self.poll_ports();
         self.poll_update();
         self.cli_window(&ctx);
+        self.poll_self_update(&ctx);
         if let Some(release) = &self.new_release {
-            update::window(&ctx, release, &mut self.update_window);
+            let install = match &self.self_update {
+                SelfUpdate::Idle(e) => update::Install::Idle(e.as_deref()),
+                SelfUpdate::Downloading { done, total, .. } => update::Install::Busy(
+                    done.load(Ordering::Relaxed),
+                    total.load(Ordering::Relaxed),
+                ),
+            };
+            let can = selfupdate::install_dir().is_some();
+            if update::window(&ctx, release, &mut self.update_window, install, can) {
+                let url = release.url.clone();
+                self.start_self_update(url);
+            }
         }
         self.watch_library();
         self.autosave(&ctx);
