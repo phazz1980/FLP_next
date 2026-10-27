@@ -124,7 +124,7 @@ mod tests {
     fn port_ref_parse() {
         assert_eq!("low.a".parse(), Ok(PortRef::new("low", "a")));
         assert_eq!(PortRef::new("low", "out").to_string(), "low.out");
-        for bad in ["low", "low.", ".a", "a.b.c", "1x.out", "a b.c"] {
+        for bad in ["low", "low.", ".a", "a.b.c", "a.b.out", "a b.c"] {
             assert!(bad.parse::<PortRef>().is_err(), "{bad}");
         }
     }

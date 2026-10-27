@@ -15,7 +15,7 @@ pub enum EditError {
     NoBlock(String),
     #[error("неизвестный тип блока «{0}»")]
     UnknownType(String),
-    #[error("недопустимый id «{0}»: только буквы (можно русские), цифры и «_», первой — буква, без пробелов и точек")]
+    #[error("недопустимый id «{0}»: только буквы (можно русские), цифры, «_» и «-» (имя может состоять и из одних цифр), без пробелов и точек")]
     InvalidId(String),
     #[error("id «{0}» уже занят")]
     DuplicateId(String),
@@ -875,7 +875,7 @@ mod tests {
             p.rename_block("button", &s),
             Err(EditError::DuplicateId(s.clone()))
         );
-        assert!(p.rename_block("button", "1x").is_err());
+        assert!(p.rename_block("button", "a b").is_err());
         p.remove_block("button").unwrap();
         assert!(p.logic.links.is_empty());
     }

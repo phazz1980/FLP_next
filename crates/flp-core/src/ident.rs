@@ -1,15 +1,12 @@
 /// Checks an identifier of a block, port, parameter or block type.
 ///
-/// Any alphabet is allowed (`насос`, `pump_1`): a letter or `_` first, then
-/// letters, digits or `_`. No spaces or dots, since links are written
-/// `block.port`. Generated C++ uses [`c_ident`] of the name.
+/// Any alphabet is allowed (`насос`, `pump_1`, `12`, `pump-2`): letters, digits, `_` and `-`,
+/// the name may even consist of digits only. No spaces or dots, since links are
+/// written `block.port`. Generated C++ uses [`c_ident`] of the name.
 pub fn is_valid_ident(s: &str) -> bool {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(c) if c.is_alphabetic() || c == '_' => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_alphanumeric() || c == '_')
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
 }
 
 /// Identifier made from a human name, for the type of a new block: lower case,
@@ -103,8 +100,10 @@ mod tests {
         assert!(is_valid_ident("ро_r1"));
         assert!(is_valid_ident("Насос_2"));
         assert!(!is_valid_ident(""));
-        assert!(!is_valid_ident("1x"));
-        assert!(!is_valid_ident("a-b"));
+        assert!(is_valid_ident("1x"));
+        assert!(is_valid_ident("12"));
+        assert!(is_valid_ident("a-b"));
+        assert!(!is_valid_ident("a.b"));
         assert!(!is_valid_ident("два слова"));
         assert!(!is_valid_ident("a.b"));
     }

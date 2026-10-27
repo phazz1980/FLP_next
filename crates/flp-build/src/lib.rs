@@ -275,6 +275,58 @@ impl BuildControl {
     }
 }
 
+/// Package index with the ESP32 core (not known to arduino-cli by default).
+pub const ESP32_INDEX_URL: &str =
+    "https://espressif.github.io/arduino-esp32/package_esp32_index.json";
+
+/// `vendor:arch` of a board `fqbn` (`esp32:esp32:esp32c3` → `esp32:esp32`).
+fn core_id(fqbn: &str) -> Option<String> {
+    let mut parts = fqbn.split(':');
+    let (vendor, arch) = (parts.next()?, parts.next()?);
+    Some(format!("{vendor}:{arch}"))
+}
+
+/// Ids of the installed cores from `arduino-cli core list --format json`
+/// (a plain array in older versions, `{"platforms": [...]}` in newer ones).
+fn parse_core_list(json: &str) -> Result<Vec<String>, BuildError> {
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| BuildError::BadOutput(e.to_string()))?;
+    let list = value.get("platforms").unwrap_or(&value);
+    Ok(list
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|i| i.get("id")?.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// Installs arduino-cli with winget (Windows). Output lines go to `on_line`.
+pub fn install_cli(on_line: &mut dyn FnMut(&str)) -> Result<(), BuildError> {
+    let exe = PathBuf::from("winget");
+    let output = Command::new(&exe)
+        .args([
+            "install",
+            "--id",
+            "ArduinoSA.CLI",
+            "-e",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|source| BuildError::Spawn { exe, source })?;
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        // Skip the spinner and progress bar frames.
+        if line.trim().len() > 2 && !line.contains('█') {
+            on_line(line.trim());
+        }
+    }
+    check_status("установка arduino-cli", output.status)
+}
+
 /// Handle to the arduino-cli executable.
 #[derive(Debug, Clone)]
 pub struct ArduinoCli {
@@ -352,6 +404,12 @@ impl ArduinoCli {
         }
         // A failed or cancelled build leaves no stamp, so the next one runs for real.
         let _ = std::fs::remove_file(&stamp_path);
+        // A quiet background build must not start a download of hundreds of megabytes.
+        if !opts.low_priority {
+            if let Some(core) = self.ensure_core(&board.fqbn, on_line)? {
+                on_line(&format!("Установлено ядро {core}"));
+            }
+        }
         let args = compile_args(work_dir, board, &opts);
         let status = self.run(&args, opts.low_priority, on_line)?;
         check_status("сборка", status)?;
@@ -371,6 +429,46 @@ impl ArduinoCli {
         let args = upload_args(&plain_path(work_dir), board, port);
         let status = self.run(&args, false, on_line)?;
         check_status("заливка", status)
+    }
+
+    /// Installs the board core (`esp32:esp32` for an `esp32:esp32:...` board) when it is
+    /// missing. Returns the core id if it was installed.
+    pub fn ensure_core(
+        &self,
+        fqbn: &str,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<Option<String>, BuildError> {
+        let Some(id) = core_id(fqbn) else {
+            return Ok(None);
+        };
+        let output = self
+            .command()
+            .args(["core", "list", "--format", "json"])
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|source| self.spawn_error(source))?;
+        check_status("список ядер", output.status)?;
+        if parse_core_list(&String::from_utf8_lossy(&output.stdout))?.contains(&id) {
+            return Ok(None);
+        }
+        on_line(&format!(
+            "Ядро {id} не установлено, устанавливаю (может занять несколько минут)..."
+        ));
+        // The ESP32 core is not in the default package index.
+        let extra: Vec<OsString> = if id.starts_with("esp32:") {
+            vec!["--additional-urls".into(), ESP32_INDEX_URL.into()]
+        } else {
+            Vec::new()
+        };
+        let mut update: Vec<OsString> = vec!["core".into(), "update-index".into()];
+        update.extend(extra.iter().cloned());
+        let status = self.run(&update, false, on_line)?;
+        check_status("обновление индекса ядер", status)?;
+        let mut install: Vec<OsString> = vec!["core".into(), "install".into(), id.clone().into()];
+        install.extend(extra);
+        let status = self.run(&install, false, on_line)?;
+        check_status("установка ядра", status)?;
+        Ok(Some(id))
     }
 
     /// Installs the Arduino libraries from `required` that are not installed yet.
@@ -651,8 +749,11 @@ fn compile_args(work_dir: &Path, board: &BoardConfig, opts: &CompileOptions) -> 
         args.push("--warnings".into());
         args.push("default".into());
     }
-    args.push("--jobs".into());
-    args.push(opts.jobs.unwrap_or(0).to_string().into());
+    // Older arduino-cli versions have no `--jobs`; the default (all cores) is the same.
+    if let Some(jobs) = opts.jobs {
+        args.push("--jobs".into());
+        args.push(jobs.to_string().into());
+    }
     args.push(sketch_dir(work_dir).into());
     args
 }
@@ -913,8 +1014,6 @@ mod tests {
                 "CPUFreq=240",
                 "--build-path",
                 &build,
-                "--jobs",
-                "0",
                 &sketch,
             ]
         );
@@ -1036,5 +1135,19 @@ mod tests {
             cli.choose_port(None, &b),
             Err(BuildError::Spawn { .. })
         ));
+    }
+
+    #[test]
+    fn core_ids_and_list() {
+        assert_eq!(
+            core_id("esp32:esp32:esp32c3").as_deref(),
+            Some("esp32:esp32")
+        );
+        assert_eq!(core_id("esp32"), None);
+        let old = r#"[{"id": "esp32:esp32", "installed": "3.0.0"}]"#;
+        assert_eq!(parse_core_list(old).unwrap(), ["esp32:esp32"]);
+        let new = r#"{"platforms": [{"id": "arduino:avr"}]}"#;
+        assert_eq!(parse_core_list(new).unwrap(), ["arduino:avr"]);
+        assert!(parse_core_list("{}").unwrap().is_empty());
     }
 }

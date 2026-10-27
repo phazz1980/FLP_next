@@ -165,6 +165,16 @@ pub struct EditorApp {
     new_release: Option<Release>,
     /// The window with the changes of the newer releases is shown.
     update_window: bool,
+    /// arduino-cli is missing: the window offers to install it.
+    cli_prompt: CliPrompt,
+}
+
+/// State of the "arduino-cli not found" offer.
+enum CliPrompt {
+    Hidden,
+    Ask,
+    /// winget runs on a worker thread and sends its lines and the final result.
+    Installing(Receiver<Result<String, String>>),
 }
 
 impl EditorApp {
@@ -213,6 +223,11 @@ impl EditorApp {
             update_rx: None,
             new_release: None,
             update_window: false,
+            cli_prompt: if ArduinoCli::locate().is_ok() {
+                CliPrompt::Hidden
+            } else {
+                CliPrompt::Ask
+            },
         };
         match LocalValues::open_default() {
             Ok(local) => app.local = local,
@@ -294,6 +309,72 @@ impl EditorApp {
             ctx.request_repaint();
         });
         self.update_rx = Some(rx);
+    }
+
+    /// Offer to install arduino-cli (winget) when it is not found; shows the progress.
+    fn cli_window(&mut self, ctx: &egui::Context) {
+        match &self.cli_prompt {
+            CliPrompt::Hidden => {}
+            CliPrompt::Ask => {
+                let mut install = false;
+                let mut later = false;
+                egui::Window::new("arduino-cli не найден")
+                    .collapsible(false)
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        ui.label("Для сборки и заливки прошивки нужна программа arduino-cli.");
+                        ui.label("Установить её сейчас через winget? Ядро ESP32 докачается при первой сборке.");
+                        ui.horizontal(|ui| {
+                            install = ui.button("Установить").clicked();
+                            later = ui.button("Позже").clicked();
+                        });
+                    });
+                if install {
+                    let (tx, rx) = mpsc::channel();
+                    let ctx = ctx.clone();
+                    thread::spawn(move || {
+                        let mut lines = Vec::new();
+                        let result = flp_build::install_cli(&mut |l| lines.push(l.to_owned()));
+                        let text = lines.join("\n");
+                        let _ = tx.send(match result {
+                            Ok(()) => Ok(text),
+                            Err(e) => Err(format!("{e}\n{text}")),
+                        });
+                        ctx.request_repaint();
+                    });
+                    self.info(LogLevel::Info, "Устанавливаю arduino-cli через winget...");
+                    self.cli_prompt = CliPrompt::Installing(rx);
+                } else if later {
+                    self.cli_prompt = CliPrompt::Hidden;
+                }
+            }
+            CliPrompt::Installing(rx) => {
+                let done = rx.try_recv().ok();
+                egui::Window::new("Установка arduino-cli")
+                    .collapsible(false)
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Идёт установка, это может занять минуту...");
+                        });
+                    });
+                ctx.request_repaint_after(Duration::from_millis(300));
+                if let Some(result) = done {
+                    self.cli_prompt = CliPrompt::Hidden;
+                    match result {
+                        Ok(_) => {
+                            self.info(LogLevel::Info, "arduino-cli установлен");
+                            self.scan_ports(ctx);
+                        }
+                        Err(e) => self.info(
+                            LogLevel::Error,
+                            format!("Не удалось установить arduino-cli: {e}"),
+                        ),
+                    }
+                }
+            }
+        }
     }
 
     fn poll_update(&mut self) {
@@ -1500,6 +1581,7 @@ impl eframe::App for EditorApp {
         self.poll_console(&ctx);
         self.poll_ports();
         self.poll_update();
+        self.cli_window(&ctx);
         if let Some(release) = &self.new_release {
             update::window(&ctx, release, &mut self.update_window);
         }

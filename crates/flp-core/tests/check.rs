@@ -79,7 +79,7 @@ fn duplicate_and_invalid_ids() {
     let src = format!("{INPUT}{INPUT}");
     assert_single_error(&src, "встречается дважды");
     assert_single_error(
-        "[[block]]\nid = \"1st\"\ntype = \"digital_in\"\npin = 1\n",
+        "[[block]]\nid = \"1 st\"\ntype = \"digital_in\"\npin = 1\n",
         "недопустимый id",
     );
 }
