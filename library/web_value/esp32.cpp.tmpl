@@ -1,6 +1,8 @@
 // @global
-FlpUiItem {{ id }}_ui = {"web_value", {{ param.caption }}, {{ param.unit }}, {{ value.col }}, {{ value.row }}, {{ value.w }}, {{ value.h }}, false, 0, 0, 0, 0, {{ param.decimals }}};
+FlpUiItem {{ id }}_ui = {"web_value", {{ param.caption }}, {{ param.unit }}, {{ value.col }}, {{ value.row }}, {{ value.w }}, {{ value.h }}, {{ value.page }}, false, 0, 0, 0, 0, {{ param.decimals }}};
 // @setup
 flpUiAdd(&{{ id }}_ui);
+{{ id }}_ui.color = {{ param.color }};
+{{ id }}_ui.back = {{ param.back }};
 // @loop
 {{ id }}_ui.value = {{ input.in }};

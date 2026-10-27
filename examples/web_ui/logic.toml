@@ -10,6 +10,8 @@ ssid = "MyNetwork"
 id = "ui"
 type = "web_ui"
 title = "Панель ESP32"
+password = "1234"
+bg = "#101820"
 
 [[block]]
 id = "head"
@@ -24,6 +26,7 @@ h = 1
 id = "sw"
 type = "web_switch"
 caption = "Свет"
+color = "#f5a623"
 col = 1
 row = 2
 w = 4
@@ -153,3 +156,53 @@ to   = "txt.in"
 [[link]]
 from = "txt.out"
 to   = "info.in"
+
+[[block]]
+id = "line"
+type = "web_shape"
+shape = 0
+thickness = 2
+color = "#4a90d9"
+col = 1
+row = 7
+w = 12
+h = 1
+
+[[block]]
+id = "box"
+type = "web_shape"
+shape = 3
+thickness = 3
+color = "#e94f37"
+col = 1
+row = 8
+w = 2
+h = 2
+
+[[block]]
+id = "trend"
+type = "web_chart"
+caption = "Ползунок"
+unit = "%"
+min = 0.0
+max = 100.0
+period = 2
+points = 60
+color = "#7ed321"
+col = 3
+row = 8
+w = 10
+h = 4
+
+[[block]]
+id = "net"
+type = "web_net"
+init_ssid = "MyNetwork"
+col = 1
+row = 12
+w = 6
+h = 5
+
+[[link]]
+from = "sld.out"
+to   = "trend.in"

@@ -1,6 +1,8 @@
 // @global
-FlpUiItem {{ id }}_ui = {"web_button", {{ param.caption }}, "", {{ value.col }}, {{ value.row }}, {{ value.w }}, {{ value.h }}, true, 0, 0, 0, 0, 0};
+FlpUiItem {{ id }}_ui = {"web_button", {{ param.caption }}, "", {{ value.col }}, {{ value.row }}, {{ value.w }}, {{ value.h }}, {{ value.page }}, true, 0, 0, 0, 0, 0};
 // @setup
 flpUiAdd(&{{ id }}_ui);
+{{ id }}_ui.color = {{ param.color }};
+{{ id }}_ui.back = {{ param.back }};
 // @loop
 {{ output.out }} = {{ id }}_ui.value != 0;

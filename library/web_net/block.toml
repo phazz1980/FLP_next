@@ -1,0 +1,200 @@
+[block]
+type = "web_net"
+name = "Веб-настройки сети"
+symbol = "NET"
+group = "Веб-интерфейс"
+description = "Форма настроек сети на веб-странице: Wi-Fi (имя сети, пароль) и адрес (DHCP, IP, шлюз, маска). Введённое сохраняется во флеш и сразу применяется блоками «Wi-Fi» и «Ethernet» проекта — их собственные поля сети при этом не используются. Значения также выдаются на выходы."
+memory = true
+includes = ["Preferences.h", "WiFi.h"]
+
+[[output]]
+name = "ssid"
+type = "string"
+label = "SSID"
+description = "Имя сети Wi-Fi"
+
+[[output]]
+name = "password"
+type = "string"
+label = "Пароль"
+description = "Пароль сети Wi-Fi"
+
+[[output]]
+name = "dhcp"
+type = "bool"
+label = "DHCP"
+description = "true — адрес по DHCP"
+
+[[output]]
+name = "ip"
+type = "string"
+label = "IP"
+description = "Постоянный IP-адрес"
+
+[[output]]
+name = "gateway"
+type = "string"
+label = "Шлюз"
+description = "Шлюз (он же DNS)"
+
+[[output]]
+name = "subnet"
+type = "string"
+label = "Маска"
+description = "Маска подсети"
+
+[[output]]
+name = "mode"
+type = "int"
+label = "Режим"
+description = "Режим Wi-Fi: 0 клиент, 1 точка доступа, 2 клиент и точка"
+
+[[output]]
+name = "changed"
+type = "bool"
+label = "Изм."
+description = "true один цикл после сохранения новых настроек со страницы"
+
+[[param]]
+name = "caption"
+type = "string"
+label = "Подпись"
+default = "Настройки сети"
+description = "Подпись виджета на странице"
+
+[[param]]
+name = "init_ssid"
+type = "string"
+label = "Сеть по умолчанию"
+default = ""
+description = "Имя сети Wi-Fi до первого сохранения со страницы"
+
+[[param]]
+name = "init_password"
+type = "string"
+label = "Пароль по умолчанию"
+default = ""
+description = "Пароль до первого сохранения со страницы"
+
+[[param]]
+name = "init_dhcp"
+type = "bool"
+label = "DHCP по умолчанию"
+default = true
+description = "Получать адрес автоматически до первого сохранения"
+
+[[param]]
+name = "init_ip"
+type = "string"
+label = "IP по умолчанию"
+default = "192.168.1.177"
+description = "Постоянный IP-адрес до первого сохранения"
+
+[[param]]
+name = "init_gateway"
+type = "string"
+label = "Шлюз по умолчанию"
+default = "192.168.1.1"
+description = "Шлюз до первого сохранения"
+
+[[param]]
+name = "init_subnet"
+type = "string"
+label = "Маска по умолчанию"
+default = "255.255.255.0"
+description = "Маска подсети до первого сохранения"
+
+[[param]]
+name = "init_ap_ssid"
+type = "string"
+label = "Точка доступа по умолчанию"
+default = ""
+description = "Имя своей точки доступа до первого сохранения со страницы"
+
+[[param]]
+name = "init_ap_password"
+type = "string"
+label = "Пароль точки по умолчанию"
+default = ""
+description = "Пароль своей точки доступа до первого сохранения (не короче 8 символов или пусто)"
+
+[[param]]
+name = "init_mode"
+type = "int"
+label = "Режим Wi-Fi по умолчанию"
+default = 0
+description = "Режим Wi-Fi до первого сохранения со страницы"
+
+[[param.choice]]
+value = 0
+label = "Клиент"
+
+[[param.choice]]
+value = 1
+label = "Точка доступа"
+
+[[param.choice]]
+value = 2
+label = "Клиент и точка доступа"
+
+[[param.choice]]
+value = 3
+label = "Клиент, при отсутствии связи — точка"
+
+[[param]]
+name = "init_ap_delay"
+type = "int"
+label = "Задержка точки, с"
+default = 30
+min = 5
+max = 3600
+description = "Через сколько секунд без связи с сетью включается точка доступа (режим «при отсутствии связи»)"
+
+[[param]]
+name = "col"
+type = "int"
+label = "Колонка"
+default = 1
+description = "Левая колонка сетки страницы (1–12)"
+
+[[param]]
+name = "row"
+type = "int"
+label = "Строка"
+default = 1
+description = "Верхняя строка сетки страницы (1, 2, …)"
+
+[[param]]
+name = "w"
+type = "int"
+label = "Ширина"
+default = 6
+description = "Ширина в колонках сетки (1–12)"
+
+[[param]]
+name = "h"
+type = "int"
+label = "Высота"
+default = 5
+description = "Высота в строках сетки"
+
+[[param]]
+name = "page"
+type = "int"
+label = "Страница"
+default = 1
+description = "Номер страницы веб-интерфейса (1, 2, …); названия страниц задаются в блоке «Веб-интерфейс»"
+
+[[param]]
+name = "color"
+type = "string"
+label = "Цвет"
+default = ""
+description = "Основной цвет виджета: #rrggbb или название. Пусто — по умолчанию"
+
+[[param]]
+name = "back"
+type = "string"
+label = "Цвет фона"
+default = ""
+description = "Цвет фона плитки: #rrggbb или название. Пусто — по умолчанию"

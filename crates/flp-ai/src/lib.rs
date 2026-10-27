@@ -7,6 +7,7 @@
 
 pub mod agent;
 pub mod folder;
+pub mod openai;
 pub mod provider;
 
 use std::fs;

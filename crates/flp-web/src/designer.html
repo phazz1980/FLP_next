@@ -18,8 +18,8 @@
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, "Segoe UI", sans-serif;
-  display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: 220px minmax(0, 1fr) 300px; }
-header { grid-column: 1 / 4; display: flex; gap: 8px; align-items: center; padding: 8px 12px;
+  display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr) 300px; }
+header { grid-column: 1 / 3; display: flex; gap: 8px; align-items: center; padding: 8px 12px;
   background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 header h1 { font-size: 15px; margin: 0 12px 0 0; }
 a { color: var(--accent); }
@@ -30,12 +30,9 @@ input, select { font: inherit; color: var(--text); background: var(--bg); border
   border-radius: 5px; padding: 3px 6px; width: 100%; }
 input[type=checkbox] { width: auto; }
 aside { background: var(--panel); overflow: auto; padding: 10px; }
-#palette { border-right: 1px solid var(--line); }
 #props { border-left: 1px solid var(--line); }
 aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 14px 0 6px; }
 aside h2:first-child { margin-top: 0; }
-.pal { display: block; width: 100%; text-align: left; margin: 3px 0; }
-.pal small { display: block; color: var(--muted); }
 main { overflow: auto; padding: 12px; min-width: 0; max-width: 100vw; }
 #grid { position: relative; margin-bottom: 14px; border-radius: 8px; border: 1px dashed var(--line); }
 .item { position: absolute; background: var(--card); border: 1.5px solid var(--line); border-radius: 7px;
@@ -45,20 +42,19 @@ main { overflow: auto; padding: 12px; min-width: 0; max-width: 100vw; }
 .item span { color: var(--muted); font-size: 11px; }
 .item .rs { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize;
   background: linear-gradient(135deg, transparent 50%, var(--accent) 50%); }
-#preview { width: 100%; height: 420px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+#preview { width: 100%; height: calc(100vh - 150px); min-height: 360px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 label.f { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--muted); }
 .row { display: flex; gap: 6px; align-items: center; }
-#status { grid-column: 1 / 4; padding: 6px 80px 6px 12px; border-top: 1px solid var(--line); background: var(--panel); min-height: 30px; }
+#status { grid-column: 1 / 3; padding: 6px 80px 6px 12px; border-top: 1px solid var(--line); background: var(--panel); min-height: 30px; }
 #status .err { color: var(--err); }
 #version { position: fixed; right: 12px; bottom: 6px; color: var(--muted); font-size: 12px; pointer-events: none; }
+#tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+.mode.on, #tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .hint { color: var(--muted); font-size: 12px; margin: 6px 0; }
 @media (max-width: 900px) {
-  body { grid-template-columns: 1fr; grid-template-rows: auto auto auto auto auto; height: auto; }
+  body { grid-template-columns: 1fr; grid-template-rows: auto auto auto auto; height: auto; }
   header, #status { grid-column: 1; }
-  #palette, #props { border: 0; border-bottom: 1px solid var(--line); }
-  #palette { display: flex; flex-wrap: wrap; gap: 4px; }
-  #palette h2 { width: 100%; }
-  .pal { width: auto; }
+  #props { border: 0; border-bottom: 1px solid var(--line); }
 }
 </style>
 </head>
@@ -69,12 +65,14 @@ label.f { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--muted
   <span class="hint" id="hostHint"></span>
 </header>
 
-<aside id="palette"></aside>
-
 <main>
+  <div class="row" style="margin-bottom:10px">
+    <button id="modeEdit" class="mode on">Редактор</button>
+    <button id="modeView" class="mode" title="Та же страница, что в прошивке">Предпросмотр</button>
+  </div>
+  <div id="tabs"></div>
   <div id="grid"></div>
-  <h2 style="font-size:12px;color:var(--muted);text-transform:uppercase;margin:0 0 6px">Предпросмотр (та же страница, что в прошивке)</h2>
-  <iframe id="preview" title="Предпросмотр"></iframe>
+  <iframe id="preview" title="Предпросмотр" hidden></iframe>
 </main>
 
 <aside id="props"></aside>
@@ -84,9 +82,10 @@ label.f { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--muted
 <script>
 "use strict";
 const GROUP = "Веб-интерфейс";
+const COLOR_PARAMS = ["color", "back", "bg"];
 const COLS = 12, CW = 60, CH = 44, GAP = 6;
 const $ = (id) => document.getElementById(id);
-let types = {}, schema = null, selected = null, pageHtml = "";
+let types = {}, schema = null, selected = null, pageHtml = "", curPage = 1;
 
 async function api(name, args = {}) {
   const r = await fetch("/api/" + name, {
@@ -117,6 +116,11 @@ function widgetParam(b, name, d) {
   const p = (types[b.type]?.params || []).find((x) => x.name === name);
   return p ? val(b, p) : d;
 }
+const pageOf = (b) => Math.max(1, num(widgetParam(b, "page", 1), 1));
+function pageNames(host) {
+  const n = host ? String(widgetParam(host, "pages", "Главная")).split(";").map((x) => x.trim()) : [];
+  return n.length && n.some((x) => x) ? n : ["Главная"];
+}
 function rect(b) {
   return {
     c: num(widgetParam(b, "col", 1), 1), r: num(widgetParam(b, "row", 1), 1),
@@ -130,8 +134,11 @@ async function reload() {
 }
 
 function render() {
-  const widgets = (schema.logic.block || []).filter(isWidget);
+  const all = (schema.logic.block || []).filter(isWidget);
   const host = (schema.logic.block || []).find((b) => b.type === "web_ui");
+  const names = pageNames(host);
+  if (curPage > names.length) curPage = names.length;
+  const widgets = all.filter((b) => Math.min(pageOf(b), names.length) === curPage);
   const wifi = (schema.logic.block || []).find((b) => b.type === "wifi");
   $("addHost").hidden = !!host;
   $("hostHint").textContent = !wifi
@@ -148,9 +155,46 @@ function render() {
   g.style.backgroundSize = `${CW + GAP}px ${CH + GAP}px`;
   for (const b of widgets) g.appendChild(itemEl(b));
 
-  renderPalette();
+  renderTabs(names, host);
   renderProps();
-  renderPreview(widgets, host);
+  renderPreview(all, host);
+}
+
+function renderTabs(names, host) {
+  const t = $("tabs");
+  t.textContent = "";
+  names.forEach((n, i) => {
+    const btn = document.createElement("button");
+    btn.textContent = n || `Страница ${i + 1}`;
+    btn.className = i + 1 === curPage ? "on" : "";
+    btn.onclick = () => { curPage = i + 1; selected = null; render(); };
+    t.appendChild(btn);
+  });
+  const add = document.createElement("button");
+  add.textContent = "＋ страница";
+  add.title = "Добавить страницу: слева на странице устройства появится меню";
+  add.onclick = () => act(async () => {
+    if (!host) await api("add_block", { type: "web_ui", id: "ui" });
+    const id = host ? host.id : "ui";
+    await api("set_params", { id, params: { pages: [...names, `Страница ${names.length + 1}`].join(";") } });
+    curPage = names.length + 1;
+  });
+  t.appendChild(add);
+  if (names.length > 1) {
+    const del = document.createElement("button");
+    del.textContent = "Удалить страницу";
+    del.title = "Виджеты удаляемой страницы переходят на предыдущую";
+    del.onclick = () => act(async () => {
+      const keep = names.filter((_, i) => i + 1 !== curPage);
+      for (const b of (schema.logic.block || []).filter(isWidget)) {
+        const pg = pageOf(b);
+        if (pg >= curPage) await api("set_params", { id: b.id, params: { page: Math.max(1, pg - 1) } });
+      }
+      await api("set_params", { id: host.id, params: { pages: keep.join(";") } });
+      curPage = Math.max(1, curPage - 1);
+    });
+    t.appendChild(del);
+  }
 }
 
 function itemEl(b) {
@@ -208,37 +252,6 @@ function drag(el, handle, b) {
   });
 }
 
-function renderPalette() {
-  const p = $("palette");
-  p.textContent = "";
-  const h = document.createElement("h2");
-  h.textContent = "Виджеты";
-  p.appendChild(h);
-  for (const t of Object.values(types)) {
-    if (t.type === "web_ui") continue;
-    const btn = document.createElement("button");
-    btn.className = "pal";
-    btn.textContent = t.name;
-    const small = document.createElement("small");
-    small.textContent = t.description.split(":")[0];
-    btn.appendChild(small);
-    btn.title = t.description;
-    btn.onclick = () => act(async () => {
-      const { c, r } = freeSpot(t);
-      const res = await api("add_block", { type: t.type, params: { col: c, row: r } });
-      selected = res.id || selected;
-    });
-    p.appendChild(btn);
-  }
-}
-
-// First free place for a new widget: below everything that is already on the page.
-function freeSpot(t) {
-  const widgets = (schema.logic.block || []).filter(isWidget);
-  const bottom = Math.max(0, ...widgets.map((b) => rect(b).r + rect(b).h - 1));
-  return { c: 1, r: bottom + 1 };
-}
-
 function sources(inputType) {
   // all block outputs of a compatible type (the schema view lists the active ports)
   const out = [];
@@ -259,7 +272,7 @@ function renderProps() {
   h.textContent = b ? `${types[b.type]?.name || b.type} · ${b.id}` : "Свойства";
   el.appendChild(h);
   if (!b) {
-    if (host) el.appendChild(paramField(host, types.web_ui.params[0]));
+    if (host) for (const hp of types.web_ui.params) el.appendChild(paramField(host, hp));
     const p = document.createElement("p");
     p.className = "hint";
     p.textContent = "Добавьте виджет слева и перетащите его в сетку. Выделите виджет, чтобы настроить подпись, единицы и привязку к схеме.";
@@ -325,6 +338,24 @@ function paramField(b, p) {
     inp.type = "checkbox";
     inp.checked = !!v;
     inp.onchange = () => set(b, p.name, inp.checked);
+  } else if (p.choices && p.choices.length) {
+    inp = document.createElement("select");
+    for (const c of p.choices) inp.appendChild(new Option(c.label, c.value));
+    inp.value = v;
+    inp.onchange = () => set(b, p.name, Number(inp.value));
+  } else if (COLOR_PARAMS.includes(p.name)) {
+    // a colour is a CSS string; empty means "default", the picker is a shortcut
+    inp = document.createElement("div");
+    inp.className = "row";
+    const txt = document.createElement("input");
+    const pick = document.createElement("input");
+    pick.type = "color";
+    pick.style.width = "44px";
+    txt.value = v || "";
+    if (/^#[0-9a-f]{6}$/i.test(txt.value)) pick.value = txt.value;
+    txt.onchange = () => set(b, p.name, txt.value.trim());
+    pick.onchange = () => set(b, p.name, pick.value);
+    inp.append(txt, pick);
   } else {
     inp = document.createElement("input");
     inp.type = p.kind === "string" ? "text" : "number";
@@ -345,7 +376,10 @@ function set(b, name, value) {
 
 // ---- preview: the device page with its three requests answered locally ----
 function renderPreview(widgets, host) {
-  const layout = { t: host ? String(widgetParam(host, "title", "")) : "Панель", i: [] };
+  const layout = {
+    t: host ? String(widgetParam(host, "title", "")) : "Панель", p: pageNames(host).join(";"), i: [],
+    bg: host ? String(widgetParam(host, "bg", "")) : "", y: host && widgetParam(host, "system", true) ? 1 : 0,
+  };
   const state = [];
   for (const b of widgets) {
     const k = b.type.slice(4);
@@ -353,10 +387,14 @@ function renderPreview(widgets, host) {
     const g = (n, d) => { const x = widgetParam(b, n, d); return x === undefined || x === null ? d : x; };
     const min = num(g("min", 0), 0), max = num(g("max", 0), 0);
     layout.i.push({
-      k, l: String(g("caption", "")), u: String(g("unit", "")), c: r.c, r: r.r, w: r.w, h: r.h,
+      k, l: String(g("caption", "")), u: String(g("unit", "")), c: r.c, r: r.r, w: r.w, h: r.h, g: pageOf(b),
       d: k === "value" ? num(g("decimals", 1), 1) : (k === "gauge" ? 1 : 3),
       a: min, b: max, s: num(g("step", 1), 1),
+      o: String(g("color", "")), q: String(g("back", "")),
     });
+    const last = layout.i[layout.i.length - 1];
+    if (k === "chart") last.s = num(g("period", 5), 5);
+    if (k === "shape") { last.a = num(g("shape", 0), 0); last.b = num(g("thickness", 2), 2); last.l = ""; }
     let v = 0;
     if (k === "switch") v = g("initial", false) ? 1 : 0;
     else if (k === "slider" || k === "input") v = num(g("initial", 0), 0);
@@ -364,6 +402,7 @@ function renderPreview(widgets, host) {
     else if (k === "gauge") v = (min + max) / 2;
     else if (k === "value") v = 12.3;
     else if (k === "text") v = "Текст со входа";
+    else if (k === "net") v = [g("ssid", ""), "", g("dhcp", true) ? "1" : "0", g("ip", ""), g("gateway", ""), g("subnet", ""), g("ap_ssid", ""), "", String(g("init_mode", 0)), String(g("init_ap_delay", 30))].join("\n");
     state.push(v);
   }
   const shim = `<script>
@@ -371,11 +410,23 @@ var L=${JSON.stringify(layout)},S=${JSON.stringify(state)};
 window.fetch=function(u){u=String(u);
  if(u.indexOf('/ui/layout')==0)return Promise.resolve({json:function(){return Promise.resolve(L)}});
  if(u.indexOf('/ui/state')==0)return Promise.resolve({json:function(){return Promise.resolve(S)}});
+ if(u.indexOf('/ui/hist')==0){var a=[];for(var j=0;j<60;j++)a.push(Math.round(50+30*Math.sin(j/6)+8*Math.sin(j*1.7)));return Promise.resolve({json:function(){return Promise.resolve(a)}})}
+ if(u.indexOf('/ui/scan')==0)return Promise.resolve({text:function(){return Promise.resolve('HomeNet'+String.fromCharCode(9)+'-48'+String.fromCharCode(10)+'Guest'+String.fromCharCode(9)+'-71'+String.fromCharCode(10))}})
+ if(u.indexOf('/ui/info')==0)return Promise.resolve({json:function(){return Promise.resolve({ip:'192.168.1.50',mac:'AA:BB:CC:DD:EE:FF',rssi:-58,up:93784,chip:'ESP32',cpu:240,heap:210000,heapAll:320000,flash:4194304,sketch:900000,free:1000000,build:'предпросмотр',u:true})}})}
  var m=/[?&]i=(\\d+)&v=([^&]*)/.exec(u);if(m)S[+m[1]]=+m[2];
  return Promise.resolve({})};
 <\/script>`;
   $("preview").srcdoc = pageHtml.replace("</head>", shim + "</head>");
 }
+
+function setMode(preview) {
+  $("grid").hidden = preview;
+  $("preview").hidden = !preview;
+  $("modeEdit").classList.toggle("on", !preview);
+  $("modeView").classList.toggle("on", preview);
+}
+$("modeEdit").onclick = () => setMode(false);
+$("modeView").onclick = () => setMode(true);
 
 $("addHost").onclick = () => act(async () => { await api("add_block", { type: "web_ui", id: "ui" }); });
 
@@ -390,6 +441,16 @@ $("addHost").onclick = () => act(async () => { await api("add_block", { type: "w
     say("Готово. Изменения сохраняются в проект сразу; прошивку соберите в редакторе схемы или командой flp build.");
   } catch (e) { say(e.message, true); }
 })();
+// widgets are created in the editor: pick up changes made there
+let lastSchema = "";
+setInterval(async () => {
+  if (document.hidden || document.activeElement?.closest?.("#props")) return;
+  try {
+    const next = await api("get_schema");
+    const text = JSON.stringify(next);
+    if (text !== lastSchema) { lastSchema = text; schema = next; render(); }
+  } catch (e) { /* the server may be busy; try again */ }
+}, 2000);
 // keeps the server alive while the page is open
 setInterval(() => fetch("/ping").catch(() => {}), 10000);
 </script>

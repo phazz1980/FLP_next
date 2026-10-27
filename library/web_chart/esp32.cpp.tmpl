@@ -1,0 +1,10 @@
+// @global
+float {{ id }}_buf[{{ value.points }}];
+FlpUiItem {{ id }}_ui = {"web_chart", {{ param.caption }}, {{ param.unit }}, {{ value.col }}, {{ value.row }}, {{ value.w }}, {{ value.h }}, {{ value.page }}, false, 0, {{ param.min }}, {{ param.max }}, {{ value.period }}, 1, String(), {{ id }}_buf, {{ value.points }}};
+// @setup
+flpUiAdd(&{{ id }}_ui);
+{{ id }}_ui.color = {{ param.color }};
+{{ id }}_ui.back = {{ param.back }};
+// @loop
+{{ id }}_ui.value = {{ input.in }};
+flpUiSample(&{{ id }}_ui);

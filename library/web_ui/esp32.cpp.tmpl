@@ -5,11 +5,17 @@ struct FlpUiItem {
   const char *caption;
   const char *unit;
   uint8_t col, row, w, h;
+  uint8_t page; // 1-based page number
   bool rw;      // the page may change the value
   float value;
-  float lo, hi, step;
+  float lo, hi, step; // for a chart `step` is the sampling period in seconds
   uint8_t dec;  // digits after the point on the page
   String text;
+  float *hist;  // chart history (ring buffer of hn points), null for other widgets
+  uint16_t hn, hpos, hfill;
+  uint32_t hlast;
+  const char *color; // CSS colour of the widget, empty/null: default
+  const char *back;  // CSS colour of the tile background
 };
 #define FLP_UI_MAX 32
 FlpUiItem *flpUiItems[FLP_UI_MAX];
@@ -17,19 +23,43 @@ uint8_t flpUiCount = 0;
 void flpUiAdd(FlpUiItem *item) {
   if (flpUiCount < FLP_UI_MAX) flpUiItems[flpUiCount++] = item;
 }
+// Chart widgets call this every loop: a point is stored once per period.
+void flpUiSample(FlpUiItem *it) {
+  uint32_t now = millis();
+  if (it->hfill && now - it->hlast < (uint32_t)it->step * 1000UL) return;
+  it->hlast = now;
+  float v = it->value;
+  if (isnan(v) || isinf(v)) v = 0;
+  it->hist[it->hpos] = v;
+  it->hpos = (it->hpos + 1) % it->hn;
+  if (it->hfill < it->hn) it->hfill++;
+}
 #define FLP_WEBUI 1
 // @global
 const char {{ id }}_html[] PROGMEM = R"FLPUI(<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FLP_next</title>
 <style>
 :root{color-scheme:light dark;--b:#fff;--f:#222;--c:#f1f3f6;--a:#2f7de1;--g:#2da44e}
 @media(prefers-color-scheme:dark){:root{--b:#14171c;--f:#e6e8eb;--c:#222831;--a:#5aa0f5;--g:#3fb950}}
-body{margin:0;padding:12px;background:var(--b);color:var(--f);font:15px system-ui,sans-serif}
+body{margin:0;background:var(--b);color:var(--f);font:15px system-ui,sans-serif;display:flex;min-height:100vh}
+#n{flex:none;width:200px;box-sizing:border-box;padding:12px 8px;background:var(--c);display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh;overflow:auto}
+#n a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;color:inherit;text-decoration:none;white-space:nowrap}
+#n a i{flex:none;width:26px;height:26px;border-radius:50%;background:#8884;font-style:normal;text-align:center;line-height:26px;font-size:13px}
+#n a.on{background:var(--a);color:#fff}
+#n a.on i{background:#fff4}
+[hidden]{display:none!important}
+#m{flex:1;min-width:0;padding:12px}
 h1{font-size:18px;margin:0 0 10px}
-#g{display:grid;grid-template-columns:repeat(12,1fr);grid-auto-rows:56px;gap:8px}
+@media(max-width:900px){ #n{width:64px}#n a{justify-content:center;padding:8px 0}#n a span{display:none}}
+@media(max-width:600px){body{flex-direction:column}#n{width:auto;height:auto;position:static;flex-direction:row;overflow-x:auto;padding:8px}#n a{padding:6px 12px}#n a span{display:inline}#n a i{display:none}}
+#gs>div{display:grid;grid-template-columns:repeat(12,1fr);grid-auto-rows:56px;gap:8px}
+#gs>div.sy{display:block;max-width:560px}
 .w{background:var(--c);border-radius:8px;padding:6px 10px;display:flex;flex-direction:column;justify-content:center;min-width:0;overflow:hidden}
 .w small{opacity:.7;font-size:12px}
 .w b{font-size:22px;font-weight:600}
 .w.p{padding:0}
+.w.cht{justify-content:flex-start}
+.cv{flex:1;min-height:0;position:relative}
+.cv canvas{position:absolute;left:0;top:0;width:100%;height:100%}
 button,input{font:inherit;color:inherit}
 .btn{border:0;border-radius:8px;background:var(--a);color:#fff;width:100%;height:100%;touch-action:manipulation;user-select:none}
 .btn.on{background:var(--g)}
@@ -39,14 +69,30 @@ button,input{font:inherit;color:inherit}
 .bar{height:10px;border-radius:5px;background:#8884;overflow:hidden;margin-top:4px}
 .bar i{display:block;height:100%;background:var(--a)}
 input[type=range]{width:100%}
-input[type=number]{width:100%;box-sizing:border-box;background:transparent;border:1px solid #8886;border-radius:6px;padding:4px}
-</style></head><body><h1 id="t"></h1><div id="g"></div><script>
-var G=document.getElementById('g'),T=document.getElementById('t'),E=[];
-function S(i,v){fetch('/ui/set?i='+i+'&v='+v).catch(function(){})}
+input[type=number],input[type=password],input[type=text]{width:100%;box-sizing:border-box;background:transparent;border:1px solid #8886;border-radius:6px;padding:4px}
+table{border-collapse:collapse;width:100%}
+td{padding:6px 8px;border-bottom:1px solid #8883}
+td:first-child{opacity:.7}
+.bt{border:0;border-radius:8px;background:var(--a);color:#fff;padding:8px 14px;margin-top:8px}
+#lg{max-width:320px;margin:60px auto;display:flex;flex-direction:column;gap:8px}
+</style></head><body><nav id="n" hidden></nav><div id="m"><h1 id="t"></h1><div id="gs"></div></div><script>
+var GS=document.getElementById('gs'),N=document.getElementById('n'),T=document.getElementById('t'),M=document.getElementById('m'),E=[],P=[],A=[],K='';
+try{K=localStorage.getItem('flpk')||''}catch(e){}
+function F(u,o){return fetch(u+(u.indexOf('?')<0?'?':'&')+'k='+encodeURIComponent(K),o)}
+function S(i,v){F('/ui/set?i='+i+'&v='+v).catch(function(){})}
 function h(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}
 function mk(d,i){
  var w=h('div','w'),k=d.k,u=d.u?' '+d.u:'',dn=false;
  w.style.gridColumn=d.c+' / span '+d.w;w.style.gridRow=d.r+' / span '+d.h;
+ if(d.q)w.style.background=d.q;
+ if(d.o){w.style.setProperty('--a',d.o);if(k!='button'&&k!='switch')w.style.setProperty('--g',d.o)}
+ if(k=='shape'){
+  var s=h('div'),t=Math.max(1,d.b||2),c=d.o||'currentColor',m=d.a;w.style.background='none';w.style.padding='0';
+  s.style.boxSizing='border-box';
+  if(m==0){s.style.borderTop=t+'px solid '+c;s.style.width='100%'}
+  else if(m==1){s.style.borderLeft=t+'px solid '+c;s.style.height='100%';s.style.alignSelf='center'}
+  else{s.style.border=t+'px solid '+c;s.style.width=s.style.height='100%';s.style.background=d.q||'none';s.style.borderRadius=m==3?'50%':'8px'}
+  w.appendChild(s);return[w,function(){}]}
  if(k=='label'){w.appendChild(h('b','',d.l));return[w,function(){}]}
  if(k=='button'||k=='switch'){
   var b=h('button','btn',d.l);w.className='w p';w.appendChild(b);
@@ -65,6 +111,33 @@ function mk(d,i){
   w.appendChild(h('small','',d.l+u));w.appendChild(n);
   n.onchange=function(){S(i,n.value)};
   return[w,function(v){if(document.activeElement!=n)n.value=v}]}
+ if(k=='net'){
+  var nf={},nm=[['o','Режим Wi-Fi','select'],['s','Сеть Wi-Fi','text'],['p','Пароль (пусто — не менять)','password'],['d','Адрес по DHCP','checkbox'],['i','IP-адрес','text'],['g','Шлюз','text'],['m','Маска','text'],['a','Своя точка доступа','text'],['b','Пароль точки (пусто — не менять)','password'],['w','Задержка точки без связи, с','number']],bt=h('button','bt','Сохранить'),ms=h('small','',''),sc=h('button','bt','Сканировать'),sl=h('select');
+  w.className='w cht';w.appendChild(h('b','',d.l));
+  nm.forEach(function(r){var l=h('label','r'),e=r[2]=='select'?h('select'):h('input');
+   if(r[2]=='select')['Клиент','Точка доступа','Клиент и точка','Клиент, при отсутствии связи — точка'].forEach(function(t,j){e.appendChild(new Option(t,j))});else e.type=r[2];
+   l.appendChild(h('small','',r[1]));l.appendChild(e);if(r[2]=='text')e.style.flex='1';w.appendChild(l);nf[r[0]]=e});
+  function ds(){['i','g','m'].forEach(function(c){nf[c].disabled=nf.d.checked});
+   var m=+nf.o.value;['s','p'].forEach(function(c){nf[c].disabled=m==1});['a','b'].forEach(function(c){nf[c].disabled=m==0});nf.w.disabled=m!=3;sc.disabled=m==1}
+  nf.d.onchange=nf.o.onchange=ds;
+  function chk(){var e='';
+   [['s','Сеть Wi-Fi'],['a','Точка доступа']].forEach(function(r){var v=nf[r[0]].value;if(new Blob([v]).size>32)e=r[1]+': имя не длиннее 32 байт'});
+   [['p','Пароль'],['b','Пароль точки']].forEach(function(r){var v=nf[r[0]].value;
+    if(v&&!/^[ -~]*$/.test(v))e=r[1]+': недопустимые символы (только латиница, цифры и знаки ASCII)';
+    else if(v&&!(v.length>=8&&v.length<=63)&&!/^[0-9a-fA-F]{64}$/.test(v))e=r[1]+': нужно 8-63 символа'});
+   return e}
+  bt.onclick=function(){var er=chk();if(er){ms.textContent=er;return}var q='';nm.forEach(function(r){q+='&'+r[0]+'='+encodeURIComponent(r[0]=='d'?(nf.d.checked?'1':'0'):nf[r[0]].value)});
+   F('/ui/net?i='+i+q).then(function(){ms.textContent='Сохранено и применено';nf.p.value=nf.b.value=''}).catch(function(){ms.textContent='Ошибка'})};
+  sl.style.display='none';sl.onchange=function(){if(sl.value)nf.s.value=sl.value};
+  function scn(){F('/ui/scan').then(function(r){return r.text()}).then(function(t){
+   if(t=='?'){setTimeout(scn,1500);return}
+   sl.innerHTML='';sl.appendChild(new Option('— найденные сети —',''));
+   t.split('\n').forEach(function(x){var p=x.split('\t');if(p[0])sl.appendChild(new Option(p[0]+' ('+p[1]+' дБм)',p[0]))});
+   sl.style.display='';sc.disabled=false;ms.textContent='Найдено сетей: '+(sl.options.length-1)}).catch(function(){sc.disabled=false;ms.textContent='Ошибка сканирования'})}
+  sc.onclick=function(){sc.disabled=true;ms.textContent='Сканирование...';scn()};
+  w.appendChild(sc);w.appendChild(sl);w.appendChild(bt);w.appendChild(ms);
+  return[w,function(v){if(w.contains(document.activeElement))return;var a=String(v).split('\n');
+   nf.s.value=a[0]||'';nf.d.checked=a[2]!='0';nf.i.value=a[3]||'';nf.g.value=a[4]||'';nf.m.value=a[5]||'';nf.a.value=a[6]||'';nf.o.value=a[8]||'0';nf.w.value=a[9]||'30';ds()}]}
  if(k=='led'){
   var r=h('div','r'),l=h('div','led');r.appendChild(l);r.appendChild(h('span','',d.l));w.appendChild(r);
   return[w,function(v){l.classList.toggle('on',v!=0)}]}
@@ -72,12 +145,58 @@ function mk(d,i){
   var q=h('b','',''),a=h('i'),z=h('div','bar');z.appendChild(a);
   w.appendChild(h('small','',d.l));w.appendChild(q);w.appendChild(z);
   return[w,function(v){q.textContent=(+v).toFixed(d.d)+u;a.style.width=Math.max(0,Math.min(100,(v-d.a)/(d.b-d.a)*100))+'%'}]}
+ if(k=='chart'){
+  var y=h('b','',''),cv=h('div','cv'),c=h('canvas'),H=[];w.className='w cht';
+  cv.appendChild(c);w.appendChild(h('small','',d.l));w.appendChild(y);w.appendChild(cv);
+  function dr(){
+   var W=c.width=c.clientWidth,Q=c.height=c.clientHeight,x=c.getContext('2d'),lo=d.a,hi=d.b;
+   if(!(hi>lo)&&H.length){lo=Math.min.apply(null,H);hi=Math.max.apply(null,H);if(hi==lo){lo-=1;hi+=1}else{var p=(hi-lo)*.1;lo-=p;hi+=p}}
+   var st=getComputedStyle(document.body),f=st.color,L=34;
+   x.font='11px system-ui';x.fillStyle=f;x.strokeStyle='#8883';x.lineWidth=1;
+   for(var j=0;j<=2;j++){var yy=4+(Q-8)*j/2;x.beginPath();x.moveTo(L,yy);x.lineTo(W,yy);x.stroke();
+    x.fillText((hi-(hi-lo)*j/2).toFixed(Math.abs(hi-lo)<10?1:0),0,yy+4)}
+   if(H.length<2)return;
+   x.strokeStyle=getComputedStyle(w).getPropertyValue('--a');x.lineWidth=2;x.beginPath();
+   H.forEach(function(v,j){var px=L+(W-L)*j/(H.length-1),py=4+(Q-8)*(1-(v-lo)/(hi-lo));j?x.lineTo(px,py):x.moveTo(px,py)});x.stroke()}
+  function ld(){F('/ui/hist?i='+i).then(function(r){return r.json()}).then(function(a){H=a;dr()}).catch(function(){})}
+  setInterval(ld,Math.max(1000,d.s*1000));ld();window.addEventListener('resize',dr);
+  return[w,function(v){y.textContent=(+v).toFixed(d.d)+u}]}
  var x=h('b','','');w.appendChild(h('small','',d.l));w.appendChild(x);
  return[w,function(v){x.textContent=(k=='value'?(+v).toFixed(d.d)+u:v)}]}
-function poll(){fetch('/ui/state').then(function(r){return r.json()}).then(function(a){a.forEach(function(v,i){if(E[i])E[i](v)})}).catch(function(){}).then(function(){setTimeout(poll,500)})}
-fetch('/ui/layout').then(function(r){return r.json()}).then(function(d){
- T.textContent=d.t;document.title=d.t;
- d.i.forEach(function(x,i){var m=mk(x,i);G.appendChild(m[0]);E.push(m[1])});poll()})
+function sy(){
+ var g=h('div','sy'),t=h('table'),R={},rows=[['ip','IP-адрес'],['mac','MAC'],['rssi','Сигнал Wi-Fi'],['up','Аптайм'],['chip','Чип'],['heap','Память (свободно)'],['flash','Флеш'],['app','Прошивка'],['build','Сборка']];
+ rows.forEach(function(r){var tr=h('tr'),v=h('td','','');tr.appendChild(h('td','',r[1]));tr.appendChild(v);t.appendChild(tr);R[r[0]]=v});
+ g.appendChild(t);var up=h('div');up.hidden=true;g.appendChild(up);
+ var f=h('input'),bt=h('button','bt','Загрузить прошивку'),st=h('div');f.type='file';f.accept='.bin';
+ up.appendChild(h('h2','','Обновление прошивки'));up.appendChild(f);up.appendChild(h('br'));up.appendChild(bt);up.appendChild(st);
+ bt.onclick=function(){var b=f.files[0];if(!b)return;var p=prompt('Пароль обновления','');st.textContent='...';
+  fetch('http://'+location.hostname+':8080/update?p='+encodeURIComponent(p||''),{method:'POST',headers:{'Content-Type':'text/plain'},body:b}).then(function(r){return r.text()}).then(function(x){st.textContent=x}).catch(function(){st.textContent='ошибка'})};
+ function ld(){if(g.hidden)return;F('/ui/info').then(function(r){return r.json()}).then(function(d){
+  var s=d.up;R.ip.textContent=d.ip;R.mac.textContent=d.mac;R.rssi.textContent=d.rssi+' дБм';
+  R.up.textContent=Math.floor(s/86400)+' д '+Math.floor(s/3600)%24+' ч '+Math.floor(s/60)%60+' мин';
+  R.chip.textContent=d.chip+', '+d.cpu+' МГц';R.heap.textContent=Math.round(d.heap/1024)+' из '+Math.round(d.heapAll/1024)+' КБ';
+  R.flash.textContent=Math.round(d.flash/1048576)+' МБ';R.app.textContent=Math.round(d.sketch/1024)+' КБ, свободно '+Math.round(d.free/1024)+' КБ';
+  R.build.textContent=d.build;up.hidden=!d.u}).catch(function(){})}
+ setInterval(ld,2000);g.onshow=ld;return g}
+function poll(){F('/ui/state').then(function(r){return r.json()}).then(function(a){a.forEach(function(v,i){if(E[i])E[i](v)})}).catch(function(){}).then(function(){setTimeout(poll,500)})}
+function go(n){P.forEach(function(g,j){g.hidden=j!=n});A.forEach(function(a,j){a.classList.toggle('on',j==n)});history.replaceState(null,'','#'+(n+1));if(P[n].onshow)P[n].onshow()}
+function lg(bad){
+ M.textContent='';var b=h('div');b.id='lg';b.appendChild(h('h1','','Вход'));
+ var p=h('input');p.type='password';p.placeholder='Пароль';var o=h('button','bt','Войти');
+ o.onclick=function(){K=p.value;try{localStorage.setItem('flpk',K)}catch(e){}location.reload()};
+ p.onkeydown=function(e){if(e.key=='Enter')o.onclick()};
+ b.appendChild(p);b.appendChild(o);if(bad)b.appendChild(h('div','','Неверный пароль'));M.appendChild(b);p.focus()}
+F('/ui/layout').then(function(r){if(r.status==403){lg(K!='');throw 0}return r.json()}).then(function(d){
+ T.textContent=d.t;document.title=d.t;if(d.bg)document.body.style.background=d.bg;
+ var nm=d.p.split(';');
+ function tab(s,g){g.hidden=true;GS.appendChild(g);P.push(g);var j=P.length-1;
+  var a=h('a');a.href='#'+(j+1);a.title=s;a.appendChild(h('i','',s.charAt(0).toUpperCase()));a.appendChild(h('span','',s));
+  a.onclick=function(e){e.preventDefault();go(j)};N.appendChild(a);A.push(a)}
+ nm.forEach(function(s){tab(s,h('div'))});
+ if(d.y)tab('Система',sy());
+ N.hidden=P.length<2;
+ d.i.forEach(function(x,i){var m=mk(x,i);P[Math.min(Math.max(x.g,1),nm.length)-1].appendChild(m[0]);E.push(m[1])});
+ go(Math.min(Math.max(parseInt(location.hash.slice(1))||1,1),P.length)-1);poll()}).catch(function(){})
 </script></body></html>)FLPUI";
 // @functions
 void {{ id }}_esc(String &o, const char *s) {
@@ -86,13 +205,27 @@ void {{ id }}_esc(String &o, const char *s) {
     if ((uint8_t)*s >= 32) o += *s;
   }
 }
+// The page itself is public; everything it reads or writes needs the password (argument k).
+bool {{ id }}_allowed(FLProgNetworkHttpServer *server) {
+  const char *pw = {{ param.password }};
+  if (!pw[0] || server->argumentValueAtKey("k") == pw) return true;
+  server->send(403, "text/plain", "auth");
+  return false;
+}
 void {{ id }}_page(FLProgNetworkHttpServer *server) {
   server->sendProgmem(200, "text/html; charset=utf-8", {{ id }}_html);
 }
 void {{ id }}_layout(FLProgNetworkHttpServer *server) {
+  if (!{{ id }}_allowed(server)) return;
   String o = "{\"t\":\"";
   {{ id }}_esc(o, {{ param.title }});
-  o += "\",\"i\":[";
+  o += "\",\"p\":\"";
+  {{ id }}_esc(o, {{ param.pages }});
+  o += "\",\"bg\":\"";
+  {{ id }}_esc(o, {{ param.bg }});
+  o += "\",\"y\":";
+  o += {{ 1 if value.system else 0 }};
+  o += ",\"i\":[";
   for (uint8_t i = 0; i < flpUiCount; i++) {
     FlpUiItem *it = flpUiItems[i];
     if (i) o += ',';
@@ -103,21 +236,26 @@ void {{ id }}_layout(FLProgNetworkHttpServer *server) {
     o += ",\"r\":"; o += it->row;
     o += ",\"w\":"; o += it->w;
     o += ",\"h\":"; o += it->h;
+    o += ",\"g\":"; o += it->page;
     o += ",\"d\":"; o += it->dec;
     o += ",\"a\":"; o += String(it->lo, 3);
     o += ",\"b\":"; o += String(it->hi, 3);
     o += ",\"s\":"; o += String(it->step, 3);
+    o += ",\"o\":\""; if (it->color) {{ id }}_esc(o, it->color);
+    o += "\",\"q\":\""; if (it->back) {{ id }}_esc(o, it->back);
+    o += '"';
     o += '}';
   }
   o += "]}";
   server->send(200, "application/json", o);
 }
 void {{ id }}_state(FLProgNetworkHttpServer *server) {
+  if (!{{ id }}_allowed(server)) return;
   String o = "[";
   for (uint8_t i = 0; i < flpUiCount; i++) {
     FlpUiItem *it = flpUiItems[i];
     if (i) o += ',';
-    if (!strcmp(it->kind, "web_text")) {
+    if (!strcmp(it->kind, "web_text") || !strcmp(it->kind, "web_net")) {
       o += '"'; {{ id }}_esc(o, it->text.c_str()); o += '"';
     } else {
       o += String(it->value, (unsigned int)it->dec);
@@ -127,6 +265,7 @@ void {{ id }}_state(FLProgNetworkHttpServer *server) {
   server->send(200, "application/json", o);
 }
 void {{ id }}_set(FLProgNetworkHttpServer *server) {
+  if (!{{ id }}_allowed(server)) return;
   if (server->hasArgumentKey("i") && server->hasArgumentKey("v")) {
     int i = server->argumentValueAtKey("i").toInt();
     float v = server->argumentValueAtKey("v").toFloat();
@@ -138,8 +277,100 @@ void {{ id }}_set(FLProgNetworkHttpServer *server) {
   }
   server->send(200, "text/plain", "ok");
 }
+// Network settings form: the widget block validates and saves what is stored here.
+void {{ id }}_net(FLProgNetworkHttpServer *server) {
+  if (!{{ id }}_allowed(server)) return;
+  int i = server->argumentValueAtKey("i").toInt();
+  if (i >= 0 && i < flpUiCount && !strcmp(flpUiItems[i]->kind, "web_net")) {
+    String a[10] = {"s", "p", "d", "i", "g", "m", "a", "b", "o", "w"};
+    String t;
+    for (uint8_t k = 0; k < 10; k++) {
+      String v = server->argumentValueAtKey(a[k]);
+      v.replace("\n", " ");
+      v.replace("\r", " ");
+      if (k) t += '\n';
+      t += v;
+    }
+    flpUiItems[i]->text = t;
+    flpUiItems[i]->value = 1;
+  }
+  server->send(200, "text/plain", "ok");
+}
+// Wi-Fi scan: the first call starts it, "?" means still running, then one "ssid<TAB>rssi" per line.
+void {{ id }}_scan(FLProgNetworkHttpServer *server) {
+  if (!{{ id }}_allowed(server)) return;
+  String o;
+  int n = WiFi.scanComplete();
+  if (n == WIFI_SCAN_FAILED) {
+    if (WiFi.getMode() == WIFI_MODE_NULL) WiFi.mode(WIFI_STA);
+    else if (WiFi.getMode() == WIFI_MODE_AP) WiFi.mode(WIFI_MODE_APSTA);
+    WiFi.scanNetworks(true);
+    o = "?";
+  } else if (n == WIFI_SCAN_RUNNING) {
+    o = "?";
+  } else {
+    for (int k = 0; k < n; k++) {
+      String s = WiFi.SSID(k);
+      if (s.length()) o += s + "\t" + String(WiFi.RSSI(k)) + "\n";
+    }
+    WiFi.scanDelete();
+  }
+  server->send(200, "text/plain", o);
+}
+// Chart history, oldest point first.
+void {{ id }}_hist(FLProgNetworkHttpServer *server) {
+  if (!{{ id }}_allowed(server)) return;
+  int i = server->argumentValueAtKey("i").toInt();
+  String o = "[";
+  if (i >= 0 && i < flpUiCount && flpUiItems[i]->hist) {
+    FlpUiItem *it = flpUiItems[i];
+    uint16_t start = (it->hpos + it->hn - it->hfill) % it->hn;
+    for (uint16_t k = 0; k < it->hfill; k++) {
+      if (k) o += ',';
+      o += String(it->hist[(start + k) % it->hn], 2);
+    }
+  }
+  o += ']';
+  server->send(200, "application/json", o);
+}
+{% if value.system %}
+// Technical data of the device for the «Система» page.
+void {{ id }}_info(FLProgNetworkHttpServer *server) {
+  if (!{{ id }}_allowed(server)) return;
+  char mac[18];
+  uint8_t *m = flpWifi.mac();
+  snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", m[0], m[1], m[2], m[3], m[4], m[5]);
+  uint32_t ip = flpWifi.clientIsReady() ? (uint32_t)flpWifi.localIP() : (uint32_t)flpWifi.accessPointIP();
+  String o = "{\"ip\":\"";
+  o += IPAddress(ip).toString();
+  o += "\",\"mac\":\""; o += mac;
+  o += "\",\"rssi\":"; o += String(flpWifi.rssi());
+  o += ",\"up\":"; o += String(millis() / 1000);
+  o += ",\"chip\":\""; o += ESP.getChipModel();
+  o += "\",\"cpu\":"; o += String(ESP.getCpuFreqMHz());
+  o += ",\"heap\":"; o += String(ESP.getFreeHeap());
+  o += ",\"heapAll\":"; o += String(ESP.getHeapSize());
+  o += ",\"flash\":"; o += String(ESP.getFlashChipSize());
+  o += ",\"sketch\":"; o += String(ESP.getSketchSize());
+  o += ",\"free\":"; o += String(ESP.getFreeSketchSpace());
+  o += ",\"build\":\"" __DATE__ " " __TIME__ "\"";
+#ifdef FLP_WEB_UPD
+  o += ",\"u\":true";
+#else
+  o += ",\"u\":false";
+#endif
+  o += '}';
+  server->send(200, "application/json", o);
+}
+{% endif %}
 // @setup
 flpWebSrv.addHandler("/ui", {{ id }}_page);
 flpWebSrv.addHandler("/ui/layout", {{ id }}_layout);
 flpWebSrv.addHandler("/ui/state", {{ id }}_state);
 flpWebSrv.addHandler("/ui/set", {{ id }}_set);
+flpWebSrv.addHandler("/ui/hist", {{ id }}_hist);
+flpWebSrv.addHandler("/ui/net", {{ id }}_net);
+flpWebSrv.addHandler("/ui/scan", {{ id }}_scan);
+{% if value.system %}
+flpWebSrv.addHandler("/ui/info", {{ id }}_info);
+{% endif %}

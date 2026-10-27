@@ -1,0 +1,106 @@
+[block]
+type = "web_chart"
+name = "Веб-график"
+symbol = "CHT"
+group = "Веб-интерфейс"
+description = "График на веб-странице: значение входа записывается раз в заданный период, на странице видна линия за последние точки. Если минимум и максимум равны, масштаб подбирается сам. История хранится в памяти платы и сбрасывается при перезагрузке."
+memory = true
+
+[[input]]
+name = "in"
+type = "float"
+
+[[param]]
+name = "caption"
+type = "string"
+label = "Подпись"
+default = "Веб-график"
+description = "Подпись виджета на странице"
+
+[[param]]
+name = "unit"
+type = "string"
+label = "Единица"
+default = ""
+description = "Единица измерения рядом со значением"
+
+[[param]]
+name = "min"
+type = "float"
+label = "Минимум"
+default = 0.0
+description = "Нижняя граница графика; если равна максимуму — масштаб автоматический"
+
+[[param]]
+name = "max"
+type = "float"
+label = "Максимум"
+default = 0.0
+description = "Верхняя граница графика; если равна минимуму — масштаб автоматический"
+
+[[param]]
+name = "period"
+type = "int"
+label = "Период, с"
+default = 5
+min = 1
+max = 3600
+description = "Как часто записывать точку (секунды). Ширина графика по времени = период × число точек"
+
+[[param]]
+name = "points"
+type = "int"
+label = "Точек"
+default = 60
+min = 10
+max = 120
+description = "Сколько последних точек хранить и показывать (4 байта на точку)"
+
+[[param]]
+name = "col"
+type = "int"
+label = "Колонка"
+default = 1
+description = "Левая колонка сетки страницы (1–12)"
+
+[[param]]
+name = "row"
+type = "int"
+label = "Строка"
+default = 1
+description = "Верхняя строка сетки страницы (1, 2, …)"
+
+[[param]]
+name = "w"
+type = "int"
+label = "Ширина"
+default = 6
+description = "Ширина в колонках сетки (1–12)"
+
+[[param]]
+name = "h"
+type = "int"
+label = "Высота"
+default = 4
+description = "Высота в строках сетки"
+
+[[param]]
+name = "page"
+type = "int"
+label = "Страница"
+default = 1
+description = "Номер страницы веб-интерфейса (1, 2, …); названия страниц задаются в блоке «Веб-интерфейс»"
+
+[[param]]
+name = "color"
+type = "string"
+label = "Цвет"
+default = ""
+description = "Основной цвет виджета (шкала, линия графика, включённое состояние): #rrggbb или название, например red. Пусто — цвет страницы по умолчанию"
+
+[[param]]
+name = "back"
+type = "string"
+label = "Цвет фона"
+default = ""
+description = "Цвет фона плитки виджета: #rrggbb или название. Пусто — по умолчанию"

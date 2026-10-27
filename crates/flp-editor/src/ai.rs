@@ -10,7 +10,6 @@ use std::time::Duration;
 
 use eframe::egui::{self, RichText, ScrollArea, Ui};
 use flp_ai::agent::{run_turn, Event};
-use flp_ai::provider::Claude;
 use flp_ai::Context;
 use flp_core::{Layout, Library, Logic, Project};
 use serde_json::Value;
@@ -85,7 +84,7 @@ impl AiChat {
         }
         self.input.clear();
         self.entries.push(Entry::User(text.clone()));
-        let provider = match Claude::from_env() {
+        let provider = match flp_ai::provider::from_env() {
             Ok(p) => p,
             Err(e) => {
                 self.entries.push(Entry::Error(e));
@@ -104,10 +103,16 @@ impl AiChat {
         };
         let wake = ctx.clone();
         thread::spawn(move || {
-            let result = run_turn(&provider, &mut worker_ctx, &mut history, &text, &mut |e| {
-                let _ = tx.send(Msg::Event(e));
-                wake.request_repaint();
-            });
+            let result = run_turn(
+                provider.as_ref(),
+                &mut worker_ctx,
+                &mut history,
+                &text,
+                &mut |e| {
+                    let _ = tx.send(Msg::Event(e));
+                    wake.request_repaint();
+                },
+            );
             let _ = tx.send(Msg::Finished {
                 history,
                 error: result.err(),
@@ -285,7 +290,7 @@ pub fn show(chat: &mut AiChat, pal: &Palette, ui: &mut Ui, has_project: bool) ->
         .stick_to_bottom(true)
         .show(ui, |ui| {
             if chat.entries.is_empty() {
-                ui.weak("Опишите задачу словами — помощник прочитает схему, добавит и соединит блоки и проверит результат. Каждую его правку можно отменить Ctrl+Z.\n\nНужен ключ Claude в переменной окружения ANTHROPIC_API_KEY.");
+                ui.weak("Опишите задачу словами — помощник прочитает схему, добавит и соединит блоки и проверит результат. Каждую его правку можно отменить Ctrl+Z.\n\nНужен ключ Claude в переменной окружения ANTHROPIC_API_KEY. Для другого сервиса с OpenAI-совместимым API задайте FLP_AI_BASE_URL, FLP_AI_KEY и FLP_AI_MODEL.");
             }
             for (i, e) in chat.entries.iter().enumerate() {
                 match e {

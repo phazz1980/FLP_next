@@ -20,6 +20,16 @@ pub enum Dialog {
     Var(VarDialog),
     Sheet(SheetDialog),
     Board(crate::boardcfg::BoardDialog),
+    Widget(WidgetDialog),
+}
+
+/// A new web page widget: its type and page are chosen before the block is created.
+pub struct WidgetDialog {
+    kind: String,
+    /// 0-based index into the page names.
+    page: usize,
+    /// Parameters of the chosen type (caption, unit, range, ...), edited like a block's.
+    form: BlockDialog,
 }
 
 pub struct BlockDialog {
@@ -33,6 +43,8 @@ pub struct BlockDialog {
     texts: BTreeMap<String, String>,
     /// Secret parameters shown as plain text (the eye button).
     revealed: BTreeSet<String>,
+    /// Page names of the web interface, for the `page` parameter of a widget (empty otherwise).
+    pages: Vec<String>,
 }
 
 pub struct VarDialog {
@@ -58,6 +70,35 @@ enum Outcome {
     Apply,
     Cancel,
     Delete,
+}
+
+impl BlockDialog {
+    /// Parameter buffer of a block that does not exist yet.
+    fn for_kind(app: &EditorApp, kind: &str) -> Option<Self> {
+        let def = &app.lib.get(kind)?.def;
+        let values = def.params.iter().map(|p| (p.name.clone(), None)).collect();
+        let texts = def
+            .params
+            .iter()
+            .filter(|p| matches!(p.kind, ParamKind::Text | ParamKind::Duration))
+            .map(|p| {
+                let text = match &p.default {
+                    Some(ParamValue::Text(s)) => s.clone(),
+                    _ => String::new(),
+                };
+                (p.name.clone(), text)
+            })
+            .collect();
+        Some(Self {
+            id: String::new(),
+            new_id: String::new(),
+            kind: kind.to_owned(),
+            values,
+            texts,
+            revealed: BTreeSet::new(),
+            pages: Vec::new(),
+        })
+    }
 }
 
 impl Dialog {
@@ -103,6 +144,24 @@ impl Dialog {
             values,
             texts,
             revealed: BTreeSet::new(),
+            pages: if is_widget_kind(&block.kind) {
+                crate::netpanel::page_names(&doc.project.logic)
+            } else {
+                Vec::new()
+            },
+        }))
+    }
+
+    /// Window for a new web widget on the given page (0-based).
+    pub fn for_widget(app: &EditorApp, page: usize) -> Option<Self> {
+        let doc = app.doc.as_ref()?;
+        let kinds = crate::netpanel::widget_kinds(&app.lib);
+        let pages = crate::netpanel::page_names(&doc.project.logic).len();
+        let kind = kinds.first()?.clone();
+        Some(Self::Widget(WidgetDialog {
+            form: BlockDialog::for_kind(app, &kind)?,
+            kind,
+            page: page.min(pages - 1),
         }))
     }
 
@@ -157,6 +216,7 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
         },
         Dialog::Sheet(d) => format!("Плата {}", d.number),
         Dialog::Board(_) => "Настройки МК".to_owned(),
+        Dialog::Widget(_) => "Новый виджет".to_owned(),
     };
     let mut open = true;
     let mut outcome = Outcome::Open;
@@ -176,6 +236,7 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
                 Dialog::Var(d) => var_body(ui, d),
                 Dialog::Sheet(d) => sheet_body(ui, d),
                 Dialog::Board(d) => d.body(ui, &app.ports),
+                Dialog::Widget(d) => widget_body(app, ui, d),
             }
         });
     if !open || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -232,6 +293,94 @@ fn buttons(ui: &mut Ui, deletable: bool) -> Outcome {
         }
     });
     outcome
+}
+
+/// Web widgets (everything `web_*` but the service block) have a place on the page set in
+/// the web designer, so their position and size are not edited here.
+fn is_widget_kind(kind: &str) -> bool {
+    kind.starts_with("web_") && kind != "web_ui"
+}
+
+fn widget_body(app: &EditorApp, ui: &mut Ui, d: &mut WidgetDialog) {
+    let Some(doc) = &app.doc else { return };
+    let pages = crate::netpanel::page_names(&doc.project.logic);
+    let kinds = crate::netpanel::widget_kinds(&app.lib);
+    let name_of = |kind: &str| {
+        app.lib
+            .get(kind)
+            .map_or_else(|| kind.to_owned(), |b| b.def.info.name.clone())
+    };
+    egui::Grid::new("widget_props")
+        .num_columns(2)
+        .spacing([10.0, 6.0])
+        .show(ui, |ui| {
+            ui.label("Тип виджета");
+            egui::ComboBox::from_id_salt("widget_kind")
+                .selected_text(name_of(&d.kind))
+                .show_ui(ui, |ui| {
+                    for kind in &kinds {
+                        let hint = app
+                            .lib
+                            .get(kind)
+                            .map(|b| b.def.info.description.clone())
+                            .unwrap_or_default();
+                        if ui
+                            .selectable_label(*kind == d.kind, name_of(kind))
+                            .on_hover_text(hint)
+                            .clicked()
+                        {
+                            if let Some(form) = BlockDialog::for_kind(app, kind) {
+                                d.kind = kind.clone();
+                                d.form = form;
+                            }
+                        }
+                    }
+                });
+            ui.end_row();
+            ui.label("Страница");
+            let page = d.page.min(pages.len() - 1);
+            egui::ComboBox::from_id_salt("widget_page")
+                .selected_text(&pages[page])
+                .show_ui(ui, |ui| {
+                    for (i, name) in pages.iter().enumerate() {
+                        if ui.selectable_label(i == page, name).clicked() {
+                            d.page = i;
+                        }
+                    }
+                });
+            ui.end_row();
+        });
+    let Some(def) = app.lib.get(&d.kind).map(|b| &b.def) else {
+        return;
+    };
+    ui.add_space(6.0);
+    ui.add(egui::Label::new(RichText::new(&def.info.description).weak()).wrap());
+    ui.add_space(6.0);
+    let current: BTreeMap<String, ParamValue> = d
+        .form
+        .values
+        .iter()
+        .filter_map(|(k, v)| Some((k.clone(), v.clone()?)))
+        .collect();
+    let params: Vec<&ParamDef> = def
+        .active_params(&current)
+        .filter(|p| !matches!(p.name.as_str(), "col" | "row" | "w" | "h" | "page"))
+        .collect();
+    let pins = Pins {
+        chip: None,
+        others: Vec::new(),
+    };
+    egui::Grid::new("widget_params")
+        .num_columns(2)
+        .spacing([10.0, 6.0])
+        .show(ui, |ui| {
+            for &p in &params {
+                ui.label(p.title()).on_hover_text(p.description.trim());
+                ui.horizontal(|ui| param_editor(ui, p, &mut d.form, def, &app.local, &pins));
+                ui.end_row();
+            }
+        });
+    ui.weak("Расположение и размер виджета — в конструкторе страницы.");
 }
 
 fn block_body(app: &EditorApp, ui: &mut Ui, d: &mut BlockDialog) {
@@ -294,7 +443,13 @@ fn block_settings(
         .iter()
         .filter_map(|(k, v)| Some((k.clone(), v.clone()?)))
         .collect();
-    let params: Vec<&ParamDef> = def.active_params(&current).collect();
+    let params: Vec<&ParamDef> = def
+        .active_params(&current)
+        .filter(|p| {
+            !(is_widget_kind(&d.kind) && matches!(p.name.as_str(), "col" | "row" | "w" | "h"))
+                && !(d.kind == "web_ui" && p.name == "pages")
+        })
+        .collect();
     let inputs: Vec<&PortDef> = def.active_inputs(&current).collect();
     let outputs: Vec<&PortDef> = def.active_outputs(&current).collect();
     let pins = Pins {
@@ -387,6 +542,28 @@ fn param_editor(
         .cloned()
         .flatten()
         .or_else(|| p.default.clone());
+    if p.name == "page" && !d.pages.is_empty() {
+        let page = match current {
+            Some(ParamValue::Int(i)) if i >= 1 => i as usize,
+            _ => 1,
+        };
+        let shown = d
+            .pages
+            .get(page - 1)
+            .cloned()
+            .unwrap_or_else(|| format!("Страница {page}"));
+        egui::ComboBox::from_id_salt("widget_page")
+            .selected_text(shown)
+            .show_ui(ui, |ui| {
+                for (i, name) in d.pages.iter().enumerate() {
+                    if ui.selectable_label(i + 1 == page, name).clicked() {
+                        d.values
+                            .insert(p.name.clone(), Some(ParamValue::Int(i as i64 + 1)));
+                    }
+                }
+            });
+        return;
+    }
     if p.kind == ParamKind::Pin && pins.chip.is_some() {
         let current = match current {
             Some(ParamValue::Int(i)) => Some(i),
@@ -693,10 +870,42 @@ fn sheet_body(ui: &mut Ui, d: &mut SheetDialog) {
         });
 }
 
+fn apply_widget(app: &mut EditorApp, d: &WidgetDialog) -> Result<(), String> {
+    let lib = app.lib.clone();
+    let pos = crate::panels::free_spot(app);
+    let doc = app.doc.as_mut().ok_or("проект не открыт")?;
+    let page = d.page + 1;
+    let (col, row) = crate::netpanel::free_cell(&lib, &doc.project.logic, page);
+    let id = doc
+        .edit(&lib, None, |p| {
+            let id = p.add_block(&lib, &d.kind, pos)?;
+            let ints = [("page", page as i64), ("col", col), ("row", row)];
+            for (name, v) in ints {
+                p.set_param(&lib, &id, name, Some(ParamValue::Int(v)))?;
+            }
+            for (name, value) in &d.form.values {
+                if let Some(v) = value
+                    .clone()
+                    .filter(|_| !ints.iter().any(|(n, _)| n == name))
+                {
+                    p.set_param(&lib, &id, name, Some(v))?;
+                }
+            }
+            Ok::<_, flp_core::EditError>(id)
+        })
+        .map_err(|e| e.to_string())?;
+    app.focus_block(&id);
+    Ok(())
+}
+
 fn apply(app: &mut EditorApp, dialog: &Dialog) -> Result<(), String> {
+    if let Dialog::Widget(d) = dialog {
+        return apply_widget(app, d);
+    }
     let lib = app.lib.clone();
     let doc = app.doc.as_mut().ok_or("проект не открыт")?;
     match dialog {
+        Dialog::Widget(_) => {}
         Dialog::Board(d) => {
             let board = d.config()?;
             let uarts = d.uarts();

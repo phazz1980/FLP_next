@@ -1,0 +1,87 @@
+[block]
+type = "web_shape"
+name = "Веб-фигура"
+symbol = "SHP"
+group = "Веб-интерфейс"
+description = "Пассивный графический элемент веб-страницы: линия, рамка или круг. Ничего не показывает и не принимает — нужен для оформления: разделить области, обвести группу виджетов, нарисовать индикатор-кружок."
+
+[[param]]
+name = "shape"
+type = "int"
+label = "Фигура"
+default = 0
+description = "Что нарисовать"
+
+[[param.choice]]
+value = 0
+label = "Горизонтальная линия"
+
+[[param.choice]]
+value = 1
+label = "Вертикальная линия"
+
+[[param.choice]]
+value = 2
+label = "Прямоугольник"
+
+[[param.choice]]
+value = 3
+label = "Круг (эллипс)"
+
+[[param]]
+name = "thickness"
+type = "int"
+label = "Толщина"
+default = 2
+min = 1
+max = 20
+description = "Толщина линии или контура в пикселях"
+
+[[param]]
+name = "color"
+type = "string"
+label = "Цвет"
+default = ""
+description = "Цвет линии или контура: #rrggbb или название, например red. Пусто — цвет текста страницы"
+
+[[param]]
+name = "back"
+type = "string"
+label = "Заливка"
+default = ""
+description = "Цвет заливки прямоугольника или круга: #rrggbb или название. Пусто — без заливки"
+
+[[param]]
+name = "col"
+type = "int"
+label = "Колонка"
+default = 1
+description = "Левая колонка сетки страницы (1–12)"
+
+[[param]]
+name = "row"
+type = "int"
+label = "Строка"
+default = 1
+description = "Верхняя строка сетки страницы (1, 2, …)"
+
+[[param]]
+name = "w"
+type = "int"
+label = "Ширина"
+default = 4
+description = "Ширина в колонках сетки (1–12)"
+
+[[param]]
+name = "h"
+type = "int"
+label = "Высота"
+default = 1
+description = "Высота в строках сетки"
+
+[[param]]
+name = "page"
+type = "int"
+label = "Страница"
+default = 1
+description = "Номер страницы веб-интерфейса (1, 2, …); названия страниц задаются в блоке «Веб-интерфейс»"

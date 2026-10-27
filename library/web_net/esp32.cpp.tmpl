@@ -1,0 +1,104 @@
+// @global once
+// Network settings shared with the Wi-Fi and Ethernet blocks: ssid, password, dhcp, ip, gateway, subnet, ap ssid, ap password, mode, ap delay.
+struct FlpNet {
+  String f[10];
+  // Mode actually applied: differs from f[8] in the automatic access point mode.
+  int eff = 0;
+};
+FlpNet flpNet;
+// @global
+FlpUiItem {{ id }}_ui = {"web_net", {{ param.caption }}, "", {{ value.col }}, {{ value.row }}, {{ value.w }}, {{ value.h }}, {{ value.page }}, true, 0, 0, 0, 0, 0};
+Preferences {{ id }}_prefs;
+// @functions
+// The page sends the whole form as ten lines (ssid, password, dhcp, ip, gateway, subnet, ap ssid, ap password, mode, ap delay); an empty password keeps the saved one.
+String {{ id }}_line(const String &s, int n) {
+  int from = 0;
+  for (int k = 0; k < n; k++) {
+    int p = s.indexOf('\n', from);
+    if (p < 0) return String();
+    from = p + 1;
+  }
+  int e = s.indexOf('\n', from);
+  return e < 0 ? s.substring(from) : s.substring(from, e);
+}
+void {{ id }}_show() {
+  {{ id }}_ui.text = flpNet.f[0] + "\n\n" + flpNet.f[2] + "\n" + flpNet.f[3] + "\n" + flpNet.f[4] + "\n" + flpNet.f[5] + "\n" + flpNet.f[6] + "\n\n" + flpNet.f[8] + "\n" + flpNet.f[9];
+}
+static bool {{ id }}_pwok(const String &p) {
+  if (p.length() == 0) return true;
+  for (size_t k = 0; k < p.length(); k++) if (p[k] < 32 || p[k] > 126) return false;
+  if (p.length() >= 8 && p.length() <= 63) return true;
+  if (p.length() != 64) return false;
+  for (size_t k = 0; k < 64; k++) if (!isxdigit(p[k])) return false;
+  return true;
+}
+static bool {{ id }}_ssidok(const String &s) {
+  if (s.length() > 32) return false;
+  for (size_t k = 0; k < s.length(); k++) if ((uint8_t)s[k] < 32) return false;
+  return true;
+}
+// @setup
+{{ id }}_prefs.begin("flp", false);
+flpNet.f[0] = {{ id }}_prefs.getString("{{ id[:12] }}_s", {{ param.init_ssid }});
+flpNet.f[1] = {{ id }}_prefs.getString("{{ id[:12] }}_p", {{ param.init_password }});
+flpNet.f[2] = {{ id }}_prefs.getString("{{ id[:12] }}_d", "{{ 1 if value.init_dhcp else 0 }}");
+flpNet.f[3] = {{ id }}_prefs.getString("{{ id[:12] }}_i", {{ param.init_ip }});
+flpNet.f[4] = {{ id }}_prefs.getString("{{ id[:12] }}_g", {{ param.init_gateway }});
+flpNet.f[5] = {{ id }}_prefs.getString("{{ id[:12] }}_m", {{ param.init_subnet }});
+flpNet.f[6] = {{ id }}_prefs.getString("{{ id[:12] }}_a", {{ param.init_ap_ssid }});
+flpNet.f[7] = {{ id }}_prefs.getString("{{ id[:12] }}_b", {{ param.init_ap_password }});
+flpNet.f[8] = {{ id }}_prefs.getString("{{ id[:12] }}_o", "{{ value.init_mode }}");
+flpNet.f[9] = {{ id }}_prefs.getString("{{ id[:12] }}_w", "{{ value.init_ap_delay }}");
+{{ id }}_show();
+flpUiAdd(&{{ id }}_ui);
+{{ id }}_ui.color = {{ param.color }};
+{{ id }}_ui.back = {{ param.back }};
+// @loop
+{{ output.changed }} = false;
+if ({{ id }}_ui.value != 0) {
+  {{ id }}_ui.value = 0;
+  String t = {{ id }}_ui.text;
+  String pw = {{ id }}_line(t, 1);
+  String apw = {{ id }}_line(t, 7);
+  String nf[10] = { {{ id }}_line(t, 0), pw.length() ? pw : flpNet.f[1], {{ id }}_line(t, 2), {{ id }}_line(t, 3), {{ id }}_line(t, 4), {{ id }}_line(t, 5), {{ id }}_line(t, 6), apw.length() ? apw : flpNet.f[7], {{ id }}_line(t, 8), {{ id }}_line(t, 9)};
+  bool valid = {{ id }}_pwok(pw) && {{ id }}_pwok(apw) && {{ id }}_ssidok(nf[0]) && {{ id }}_ssidok(nf[6]);
+  static const char *keys[10] = {"_s", "_p", "_d", "_i", "_g", "_m", "_a", "_b", "_o", "_w"};
+  for (int k = 0; k < 10 && valid; k++) {
+    if (nf[k] != flpNet.f[k]) {
+      flpNet.f[k] = nf[k];
+      // Flash wears out: only changed fields are written.
+      {{ id }}_prefs.putString((String("{{ id[:12] }}") + keys[k]).c_str(), nf[k]);
+      {{ output.changed }} = true;
+    }
+  }
+  {{ id }}_show();
+}
+{
+  // Automatic mode: client only, the access point joins when there is no connection for the delay.
+  static uint32_t since = 0;
+  static bool apUp = false;
+  static uint32_t joined = 0;
+  int m = flpNet.f[8].toInt();
+  if (m == 3) {
+    if (WiFi.status() == WL_CONNECTED) {
+      // The access point stays up for 10 s after the client got connected, then goes off.
+      if (!joined) joined = millis();
+      if (millis() - joined >= 10000UL) apUp = false;
+      since = millis();
+    } else {
+      joined = 0;
+      if (!apUp && millis() - since >= (uint32_t)flpNet.f[9].toInt() * 1000UL) {
+        apUp = true;
+      }
+    }
+    m = apUp ? 2 : 0;
+  }
+  flpNet.eff = m;
+}
+{{ output.ssid }} = flpNet.f[0];
+{{ output.password }} = flpNet.f[1];
+{{ output.dhcp }} = flpNet.f[2] != "0";
+{{ output.ip }} = flpNet.f[3];
+{{ output.gateway }} = flpNet.f[4];
+{{ output.subnet }} = flpNet.f[5];
+{{ output.mode }} = flpNet.f[8].toInt();

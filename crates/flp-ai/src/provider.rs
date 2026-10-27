@@ -24,6 +24,15 @@ pub struct Reply {
     pub stop_reason: String,
 }
 
+/// Picks the provider from the environment: an OpenAI-compatible endpoint when
+/// `FLP_AI_BASE_URL` is set, Claude otherwise.
+pub fn from_env() -> Result<Box<dyn Provider>, String> {
+    match crate::openai::OpenAiCompat::from_env() {
+        Some(p) => Ok(Box::new(p?)),
+        None => Ok(Box::new(Claude::from_env()?)),
+    }
+}
+
 /// Claude over the Messages API (raw HTTP: there is no official Rust SDK).
 pub struct Claude {
     api_key: String,

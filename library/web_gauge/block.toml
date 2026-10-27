@@ -65,3 +65,24 @@ type = "int"
 label = "Высота"
 default = 2
 description = "Высота в строках сетки"
+
+[[param]]
+name = "page"
+type = "int"
+label = "Страница"
+default = 1
+description = "Номер страницы веб-интерфейса (1, 2, …); названия страниц задаются в блоке «Веб-интерфейс»"
+
+[[param]]
+name = "color"
+type = "string"
+label = "Цвет"
+default = ""
+description = "Основной цвет виджета (шкала, линия графика, включённое состояние): #rrggbb или название, например red. Пусто — цвет страницы по умолчанию"
+
+[[param]]
+name = "back"
+type = "string"
+label = "Цвет фона"
+default = ""
+description = "Цвет фона плитки виджета: #rrggbb или название. Пусто — по умолчанию"

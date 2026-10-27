@@ -175,6 +175,43 @@ fn render_block(
             Some((n, text))
         })
         .collect();
+    // With a network settings widget on the page, Wi-Fi and Ethernet take their address
+    // settings from it (saved in flash) instead of the block's own parameters.
+    let mut param = param;
+    let mut bound = bound;
+    let mut flag = flag;
+    let mut value = value;
+    let mut input = input;
+    if matches!(kind.as_str(), "wifi" | "ethernet")
+        && program.blocks.iter().any(|b| b.block.kind == "web_net")
+    {
+        const FIELDS: [(&str, usize); 8] = [
+            ("ssid", 0),
+            ("password", 1),
+            ("dhcp", 2),
+            ("ip", 3),
+            ("gateway", 4),
+            ("subnet", 5),
+            ("ap_ssid", 6),
+            ("ap_password", 7),
+        ];
+        for (name, i) in FIELDS {
+            let Some(key) = bound.keys().find(|k| **k == name).copied() else {
+                continue;
+            };
+            bound.insert(key, true);
+            if name == "dhcp" {
+                flag.insert(key, format!("(flpNet.f[{i}] != \"0\")"));
+            } else {
+                param.insert(key, Value::from(format!("flpNet.f[{i}].c_str()")));
+            }
+        }
+        if kind == "wifi" {
+            // The mode is chosen on the page, so the block is built as "set by the mode input".
+            value.insert("wifi_mode", Value::from(3));
+            input.insert("mode", "flpNet.eff".to_owned());
+        }
+    }
     let ctx = context! { id, input, input_type, output, param, value, bound, flag, var, uart };
     let text = env
         .render_named_str(&name, &source, ctx)

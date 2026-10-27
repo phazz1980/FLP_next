@@ -212,7 +212,12 @@ fn check_blocks<'a>(
         let def = &lib_block.def;
         for (name, value) in &block.params {
             match def.param(name) {
-                Some(p) => check_param(id, p, value, report),
+                Some(p) => {
+                    check_param(id, p, value, report);
+                    if block.kind == "wifi" {
+                        check_wifi_text(id, &p.name, value, report);
+                    }
+                }
                 None => report.block_error(
                     id,
                     format!(
@@ -302,6 +307,49 @@ fn check_blocks<'a>(
         defs.push(Some(def));
     }
     defs
+}
+
+/// Wi-Fi limits: SSID is 1..=32 bytes; a password is empty (open network), 8..=63 printable
+/// ASCII characters, or exactly 64 hex digits (a raw PSK).
+pub fn wifi_text_error(name: &str, text: &str) -> Option<String> {
+    match name {
+        "ssid" | "ap_ssid" => {
+            if text.len() > 32 {
+                return Some("имя сети — не более 32 байт".to_owned());
+            }
+            if text.chars().any(|c| c.is_control()) {
+                return Some("имя сети содержит управляющие символы".to_owned());
+            }
+            None
+        }
+        "password" | "ap_password" => {
+            if text.is_empty() {
+                return None;
+            }
+            if let Some(c) = text.chars().find(|c| !(' '..='~').contains(c)) {
+                return Some(format!(
+                    "в пароле недопустимый символ «{c}» (разрешены латиница, цифры и знаки ASCII)"
+                ));
+            }
+            let hex64 = text.len() == 64 && text.bytes().all(|b| b.is_ascii_hexdigit());
+            if !(8..=63).contains(&text.len()) && !hex64 {
+                return Some(format!(
+                    "длина пароля {} — нужно 8–63 символа (или 64 шестнадцатеричных)",
+                    text.len()
+                ));
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn check_wifi_text(id: &str, name: &str, value: &ParamValue, report: &mut Report) {
+    if let ParamValue::Text(s) = value {
+        if let Some(e) = wifi_text_error(name, s) {
+            report.block_error(id, format!("блок «{id}»: параметр «{name}» — {e}"));
+        }
+    }
 }
 
 fn check_param(id: &str, p: &ParamDef, value: &ParamValue, report: &mut Report) {
@@ -1198,5 +1246,22 @@ tx = 16",
                 "блок «e»: вывод GPIO1 — UART0: заливка и отладка по USB",
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod wifi_text_tests {
+    use super::wifi_text_error;
+
+    #[test]
+    fn password_rules() {
+        assert!(wifi_text_error("password", "").is_none());
+        assert!(wifi_text_error("password", "12345678").is_none());
+        assert!(wifi_text_error("password", "short").is_some());
+        assert!(wifi_text_error("ap_password", &"a".repeat(64)).is_none());
+        assert!(wifi_text_error("ap_password", &"g".repeat(64)).is_some());
+        assert!(wifi_text_error("password", "парольпароль").is_some());
+        assert!(wifi_text_error("ssid", &"a".repeat(33)).is_some());
+        assert!(wifi_text_error("ssid", "Сеть").is_none());
     }
 }

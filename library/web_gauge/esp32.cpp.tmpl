@@ -1,6 +1,8 @@
 // @global
-FlpUiItem {{ id }}_ui = {"web_gauge", {{ param.caption }}, {{ param.unit }}, {{ value.col }}, {{ value.row }}, {{ value.w }}, {{ value.h }}, false, 0, {{ param.min }}, {{ param.max }}, 0, 1};
+FlpUiItem {{ id }}_ui = {"web_gauge", {{ param.caption }}, {{ param.unit }}, {{ value.col }}, {{ value.row }}, {{ value.w }}, {{ value.h }}, {{ value.page }}, false, 0, {{ param.min }}, {{ param.max }}, 0, 1};
 // @setup
 flpUiAdd(&{{ id }}_ui);
+{{ id }}_ui.color = {{ param.color }};
+{{ id }}_ui.back = {{ param.back }};
 // @loop
 {{ id }}_ui.value = {{ input.in }};

@@ -17,7 +17,7 @@ bool relay_reg_out_b = false;
 // eth: ethernet
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgWiznetInterface flpEth(5);
-// Stub web page: technical data of the device (port 80).
+// Web server (port 80): the web_ui block adds its pages to it.
 FLProgWebServer eth_web(&flpEth, 80);
 // Update over the network (ArduinoOTA through the shared interface).
 FLProgNetworkOta eth_ota;
@@ -157,29 +157,6 @@ void eth_up_poll() {
   }
 }
 
-void eth_page(FLProgNetworkHttpServer *server) {
-  char mac[18];
-  uint8_t *m = flpEth.mac();
-  snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", m[0], m[1], m[2], m[3], m[4], m[5]);
-  uint32_t sec = millis() / 1000;
-  String page = F("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>eth</title></head><body><h1>FLP_next</h1><table>");
-  page += F("<tr><td>IP-адрес</td><td>"); page += flpEth.localIP().toString(); page += F("</td></tr>");
-  page += F("<tr><td>MAC</td><td>"); page += mac; page += F("</td></tr>");
-  page += F("<tr><td>Аптайм</td><td>"); page += String(sec / 3600); page += F(" ч "); page += String(sec / 60 % 60); page += F(" мин</td></tr>");
-  page += F("<tr><td>Сборка</td><td>" __DATE__ " " __TIME__ "</td></tr>");
-  if (true) {
-    page += F("<tr><td>Обновление</td><td>по сети (OTA), имя: "); page += eth_ota.getName(); page += F("</td></tr>");
-  } else {
-    page += F("<tr><td>Обновление</td><td>выключено</td></tr>");
-  }
-  page += F("</table>");
-  if (true) {
-    page += F("<h2>Обновление прошивки</h2><input type=file id=f accept=.bin><button onclick=\"u()\">Загрузить</button> <span id=s></span><script>function u(){var f=f.files[0];if(!f)return;var p=prompt('Пароль','');s.textContent='...';fetch('http://'+location.hostname+':8080/update?p='+encodeURIComponent(p||''),{method:'POST',headers:{'Content-Type':'text/plain'},body:f}).then(function(r){return r.text()}).then(function(x){s.textContent=x}).catch(function(){s.textContent='ошибка'})}</script>");
-  }
-  page += F("</body></html>");
-  server->send(200, "text/html", page);
-}
-
 void setup() {
   // eth: ethernet
   flpEth.mac(0x78, 0xAC, 0xC0, 0x2C, 0x3E, 40);
@@ -196,7 +173,6 @@ void setup() {
     flpEth.subnet(addr);
     flpEth.resetDhcp();
   }
-  eth_web.addHandler("/", eth_page);
   eth_ota.setHostname("eth");
 
   // slave: modbus_tcp_slave
