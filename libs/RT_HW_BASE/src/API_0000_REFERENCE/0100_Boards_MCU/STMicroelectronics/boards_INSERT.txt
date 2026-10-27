@@ -1,0 +1,915 @@
+###FLPROG_BEGIN_1_37
+###############################
+# FLProg Generic C0
+GenFLProgC0.name=FLProg STM32C0 series
+
+GenFLProgC0.build.core=arduino
+GenFLProgC0.build.board=GenC0
+GenFLProgC0.build.mcu=cortex-m0plus
+GenFLProgC0.build.series=STM32C0xx
+GenFLProgC0.build.st_extra_flags=-D{build.product_line} {build.xSerial} -D__CORTEX_SC=0
+GenFLProgC0.build.flash_offset=0x0
+GenFLProgC0.upload.maximum_size=0
+GenFLProgC0.upload.maximum_data_size=0
+
+# FLProg Generic C011F4Px
+GenFLProgC0.menu.pnum.GENERIC_C011F4PX=FLProg Generic C011F4Px
+GenFLProgC0.menu.pnum.GENERIC_C011F4PX.upload.maximum_size=16384
+GenFLProgC0.menu.pnum.GENERIC_C011F4PX.upload.maximum_data_size=6144
+GenFLProgC0.menu.pnum.GENERIC_C011F4PX.build.board=GENERIC_C011F4PX
+GenFLProgC0.menu.pnum.GENERIC_C011F4PX.build.product_line=STM32C011xx
+GenFLProgC0.menu.pnum.GENERIC_C011F4PX.build.variant=STM32C0xx/C011D6Y_C011F(4-6)(P-U)_C031F(4-6)P
+GenFLProgC0.menu.pnum.GENERIC_C011F4PX.build.flprog=GENERIC_C011F4PX
+
+# FLProg Generic C011F6Px
+GenFLProgC0.menu.pnum.GENERIC_C011F6PX=FLProg Generic C011F6Px
+GenFLProgC0.menu.pnum.GENERIC_C011F6PX.upload.maximum_size=32768
+GenFLProgC0.menu.pnum.GENERIC_C011F6PX.upload.maximum_data_size=6144
+GenFLProgC0.menu.pnum.GENERIC_C011F6PX.build.board=GENERIC_C011F6PX
+GenFLProgC0.menu.pnum.GENERIC_C011F6PX.build.product_line=STM32C011xx
+GenFLProgC0.menu.pnum.GENERIC_C011F6PX.build.variant=STM32C0xx/C011D6Y_C011F(4-6)(P-U)_C031F(4-6)P
+GenFLProgC0.menu.pnum.GENERIC_C011F6PX.build.flprog=GENERIC_C011F6PX
+
+# FLProg Generic C011F4Ux
+GenFLProgC0.menu.pnum.GENERIC_C011F4UX=FLProg Generic C011F4Ux
+GenFLProgC0.menu.pnum.GENERIC_C011F4UX.upload.maximum_size=16384
+GenFLProgC0.menu.pnum.GENERIC_C011F4UX.upload.maximum_data_size=6144
+GenFLProgC0.menu.pnum.GENERIC_C011F4UX.build.board=GENERIC_C011F4UX
+GenFLProgC0.menu.pnum.GENERIC_C011F4UX.build.product_line=STM32C011xx
+GenFLProgC0.menu.pnum.GENERIC_C011F4UX.build.variant=STM32C0xx/C011D6Y_C011F(4-6)(P-U)_C031F(4-6)P
+GenFLProgF0.menu.pnum.GENERIC_C011F4UX.build.flprog=GENERIC_C011FUPX
+
+# Upload menu
+GenFLProgC0.menu.upload_method.swdMethod=STM32CubeProgrammer (SWD)
+GenFLProgC0.menu.upload_method.swdMethod.upload.protocol=0
+GenFLProgC0.menu.upload_method.swdMethod.upload.options=
+GenFLProgC0.menu.upload_method.swdMethod.upload.tool=stm32CubeProg
+
+GenFLProgC0.menu.upload_method.serialMethod=STM32CubeProgrammer (Serial)
+GenFLProgC0.menu.upload_method.serialMethod.upload.protocol=1
+GenFLProgC0.menu.upload_method.serialMethod.upload.options={serial.port.file}
+GenFLProgC0.menu.upload_method.serialMethod.upload.tool=stm32CubeProg
+
+###############################
+# FLProg Generic F0
+GenFLProgF0.name=FLProg STM32F0 series
+
+GenFLProgF0.build.core=arduino
+GenFLProgF0.build.board=GenF0
+GenFLProgF0.build.mcu=cortex-m0
+GenFLProgF0.build.series=STM32F0xx
+GenFLProgF0.build.st_extra_flags=-D{build.product_line} {build.enable_usb} {build.xSerial}
+GenFLProgF0.build.flash_offset=0x0
+GenFLProgF0.upload.maximum_size=0
+GenFLProgF0.upload.maximum_data_size=0
+
+# FLProg Generic F030F4Px
+GenFLProgF0.menu.pnum.GENERIC_F030F4PX=FLProg Generic F030F4Px
+GenFLProgF0.menu.pnum.GENERIC_F030F4PX.upload.maximum_size=16384
+GenFLProgF0.menu.pnum.GENERIC_F030F4PX.upload.maximum_data_size=4096
+GenFLProgF0.menu.pnum.GENERIC_F030F4PX.build.board=GENERIC_F030F4PX
+GenFLProgF0.menu.pnum.GENERIC_F030F4PX.build.product_line=STM32F030x6
+GenFLProgF0.menu.pnum.GENERIC_F030F4PX.build.variant=STM32F0xx/F030F4P
+GenFLProgF0.menu.pnum.GENERIC_F030F4PX.build.flprog=GENERIC_F030F4PX
+
+# FLProg Generic F030K6Tx
+GenFLProgF0.menu.pnum.GENERIC_F030K6TX=FLProg Generic F030K6Tx
+GenFLProgF0.menu.pnum.GENERIC_F030K6TX.upload.maximum_size=32768
+GenFLProgF0.menu.pnum.GENERIC_F030K6TX.upload.maximum_data_size=4096
+GenFLProgF0.menu.pnum.GENERIC_F030K6TX.build.board=GENERIC_F030K6TX
+GenFLProgF0.menu.pnum.GENERIC_F030K6TX.build.product_line=STM32F030x6
+GenFLProgF0.menu.pnum.GENERIC_F030K6TX.build.variant=STM32F0xx/F030K6T
+GenFLProgF0.menu.pnum.GENERIC_F030F6TX.build.flprog=GENERIC_F030K6TX
+
+# FLProg Generic F030R8Tx
+GenFLProgF0.menu.pnum.GENERIC_F030R8TX=FLProg Generic F030R8Tx
+GenFLProgF0.menu.pnum.GENERIC_F030R8TX.upload.maximum_size=65536
+GenFLProgF0.menu.pnum.GENERIC_F030R8TX.upload.maximum_data_size=8192
+GenFLProgF0.menu.pnum.GENERIC_F030R8TX.build.board=GENERIC_F030R8TX
+GenFLProgF0.menu.pnum.GENERIC_F030R8TX.build.product_line=STM32F030x8
+GenFLProgF0.menu.pnum.GENERIC_F030R8TX.build.variant=STM32F0xx/F030R8T
+GenFLProgF0.menu.pnum.GENERIC_F030F8TX.build.flprog=GENERIC_F030R8TX
+
+# Upload menu
+GenFLProgF0.menu.upload_method.swdMethod=STM32CubeProgrammer (SWD)
+GenFLProgF0.menu.upload_method.swdMethod.upload.protocol=0
+GenFLProgF0.menu.upload_method.swdMethod.upload.options=
+GenFLProgF0.menu.upload_method.swdMethod.upload.tool=stm32CubeProg
+
+GenFLProgF0.menu.upload_method.serialMethod=STM32CubeProgrammer (Serial)
+GenFLProgF0.menu.upload_method.serialMethod.upload.protocol=1
+GenFLProgF0.menu.upload_method.serialMethod.upload.options={serial.port.file}
+GenFLProgF0.menu.upload_method.serialMethod.upload.tool=stm32CubeProg
+
+GenFLProgF0.menu.upload_method.dfuMethod=STM32CubeProgrammer (DFU)
+GenFLProgF0.menu.upload_method.dfuMethod.upload.protocol=2
+GenFLProgF0.menu.upload_method.dfuMethod.upload.options=
+GenFLProgF0.menu.upload_method.dfuMethod.upload.tool=stm32CubeProg
+
+################################################################################
+# FLProg Generic F1
+GenFLProgF1.name=FLProg STM32F1 series
+
+GenFLProgF1.build.core=arduino
+GenFLProgF1.build.board=GenF1
+GenFLProgF1.build.mcu=cortex-m3
+GenFLProgF1.build.series=STM32F1xx
+GenFLProgF1.build.st_extra_flags=-D{build.product_line} {build.enable_usb} {build.xSerial} {build.bootloader_flags}
+GenFLProgF1.build.flash_offset=0x0
+GenFLProgF1.upload.maximum_size=0
+GenFLProgF1.upload.maximum_data_size=0
+
+# FLProg PLC FLE-10Mx
+GenFLProgF1.menu.pnum.FLProg_FLE_10Mx=FLProg PLC FLE-10Mx
+GenFLProgF1.menu.pnum.FLProg_FLE_10Mx.upload.maximum_size=262144
+GenFLProgF1.menu.pnum.FLProg_FLE_10Mx.upload.maximum_data_size=49152
+GenFLProgF1.menu.pnum.FLProg_FLE_10Mx.build.board=GENERIC_F103VCTX
+GenFLProgF1.menu.pnum.FLProg_FLE_10Mx.build.product_line=STM32F103xE
+GenFLProgF1.menu.pnum.FLProg_FLE_10Mx.build.variant=STM32F1xx/F103V(C-D-E)(H-T)
+GenFLProgF1.menu.pnum.FLProg_FLE_10Mx.build.flprog=PLC_FLE_10MX
+
+# FLProg PLC FLE-14Mx
+GenFLProgF1.menu.pnum.FLProg_FLE_14Mx=FLProg PLC FLE-14Mx
+GenFLProgF1.menu.pnum.FLProg_FLE_14Mx.upload.maximum_size=262144
+GenFLProgF1.menu.pnum.FLProg_FLE_14Mx.upload.maximum_data_size=49152
+GenFLProgF1.menu.pnum.FLProg_FLE_14Mx.build.board=GENERIC_F103VCTX
+GenFLProgF1.menu.pnum.FLProg_FLE_14Mx.build.product_line=STM32F103xE
+GenFLProgF1.menu.pnum.FLProg_FLE_14Mx.build.variant=STM32F1xx/F103V(C-D-E)(H-T)
+GenFLProgF1.menu.pnum.FLProg_FLE_14Mx.build.flprog=PLC_FLE_14MX
+
+# FLProg PLC FLE-24Mx
+GenFLProgF1.menu.pnum.FLProg_FLE_24Mx=FLProg PLC FLE-24Mx
+GenFLProgF1.menu.pnum.FLProg_FLE_24Mx.upload.maximum_size=262144
+GenFLProgF1.menu.pnum.FLProg_FLE_24Mx.upload.maximum_data_size=49152
+GenFLProgF1.menu.pnum.FLProg_FLE_24Mx.build.board=GENERIC_F103VCTX
+GenFLProgF1.menu.pnum.FLProg_FLE_24Mx.build.product_line=STM32F103xE
+GenFLProgF1.menu.pnum.FLProg_FLE_24Mx.build.variant=STM32F1xx/F103V(C-D-E)(H-T)
+GenFLProgF1.menu.pnum.FLProg_FLE_24Mx.build.flprog=PLC_FLE_24MX
+
+# FLProg PLC FLE-32Mx
+GenFLProgF1.menu.pnum.FLProg_FLE_32Mx=FLProg PLC FLE-32Mx
+GenFLProgF1.menu.pnum.FLProg_FLE_32Mx.upload.maximum_size=262144
+GenFLProgF1.menu.pnum.FLProg_FLE_32Mx.upload.maximum_data_size=49152
+GenFLProgF1.menu.pnum.FLProg_FLE_32Mx.build.board=GENERIC_F103VCTX
+GenFLProgF1.menu.pnum.FLProg_FLE_32Mx.build.product_line=STM32F103xE
+GenFLProgF1.menu.pnum.FLProg_FLE_32Mx.build.variant=STM32F1xx/F103V(C-D-E)(H-T)
+GenFLProgF1.menu.pnum.FLProg_FLE_32Mx.build.flprog=PLC_FLE_32MX
+
+# FLProg PLC FLE-48Mx
+GenFLProgF1.menu.pnum.FLProg_FLE_48Mx=FLProg PLC FLE-48Mx
+GenFLProgF1.menu.pnum.FLProg_FLE_48Mx.upload.maximum_size=262144
+GenFLProgF1.menu.pnum.FLProg_FLE_48Mx.upload.maximum_data_size=49152
+GenFLProgF1.menu.pnum.FLProg_FLE_48Mx.build.board=GENERIC_F103VCTX
+GenFLProgF1.menu.pnum.FLProg_FLE_48Mx.build.product_line=STM32F103xE
+GenFLProgF1.menu.pnum.FLProg_FLE_48Mx.build.variant=STM32F1xx/F103V(C-D-E)(H-T)
+GenFLProgF1.menu.pnum.FLProg_FLE_48Mx.build.flprog=PLC_FLE_48MX
+
+# FLProg PLC FLE-56Mx
+GenFLProgF1.menu.pnum.FLProg_FLE_56Mx=FLProg PLC FLE-56Mx
+GenFLProgF1.menu.pnum.FLProg_FLE_56Mx.upload.maximum_size=262144
+GenFLProgF1.menu.pnum.FLProg_FLE_56Mx.upload.maximum_data_size=49152
+GenFLProgF1.menu.pnum.FLProg_FLE_56Mx.build.board=GENERIC_F103VCTX
+GenFLProgF1.menu.pnum.FLProg_FLE_56Mx.build.product_line=STM32F103xE
+GenFLProgF1.menu.pnum.FLProg_FLE_56Mx.build.variant=STM32F1xx/F103V(C-D-E)(H-T)
+GenFLProgF1.menu.pnum.FLProg_FLE_56Mx.build.flprog=PLC_FLE_56MX
+
+# FLProg PLC FLE1-28Mx
+GenFLProgF1.menu.pnum.FLProg_FLE1_28Mx=FLProg PLC FLE1-28Mx
+GenFLProgF1.menu.pnum.FLProg_FLE1_28Mx.upload.maximum_size=262144
+GenFLProgF1.menu.pnum.FLProg_FLE1_28Mx.upload.maximum_data_size=49152
+GenFLProgF1.menu.pnum.FLProg_FLE1_28Mx.build.board=GENERIC_F103VCTX
+GenFLProgF1.menu.pnum.FLProg_FLE1_28Mx.build.product_line=STM32F103xE
+GenFLProgF1.menu.pnum.FLProg_FLE1_28Mx.build.variant=STM32F1xx/F103V(C-D-E)(H-T)
+GenFLProgF1.menu.pnum.FLProg_FLE1_28Mx.build.flprog=PLC_FLE1_28MX
+
+# FLProg PLC FLE1-32Mx
+GenFLProgF1.menu.pnum.FLProg_FLE1_32Mx=FLProg PLC FLE1-32Mx
+GenFLProgF1.menu.pnum.FLProg_FLE1_32Mx.upload.maximum_size=262144
+GenFLProgF1.menu.pnum.FLProg_FLE1_32Mx.upload.maximum_data_size=49152
+GenFLProgF1.menu.pnum.FLProg_FLE1_32Mx.build.board=GENERIC_F103VCTX
+GenFLProgF1.menu.pnum.FLProg_FLE1_32Mx.build.product_line=STM32F103xE
+GenFLProgF1.menu.pnum.FLProg_FLE1_32Mx.build.variant=STM32F1xx/F103V(C-D-E)(H-T)
+GenFLProgF1.menu.pnum.FLProg_FLE1_32Mx.build.flprog=PLC_FLE1_32MX
+
+# FLProg PLC FLE1-40Mx
+GenFLProgF1.menu.pnum.FLProg_FLE1_40Mx=FLProg PLC FLE1-40Mx
+GenFLProgF1.menu.pnum.FLProg_FLE1_40Mx.upload.maximum_size=262144
+GenFLProgF1.menu.pnum.FLProg_FLE1_40Mx.upload.maximum_data_size=49152
+GenFLProgF1.menu.pnum.FLProg_FLE1_40Mx.build.board=GENERIC_F103VCTX
+GenFLProgF1.menu.pnum.FLProg_FLE1_40Mx.build.product_line=STM32F103xE
+GenFLProgF1.menu.pnum.FLProg_FLE1_40Mx.build.variant=STM32F1xx/F103V(C-D-E)(H-T)
+GenFLProgF1.menu.pnum.FLProg_FLE1_40Mx.build.flprog=PLC_FLE1_40MX
+
+# FLProg Board BLUEPILL_F103C8
+GenFLProgF1.menu.pnum.BLUEPILL_F103C8=FLProg Board BluePill F103C8
+GenFLProgF1.menu.pnum.BLUEPILL_F103C8.upload.maximum_size=65536
+GenFLProgF1.menu.pnum.BLUEPILL_F103C8.upload.maximum_data_size=20480
+GenFLProgF1.menu.pnum.BLUEPILL_F103C8.build.board=BLUEPILL_F103C8
+GenFLProgF1.menu.pnum.BLUEPILL_F103C8.build.product_line=STM32F103xB
+GenFLProgF1.menu.pnum.BLUEPILL_F103C8.build.variant=STM32F1xx/F103C8T_F103CB(T-U)
+GenFLProgF1.menu.pnum.BLUEPILL_F103C8.build.variant_h=variant_PILL_F103Cx.h
+GenFLProgF1.menu.pnum.BLUEPILL_F103C8.build.flprog=BLUEPILL_F103C8
+
+# FLProg Board BLUEPILL_F103C8B
+GenFLProgF1.menu.pnum.BLUEPILL_F103CB=FLProg Board BluePill F103CB
+GenFLProgF1.menu.pnum.BLUEPILL_F103CB.upload.maximum_size=131072
+GenFLProgF1.menu.pnum.BLUEPILL_F103CB.upload.maximum_data_size=20480
+GenFLProgF1.menu.pnum.BLUEPILL_F103CB.build.board=BLUEPILL_F103CB
+GenFLProgF1.menu.pnum.BLUEPILL_F103CB.build.product_line=STM32F103xB
+GenFLProgF1.menu.pnum.BLUEPILL_F103CB.build.variant_h=variant_PILL_F103Cx.h
+GenFLProgF1.menu.pnum.BLUEPILL_F103CB.build.variant=STM32F1xx/F103C8T_F103CB(T-U)
+GenFLProgF1.menu.pnum.BLUEPILL_F103CB.build.flprog=BLUEPILL_F103CB
+
+# FLProg Generic F103R6Tx
+GenFLProgF1.menu.pnum.GENERIC_F103R6TX=FLProg Generic F103R6Tx
+GenFLProgF1.menu.pnum.GENERIC_F103R6TX.upload.maximum_size=32768
+GenFLProgF1.menu.pnum.GENERIC_F103R6TX.upload.maximum_data_size=10240
+GenFLProgF1.menu.pnum.GENERIC_F103R6TX.build.board=GENERIC_F103R6TX
+GenFLProgF1.menu.pnum.GENERIC_F103R6TX.build.product_line=STM32F103x6
+GenFLProgF1.menu.pnum.GENERIC_F103R6TX.build.variant=STM32F1xx/F103R(4-6)T
+GenFLProgF1.menu.pnum.GENERIC_F103R6TX.build.flprog=GENERIC_F103R6TX
+
+# FLProg Generic F103VCTx
+GenFLProgF1.menu.pnum.GENERIC_F103VCTX=FLProg Generic F103VCTx
+GenFLProgF1.menu.pnum.GENERIC_F103VCTX.upload.maximum_size=262144
+GenFLProgF1.menu.pnum.GENERIC_F103VCTX.upload.maximum_data_size=49152
+GenFLProgF1.menu.pnum.GENERIC_F103VCTX.build.board=GENERIC_F103VCTX
+GenFLProgF1.menu.pnum.GENERIC_F103VCTX.build.product_line=STM32F103xE
+GenFLProgF1.menu.pnum.GENERIC_F103VCTX.build.variant=STM32F1xx/F103V(C-D-E)(H-T)
+GenFLProgF1.menu.pnum.GENERIC_F103VCTX.build.flprog=GENERIC_F103VCTX
+
+# FLProg Generic F103VETx
+GenFLProgF1.menu.pnum.GENERIC_F103VETX=FLProg Generic F103VETx
+GenFLProgF1.menu.pnum.GENERIC_F103VETX.upload.maximum_size=524288
+GenFLProgF1.menu.pnum.GENERIC_F103VETX.upload.maximum_data_size=65536
+GenFLProgF1.menu.pnum.GENERIC_F103VETX.build.board=GENERIC_F103VETX
+GenFLProgF1.menu.pnum.GENERIC_F103VETX.build.product_line=STM32F103xE
+GenFLProgF1.menu.pnum.GENERIC_F103VETX.build.variant=STM32F1xx/F103V(C-D-E)(H-T)
+GenFLProgF1.menu.pnum.GENERIC_F103VETX.build.flprog=GENERIC_F103VETX
+
+# FLProg Generic F103VGTx
+GenFLProgF1.menu.pnum.GENERIC_F103VGTX=FLProg Generic F103VGTx
+GenFLProgF1.menu.pnum.GENERIC_F103VGTX.upload.maximum_size=1048576
+GenFLProgF1.menu.pnum.GENERIC_F103VGTX.upload.maximum_data_size=98304
+GenFLProgF1.menu.pnum.GENERIC_F103VGTX.build.board=GENERIC_F103VGTX
+GenFLProgF1.menu.pnum.GENERIC_F103VGTX.build.product_line=STM32F103xG
+GenFLProgF1.menu.pnum.GENERIC_F103VGTX.build.variant=STM32F1xx/F103V(F-G)T
+GenFLProgF1.menu.pnum.GENERIC_F103VGTX.build.flprog=GENERIC_F103VGTX
+
+# Upload menu
+GenFLProgF1.menu.upload_method.swdMethod=STM32CubeProgrammer (SWD)
+GenFLProgF1.menu.upload_method.swdMethod.upload.protocol=0
+GenFLProgF1.menu.upload_method.swdMethod.upload.options=
+GenFLProgF1.menu.upload_method.swdMethod.upload.tool=stm32CubeProg
+
+GenFLProgF1.menu.upload_method.serialMethod=STM32CubeProgrammer (Serial)
+GenFLProgF1.menu.upload_method.serialMethod.upload.protocol=1
+GenFLProgF1.menu.upload_method.serialMethod.upload.options={serial.port.file}
+GenFLProgF1.menu.upload_method.serialMethod.upload.tool=stm32CubeProg
+
+GenFLProgF1.menu.upload_method.dfuMethod=STM32CubeProgrammer (DFU)
+GenFLProgF1.menu.upload_method.dfuMethod.upload.protocol=2
+GenFLProgF1.menu.upload_method.dfuMethod.upload.options=
+GenFLProgF1.menu.upload_method.dfuMethod.upload.tool=stm32CubeProg
+
+GenFLProgF1.menu.upload_method.bmpMethod=BMP (Black Magic Probe)
+GenFLProgF1.menu.upload_method.bmpMethod.upload.protocol=gdb_bmp
+GenFLProgF1.menu.upload_method.bmpMethod.upload.tool=bmp_upload
+
+GenFLProgF1.menu.upload_method.hidMethod=HID Bootloader 2.2
+GenFLProgF1.menu.upload_method.hidMethod.upload.protocol=hid22
+GenFLProgF1.menu.upload_method.hidMethod.upload.tool=hid_upload
+GenFLProgF1.menu.upload_method.hidMethod.build.flash_offset=0x800
+GenFLProgF1.menu.upload_method.hidMethod.build.bootloader_flags=-DBL_HID
+
+GenFLProgF1.menu.upload_method.dfu2Method=Maple DFU Bootloader 2.0
+GenFLProgF1.menu.upload_method.dfu2Method.upload.protocol=maple
+GenFLProgF1.menu.upload_method.dfu2Method.upload.tool=maple_upload
+GenFLProgF1.menu.upload_method.dfu2Method.upload.usbID=1EAF:0003
+GenFLProgF1.menu.upload_method.dfu2Method.upload.altID=2
+GenFLProgF1.menu.upload_method.dfu2Method.build.flash_offset=0x2000
+GenFLProgF1.menu.upload_method.dfu2Method.build.bootloader_flags=-DBL_LEGACY_LEAF
+
+GenFLProgF1.menu.upload_method.dfuoMethod=Maple DFU Bootloader original
+GenFLProgF1.menu.upload_method.dfuoMethod.upload.protocol=maple
+GenFLProgF1.menu.upload_method.dfuoMethod.upload.tool=maple_upload
+GenFLProgF1.menu.upload_method.dfuoMethod.upload.usbID=1EAF:0003
+GenFLProgF1.menu.upload_method.dfuoMethod.upload.altID=1
+GenFLProgF1.menu.upload_method.dfuoMethod.build.flash_offset=0x5000
+GenFLProgF1.menu.upload_method.dfuoMethod.build.bootloader_flags=-DBL_LEGACY_LEAF
+
+
+# Serialx activation
+GenFLProgF1.menu.xserial.generic=Enabled (generic 'Serial')
+GenFLProgF1.menu.xserial.none=Enabled (no generic 'Serial')
+GenFLProgF1.menu.xserial.none.build.xSerial=-DHAL_UART_MODULE_ENABLED -DHWSERIAL_NONE
+GenFLProgF1.menu.xserial.disabled=Disabled (no Serial support)
+GenFLProgF1.menu.xserial.disabled.build.xSerial=
+
+# USB connectivity
+GenFLProgF1.menu.usb.none=None
+GenFLProgF1.menu.usb.CDCgen=CDC (generic 'Serial' supersede U(S)ART)
+GenFLProgF1.menu.usb.CDCgen.build.enable_usb={build.usb_flags} -DUSBD_USE_CDC
+GenFLProgF1.menu.usb.CDC=CDC (no generic 'Serial')
+GenFLProgF1.menu.usb.CDC.build.enable_usb={build.usb_flags} -DUSBD_USE_CDC -DDISABLE_GENERIC_SERIALUSB
+GenFLProgF1.menu.usb.HID=HID (keyboard and mouse)
+GenFLProgF1.menu.usb.HID.build.enable_usb={build.usb_flags} -DUSBD_USE_HID_COMPOSITE
+GenFLProgF1.menu.xusb.FS=Low/Full Speed
+GenFLProgF1.menu.xusb.HS=High Speed
+GenFLProgF1.menu.xusb.HS.build.usb_speed=-DUSE_USB_HS
+GenFLProgF1.menu.xusb.HSFS=High Speed in Full Speed mode
+GenFLProgF1.menu.xusb.HSFS.build.usb_speed=-DUSE_USB_HS -DUSE_USB_HS_IN_FS
+
+# Optimizations
+GenFLProgF1.menu.opt.osstd=Smallest (-Os default)
+GenFLProgF1.menu.opt.oslto=Smallest (-Os) with LTO
+GenFLProgF1.menu.opt.oslto.build.flags.optimize=-Os -flto
+GenFLProgF1.menu.opt.o1std=Fast (-O1)
+GenFLProgF1.menu.opt.o1std.build.flags.optimize=-O1
+GenFLProgF1.menu.opt.o1lto=Fast (-O1) with LTO
+GenFLProgF1.menu.opt.o1lto.build.flags.optimize=-O1 -flto
+GenFLProgF1.menu.opt.o2std=Faster (-O2)
+GenFLProgF1.menu.opt.o2std.build.flags.optimize=-O2
+GenFLProgF1.menu.opt.o2lto=Faster (-O2) with LTO
+GenFLProgF1.menu.opt.o2lto.build.flags.optimize=-O2 -flto
+GenFLProgF1.menu.opt.o3std=Fastest (-O3)
+GenFLProgF1.menu.opt.o3std.build.flags.optimize=-O3
+GenFLProgF1.menu.opt.o3lto=Fastest (-O3) with LTO
+GenFLProgF1.menu.opt.o3lto.build.flags.optimize=-O3 -flto
+GenFLProgF1.menu.opt.ogstd=Debug (-Og)
+GenFLProgF1.menu.opt.ogstd.build.flags.optimize=-Og
+GenFLProgF1.menu.opt.o0std=No Optimization (-O0)
+GenFLProgF1.menu.opt.o0std.build.flags.optimize=-O0
+
+# Debug information
+GenFLProgF1.menu.dbg.none=None
+GenFLProgF1.menu.dbg.enable_sym=Symbols Enabled (-g)
+GenFLProgF1.menu.dbg.enable_sym.build.flags.debug=-g -DNDEBUG
+GenFLProgF1.menu.dbg.enable_log=Core logs Enabled
+GenFLProgF1.menu.dbg.enable_log.build.flags.debug=
+GenFLProgF1.menu.dbg.enable_all=Core Logs and Symbols Enabled (-g)
+GenFLProgF1.menu.dbg.enable_all.build.flags.debug=-g
+
+# C Runtime Library
+GenFLProgF1.menu.rtlib.nano=Newlib Nano (default)
+GenFLProgF1.menu.rtlib.nanofp=Newlib Nano + Float Printf
+GenFLProgF1.menu.rtlib.nanofp.build.flags.ldspecs=--specs=nano.specs -u _printf_float
+GenFLProgF1.menu.rtlib.nanofs=Newlib Nano + Float Scanf
+GenFLProgF1.menu.rtlib.nanofs.build.flags.ldspecs=--specs=nano.specs -u _scanf_float
+GenFLProgF1.menu.rtlib.nanofps=Newlib Nano + Float Printf/Scanf
+GenFLProgF1.menu.rtlib.nanofps.build.flags.ldspecs=--specs=nano.specs -u _printf_float -u _scanf_float
+GenFLProgF1.menu.rtlib.full=Newlib Standard
+GenFLProgF1.menu.rtlib.full.build.flags.ldspecs=
+
+################################################################################
+# FLProg Generic F4
+GenFLProgF4.name=FLProg STM32F4 series
+
+GenFLProgF4.build.core=arduino
+GenFLProgF4.build.board=GenFLProgF4
+GenFLProgF4.build.st_extra_flags=-D{build.product_line} {build.enable_usb} {build.xSerial} {build.bootloader_flags}
+GenFLProgF4.build.mcu=cortex-m4
+GenFLProgF4.build.fpu=-mfpu=fpv4-sp-d16
+GenFLProgF4.build.float-abi=-mfloat-abi=hard
+GenFLProgF4.build.series=STM32F4xx
+GenFLProgF4.build.flash_offset=0x0
+GenFLProgF4.upload.maximum_size=0
+GenFLProgF4.upload.maximum_data_size=0
+GenFLProgF4.openocd.target=stm32f4x
+GenFLProgF4.vid.0=0x0483
+GenFLProgF4.pid.0=0x5740
+
+# FLProg PLC FLE4-24.1
+GenFLProgF4.menu.pnum.FLProg_FLE4_24_1=FLProg PLC FLE4-24.1
+GenFLProgF4.menu.pnum.FLProg_FLE4_24_1.upload.maximum_size=524288
+GenFLProgF4.menu.pnum.FLProg_FLE4_24_1.upload.maximum_data_size=131072
+GenFLProgF4.menu.pnum.FLProg_FLE4_24_1.build.board=BLACK_F407VE
+GenFLProgF4.menu.pnum.FLProg_FLE4_24_1.build.product_line=STM32F407xx
+GenFLProgF4.menu.pnum.FLProg_FLE4_24_1.build.variant_h=variant_BLACK_F407VX.h
+GenFLProgF4.menu.pnum.FLProg_FLE4_24_1.build.variant=STM32F4xx/F407V(E-G)T_F417V(E-G)T
+GenFLProgF4.menu.pnum.FLProg_FLE4_24_1.build.peripheral_pins=-DCUSTOM_PERIPHERAL_PINS
+GenFLProgF4.menu.pnum.FLProg_FLE4_24_1.debug.svd_file={runtime.tools.STM32_SVD.path}/svd/STM32F4xx/STM32F407.svd
+GenFLProgF4.menu.pnum.FLProg_FLE4_24_1.build.flprog=PLC_FLE4_24_1
+
+# FLProg PLC FLE4-20.1
+GenFLProgF4.menu.pnum.FLProg_FLE4_20_1=FLProg PLC FLE4-20.1
+GenFLProgF4.menu.pnum.FLProg_FLE4_20_1.upload.maximum_size=1048576
+GenFLProgF4.menu.pnum.FLProg_FLE4_20_1.upload.maximum_data_size=131072
+GenFLProgF4.menu.pnum.FLProg_FLE4_20_1.build.board=BLACK_F407VG
+GenFLProgF4.menu.pnum.FLProg_FLE4_20_1.build.product_line=STM32F407xx
+GenFLProgF4.menu.pnum.FLProg_FLE4_20_1.build.variant_h=variant_BLACK_F407VX.h
+GenFLProgF4.menu.pnum.FLProg_FLE4_20_1.build.variant=STM32F4xx/F407V(E-G)T_F417V(E-G)T
+GenFLProgF4.menu.pnum.FLProg_FLE4_20_1.build.peripheral_pins=-DCUSTOM_PERIPHERAL_PINS
+GenFLProgF4.menu.pnum.FLProg_FLE4_20_1.debug.svd_file={runtime.tools.STM32_SVD.path}/svd/STM32F4xx/STM32F407.svd
+GenFLProgF4.menu.pnum.FLProg_FLE4_20_1.build.flprog=PLC_FLE4_20_1
+
+# FLProg PLC FLE4C-30MT
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MT=FLProg PLC FLE4C-30MT
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MT.upload.maximum_size=1048576
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MT.upload.maximum_data_size=131072
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MT.build.board=BLACK_F407VG
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MT.build.product_line=STM32F407xx
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MT.build.variant_h=variant_BLACK_F407VX.h
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MT.build.variant=STM32F4xx/F407V(E-G)T_F417V(E-G)T
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MT.build.peripheral_pins=-DCUSTOM_PERIPHERAL_PINS
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MT.debug.svd_file={runtime.tools.STM32_SVD.path}/svd/STM32F4xx/STM32F407.svd
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MT.build.flprog=PLC_FLE4C_30MT
+
+# FLProg PLC FLE4C-30MR
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MR=FLProg PLC FLE4C-30MR
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MR.upload.maximum_size=1048576
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MR.upload.maximum_data_size=131072
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MR.build.board=BLACK_F407VG
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MR.build.product_line=STM32F407xx
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MR.build.variant_h=variant_BLACK_F407VX.h
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MR.build.variant=STM32F4xx/F407V(E-G)T_F417V(E-G)T
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MR.build.peripheral_pins=-DCUSTOM_PERIPHERAL_PINS
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MR.debug.svd_file={runtime.tools.STM32_SVD.path}/svd/STM32F4xx/STM32F407.svd
+GenFLProgF4.menu.pnum.FLProg_FLE4C_30MR.build.flprog=PLC_FLE4C_30MR
+
+
+# FLProg PLC FLE4-40.1
+GenFLProgF4.menu.pnum.FLProg_FLE4_40_1=FLProg PLC FLE4-40.1
+GenFLProgF4.menu.pnum.FLProg_FLE4_40_1.upload.maximum_size=524288
+GenFLProgF4.menu.pnum.FLProg_FLE4_40_1.upload.maximum_data_size=131072
+GenFLProgF4.menu.pnum.FLProg_FLE4_40_1.build.board=BLACK_F407VG
+GenFLProgF4.menu.pnum.FLProg_FLE4_40_1.build.product_line=STM32F407xx
+GenFLProgF4.menu.pnum.FLProg_FLE4_40_1.build.variant_h=variant_BLACK_F407VX.h
+GenFLProgF4.menu.pnum.FLProg_FLE4_40_1.build.variant=STM32F4xx/F407V(E-G)T_F417V(E-G)T
+GenFLProgF4.menu.pnum.FLProg_FLE4_40_1.build.peripheral_pins=-DCUSTOM_PERIPHERAL_PINS
+GenFLProgF4.menu.pnum.FLProg_FLE4_40_1.debug.svd_file={runtime.tools.STM32_SVD.path}/svd/STM32F4xx/STM32F407.svd
+GenFLProgF4.menu.pnum.FLProg_FLE4_40_1.build.flprog=PLC_FLE4_48_1
+
+# FLProg PLC FLE4F-32.1
+GenFLProgF4.menu.pnum.FLProg_FLE4F_32_1=FLProg PLC FLE4F-32.1
+GenFLProgF4.menu.pnum.FLProg_FLE4F_32_1.upload.maximum_size=1048576
+GenFLProgF4.menu.pnum.FLProg_FLE4F_32_1.upload.maximum_data_size=131072
+GenFLProgF4.menu.pnum.FLProg_FLE4F_32_1.build.board=BLACK_F407VG
+GenFLProgF4.menu.pnum.FLProg_FLE4F_32_1.build.product_line=STM32F407xx
+GenFLProgF4.menu.pnum.FLProg_FLE4F_32_1.build.variant_h=variant_BLACK_F407VX.h
+GenFLProgF4.menu.pnum.FLProg_FLE4F_32_1.build.variant=STM32F4xx/F407V(E-G)T_F417V(E-G)T
+GenFLProgF4.menu.pnum.FLProg_FLE4F_32_1.build.peripheral_pins=-DCUSTOM_PERIPHERAL_PINS
+GenFLProgF4.menu.pnum.FLProg_FLE4F_32_1.debug.svd_file={runtime.tools.STM32_SVD.path}/svd/STM32F4xx/STM32F407.svd
+GenFLProgF4.menu.pnum.FLProg_FLE4F_32_1.build.flprog=PLC_FLE4F_32_1
+
+# FLProg Board Black F407VE
+GenFLProgF4.menu.pnum.BLACK_F407VE=FLProg Board Black F407VE
+GenFLProgF4.menu.pnum.BLACK_F407VE.upload.maximum_size=524288
+GenFLProgF4.menu.pnum.BLACK_F407VE.upload.maximum_data_size=131072
+GenFLProgF4.menu.pnum.BLACK_F407VE.build.board=BLACK_F407VE
+GenFLProgF4.menu.pnum.BLACK_F407VE.build.product_line=STM32F407xx
+GenFLProgF4.menu.pnum.BLACK_F407VE.build.variant_h=variant_BLACK_F407VX.h
+GenFLProgF4.menu.pnum.BLACK_F407VE.build.variant=STM32F4xx/F407V(E-G)T_F417V(E-G)T
+GenFLProgF4.menu.pnum.BLACK_F407VE.build.peripheral_pins=-DCUSTOM_PERIPHERAL_PINS
+GenFLProgF4.menu.pnum.BLACK_F407VE.debug.svd_file={runtime.tools.STM32_SVD.path}/svd/STM32F4xx/STM32F407.svd
+GenFLProgF4.menu.pnum.BLACK_F407VE.build.flprog=BLACK_F407VE
+
+# FLProg Board Black F407VG
+GenFLProgF4.menu.pnum.BLACK_F407VG=FLProg Board Black F407VG
+GenFLProgF4.menu.pnum.BLACK_F407VG.upload.maximum_size=1048576
+GenFLProgF4.menu.pnum.BLACK_F407VG.upload.maximum_data_size=131072
+GenFLProgF4.menu.pnum.BLACK_F407VG.build.board=BLACK_F407VG
+GenFLProgF4.menu.pnum.BLACK_F407VG.build.product_line=STM32F407xx
+GenFLProgF4.menu.pnum.BLACK_F407VG.build.variant_h=variant_BLACK_F407VX.h
+GenFLProgF4.menu.pnum.BLACK_F407VG.build.variant=STM32F4xx/F407V(E-G)T_F417V(E-G)T
+GenFLProgF4.menu.pnum.BLACK_F407VG.build.peripheral_pins=-DCUSTOM_PERIPHERAL_PINS
+GenFLProgF4.menu.pnum.BLACK_F407VG.debug.svd_file={runtime.tools.STM32_SVD.path}/svd/STM32F4xx/STM32F407.svd
+GenFLProgF4.menu.pnum.BLACK_F407VG.build.flprog=BLACK_F407VG
+
+# FLProg Board Black F407VG_without USB
+GenFLProgF4.menu.pnum.BLACK_F407VG_NO_USB=FLProg Board Black F407VG without USB
+GenFLProgF4.menu.pnum.BLACK_F407VG_NO_USB.upload.maximum_size=1048576
+GenFLProgF4.menu.pnum.BLACK_F407VG_NO_USB.upload.maximum_data_size=131072
+GenFLProgF4.menu.pnum.BLACK_F407VG_NO_USB.build.board=BLACK_F407VG
+GenFLProgF4.menu.pnum.BLACK_F407VG_NO_USB.build.product_line=STM32F407xx
+GenFLProgF4.menu.pnum.BLACK_F407VG_NO_USB.build.variant_h=variant_BLACK_F407VX.h
+GenFLProgF4.menu.pnum.BLACK_F407VG_NO_USB.build.variant=STM32F4xx/F407V(E-G)T_F417V(E-G)T
+GenFLProgF4.menu.pnum.BLACK_F407VG_NO_USB.build.peripheral_pins=-DCUSTOM_PERIPHERAL_PINS
+GenFLProgF4.menu.pnum.BLACK_F407VG_NO_USB.debug.svd_file={runtime.tools.STM32_SVD.path}/svd/STM32F4xx/STM32F407.svd
+GenFLProgF4.menu.pnum.BLACK_F407VG_NO_USB.build.flprog=BLACK_F407VG_NO_USB
+
+# FLProg Board BlackPill F401CC
+GenFLProgF4.menu.pnum.BLACKPILL_F401CC=FLProg Board BlackPill F401CC
+GenFLProgF4.menu.pnum.BLACKPILL_F401CC.upload.maximum_size=262144
+GenFLProgF4.menu.pnum.BLACKPILL_F401CC.upload.maximum_data_size=65536
+GenFLProgF4.menu.pnum.BLACKPILL_F401CC.build.board=BLACKPILL_F401CC
+GenFLProgF4.menu.pnum.BLACKPILL_F401CC.build.product_line=STM32F401xC
+GenFLProgF4.menu.pnum.BLACKPILL_F401CC.build.variant=STM32F4xx/F401CC(F-U-Y)_F401C(B-D-E)(U-Y)
+GenFLProgF4.menu.pnum.BLACKPILL_F401CC.build.variant_h=variant_BLACKPILL_F401Cx.h
+GenFLProgF4.menu.pnum.BLACKPILL_F401CC.build.peripheral_pins=-DCUSTOM_PERIPHERAL_PINS
+GenFLProgF4.menu.pnum.BLACKPILL_F401CC.build.flprog=BLACKPILL_F401CC
+
+# FLProg Board BlackPill F411CE
+# https://github.com/mcauser/WEACT_F411CEU6
+GenFLProgF4.menu.pnum.BLACKPILL_F411CE=FLProg Board BlackPill F411CE
+GenFLProgF4.menu.pnum.BLACKPILL_F411CE.upload.maximum_size=524288
+GenFLProgF4.menu.pnum.BLACKPILL_F411CE.upload.maximum_data_size=131072
+GenFLProgF4.menu.pnum.BLACKPILL_F411CE.build.board=BLACKPILL_F411CE
+GenFLProgF4.menu.pnum.BLACKPILL_F411CE.build.product_line=STM32F411xE
+GenFLProgF4.menu.pnum.BLACKPILL_F411CE.build.variant=STM32F4xx/F411C(C-E)(U-Y)
+GenFLProgF4.menu.pnum.BLACKPILL_F411CE.build.variant_h=variant_{build.board}.h
+GenFLProgF4.menu.pnum.BLACKPILL_F411CE.build.peripheral_pins=-DCUSTOM_PERIPHERAL_PINS
+GenFLProgF4.menu.pnum.BLACKPILL_F411CE.build.flprog=BLACKPILL_F411CE
+
+# FLProg Board Generic F401CCYx
+GenFLProgF4.menu.pnum.GENERIC_F401CCYX=FLProg Generic F401CCYx
+GenFLProgF4.menu.pnum.GENERIC_F401CCYX.upload.maximum_size=262144
+GenFLProgF4.menu.pnum.GENERIC_F401CCYX.upload.maximum_data_size=65536
+GenFLProgF4.menu.pnum.GENERIC_F401CCYX.build.board=GENERIC_F401CCYX
+GenFLProgF4.menu.pnum.GENERIC_F401CCYX.build.product_line=STM32F401xC
+GenFLProgF4.menu.pnum.GENERIC_F401CCYX.build.variant=STM32F4xx/F401CC(F-U-Y)_F401C(B-D-E)(U-Y)
+GenFLProgF4.menu.pnum.GENERIC_F401CCYX.build.flprog=GENERIC_F401CCYX
+
+# FLProg Board Generic F411CEYx
+GenFLProgF4.menu.pnum.GENERIC_F411CEYX=FLProg Generic F411CEYx
+GenFLProgF4.menu.pnum.GENERIC_F411CEYX.upload.maximum_size=524288
+GenFLProgF4.menu.pnum.GENERIC_F411CEYX.upload.maximum_data_size=131072
+GenFLProgF4.menu.pnum.GENERIC_F411CEYX.build.board=GENERIC_F411CEYX
+GenFLProgF4.menu.pnum.GENERIC_F411CEYX.build.product_line=STM32F411xE
+GenFLProgF4.menu.pnum.GENERIC_F411CEYX.build.variant=STM32F4xx/F411C(C-E)(U-Y)
+GenFLProgF4.menu.pnum.GENERIC_F411CEYX.build.flprog=GENERIC_F411CEYX
+
+# FLProg Board WeAct STM32F446RETx
+GenFLProgF4.menu.pnum.GENERIC_F446RETX=FLProg Board WeAct STM32F446RETx
+GenFLProgF4.menu.pnum.GENERIC_F446RETX.upload.maximum_size=524288
+GenFLProgF4.menu.pnum.GENERIC_F446RETX.upload.maximum_data_size=131072
+GenFLProgF4.menu.pnum.GENERIC_F446RETX.build.board=GENERIC_F446RETX
+GenFLProgF4.menu.pnum.GENERIC_F446RETX.build.product_line=STM32F446xx
+GenFLProgF4.menu.pnum.GENERIC_F446RETX.build.variant=STM32F4xx/F446R(C-E)T
+GenFLProgF4.menu.pnum.GENERIC_F446RETX.build.flprog=GENERIC_F446RETX
+
+# Upload menu
+GenFLProgF4.menu.upload_method.swdMethod=STM32CubeProgrammer (SWD)
+GenFLProgF4.menu.upload_method.swdMethod.upload.protocol=0
+GenFLProgF4.menu.upload_method.swdMethod.upload.options=
+GenFLProgF4.menu.upload_method.swdMethod.upload.tool=stm32CubeProg
+
+GenFLProgF4.menu.upload_method.serialMethod=STM32CubeProgrammer (Serial)
+GenFLProgF4.menu.upload_method.serialMethod.upload.protocol=1
+GenFLProgF4.menu.upload_method.serialMethod.upload.options={serial.port.file}
+GenFLProgF4.menu.upload_method.serialMethod.upload.tool=stm32CubeProg
+
+GenFLProgF4.menu.upload_method.dfuMethod=STM32CubeProgrammer (DFU)
+GenFLProgF4.menu.upload_method.dfuMethod.upload.protocol=2
+GenFLProgF4.menu.upload_method.dfuMethod.upload.options=
+GenFLProgF4.menu.upload_method.dfuMethod.upload.tool=stm32CubeProg
+
+GenFLProgF4.menu.upload_method.bmpMethod=BMP (Black Magic Probe)
+GenFLProgF4.menu.upload_method.bmpMethod.upload.protocol=gdb_bmp
+GenFLProgF4.menu.upload_method.bmpMethod.upload.tool=bmp_upload
+
+GenFLProgF4.menu.upload_method.hidMethod=HID Bootloader 2.2
+GenFLProgF4.menu.upload_method.hidMethod.upload.protocol=hid22
+GenFLProgF4.menu.upload_method.hidMethod.upload.tool=hid_upload
+GenFLProgF4.menu.upload_method.hidMethod.build.flash_offset=0x4000
+GenFLProgF4.menu.upload_method.hidMethod.build.bootloader_flags=-DBL_HID
+
+
+# Serialx activation
+GenFLProgF4.menu.xserial.generic=Enabled (generic 'Serial')
+GenFLProgF4.menu.xserial.none=Enabled (no generic 'Serial')
+GenFLProgF4.menu.xserial.none.build.xSerial=-DHAL_UART_MODULE_ENABLED -DHWSERIAL_NONE
+GenFLProgF4.menu.xserial.disabled=Disabled (no Serial support)
+GenFLProgF4.menu.xserial.disabled.build.xSerial=
+
+# USB connectivity
+GenFLProgF4.menu.usb.none=None
+GenFLProgF4.menu.usb.CDCgen=CDC (generic 'Serial' supersede U(S)ART)
+GenFLProgF4.menu.usb.CDCgen.build.enable_usb={build.usb_flags} -DUSBD_USE_CDC
+GenFLProgF4.menu.usb.CDC=CDC (no generic 'Serial')
+GenFLProgF4.menu.usb.CDC.build.enable_usb={build.usb_flags} -DUSBD_USE_CDC -DDISABLE_GENERIC_SERIALUSB
+GenFLProgF4.menu.usb.HID=HID (keyboard and mouse)
+GenFLProgF4.menu.usb.HID.build.enable_usb={build.usb_flags} -DUSBD_USE_HID_COMPOSITE
+GenFLProgF4.menu.xusb.FS=Low/Full Speed
+GenFLProgF4.menu.xusb.HS=High Speed
+GenFLProgF4.menu.xusb.HS.build.usb_speed=-DUSE_USB_HS
+GenFLProgF4.menu.xusb.HSFS=High Speed in Full Speed mode
+GenFLProgF4.menu.xusb.HSFS.build.usb_speed=-DUSE_USB_HS -DUSE_USB_HS_IN_FS
+
+# Optimizations
+GenFLProgF4.menu.opt.osstd=Smallest (-Os default)
+GenFLProgF4.menu.opt.oslto=Smallest (-Os) with LTO
+GenFLProgF4.menu.opt.oslto.build.flags.optimize=-Os -flto
+GenFLProgF4.menu.opt.o1std=Fast (-O1)
+GenFLProgF4.menu.opt.o1std.build.flags.optimize=-O1
+GenFLProgF4.menu.opt.o1lto=Fast (-O1) with LTO
+GenFLProgF4.menu.opt.o1lto.build.flags.optimize=-O1 -flto
+GenFLProgF4.menu.opt.o2std=Faster (-O2)
+GenFLProgF4.menu.opt.o2std.build.flags.optimize=-O2
+GenFLProgF4.menu.opt.o2lto=Faster (-O2) with LTO
+GenFLProgF4.menu.opt.o2lto.build.flags.optimize=-O2 -flto
+GenFLProgF4.menu.opt.o3std=Fastest (-O3)
+GenFLProgF4.menu.opt.o3std.build.flags.optimize=-O3
+GenFLProgF4.menu.opt.o3lto=Fastest (-O3) with LTO
+GenFLProgF4.menu.opt.o3lto.build.flags.optimize=-O3 -flto
+GenFLProgF4.menu.opt.ogstd=Debug (-Og)
+GenFLProgF4.menu.opt.ogstd.build.flags.optimize=-Og
+GenFLProgF4.menu.opt.o0std=No Optimization (-O0)
+GenFLProgF4.menu.opt.o0std.build.flags.optimize=-O0
+
+# Debug information
+GenFLProgF4.menu.dbg.none=None
+GenFLProgF4.menu.dbg.enable_sym=Symbols Enabled (-g)
+GenFLProgF4.menu.dbg.enable_sym.build.flags.debug=-g -DNDEBUG
+GenFLProgF4.menu.dbg.enable_log=Core logs Enabled
+GenFLProgF4.menu.dbg.enable_log.build.flags.debug=
+GenFLProgF4.menu.dbg.enable_all=Core Logs and Symbols Enabled (-g)
+GenFLProgF4.menu.dbg.enable_all.build.flags.debug=-g
+
+
+# C Runtime Library
+GenFLProgF4.menu.rtlib.nano=Newlib Nano (default)
+GenFLProgF4.menu.rtlib.nanofp=Newlib Nano + Float Printf
+GenFLProgF4.menu.rtlib.nanofp.build.flags.ldspecs=--specs=nano.specs -u _printf_float
+GenFLProgF4.menu.rtlib.nanofs=Newlib Nano + Float Scanf
+GenFLProgF4.menu.rtlib.nanofs.build.flags.ldspecs=--specs=nano.specs -u _scanf_float
+GenFLProgF4.menu.rtlib.nanofps=Newlib Nano + Float Printf/Scanf
+GenFLProgF4.menu.rtlib.nanofps.build.flags.ldspecs=--specs=nano.specs -u _printf_float -u _scanf_float
+GenFLProgF4.menu.rtlib.full=Newlib Standard
+GenFLProgF4.menu.rtlib.full.build.flags.ldspecs=
+
+################################################################################
+# FLProg STM32H7 series
+GenFLProgH7.name=FLProg STM32H7 series
+
+GenFLProgH7.build.core=arduino
+GenFLProgH7.build.board=GenFLProgH7
+GenFLProgH7.build.st_extra_flags=-DCORE_CM7 -D{build.product_line} {build.enable_usb} {build.xSerial}
+GenFLProgH7.build.fpu=-mfpu=fpv4-sp-d16
+GenFLProgH7.build.float-abi=-mfloat-abi=hard
+GenFLProgH7.build.series=STM32H7xx
+GenFLProgH7.build.mcu=cortex-m7
+GenFLProgH7.build.flash_offset=0x0
+GenFLProgH7.upload.maximum_size=0
+GenFLProgH7.upload.maximum_data_size=0
+
+
+# FLProg Board WeAct MiniSTM32H743VITX
+GenFLProgH7.menu.pnum.WeActMiniH743VITX=FLProg Board WeAct MiniSTM32H743VITX
+GenFLProgH7.menu.pnum.WeActMiniH743VITX.upload.maximum_size=2097152
+GenFLProgH7.menu.pnum.WeActMiniH743VITX.upload.maximum_data_size=524288
+GenFLProgH7.menu.pnum.WeActMiniH743VITX.build.board=WeActMiniH743VITX
+GenFLProgH7.menu.pnum.WeActMiniH743VITX.build.product_line=STM32H743xx
+GenFLProgH7.menu.pnum.WeActMiniH743VITX.build.variant=STM32H7xx/H742V(G-I)(H-T)_H743V(G-I)(H-T)_H750VBT_H753VI(H-T)
+GenFLProgH7.menu.pnum.WeActMiniH743VITX.build.variant_h=variant_WeActMiniH7xx.h
+GenFLProgH7.menu.pnum.WeActMiniH743VITX.build.peripheral_pins=-DCUSTOM_PERIPHERAL_PINS
+GenFLProgH7.menu.pnum.WeActMiniH743VITX.debug.svd_file={runtime.tools.STM32_SVD.path}/svd/STM32H7xx/STM32H743.svd
+GenFLProgH7.menu.pnum.WeActMiniH743VITX.build.flprog=WeActMiniH743VITX
+
+# FLProg Board WeAct MiniSTM32H750VBTX
+GenFLProgH7.menu.pnum.WeActMiniH750VBTX=FLProg Board WeAct MiniSTM32H750VBTX
+GenFLProgH7.menu.pnum.WeActMiniH750VBTX.upload.maximum_size=131072
+GenFLProgH7.menu.pnum.WeActMiniH750VBTX.upload.maximum_data_size=524288
+GenFLProgH7.menu.pnum.WeActMiniH750VBTX.build.board=WeActMiniH750VBTX
+GenFLProgH7.menu.pnum.WeActMiniH750VBTX.build.product_line=STM32H750xx
+GenFLProgH7.menu.pnum.WeActMiniH750VBTX.build.variant=STM32H7xx/H742V(G-I)(H-T)_H743V(G-I)(H-T)_H750VBT_H753VI(H-T)
+GenFLProgH7.menu.pnum.WeActMiniH750VBTX.build.variant_h=variant_WeActMiniH7xx.h
+GenFLProgH7.menu.pnum.WeActMiniH750VBTX.build.peripheral_pins=-DCUSTOM_PERIPHERAL_PINS
+GenFLProgH7.menu.pnum.WeActMiniH750VBTX.debug.svd_file={runtime.tools.STM32_SVD.path}/svd/STM32H7xx/STM32H750.svd
+GenFLProgH7.menu.pnum.WeActMiniH750VBTX.build.flprog=WeActMiniH750VBTX
+
+# Upload menu
+GenFLProgH7.menu.upload_method.swdMethod=STM32CubeProgrammer (SWD)
+GenFLProgH7.menu.upload_method.swdMethod.upload.protocol=0
+GenFLProgH7.menu.upload_method.swdMethod.upload.options=
+GenFLProgH7.menu.upload_method.swdMethod.upload.tool=stm32CubeProg
+
+GenFLProgH7.menu.upload_method.serialMethod=STM32CubeProgrammer (Serial)
+GenFLProgH7.menu.upload_method.serialMethod.upload.protocol=1
+GenFLProgH7.menu.upload_method.serialMethod.upload.options={serial.port.file}
+GenFLProgH7.menu.upload_method.serialMethod.upload.tool=stm32CubeProg
+
+GenFLProgH7.menu.upload_method.dfuMethod=STM32CubeProgrammer (DFU)
+GenFLProgH7.menu.upload_method.dfuMethod.upload.protocol=2
+GenFLProgH7.menu.upload_method.dfuMethod.upload.options=
+GenFLProgH7.menu.upload_method.dfuMethod.upload.tool=stm32CubeProg
+
+# Serialx activation
+GenFLProgH7.menu.xserial.generic=Enabled (generic 'Serial')
+GenFLProgH7.menu.xserial.none=Enabled (no generic 'Serial')
+GenFLProgH7.menu.xserial.none.build.xSerial=-DHAL_UART_MODULE_ENABLED -DHWSERIAL_NONE
+GenFLProgH7.menu.xserial.disabled=Disabled (No Serial support)
+GenFLProgH7.menu.xserial.disabled.build.xSerial=
+
+# USB connectivity
+GenFLProgH7.menu.usb.none=None
+GenFLProgH7.menu.usb.CDCgen=CDC (generic 'Serial' supersede U(S)ART)
+GenFLProgH7.menu.usb.CDCgen.build.enable_usb={build.usb_flags} -DUSBD_USE_CDC
+GenFLProgH7.menu.usb.CDC=CDC (no generic 'Serial')
+GenFLProgH7.menu.usb.CDC.build.enable_usb={build.usb_flags} -DUSBD_USE_CDC -DDISABLE_GENERIC_SERIALUSB
+GenFLProgH7.menu.usb.HID=HID (keyboard and mouse)
+GenFLProgH7.menu.usb.HID.build.enable_usb={build.usb_flags} -DUSBD_USE_HID_COMPOSITE
+GenFLProgH7.menu.xusb.FS=Low/Full Speed
+GenFLProgH7.menu.xusb.HS=High Speed
+GenFLProgH7.menu.xusb.HS.build.usb_speed=-DUSE_USB_HS
+GenFLProgH7.menu.xusb.HSFS=High Speed in Full Speed mode
+GenFLProgH7.menu.xusb.HSFS.build.usb_speed=-DUSE_USB_HS -DUSE_USB_HS_IN_FS
+
+# Optimizations
+GenFLProgH7.menu.opt.osstd=Smallest (-Os default)
+GenFLProgH7.menu.opt.oslto=Smallest (-Os) with LTO
+GenFLProgH7.menu.opt.oslto.build.flags.optimize=-Os -flto
+GenFLProgH7.menu.opt.o1std=Fast (-O1)
+GenFLProgH7.menu.opt.o1std.build.flags.optimize=-O1
+GenFLProgH7.menu.opt.o1lto=Fast (-O1) with LTO
+GenFLProgH7.menu.opt.o1lto.build.flags.optimize=-O1 -flto
+GenFLProgH7.menu.opt.o2std=Faster (-O2)
+GenFLProgH7.menu.opt.o2std.build.flags.optimize=-O2
+GenFLProgH7.menu.opt.o2lto=Faster (-O2) with LTO
+GenFLProgH7.menu.opt.o2lto.build.flags.optimize=-O2 -flto
+GenFLProgH7.menu.opt.o3std=Fastest (-O3)
+GenFLProgH7.menu.opt.o3std.build.flags.optimize=-O3
+GenFLProgH7.menu.opt.o3lto=Fastest (-O3) with LTO
+GenFLProgH7.menu.opt.o3lto.build.flags.optimize=-O3 -flto
+GenFLProgH7.menu.opt.ogstd=Debug (-Og)
+GenFLProgH7.menu.opt.ogstd.build.flags.optimize=-Og
+GenFLProgH7.menu.opt.o0std=No Optimization (-O0)
+GenFLProgH7.menu.opt.o0std.build.flags.optimize=-O0
+
+# Debug information
+GenFLProgH7.menu.dbg.none=None
+GenFLProgH7.menu.dbg.enable_sym=Symbols Enabled (-g)
+GenFLProgH7.menu.dbg.enable_sym.build.flags.debug=-g -DNDEBUG
+GenFLProgH7.menu.dbg.enable_log=Core logs Enabled
+GenFLProgH7.menu.dbg.enable_log.build.flags.debug=
+GenFLProgH7.menu.dbg.enable_all=Core Logs and Symbols Enabled (-g)
+GenFLProgH7.menu.dbg.enable_all.build.flags.debug=-g
+
+# C Runtime Library
+GenFLProgH7.menu.rtlib.nano=Newlib Nano (default)
+GenFLProgH7.menu.rtlib.nanofp=Newlib Nano + Float Printf
+GenFLProgH7.menu.rtlib.nanofp.build.flags.ldspecs=--specs=nano.specs -u _printf_float
+GenFLProgH7.menu.rtlib.nanofs=Newlib Nano + Float Scanf
+GenFLProgH7.menu.rtlib.nanofs.build.flags.ldspecs=--specs=nano.specs -u _scanf_float
+GenFLProgH7.menu.rtlib.nanofps=Newlib Nano + Float Printf/Scanf
+GenFLProgH7.menu.rtlib.nanofps.build.flags.ldspecs=--specs=nano.specs -u _printf_float -u _scanf_float
+GenFLProgH7.menu.rtlib.full=Newlib Standard
+GenFLProgH7.menu.rtlib.full.build.flags.ldspecs=
+
+
+###############################
+# FLProg Generic G0
+GenFLProgG0.name=FLProg STM32G0 series
+
+GenFLProgG0.build.core=arduino
+GenFLProgG0.build.board=GenG0
+GenFLProgG0.build.mcu=cortex-m0plus
+GenFLProgG0.build.series=STM32G0xx
+GenFLProgG0.build.st_extra_flags=-D{build.product_line} {build.enable_usb} {build.xSerial} -D__CORTEX_SC=0
+GenFLProgG0.build.flash_offset=0x0
+GenFLProgG0.upload.maximum_size=0
+GenFLProgG0.upload.maximum_data_size=0
+
+# FLProg Generic G030C6Tx
+GenFLProgG0.menu.pnum.GENERIC_G030C6TX=FLProg Generic G030C6Tx
+GenFLProgG0.menu.pnum.GENERIC_G030C6TX.upload.maximum_size=32768
+GenFLProgG0.menu.pnum.GENERIC_G030C6TX.upload.maximum_data_size=8192
+GenFLProgG0.menu.pnum.GENERIC_G030C6TX.build.board=GENERIC_G030C6TX
+GenFLProgG0.menu.pnum.GENERIC_G030C6TX.build.product_line=STM32G030xx
+GenFLProgG0.menu.pnum.GENERIC_G030C6TX.build.variant=STM32G0xx/G030C(6-8)T
+GenFLProgG0.menu.pnum.GENERIC_G030C6TX.build.flprog=GENERIC_G030C6TX
+
+# FLProg Generic G030C8Tx
+GenFLProgG0.menu.pnum.GENERIC_G030C8TX=FLProg Generic G030C8Tx
+GenFLProgG0.menu.pnum.GENERIC_G030C8TX.upload.maximum_size=65536
+GenFLProgG0.menu.pnum.GENERIC_G030C8TX.upload.maximum_data_size=8192
+GenFLProgG0.menu.pnum.GENERIC_G030C8TX.build.board=GENERIC_G030C8TX
+GenFLProgG0.menu.pnum.GENERIC_G030C8TX.build.product_line=STM32G030xx
+GenFLProgG0.menu.pnum.GENERIC_G030C8TX.build.variant=STM32G0xx/G030C(6-8)T
+GenFLProgG0.menu.pnum.GENERIC_G030C8TX.build.flprog=GENERIC_G030C8TX
+
+# FLProg Generic G030F6Px
+GenFLProgG0.menu.pnum.GENERIC_G030F6PX=FLProg Generic G030F6Px
+GenFLProgG0.menu.pnum.GENERIC_G030F6PX.upload.maximum_size=32768
+GenFLProgG0.menu.pnum.GENERIC_G030F6PX.upload.maximum_data_size=8192
+GenFLProgG0.menu.pnum.GENERIC_G030F6PX.build.board=GENERIC_G030F6PX
+GenFLProgG0.menu.pnum.GENERIC_G030F6PX.build.product_line=STM32G030xx
+GenFLProgG0.menu.pnum.GENERIC_G030F6PX.build.variant=STM32G0xx/G030F6P
+GenFLProgG0.menu.pnum.GENERIC_G030F6PX.build.flprog=GENERIC_G030F6PX
+
+# FLProg Generic G031F4Px
+GenFLProgG0.menu.pnum.GENERIC_G031F4PX=FLProg Generic G031F4Px
+GenFLProgG0.menu.pnum.GENERIC_G031F4PX.upload.maximum_size=16384
+GenFLProgG0.menu.pnum.GENERIC_G031F4PX.upload.maximum_data_size=8192
+GenFLProgG0.menu.pnum.GENERIC_G031F4PX.build.board=GENERIC_G031F4PX
+GenFLProgG0.menu.pnum.GENERIC_G031F4PX.build.product_line=STM32G031xx
+GenFLProgG0.menu.pnum.GENERIC_G031F4PX.build.variant=STM32G0xx/G031F(4-6-8)P_G031Y8Y_G041F(6-8)P_G041Y8Y
+GenFLProgG0.menu.pnum.GENERIC_G031F4PX.build.flprog=GENERIC_G031F4PX
+
+# FLProg Generic G031F6Px
+GenFLProgG0.menu.pnum.GENERIC_G031F6PX=FLProg Generic G031F6Px
+GenFLProgG0.menu.pnum.GENERIC_G031F6PX.upload.maximum_size=32768
+GenFLProgG0.menu.pnum.GENERIC_G031F6PX.upload.maximum_data_size=8192
+GenFLProgG0.menu.pnum.GENERIC_G031F6PX.build.board=GENERIC_G031F6PX
+GenFLProgG0.menu.pnum.GENERIC_G031F6PX.build.product_line=STM32G031xx
+GenFLProgG0.menu.pnum.GENERIC_G031F6PX.build.variant=STM32G0xx/G031F(4-6-8)P_G031Y8Y_G041F(6-8)P_G041Y8Y
+GenFLProgG0.menu.pnum.GENERIC_G031F6PX.build.flprog=GENERIC_G031F6PX
+
+# FLProg Generic G031F8Px
+GenFLProgG0.menu.pnum.GENERIC_G031F8PX=FLProg Generic G031F8Px
+GenFLProgG0.menu.pnum.GENERIC_G031F8PX.upload.maximum_size=65536
+GenFLProgG0.menu.pnum.GENERIC_G031F8PX.upload.maximum_data_size=8192
+GenFLProgG0.menu.pnum.GENERIC_G031F8PX.build.board=GENERIC_G031F8PX
+GenFLProgG0.menu.pnum.GENERIC_G031F8PX.build.product_line=STM32G031xx
+GenFLProgG0.menu.pnum.GENERIC_G031F8PX.build.variant=STM32G0xx/G031F(4-6-8)P_G031Y8Y_G041F(6-8)P_G041Y8Y
+GenFLProgG0.menu.pnum.GENERIC_G031F8PX.build.flprog=GENERIC_G031F8PX
+
+# FLProg Generic G070RBTx
+GenFLProgG0.menu.pnum.GENERIC_G070RBTX=FLProg Generic G070RBTx
+GenFLProgG0.menu.pnum.GENERIC_G070RBTX.upload.maximum_size=131072
+GenFLProgG0.menu.pnum.GENERIC_G070RBTX.upload.maximum_data_size=36864
+GenFLProgG0.menu.pnum.GENERIC_G070RBTX.build.board=GENERIC_G070RBTX
+GenFLProgG0.menu.pnum.GENERIC_G070RBTX.build.product_line=STM32G070xx
+GenFLProgG0.menu.pnum.GENERIC_G070RBTX.build.variant=STM32G0xx/G070RBT
+GenFLProgG0.menu.pnum.GENERIC_G070RBTX.build.flprog=GENERIC_G070RBTX
+
+# Upload menu
+GenFLProgG0.menu.upload_method.swdMethod=STM32CubeProgrammer (SWD)
+GenFLProgG0.menu.upload_method.swdMethod.upload.protocol=0
+GenFLProgG0.menu.upload_method.swdMethod.upload.options=
+GenFLProgG0.menu.upload_method.swdMethod.upload.tool=stm32CubeProg
+
+GenFLProgG0.menu.upload_method.serialMethod=STM32CubeProgrammer (Serial)
+GenFLProgG0.menu.upload_method.serialMethod.upload.protocol=1
+GenFLProgG0.menu.upload_method.serialMethod.upload.options={serial.port.file}
+GenFLProgG0.menu.upload_method.serialMethod.upload.tool=stm32CubeProg
+
+GenFLProgG0.menu.upload_method.dfuMethod=STM32CubeProgrammer (DFU)
+GenFLProgG0.menu.upload_method.dfuMethod.upload.protocol=2
+GenFLProgG0.menu.upload_method.dfuMethod.upload.options=
+GenFLProgG0.menu.upload_method.dfuMethod.upload.tool=stm32CubeProg
+
+###############################
+# FLProg Generic G4
+GenFLProgG4.name=FLProg STM32G4 series
+
+GenFLProgG4.build.core=arduino
+GenFLProgG4.build.board=GenG4
+GenFLProgG4.build.st_extra_flags=-D{build.product_line} {build.enable_usb} {build.xSerial}
+GenFLProgG4.build.mcu=cortex-m4
+GenFLProgG4.build.fpu=-mfpu=fpv4-sp-d16
+GenFLProgG4.build.float-abi=-mfloat-abi=hard
+GenFLProgG4.build.series=STM32G4xx
+GenFLProgG4.build.flash_offset=0x0
+GenFLProgG4.upload.maximum_size=0
+GenFLProgG4.upload.maximum_data_size=0
+
+# FLProg Generic G431CBUx
+GenFLProgG4.menu.pnum.GENERIC_G431CBUX=FLProg Generic G431CBUx
+GenFLProgG4.menu.pnum.GENERIC_G431CBUX.upload.maximum_size=131072
+GenFLProgG4.menu.pnum.GENERIC_G431CBUX.upload.maximum_data_size=32768
+GenFLProgG4.menu.pnum.GENERIC_G431CBUX.build.board=GENERIC_G431CBUX
+GenFLProgG4.menu.pnum.GENERIC_G431CBUX.build.product_line=STM32G431xx
+GenFLProgG4.menu.pnum.GENERIC_G431CBUX.build.variant=STM32G4xx/G431C(6-8-B)U_G441CBU
+GenFLProgG4.menu.pnum.GENERIC_G431CBUX.build.flprog=GENERIC_G431CBUX
+
+# Flprog Generic G474CETx
+GenFLProgG4.menu.pnum.GENERIC_G474CETX=FLProg Generic G474CETx
+GenFLProgG4.menu.pnum.GENERIC_G474CETX.upload.maximum_size=524288
+GenFLProgG4.menu.pnum.GENERIC_G474CETX.upload.maximum_data_size=131072
+GenFLProgG4.menu.pnum.GENERIC_G474CETX.build.board=GENERIC_G474CETX
+GenFLProgG4.menu.pnum.GENERIC_G474CETX.build.product_line=STM32G474xx
+GenFLProgG4.menu.pnum.GENERIC_G474CETX.build.variant=STM32G4xx/G473C(B-C-E)T_G474C(B-C-E)T_G483CET_G484CET
+GenFLProgG4.menu.pnum.GENERIC_G474CETX.build.flprog=GENERIC_G474CETX
+
+# Upload menu
+GenFLProgG4.menu.upload_method.swdMethod=STM32CubeProgrammer (SWD)
+GenFLProgG4.menu.upload_method.swdMethod.upload.protocol=0
+GenFLProgG4.menu.upload_method.swdMethod.upload.options=
+GenFLProgG4.menu.upload_method.swdMethod.upload.tool=stm32CubeProg
+
+GenFLProgG4.menu.upload_method.serialMethod=STM32CubeProgrammer (Serial)
+GenFLProgG4.menu.upload_method.serialMethod.upload.protocol=1
+GenFLProgG4.menu.upload_method.serialMethod.upload.options={serial.port.file}
+GenFLProgG4.menu.upload_method.serialMethod.upload.tool=stm32CubeProg
+
+GenFLProgG4.menu.upload_method.dfuMethod=STM32CubeProgrammer (DFU)
+GenFLProgG4.menu.upload_method.dfuMethod.upload.protocol=2
+GenFLProgG4.menu.upload_method.dfuMethod.upload.options=
+GenFLProgG4.menu.upload_method.dfuMethod.upload.tool=stm32CubeProg
+
+################################################################################
+# FLProg Generic H5
+GenFLProgH5.name=FLProg STM32H5 series
+
+GenFLProgH5.build.core=arduino
+GenFLProgH5.build.board=GenH5
+GenFLProgH5.build.st_extra_flags=-D{build.product_line} {build.enable_usb} {build.xSerial}
+GenFLProgH5.build.mcu=cortex-m33
+GenFLProgH5.build.fpu=-mfpu=fpv4-sp-d16
+GenFLProgH5.build.float-abi=-mfloat-abi=hard
+GenFLProgH5.build.series=STM32H5xx
+GenFLProgH5.build.flash_offset=0x0
+GenFLProgH5.upload.maximum_size=0
+GenFLProgH5.upload.maximum_data_size=0
+
+# FLProg Generic H503RBTx
+GenFLProgH5.menu.pnum.GENERIC_H503RBTX=FLProg Generic H503RBTx
+GenFLProgH5.menu.pnum.GENERIC_H503RBTX.upload.maximum_size=131072
+GenFLProgH5.menu.pnum.GENERIC_H503RBTX.upload.maximum_data_size=32768
+GenFLProgH5.menu.pnum.GENERIC_H503RBTX.build.board=GENERIC_H503RBTX
+GenFLProgH5.menu.pnum.GENERIC_H503RBTX.build.product_line=STM32H503xx
+GenFLProgH5.menu.pnum.GENERIC_H503RBTX.build.variant=STM32H5xx/H503RBT
+GenFLProgG4.menu.pnum.GENERIC_H503RBTX.build.flprog=GENERIC_H503RBTX
+
+###FLPROG_END

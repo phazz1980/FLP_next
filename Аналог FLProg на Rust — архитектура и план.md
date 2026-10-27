@@ -121,8 +121,11 @@ to   = "pump.in"
 
 Сеть *(начато)*: блоки `wifi`, `ethernet` (W5500), `modbus_tcp_slave` (`net = wifi|ethernet`), `modbus_rtu_slave`,
 `modbus_read`/`modbus_write` (`slave = tcp|rtu`), `modbus_rtu_master` (до 4 ведомых) с `modbus_master_read`/`modbus_master_write`.
-RTU-блоки берут UART из FLProg_Utilites (её ставит FLProg; в комплекте её нет). Всё это на Arduino-библиотеках
-FLProg_Network и Flprog_Modbus из `Flprog_Network/Библиотека`. `flp-build` сам передаёт эту папку
+Всё это на сторонних Arduino-библиотеках из папки `libs/` в корне (в git, едет в архив релиза): FLProg_Network и Flprog_Modbus
+(очищенные копии https://github.com/Anderand/FLProg_Network — только `src`, `library.properties`, `keywords.txt`),
+а также их зависимости из стандартного набора FLProg — Flprog_Utilites и RT_HW_BASE (`src`). Новые сторонние
+библиотеки кладём туда же отдельной папкой; `libs/README.md` — откуда что взято. Прежняя папка `Flprog_Network/Библиотека`
+ещё ищется как запасная. `flp-build` сам передаёт эту папку
 arduino-cli через `--libraries` (другую можно задать в `FLP_ARDUINO_LIBS`). Сетевые блоки работают через общие объекты
 `flpWifi` и `flpModbus`. Дальше на очереди Modbus TCP Master, NTP, MQTT, а также отладка по Wi-Fi.
 

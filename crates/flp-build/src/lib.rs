@@ -144,12 +144,16 @@ fn port_order(a: &str, b: &str) -> std::cmp::Ordering {
     split(a).cmp(&split(b)).then_with(|| a.cmp(b))
 }
 
-/// Folder with Arduino libraries shipped with FLP_next (FLProg_Network, Modbus...).
-const BUNDLED_LIBRARIES: &str = "Flprog_Network/Библиотека";
+/// Folder with third-party Arduino libraries shipped with FLP_next (FLProg_Network,
+/// Modbus, ...); every subfolder is one library.
+const BUNDLED_LIBRARIES: &str = "libs";
+
+/// Where the libraries lived before `libs/`; still searched so old installs keep building.
+const LEGACY_LIBRARIES: &str = "Flprog_Network/Библиотека";
 
 /// Bundled Arduino library folders: `FLP_ARDUINO_LIBS` (separated like `PATH`),
-/// otherwise `Flprog_Network/Библиотека` next to the project (or its parents)
-/// or next to the executable (or its parents).
+/// otherwise `libs/` next to the project (or its parents) or next to the executable
+/// (or its parents).
 pub fn bundled_libraries(project_root: &Path) -> Vec<PathBuf> {
     if let Some(dirs) = env::var_os("FLP_ARDUINO_LIBS") {
         return env::split_paths(&dirs).filter(|d| d.is_dir()).collect();
@@ -165,7 +169,7 @@ pub fn bundled_libraries(project_root: &Path) -> Vec<PathBuf> {
         .find_map(|start| {
             start
                 .ancestors()
-                .map(|d| d.join(BUNDLED_LIBRARIES))
+                .flat_map(|d| [d.join(BUNDLED_LIBRARIES), d.join(LEGACY_LIBRARIES)])
                 .find(|d| d.is_dir())
         })
         .into_iter()

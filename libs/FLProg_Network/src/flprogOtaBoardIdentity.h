@@ -1,0 +1,49 @@
+#pragma once
+// Model comes from the board selected for this application build.
+#if defined(FLPROG_OTA_BOARD_FLE4D_30MT)
+#define FLPROG_OTA_MODEL "FLE4D-30MT / STM32F407VG"
+#elif defined(FLPROG_OTA_BOARD_BLACK_F407VE)
+#define FLPROG_OTA_MODEL "FLProg Board Black F407VE"
+#elif defined(FLPROG_OTA_BOARD_BLACK_F407VG)
+#define FLPROG_OTA_MODEL "FLProg Board Black F407VG"
+#elif defined(FLPROG_OTA_BOARD_BLACK_F407VG_NO_USB)
+#define FLPROG_OTA_MODEL "FLProg Board Black F407VG without USB"
+#elif defined(FLPROG_OTA_BOARD_FLProg_FLE1_28Mx)
+#define FLPROG_OTA_MODEL "FLProg PLC FLE1-28Mx"
+#elif defined(FLPROG_OTA_BOARD_FLProg_FLE1_32Mx)
+#define FLPROG_OTA_MODEL "FLProg PLC FLE1-32Mx"
+#elif defined(FLPROG_OTA_BOARD_FLProg_FLE1_40Mx)
+#define FLPROG_OTA_MODEL "FLProg PLC FLE1-40Mx"
+#elif defined(FLPROG_OTA_BOARD_FLProg_FLE4C_30MR)
+#define FLPROG_OTA_MODEL "FLProg PLC FLE4C-30MR"
+#elif defined(FLPROG_OTA_BOARD_FLProg_FLE4C_30MT)
+#define FLPROG_OTA_MODEL "FLProg PLC FLE4C-30MT"
+#elif defined(FLPROG_OTA_BOARD_FLProg_FLE4F_32_1)
+#define FLPROG_OTA_MODEL "FLProg PLC FLE4F-32.1"
+#elif defined(FLPROG_OTA_BOARD_FLProg_FLE4_20_1)
+#define FLPROG_OTA_MODEL "FLProg PLC FLE4-20.1"
+#elif defined(FLPROG_OTA_BOARD_FLProg_FLE4_24_1)
+#define FLPROG_OTA_MODEL "FLProg PLC FLE4-24.1"
+#elif defined(FLPROG_OTA_BOARD_FLProg_FLE4_40_1)
+#define FLPROG_OTA_MODEL "FLProg PLC FLE4-40.1"
+#elif defined(FLPROG_OTA_BOARD_FLProg_FLE_10Mx)
+#define FLPROG_OTA_MODEL "FLProg PLC FLE-10Mx"
+#elif defined(FLPROG_OTA_BOARD_FLProg_FLE_14Mx)
+#define FLPROG_OTA_MODEL "FLProg PLC FLE-14Mx"
+#elif defined(FLPROG_OTA_BOARD_FLProg_FLE_24Mx)
+#define FLPROG_OTA_MODEL "FLProg PLC FLE-24Mx"
+#elif defined(FLPROG_OTA_BOARD_FLProg_FLE_32Mx)
+#define FLPROG_OTA_MODEL "FLProg PLC FLE-32Mx"
+#elif defined(FLPROG_OTA_BOARD_FLProg_FLE_48Mx)
+#define FLPROG_OTA_MODEL "FLProg PLC FLE-48Mx"
+#elif defined(FLPROG_OTA_BOARD_FLProg_FLE_56Mx)
+#define FLPROG_OTA_MODEL "FLProg PLC FLE-56Mx"
+#elif defined(FLPROG_OTA_BOARD_GENERIC_F103VCTX)
+#define FLPROG_OTA_MODEL "FLProg Generic F103VCTx"
+#elif defined(FLPROG_OTA_BOARD_GENERIC_F103VETX)
+#define FLPROG_OTA_MODEL "FLProg Generic F103VETx"
+#elif defined(FLPROG_FLE4D_30MT_OTA_PROFILE) && !defined(FLPROG_STM32_OTA_LAYOUT)
+#define FLPROG_OTA_MODEL "FLE4D-30MT / STM32F407VG"
+#else
+#define FLPROG_OTA_MODEL "STM32 / board identity not configured"
+#endif

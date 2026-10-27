@@ -94,7 +94,9 @@ foreach ($bin in $bins) {
 }
 
 # Folders are mirrored; user_library in dist is left alone: it holds the user's own blocks.
-foreach ($dir in 'library', 'examples', 'Flprog_Network') {
+# The libraries used to live in Flprog_Network; drop the old copy from dist.
+if (Test-Path (Join-Path $dist 'Flprog_Network')) { Remove-Item (Join-Path $dist 'Flprog_Network') -Recurse -Force }
+foreach ($dir in 'library', 'examples', 'libs') {
     $src = Join-Path $root $dir
     $dst = Join-Path $dist $dir
     if (-not (Test-Path $src)) {

@@ -1,6 +1,6 @@
 ﻿FLP_next — визуальное программирование ESP32 (FBD)
 
-Запуск: flp-editor.exe. Папки library и Flprog_Network должны лежать рядом с exe.
+Запуск: flp-editor.exe. Папки library и libs должны лежать рядом с exe.
 
 Для сборки и заливки прошивок нужны arduino-cli и ядро ESP32:
   winget install ArduinoSA.CLI

@@ -1,0 +1,3 @@
+https://arduino.github.io/arduino-cli/0.19/library-specification/
+https://arduino.github.io/arduino-cli/0.35/library-specification/
+https://github.com/arduino/Arduino/wiki/Arduino-IDE-Auto-Format-configuration

@@ -74,6 +74,11 @@ table{border-collapse:collapse;width:100%}
 td{padding:6px 8px;border-bottom:1px solid #8883}
 td:first-child{opacity:.7}
 .bt{border:0;border-radius:8px;background:var(--a);color:#fff;padding:8px 14px;margin-top:8px}
+.btn,.bt{transition:transform .12s,filter .12s,background-color .2s}
+.btn:active,.bt:active{transform:scale(.96);filter:brightness(.88)}
+.led{transition:background-color .2s,box-shadow .2s}
+.bar i{transition:width .3s}
+@media(prefers-reduced-motion:reduce){.btn,.bt,.led,.bar i{transition:none}.btn:active,.bt:active{transform:none}}
 #lg{max-width:320px;margin:60px auto;display:flex;flex-direction:column;gap:8px}
 </style></head><body><nav id="n" hidden></nav><div id="m"><h1 id="t"></h1><div id="gs"></div></div><script>
 var GS=document.getElementById('gs'),N=document.getElementById('n'),T=document.getElementById('t'),M=document.getElementById('m'),E=[],P=[],A=[],K='';

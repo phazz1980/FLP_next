@@ -1,0 +1,246 @@
+###FLPROG_BEGIN_1_0
+################################################################################
+
+###############################################################
+#				Raspberry Pi Pico
+###############################################################
+
+rpipico_eis.name=FLPrpog: Raspberry Pi Pico
+rpipico_eis.vid.0=0x2e8a
+rpipico_eis.pid.0=0x000a
+rpipico_eis.vid.1=0x2e8a
+rpipico_eis.pid.1=0x010a
+rpipico_eis.vid.2=0x2e8a
+rpipico_eis.pid.2=0x400a
+rpipico_eis.vid.3=0x2e8a
+rpipico_eis.pid.3=0x410a
+rpipico_eis.vid.4=0x2e8a
+rpipico_eis.pid.4=0x800a
+rpipico_eis.vid.5=0x2e8a
+rpipico_eis.pid.5=0x810a
+rpipico_eis.vid.6=0x2e8a
+rpipico_eis.pid.6=0xc00a
+rpipico_eis.vid.7=0x2e8a
+rpipico_eis.pid.7=0xc10a
+rpipico_eis.upload_port.0.vid=0x2e8a
+rpipico_eis.upload_port.0.pid=0x000a
+rpipico_eis.upload_port.1.vid=0x2e8a
+rpipico_eis.upload_port.1.pid=0x010a
+rpipico_eis.upload_port.2.vid=0x2e8a
+rpipico_eis.upload_port.2.pid=0x400a
+rpipico_eis.upload_port.3.vid=0x2e8a
+rpipico_eis.upload_port.3.pid=0x410a
+rpipico_eis.upload_port.4.vid=0x2e8a
+rpipico_eis.upload_port.4.pid=0x800a
+rpipico_eis.upload_port.5.vid=0x2e8a
+rpipico_eis.upload_port.5.pid=0x810a
+rpipico_eis.upload_port.6.vid=0x2e8a
+rpipico_eis.upload_port.6.pid=0xc00a
+rpipico_eis.upload_port.7.vid=0x2e8a
+rpipico_eis.upload_port.7.pid=0xc10a
+rpipico_eis.build.usbvid=-DUSBD_VID=0x2e8a
+rpipico_eis.build.usbpid=-DUSBD_PID=0x000a
+rpipico_eis.build.usbpwr=-DUSBD_MAX_POWER_MA=250
+rpipico_eis.build.board=RASPBERRY_PI_PICO_EIS
+rpipico_eis.build.mcu=cortex-m0plus
+rpipico_eis.build.chip=rp2040
+rpipico_eis.build.toolchain=arm-none-eabi
+rpipico_eis.build.toolchainpkg=pqt-gcc
+rpipico_eis.build.toolchainopts=-march=armv6-m -mcpu=cortex-m0plus -mthumb
+rpipico_eis.build.uf2family=--family rp2040
+rpipico_eis.build.variant=rpipico
+rpipico_eis.upload.maximum_size=2097152
+rpipico_eis.upload.wait_for_upload_port=true
+rpipico_eis.upload.erase_cmd=
+rpipico_eis.serial.disableDTR=false
+rpipico_eis.serial.disableRTS=false
+rpipico_eis.build.f_cpu=125000000
+rpipico_eis.build.led=
+rpipico_eis.build.core=rp2040
+rpipico_eis.build.ldscript=memmap_default.ld
+rpipico_eis.build.boot2=boot2_w25q080_2_padded_checksum
+rpipico_eis.build.usb_manufacturer="Raspberry Pi"
+rpipico_eis.build.usb_product="Pico"
+rpipico_eis.menu.flash.2097152_0=2MB (no FS)
+rpipico_eis.menu.flash.2097152_0.upload.maximum_size=2093056
+rpipico_eis.menu.flash.2097152_0.build.flash_total=2097152
+rpipico_eis.menu.flash.2097152_0.build.flash_length=2093056
+rpipico_eis.menu.flash.2097152_0.build.eeprom_start=270528512
+rpipico_eis.menu.flash.2097152_0.build.fs_start=270528512
+rpipico_eis.menu.flash.2097152_0.build.fs_end=270528512
+rpipico_eis.menu.flash.2097152_65536=2MB (Sketch: 1984KB, FS: 64KB)
+rpipico_eis.menu.flash.2097152_65536.upload.maximum_size=2027520
+rpipico_eis.menu.flash.2097152_65536.build.flash_total=2097152
+rpipico_eis.menu.flash.2097152_65536.build.flash_length=2027520
+rpipico_eis.menu.flash.2097152_65536.build.eeprom_start=270528512
+rpipico_eis.menu.flash.2097152_65536.build.fs_start=270462976
+rpipico_eis.menu.flash.2097152_65536.build.fs_end=270528512
+rpipico_eis.menu.flash.2097152_131072=2MB (Sketch: 1920KB, FS: 128KB)
+rpipico_eis.menu.flash.2097152_131072.upload.maximum_size=1961984
+rpipico_eis.menu.flash.2097152_131072.build.flash_total=2097152
+rpipico_eis.menu.flash.2097152_131072.build.flash_length=1961984
+rpipico_eis.menu.flash.2097152_131072.build.eeprom_start=270528512
+rpipico_eis.menu.flash.2097152_131072.build.fs_start=270397440
+rpipico_eis.menu.flash.2097152_131072.build.fs_end=270528512
+rpipico_eis.menu.flash.2097152_262144=2MB (Sketch: 1792KB, FS: 256KB)
+rpipico_eis.menu.flash.2097152_262144.upload.maximum_size=1830912
+rpipico_eis.menu.flash.2097152_262144.build.flash_total=2097152
+rpipico_eis.menu.flash.2097152_262144.build.flash_length=1830912
+rpipico_eis.menu.flash.2097152_262144.build.eeprom_start=270528512
+rpipico_eis.menu.flash.2097152_262144.build.fs_start=270266368
+rpipico_eis.menu.flash.2097152_262144.build.fs_end=270528512
+rpipico_eis.menu.flash.2097152_524288=2MB (Sketch: 1536KB, FS: 512KB)
+rpipico_eis.menu.flash.2097152_524288.upload.maximum_size=1568768
+rpipico_eis.menu.flash.2097152_524288.build.flash_total=2097152
+rpipico_eis.menu.flash.2097152_524288.build.flash_length=1568768
+rpipico_eis.menu.flash.2097152_524288.build.eeprom_start=270528512
+rpipico_eis.menu.flash.2097152_524288.build.fs_start=270004224
+rpipico_eis.menu.flash.2097152_524288.build.fs_end=270528512
+rpipico_eis.menu.flash.2097152_1048576=2MB (Sketch: 1MB, FS: 1MB)
+rpipico_eis.menu.flash.2097152_1048576.upload.maximum_size=1044480
+rpipico_eis.menu.flash.2097152_1048576.build.flash_total=2097152
+rpipico_eis.menu.flash.2097152_1048576.build.flash_length=1044480
+rpipico_eis.menu.flash.2097152_1048576.build.eeprom_start=270528512
+rpipico_eis.menu.flash.2097152_1048576.build.fs_start=269479936
+rpipico_eis.menu.flash.2097152_1048576.build.fs_end=270528512
+rpipico_eis.menu.freq.133=133 MHz
+rpipico_eis.menu.freq.133.build.f_cpu=133000000L
+rpipico_eis.menu.freq.50=50 MHz
+rpipico_eis.menu.freq.50.build.f_cpu=50000000L
+rpipico_eis.menu.freq.100=100 MHz
+rpipico_eis.menu.freq.100.build.f_cpu=100000000L
+rpipico_eis.menu.freq.120=120 MHz
+rpipico_eis.menu.freq.120.build.f_cpu=120000000L
+rpipico_eis.menu.freq.125=125 MHz
+rpipico_eis.menu.freq.125.build.f_cpu=125000000L
+rpipico_eis.menu.freq.128=128 MHz
+rpipico_eis.menu.freq.128.build.f_cpu=128000000L
+rpipico_eis.menu.freq.150=150 MHz (Overclock)
+rpipico_eis.menu.freq.150.build.f_cpu=150000000L
+rpipico_eis.menu.freq.175=175 MHz (Overclock)
+rpipico_eis.menu.freq.175.build.f_cpu=175000000L
+rpipico_eis.menu.freq.200=200 MHz (Overclock)
+rpipico_eis.menu.freq.200.build.f_cpu=200000000L
+rpipico_eis.menu.freq.225=225 MHz (Overclock)
+rpipico_eis.menu.freq.225.build.f_cpu=225000000L
+rpipico_eis.menu.freq.240=240 MHz (Overclock)
+rpipico_eis.menu.freq.240.build.f_cpu=240000000L
+rpipico_eis.menu.freq.250=250 MHz (Overclock)
+rpipico_eis.menu.freq.250.build.f_cpu=250000000L
+rpipico_eis.menu.freq.275=275 MHz (Overclock)
+rpipico_eis.menu.freq.275.build.f_cpu=275000000L
+rpipico_eis.menu.freq.300=300 MHz (Overclock)
+rpipico_eis.menu.freq.300.build.f_cpu=300000000L
+rpipico_eis.menu.opt.Small=Small (-Os) (standard)
+rpipico_eis.menu.opt.Small.build.flags.optimize=-Os
+rpipico_eis.menu.opt.Optimize=Optimize (-O)
+rpipico_eis.menu.opt.Optimize.build.flags.optimize=-O
+rpipico_eis.menu.opt.Optimize2=Optimize More (-O2)
+rpipico_eis.menu.opt.Optimize2.build.flags.optimize=-O2
+rpipico_eis.menu.opt.Optimize3=Optimize Even More (-O3)
+rpipico_eis.menu.opt.Optimize3.build.flags.optimize=-O3
+rpipico_eis.menu.opt.Fast=Fast (-Ofast) (maybe slower)
+rpipico_eis.menu.opt.Fast.build.flags.optimize=-Ofast
+rpipico_eis.menu.opt.Debug=Debug (-Og)
+rpipico_eis.menu.opt.Debug.build.flags.optimize=-Og
+rpipico_eis.menu.opt.Disabled=Disabled (-O0)
+rpipico_eis.menu.opt.Disabled.build.flags.optimize=-O0
+rpipico_eis.menu.profile.Disabled=Disabled
+rpipico_eis.menu.profile.Disabled.build.flags.profile=
+rpipico_eis.menu.profile.Enabled=Enabled
+rpipico_eis.menu.profile.Enabled.build.flags.profile=-pg -D__PROFILE
+rpipico_eis.menu.rtti.Disabled=Disabled
+rpipico_eis.menu.rtti.Disabled.build.flags.rtti=-fno-rtti
+rpipico_eis.menu.rtti.Enabled=Enabled
+rpipico_eis.menu.rtti.Enabled.build.flags.rtti=
+rpipico_eis.menu.stackprotect.Disabled=Disabled
+rpipico_eis.menu.stackprotect.Disabled.build.flags.stackprotect=
+rpipico_eis.menu.stackprotect.Enabled=Enabled
+rpipico_eis.menu.stackprotect.Enabled.build.flags.stackprotect=-fstack-protector
+rpipico_eis.menu.exceptions.Disabled=Disabled
+rpipico_eis.menu.exceptions.Disabled.build.flags.exceptions=-fno-exceptions
+rpipico_eis.menu.exceptions.Disabled.build.flags.libstdcpp=-lstdc++
+rpipico_eis.menu.exceptions.Enabled=Enabled
+rpipico_eis.menu.exceptions.Enabled.build.flags.exceptions=-fexceptions
+rpipico_eis.menu.exceptions.Enabled.build.flags.libstdcpp=-lstdc++-exc
+rpipico_eis.menu.dbgport.Disabled=Disabled
+rpipico_eis.menu.dbgport.Disabled.build.debug_port=
+rpipico_eis.menu.dbgport.Serial=Serial
+rpipico_eis.menu.dbgport.Serial.build.debug_port=-DDEBUG_RP2040_PORT=Serial
+rpipico_eis.menu.dbgport.Serial1=Serial1
+rpipico_eis.menu.dbgport.Serial1.build.debug_port=-DDEBUG_RP2040_PORT=Serial1
+rpipico_eis.menu.dbgport.Serial2=Serial2
+rpipico_eis.menu.dbgport.Serial2.build.debug_port=-DDEBUG_RP2040_PORT=Serial2
+rpipico_eis.menu.dbgport.SerialSemi=SerialSemi
+rpipico_eis.menu.dbgport.SerialSemi.build.debug_port=-DDEBUG_RP2040_PORT=SerialSemi
+rpipico_eis.menu.dbglvl.None=None
+rpipico_eis.menu.dbglvl.None.build.debug_level=
+rpipico_eis.menu.dbglvl.Core=Core
+rpipico_eis.menu.dbglvl.Core.build.debug_level=-DDEBUG_RP2040_CORE
+rpipico_eis.menu.dbglvl.SPI=SPI
+rpipico_eis.menu.dbglvl.SPI.build.debug_level=-DDEBUG_RP2040_SPI
+rpipico_eis.menu.dbglvl.Wire=Wire
+rpipico_eis.menu.dbglvl.Wire.build.debug_level=-DDEBUG_RP2040_WIRE
+rpipico_eis.menu.dbglvl.Bluetooth=Bluetooth
+rpipico_eis.menu.dbglvl.Bluetooth.build.debug_level=-DDEBUG_RP2040_BLUETOOTH
+rpipico_eis.menu.dbglvl.All=All
+rpipico_eis.menu.dbglvl.All.build.debug_level=-DDEBUG_RP2040_WIRE -DDEBUG_RP2040_SPI -DDEBUG_RP2040_CORE -DDEBUG_RP2040_BLUETOOTH
+rpipico_eis.menu.dbglvl.NDEBUG=NDEBUG
+rpipico_eis.menu.dbglvl.NDEBUG.build.debug_level=-DNDEBUG
+rpipico_eis.menu.usbstack.picosdk=Pico SDK
+rpipico_eis.menu.usbstack.picosdk.build.usbstack_flags=
+rpipico_eis.menu.usbstack.tinyusb=Adafruit TinyUSB
+rpipico_eis.menu.usbstack.tinyusb.build.usbstack_flags=-DUSE_TINYUSB "-I{runtime.platform.path}/libraries/Adafruit_TinyUSB_Arduino/src/arduino"
+rpipico_eis.menu.usbstack.tinyusb_host=Adafruit TinyUSB Host (native)
+rpipico_eis.menu.usbstack.tinyusb_host.build.usbstack_flags=-DUSE_TINYUSB -DUSE_TINYUSB_HOST "-I{runtime.platform.path}/libraries/Adafruit_TinyUSB_Arduino/src/arduino"
+rpipico_eis.menu.usbstack.nousb=No USB
+rpipico_eis.menu.usbstack.nousb.build.usbstack_flags="-DNO_USB -DDISABLE_USB_SERIAL -I{runtime.platform.path}/tools/libpico"
+rpipico_eis.menu.ipbtstack.ipv4only=IPv4 Only
+rpipico_eis.menu.ipbtstack.ipv4only.build.libpicow=libipv4.a
+rpipico_eis.menu.ipbtstack.ipv4only.build.libpicowdefs=-DLWIP_IPV6=0 -DLWIP_IPV4=1
+rpipico_eis.menu.ipbtstack.ipv4ipv6=IPv4 + IPv6
+rpipico_eis.menu.ipbtstack.ipv4ipv6.build.libpicow=libipv4-ipv6.a
+rpipico_eis.menu.ipbtstack.ipv4ipv6.build.libpicowdefs=-DLWIP_IPV6=1 -DLWIP_IPV4=1
+rpipico_eis.menu.ipbtstack.ipv4btcble=IPv4 + Bluetooth
+rpipico_eis.menu.ipbtstack.ipv4btcble.build.libpicow=libipv4-bt.a
+rpipico_eis.menu.ipbtstack.ipv4btcble.build.libpicowdefs=-DLWIP_IPV6=0 -DLWIP_IPV4=1 -DENABLE_CLASSIC=1 -DENABLE_BLE=1
+rpipico_eis.menu.ipbtstack.ipv4ipv6btcble=IPv4 + IPv6 + Bluetooth
+rpipico_eis.menu.ipbtstack.ipv4ipv6btcble.build.libpicow=libipv4-ipv6-bt.a
+rpipico_eis.menu.ipbtstack.ipv4ipv6btcble.build.libpicowdefs=-DLWIP_IPV6=1 -DLWIP_IPV4=1 -DENABLE_CLASSIC=1 -DENABLE_BLE=1
+rpipico_eis.menu.ipbtstack.ipv4onlybig=IPv4 Only - 32K
+rpipico_eis.menu.ipbtstack.ipv4onlybig.build.libpicow=libipv4-big.a
+rpipico_eis.menu.ipbtstack.ipv4onlybig.build.libpicowdefs=-DLWIP_IPV6=0 -DLWIP_IPV4=1 -D__LWIP_MEMMULT=2
+rpipico_eis.menu.ipbtstack.ipv4ipv6big=IPv4 + IPv6 - 32K
+rpipico_eis.menu.ipbtstack.ipv4ipv6big.build.libpicow=libipv4-ipv6-big.a
+rpipico_eis.menu.ipbtstack.ipv4ipv6big.build.libpicowdefs=-DLWIP_IPV6=1 -DLWIP_IPV4=1 -D__LWIP_MEMMULT=2
+rpipico_eis.menu.ipbtstack.ipv4btcblebig=IPv4 + Bluetooth - 32K
+rpipico_eis.menu.ipbtstack.ipv4btcblebig.build.libpicow=libipv4-bt-big.a
+rpipico_eis.menu.ipbtstack.ipv4btcblebig.build.libpicowdefs=-DLWIP_IPV6=0 -DLWIP_IPV4=1 -DENABLE_CLASSIC=1 -DENABLE_BLE=1 -D__LWIP_MEMMULT=2
+rpipico_eis.menu.ipbtstack.ipv4ipv6btcblebig=IPv4 + IPv6 + Bluetooth - 32K
+rpipico_eis.menu.ipbtstack.ipv4ipv6btcblebig.build.libpicow=libipv4-ipv6-bt-big.a
+rpipico_eis.menu.ipbtstack.ipv4ipv6btcblebig.build.libpicowdefs=-DLWIP_IPV6=1 -DLWIP_IPV4=1 -DENABLE_CLASSIC=1 -DENABLE_BLE=1 -D__LWIP_MEMMULT=2
+rpipico_eis.menu.uploadmethod.default=Default (UF2)
+rpipico_eis.menu.uploadmethod.default.build.ram_length=256k
+rpipico_eis.menu.uploadmethod.default.build.debugscript=picoprobe_cmsis_dap.tcl
+rpipico_eis.menu.uploadmethod.default.upload.maximum_data_size=262144
+rpipico_eis.menu.uploadmethod.default.upload.tool=uf2conv
+rpipico_eis.menu.uploadmethod.default.upload.tool.default=uf2conv
+rpipico_eis.menu.uploadmethod.default.upload.tool.network=uf2conv-network
+rpipico_eis.menu.uploadmethod.picotool=Picotool
+rpipico_eis.menu.uploadmethod.picotool.build.ram_length=256k
+rpipico_eis.menu.uploadmethod.picotool.build.debugscript=picoprobe.tcl
+rpipico_eis.menu.uploadmethod.picotool.build.picodebugflags=-DENABLE_PICOTOOL_USB
+rpipico_eis.menu.uploadmethod.picotool.upload.maximum_data_size=262144
+rpipico_eis.menu.uploadmethod.picotool.upload.tool=picotool
+rpipico_eis.menu.uploadmethod.picotool.upload.tool.default=picotool
+rpipico_eis.menu.uploadmethod.picoprobe_cmsis_dap=Picoprobe/Debugprobe (CMSIS-DAP)
+rpipico_eis.menu.uploadmethod.picoprobe_cmsis_dap.build.ram_length=256k
+rpipico_eis.menu.uploadmethod.picoprobe_cmsis_dap.build.debugscript=picoprobe_cmsis_dap.tcl
+rpipico_eis.menu.uploadmethod.picoprobe_cmsis_dap.upload.maximum_data_size=262144
+rpipico_eis.menu.uploadmethod.picoprobe_cmsis_dap.upload.tool=picoprobe_cmsis_dap
+rpipico_eis.menu.uploadmethod.picoprobe_cmsis_dap.upload.tool.default=picoprobe_cmsis_dap
+
+
+##############################################################
+
+###FLPROG_END

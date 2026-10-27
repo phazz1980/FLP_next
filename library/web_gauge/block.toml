@@ -40,6 +40,7 @@ description = "Единица измерения рядом со значени�
 
 [[param]]
 name = "col"
+show = "hidden"
 type = "int"
 label = "Колонка"
 default = 1
@@ -47,6 +48,7 @@ description = "Левая колонка сетки страницы (1–12)"
 
 [[param]]
 name = "row"
+show = "hidden"
 type = "int"
 label = "Строка"
 default = 1
@@ -54,6 +56,7 @@ description = "Верхняя строка сетки страницы (1, 2, �
 
 [[param]]
 name = "w"
+show = "hidden"
 type = "int"
 label = "Ширина"
 default = 4
@@ -61,6 +64,7 @@ description = "Ширина в колонках сетки (1–12)"
 
 [[param]]
 name = "h"
+show = "hidden"
 type = "int"
 label = "Высота"
 default = 2
@@ -68,6 +72,7 @@ description = "Высота в строках сетки"
 
 [[param]]
 name = "page"
+show = "hidden"
 type = "int"
 label = "Страница"
 default = 1

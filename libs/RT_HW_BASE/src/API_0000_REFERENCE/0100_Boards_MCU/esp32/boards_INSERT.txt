@@ -1,0 +1,2852 @@
+###FLPROG_BEGIN_1_11
+################################################################################
+
+###############################################################
+#					ESP32S  Dev Module
+###############################################################
+esp32s_dev_eis.name=FLPrpog: ESP32S-Dev-Module
+
+esp32s_dev_eis.bootloader.tool=esptool_py
+esp32s_dev_eis.bootloader.tool.default=esptool_py
+
+esp32s_dev_eis.upload.tool=esptool_py
+esp32s_dev_eis.upload.tool.default=esptool_py
+esp32s_dev_eis.upload.tool.network=esp_ota
+
+esp32s_dev_eis.upload.maximum_size=1310720
+esp32s_dev_eis.upload.maximum_data_size=327680
+esp32s_dev_eis.upload.flags=
+esp32s_dev_eis.upload.extra_flags=
+
+esp32s_dev_eis.serial.disableDTR=true
+esp32s_dev_eis.serial.disableRTS=true
+
+esp32s_dev_eis.build.tarch=xtensa
+esp32s_dev_eis.build.bootloader_addr=0x1000
+esp32s_dev_eis.build.target=esp32
+esp32s_dev_eis.build.mcu=esp32
+esp32s_dev_eis.build.core=esp32
+esp32s_dev_eis.build.variant=esp32
+esp32s_dev_eis.build.board=ESP32S_DEV_EIS
+
+esp32s_dev_eis.build.f_cpu=240000000L
+esp32s_dev_eis.build.flash_size=4MB
+esp32s_dev_eis.build.flash_freq=40m
+esp32s_dev_eis.build.flash_mode=dio
+esp32s_dev_eis.build.boot=dio
+esp32s_dev_eis.build.partitions=default
+esp32s_dev_eis.build.defines=
+esp32s_dev_eis.build.loop_core=
+esp32s_dev_eis.build.event_core=
+
+esp32s_dev_eis.menu.PSRAM.disabled=Disabled
+esp32s_dev_eis.menu.PSRAM.disabled.build.defines=
+esp32s_dev_eis.menu.PSRAM.disabled.build.extra_libs=
+esp32s_dev_eis.menu.PSRAM.enabled=Enabled
+esp32s_dev_eis.menu.PSRAM.enabled.build.defines=-DBOARD_HAS_PSRAM -mfix-esp32-psram-cache-issue -mfix-esp32-psram-cache-strategy=memw
+esp32s_dev_eis.menu.PSRAM.enabled.build.extra_libs=
+
+esp32s_dev_eis.menu.PartitionScheme.default=Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)
+esp32s_dev_eis.menu.PartitionScheme.default.build.partitions=default
+esp32s_dev_eis.menu.PartitionScheme.defaultffat=Default 4MB with ffat (1.2MB APP/1.5MB FATFS)
+esp32s_dev_eis.menu.PartitionScheme.defaultffat.build.partitions=default_ffat
+esp32s_dev_eis.menu.PartitionScheme.default_8MB=8M with spiffs (3MB APP/1.5MB SPIFFS)
+esp32s_dev_eis.menu.PartitionScheme.default_8MB.build.partitions=default_8MB
+esp32s_dev_eis.menu.PartitionScheme.default_8MB.upload.maximum_size=3342336
+esp32s_dev_eis.menu.PartitionScheme.minimal=Minimal (1.3MB APP/700KB SPIFFS)
+esp32s_dev_eis.menu.PartitionScheme.minimal.build.partitions=minimal
+esp32s_dev_eis.menu.PartitionScheme.no_ota=No OTA (2MB APP/2MB SPIFFS)
+esp32s_dev_eis.menu.PartitionScheme.no_ota.build.partitions=no_ota
+esp32s_dev_eis.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+esp32s_dev_eis.menu.PartitionScheme.noota_3g=No OTA (1MB APP/3MB SPIFFS)
+esp32s_dev_eis.menu.PartitionScheme.noota_3g.build.partitions=noota_3g
+esp32s_dev_eis.menu.PartitionScheme.noota_3g.upload.maximum_size=1048576
+esp32s_dev_eis.menu.PartitionScheme.noota_ffat=No OTA (2MB APP/2MB FATFS)
+esp32s_dev_eis.menu.PartitionScheme.noota_ffat.build.partitions=noota_ffat
+esp32s_dev_eis.menu.PartitionScheme.noota_ffat.upload.maximum_size=2097152
+esp32s_dev_eis.menu.PartitionScheme.noota_3gffat=No OTA (1MB APP/3MB FATFS)
+esp32s_dev_eis.menu.PartitionScheme.noota_3gffat.build.partitions=noota_3gffat
+esp32s_dev_eis.menu.PartitionScheme.noota_3gffat.upload.maximum_size=1048576
+esp32s_dev_eis.menu.PartitionScheme.huge_app=Huge APP (3MB No OTA/1MB SPIFFS)
+esp32s_dev_eis.menu.PartitionScheme.huge_app.build.partitions=huge_app
+esp32s_dev_eis.menu.PartitionScheme.huge_app.upload.maximum_size=3145728
+esp32s_dev_eis.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)
+esp32s_dev_eis.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+esp32s_dev_eis.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+esp32s_dev_eis.menu.PartitionScheme.fatflash=16M Flash (2MB APP/12.5MB FATFS)
+esp32s_dev_eis.menu.PartitionScheme.fatflash.build.partitions=ffat
+esp32s_dev_eis.menu.PartitionScheme.fatflash.upload.maximum_size=2097152
+esp32s_dev_eis.menu.PartitionScheme.app3M_fat9M_16MB=16M Flash (3MB APP/9.9MB FATFS)
+esp32s_dev_eis.menu.PartitionScheme.app3M_fat9M_16MB.build.partitions=app3M_fat9M_16MB
+esp32s_dev_eis.menu.PartitionScheme.app3M_fat9M_16MB.upload.maximum_size=3145728
+esp32s_dev_eis.menu.PartitionScheme.rainmaker=RainMaker
+esp32s_dev_eis.menu.PartitionScheme.rainmaker.build.partitions=rainmaker
+esp32s_dev_eis.menu.PartitionScheme.rainmaker.upload.maximum_size=3145728
+
+esp32s_dev_eis.menu.CPUFreq.240=240MHz (WiFi/BT)
+esp32s_dev_eis.menu.CPUFreq.240.build.f_cpu=240000000L
+esp32s_dev_eis.menu.CPUFreq.160=160MHz (WiFi/BT)
+esp32s_dev_eis.menu.CPUFreq.160.build.f_cpu=160000000L
+esp32s_dev_eis.menu.CPUFreq.80=80MHz (WiFi/BT)
+esp32s_dev_eis.menu.CPUFreq.80.build.f_cpu=80000000L
+esp32s_dev_eis.menu.CPUFreq.40=40MHz (40MHz XTAL)
+esp32s_dev_eis.menu.CPUFreq.40.build.f_cpu=40000000L
+esp32s_dev_eis.menu.CPUFreq.26=26MHz (26MHz XTAL)
+esp32s_dev_eis.menu.CPUFreq.26.build.f_cpu=26000000L
+esp32s_dev_eis.menu.CPUFreq.20=20MHz (40MHz XTAL)
+esp32s_dev_eis.menu.CPUFreq.20.build.f_cpu=20000000L
+esp32s_dev_eis.menu.CPUFreq.13=13MHz (26MHz XTAL)
+esp32s_dev_eis.menu.CPUFreq.13.build.f_cpu=13000000L
+esp32s_dev_eis.menu.CPUFreq.10=10MHz (40MHz XTAL)
+esp32s_dev_eis.menu.CPUFreq.10.build.f_cpu=10000000L
+
+esp32s_dev_eis.menu.FlashMode.qio=QIO
+esp32s_dev_eis.menu.FlashMode.qio.build.flash_mode=dio
+esp32s_dev_eis.menu.FlashMode.qio.build.boot=qio
+esp32s_dev_eis.menu.FlashMode.dio=DIO
+esp32s_dev_eis.menu.FlashMode.dio.build.flash_mode=dio
+esp32s_dev_eis.menu.FlashMode.dio.build.boot=dio
+esp32s_dev_eis.menu.FlashMode.qout=QOUT
+esp32s_dev_eis.menu.FlashMode.qout.build.flash_mode=dout
+esp32s_dev_eis.menu.FlashMode.qout.build.boot=qout
+esp32s_dev_eis.menu.FlashMode.dout=DOUT
+esp32s_dev_eis.menu.FlashMode.dout.build.flash_mode=dout
+esp32s_dev_eis.menu.FlashMode.dout.build.boot=dout
+
+esp32s_dev_eis.menu.FlashFreq.80=80MHz
+esp32s_dev_eis.menu.FlashFreq.80.build.flash_freq=80m
+esp32s_dev_eis.menu.FlashFreq.40=40MHz
+esp32s_dev_eis.menu.FlashFreq.40.build.flash_freq=40m
+
+esp32s_dev_eis.menu.FlashSize.4M=4MB (32Mb)
+esp32s_dev_eis.menu.FlashSize.4M.build.flash_size=4MB
+esp32s_dev_eis.menu.FlashSize.8M=8MB (64Mb)
+esp32s_dev_eis.menu.FlashSize.8M.build.flash_size=8MB
+esp32s_dev_eis.menu.FlashSize.8M.build.partitions=default_8MB
+esp32s_dev_eis.menu.FlashSize.2M=2MB (16Mb)
+esp32s_dev_eis.menu.FlashSize.2M.build.flash_size=2MB
+esp32s_dev_eis.menu.FlashSize.2M.build.partitions=minimal
+esp32s_dev_eis.menu.FlashSize.16M=16MB (128Mb)
+esp32s_dev_eis.menu.FlashSize.16M.build.flash_size=16MB
+
+esp32s_dev_eis.menu.UploadSpeed.921600=921600
+esp32s_dev_eis.menu.UploadSpeed.921600.upload.speed=921600
+esp32s_dev_eis.menu.UploadSpeed.115200=115200
+esp32s_dev_eis.menu.UploadSpeed.115200.upload.speed=115200
+esp32s_dev_eis.menu.UploadSpeed.256000.windows=256000
+esp32s_dev_eis.menu.UploadSpeed.256000.upload.speed=256000
+esp32s_dev_eis.menu.UploadSpeed.230400.windows.upload.speed=256000
+esp32s_dev_eis.menu.UploadSpeed.230400=230400
+esp32s_dev_eis.menu.UploadSpeed.230400.upload.speed=230400
+esp32s_dev_eis.menu.UploadSpeed.460800.linux=460800
+esp32s_dev_eis.menu.UploadSpeed.460800.macosx=460800
+esp32s_dev_eis.menu.UploadSpeed.460800.upload.speed=460800
+esp32s_dev_eis.menu.UploadSpeed.512000.windows=512000
+esp32s_dev_eis.menu.UploadSpeed.512000.upload.speed=512000
+
+esp32s_dev_eis.menu.LoopCore.1=Core 1
+esp32s_dev_eis.menu.LoopCore.1.build.loop_core=-DARDUINO_RUNNING_CORE=1
+esp32s_dev_eis.menu.LoopCore.0=Core 0
+esp32s_dev_eis.menu.LoopCore.0.build.loop_core=-DARDUINO_RUNNING_CORE=0
+
+esp32s_dev_eis.menu.EventsCore.1=Core 1
+esp32s_dev_eis.menu.EventsCore.1.build.event_core=-DARDUINO_EVENT_RUNNING_CORE=1
+esp32s_dev_eis.menu.EventsCore.0=Core 0
+esp32s_dev_eis.menu.EventsCore.0.build.event_core=-DARDUINO_EVENT_RUNNING_CORE=0
+
+esp32s_dev_eis.menu.DebugLevel.none=None
+esp32s_dev_eis.menu.DebugLevel.none.build.code_debug=0
+esp32s_dev_eis.menu.DebugLevel.error=Error
+esp32s_dev_eis.menu.DebugLevel.error.build.code_debug=1
+esp32s_dev_eis.menu.DebugLevel.warn=Warn
+esp32s_dev_eis.menu.DebugLevel.warn.build.code_debug=2
+esp32s_dev_eis.menu.DebugLevel.info=Info
+esp32s_dev_eis.menu.DebugLevel.info.build.code_debug=3
+esp32s_dev_eis.menu.DebugLevel.debug=Debug
+esp32s_dev_eis.menu.DebugLevel.debug.build.code_debug=4
+esp32s_dev_eis.menu.DebugLevel.verbose=Verbose
+esp32s_dev_eis.menu.DebugLevel.verbose.build.code_debug=5
+
+esp32s_dev_eis.menu.EraseFlash.none=Disabled
+esp32s_dev_eis.menu.EraseFlash.none.upload.erase_cmd=
+esp32s_dev_eis.menu.EraseFlash.all=Enabled
+esp32s_dev_eis.menu.EraseFlash.all.upload.erase_cmd=-e
+
+###############################################################
+#					ESP32S  Dev Module BlueTooth EIS
+###############################################################
+esp32s_bth.name=FLPrpog: ESP32S Dev Module BTH
+
+esp32s_bth.bootloader.tool=esptool_py
+esp32s_bth.bootloader.tool.default=esptool_py
+
+esp32s_bth.upload.tool=esptool_py
+esp32s_bth.upload.tool.default=esptool_py
+esp32s_bth.upload.tool.network=esp_ota
+
+esp32s_bth.upload.maximum_size=1310720
+esp32s_bth.upload.maximum_data_size=327680
+esp32s_bth.upload.flags=
+esp32s_bth.upload.extra_flags=
+
+esp32s_bth.serial.disableDTR=true
+esp32s_bth.serial.disableRTS=true
+
+esp32s_bth.build.tarch=xtensa
+esp32s_bth.build.bootloader_addr=0x1000
+esp32s_bth.build.target=esp32
+esp32s_bth.build.mcu=esp32
+esp32s_bth.build.core=esp32
+esp32s_bth.build.variant=esp32
+esp32s_bth.build.board=ESP32S_DEV_EIS_BTH
+
+esp32s_bth.build.f_cpu=240000000L
+esp32s_bth.build.flash_size=4MB
+esp32s_bth.build.flash_freq=40m
+esp32s_bth.build.flash_mode=dio
+esp32s_bth.build.boot=dio
+esp32s_bth.build.partitions=default
+esp32s_bth.build.defines=
+esp32s_bth.build.loop_core=
+esp32s_bth.build.event_core=
+
+esp32s_bth.menu.PSRAM.disabled=Disabled
+esp32s_bth.menu.PSRAM.disabled.build.defines=
+esp32s_bth.menu.PSRAM.disabled.build.extra_libs=
+esp32s_bth.menu.PSRAM.enabled=Enabled
+esp32s_bth.menu.PSRAM.enabled.build.defines=-DBOARD_HAS_PSRAM -mfix-esp32-psram-cache-issue -mfix-esp32-psram-cache-strategy=memw
+esp32s_bth.menu.PSRAM.enabled.build.extra_libs=
+
+esp32s_bth.menu.PartitionScheme.default=Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)
+esp32s_bth.menu.PartitionScheme.default.build.partitions=default
+esp32s_bth.menu.PartitionScheme.defaultffat=Default 4MB with ffat (1.2MB APP/1.5MB FATFS)
+esp32s_bth.menu.PartitionScheme.defaultffat.build.partitions=default_ffat
+esp32s_bth.menu.PartitionScheme.default_8MB=8M with spiffs (3MB APP/1.5MB SPIFFS)
+esp32s_bth.menu.PartitionScheme.default_8MB.build.partitions=default_8MB
+esp32s_bth.menu.PartitionScheme.default_8MB.upload.maximum_size=3342336
+esp32s_bth.menu.PartitionScheme.minimal=Minimal (1.3MB APP/700KB SPIFFS)
+esp32s_bth.menu.PartitionScheme.minimal.build.partitions=minimal
+esp32s_bth.menu.PartitionScheme.no_ota=No OTA (2MB APP/2MB SPIFFS)
+esp32s_bth.menu.PartitionScheme.no_ota.build.partitions=no_ota
+esp32s_bth.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+esp32s_bth.menu.PartitionScheme.noota_3g=No OTA (1MB APP/3MB SPIFFS)
+esp32s_bth.menu.PartitionScheme.noota_3g.build.partitions=noota_3g
+esp32s_bth.menu.PartitionScheme.noota_3g.upload.maximum_size=1048576
+esp32s_bth.menu.PartitionScheme.noota_ffat=No OTA (2MB APP/2MB FATFS)
+esp32s_bth.menu.PartitionScheme.noota_ffat.build.partitions=noota_ffat
+esp32s_bth.menu.PartitionScheme.noota_ffat.upload.maximum_size=2097152
+esp32s_bth.menu.PartitionScheme.noota_3gffat=No OTA (1MB APP/3MB FATFS)
+esp32s_bth.menu.PartitionScheme.noota_3gffat.build.partitions=noota_3gffat
+esp32s_bth.menu.PartitionScheme.noota_3gffat.upload.maximum_size=1048576
+esp32s_bth.menu.PartitionScheme.huge_app=Huge APP (3MB No OTA/1MB SPIFFS)
+esp32s_bth.menu.PartitionScheme.huge_app.build.partitions=huge_app
+esp32s_bth.menu.PartitionScheme.huge_app.upload.maximum_size=3145728
+esp32s_bth.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)
+esp32s_bth.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+esp32s_bth.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+esp32s_bth.menu.PartitionScheme.fatflash=16M Flash (2MB APP/12.5MB FATFS)
+esp32s_bth.menu.PartitionScheme.fatflash.build.partitions=ffat
+esp32s_bth.menu.PartitionScheme.fatflash.upload.maximum_size=2097152
+esp32s_bth.menu.PartitionScheme.app3M_fat9M_16MB=16M Flash (3MB APP/9.9MB FATFS)
+esp32s_bth.menu.PartitionScheme.app3M_fat9M_16MB.build.partitions=app3M_fat9M_16MB
+esp32s_bth.menu.PartitionScheme.app3M_fat9M_16MB.upload.maximum_size=3145728
+esp32s_bth.menu.PartitionScheme.rainmaker=RainMaker
+esp32s_bth.menu.PartitionScheme.rainmaker.build.partitions=rainmaker
+esp32s_bth.menu.PartitionScheme.rainmaker.upload.maximum_size=3145728
+
+esp32s_bth.menu.CPUFreq.240=240MHz (WiFi/BT)
+esp32s_bth.menu.CPUFreq.240.build.f_cpu=240000000L
+esp32s_bth.menu.CPUFreq.160=160MHz (WiFi/BT)
+esp32s_bth.menu.CPUFreq.160.build.f_cpu=160000000L
+esp32s_bth.menu.CPUFreq.80=80MHz (WiFi/BT)
+esp32s_bth.menu.CPUFreq.80.build.f_cpu=80000000L
+esp32s_bth.menu.CPUFreq.40=40MHz (40MHz XTAL)
+esp32s_bth.menu.CPUFreq.40.build.f_cpu=40000000L
+esp32s_bth.menu.CPUFreq.26=26MHz (26MHz XTAL)
+esp32s_bth.menu.CPUFreq.26.build.f_cpu=26000000L
+esp32s_bth.menu.CPUFreq.20=20MHz (40MHz XTAL)
+esp32s_bth.menu.CPUFreq.20.build.f_cpu=20000000L
+esp32s_bth.menu.CPUFreq.13=13MHz (26MHz XTAL)
+esp32s_bth.menu.CPUFreq.13.build.f_cpu=13000000L
+esp32s_bth.menu.CPUFreq.10=10MHz (40MHz XTAL)
+esp32s_bth.menu.CPUFreq.10.build.f_cpu=10000000L
+
+esp32s_bth.menu.FlashMode.qio=QIO
+esp32s_bth.menu.FlashMode.qio.build.flash_mode=dio
+esp32s_bth.menu.FlashMode.qio.build.boot=qio
+esp32s_bth.menu.FlashMode.dio=DIO
+esp32s_bth.menu.FlashMode.dio.build.flash_mode=dio
+esp32s_bth.menu.FlashMode.dio.build.boot=dio
+esp32s_bth.menu.FlashMode.qout=QOUT
+esp32s_bth.menu.FlashMode.qout.build.flash_mode=dout
+esp32s_bth.menu.FlashMode.qout.build.boot=qout
+esp32s_bth.menu.FlashMode.dout=DOUT
+esp32s_bth.menu.FlashMode.dout.build.flash_mode=dout
+esp32s_bth.menu.FlashMode.dout.build.boot=dout
+
+esp32s_bth.menu.FlashFreq.80=80MHz
+esp32s_bth.menu.FlashFreq.80.build.flash_freq=80m
+esp32s_bth.menu.FlashFreq.40=40MHz
+esp32s_bth.menu.FlashFreq.40.build.flash_freq=40m
+
+esp32s_bth.menu.FlashSize.4M=4MB (32Mb)
+esp32s_bth.menu.FlashSize.4M.build.flash_size=4MB
+esp32s_bth.menu.FlashSize.8M=8MB (64Mb)
+esp32s_bth.menu.FlashSize.8M.build.flash_size=8MB
+esp32s_bth.menu.FlashSize.8M.build.partitions=default_8MB
+esp32s_bth.menu.FlashSize.2M=2MB (16Mb)
+esp32s_bth.menu.FlashSize.2M.build.flash_size=2MB
+esp32s_bth.menu.FlashSize.2M.build.partitions=minimal
+esp32s_bth.menu.FlashSize.16M=16MB (128Mb)
+esp32s_bth.menu.FlashSize.16M.build.flash_size=16MB
+
+esp32s_bth.menu.UploadSpeed.921600=921600
+esp32s_bth.menu.UploadSpeed.921600.upload.speed=921600
+esp32s_bth.menu.UploadSpeed.115200=115200
+esp32s_bth.menu.UploadSpeed.115200.upload.speed=115200
+esp32s_bth.menu.UploadSpeed.256000.windows=256000
+esp32s_bth.menu.UploadSpeed.256000.upload.speed=256000
+esp32s_bth.menu.UploadSpeed.230400.windows.upload.speed=256000
+esp32s_bth.menu.UploadSpeed.230400=230400
+esp32s_bth.menu.UploadSpeed.230400.upload.speed=230400
+esp32s_bth.menu.UploadSpeed.460800.linux=460800
+esp32s_bth.menu.UploadSpeed.460800.macosx=460800
+esp32s_bth.menu.UploadSpeed.460800.upload.speed=460800
+esp32s_bth.menu.UploadSpeed.512000.windows=512000
+esp32s_bth.menu.UploadSpeed.512000.upload.speed=512000
+
+esp32s_bth.menu.LoopCore.1=Core 1
+esp32s_bth.menu.LoopCore.1.build.loop_core=-DARDUINO_RUNNING_CORE=1
+esp32s_bth.menu.LoopCore.0=Core 0
+esp32s_bth.menu.LoopCore.0.build.loop_core=-DARDUINO_RUNNING_CORE=0
+
+esp32s_bth.menu.EventsCore.1=Core 1
+esp32s_bth.menu.EventsCore.1.build.event_core=-DARDUINO_EVENT_RUNNING_CORE=1
+esp32s_bth.menu.EventsCore.0=Core 0
+esp32s_bth.menu.EventsCore.0.build.event_core=-DARDUINO_EVENT_RUNNING_CORE=0
+
+esp32s_bth.menu.DebugLevel.none=None
+esp32s_bth.menu.DebugLevel.none.build.code_debug=0
+esp32s_bth.menu.DebugLevel.error=Error
+esp32s_bth.menu.DebugLevel.error.build.code_debug=1
+esp32s_bth.menu.DebugLevel.warn=Warn
+esp32s_bth.menu.DebugLevel.warn.build.code_debug=2
+esp32s_bth.menu.DebugLevel.info=Info
+esp32s_bth.menu.DebugLevel.info.build.code_debug=3
+esp32s_bth.menu.DebugLevel.debug=Debug
+esp32s_bth.menu.DebugLevel.debug.build.code_debug=4
+esp32s_bth.menu.DebugLevel.verbose=Verbose
+esp32s_bth.menu.DebugLevel.verbose.build.code_debug=5
+
+esp32s_bth.menu.EraseFlash.none=Disabled
+esp32s_bth.menu.EraseFlash.none.upload.erase_cmd=
+esp32s_bth.menu.EraseFlash.all=Enabled
+esp32s_bth.menu.EraseFlash.all.upload.erase_cmd=-e
+
+###############################################################
+#					ESP32S2  Dev Module
+###############################################################
+esp32s2_eis.name=FLPrpog: ESP32S2 Dev Module
+
+esp32s2_eis.vid.0=0x303a
+esp32s2_eis.pid.0=0x0002
+
+esp32s2_eis.bootloader.tool=esptool_py
+esp32s2_eis.bootloader.tool.default=esptool_py
+
+esp32s2_eis.upload.tool=esptool_py
+esp32s2_eis.upload.tool.default=esptool_py
+esp32s2_eis.upload.tool.network=esp_ota
+
+esp32s2_eis.upload.maximum_size=1310720
+esp32s2_eis.upload.maximum_data_size=327680
+esp32s2_eis.upload.flags=
+esp32s2_eis.upload.extra_flags=
+esp32s2_eis.upload.use_1200bps_touch=false
+esp32s2_eis.upload.wait_for_upload_port=false
+
+esp32s2_eis.serial.disableDTR=false
+esp32s2_eis.serial.disableRTS=false
+
+esp32s2_eis.build.tarch=xtensa
+esp32s2_eis.build.bootloader_addr=0x1000
+esp32s2_eis.build.target=esp32s2
+esp32s2_eis.build.mcu=esp32s2
+esp32s2_eis.build.core=esp32
+esp32s2_eis.build.variant=esp32s2
+esp32s2_eis.build.board=ESP32S2_DEV_EIS
+
+esp32s2_eis.build.cdc_on_boot=0
+esp32s2_eis.build.msc_on_boot=0
+esp32s2_eis.build.dfu_on_boot=0
+esp32s2_eis.build.f_cpu=240000000L
+esp32s2_eis.build.flash_size=4MB
+esp32s2_eis.build.flash_freq=80m
+esp32s2_eis.build.flash_mode=dio
+esp32s2_eis.build.boot=qio
+esp32s2_eis.build.partitions=default
+esp32s2_eis.build.defines=
+
+## IDE 2.0 Seems to not update the value
+esp32s2_eis.menu.JTAGAdapter.default=Disabled
+esp32s2_eis.menu.JTAGAdapter.default.build.copy_jtag_files=0
+esp32s2_eis.menu.JTAGAdapter.external=FTDI Adapter
+esp32s2_eis.menu.JTAGAdapter.external.build.openocdscript=esp32s2-kaluga-1.cfg
+esp32s2_eis.menu.JTAGAdapter.external.build.copy_jtag_files=1
+esp32s2_eis.menu.JTAGAdapter.bridge=ESP USB Bridge
+esp32s2_eis.menu.JTAGAdapter.bridge.build.openocdscript=esp32s2-bridge.cfg
+esp32s2_eis.menu.JTAGAdapter.bridge.build.copy_jtag_files=1
+
+esp32s2_eis.menu.CDCOnBoot.default=Disabled
+esp32s2_eis.menu.CDCOnBoot.default.build.cdc_on_boot=0
+esp32s2_eis.menu.CDCOnBoot.cdc=Enabled
+esp32s2_eis.menu.CDCOnBoot.cdc.build.cdc_on_boot=1
+
+esp32s2_eis.menu.MSCOnBoot.default=Disabled
+esp32s2_eis.menu.MSCOnBoot.default.build.msc_on_boot=0
+esp32s2_eis.menu.MSCOnBoot.msc=Enabled
+esp32s2_eis.menu.MSCOnBoot.msc.build.msc_on_boot=1
+
+esp32s2_eis.menu.DFUOnBoot.default=Disabled
+esp32s2_eis.menu.DFUOnBoot.default.build.dfu_on_boot=0
+esp32s2_eis.menu.DFUOnBoot.dfu=Enabled
+esp32s2_eis.menu.DFUOnBoot.dfu.build.dfu_on_boot=1
+
+esp32s2_eis.menu.UploadMode.default=UART0
+esp32s2_eis.menu.UploadMode.default.upload.use_1200bps_touch=false
+esp32s2_eis.menu.UploadMode.default.upload.wait_for_upload_port=false
+esp32s2_eis.menu.UploadMode.cdc=Internal USB
+esp32s2_eis.menu.UploadMode.cdc.upload.use_1200bps_touch=true
+esp32s2_eis.menu.UploadMode.cdc.upload.wait_for_upload_port=true
+
+esp32s2_eis.menu.PSRAM.disabled=Disabled
+esp32s2_eis.menu.PSRAM.disabled.build.defines=
+esp32s2_eis.menu.PSRAM.enabled=Enabled
+esp32s2_eis.menu.PSRAM.enabled.build.defines=-DBOARD_HAS_PSRAM
+
+esp32s2_eis.menu.PartitionScheme.default=Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)
+esp32s2_eis.menu.PartitionScheme.default.build.partitions=default
+esp32s2_eis.menu.PartitionScheme.defaultffat=Default 4MB with ffat (1.2MB APP/1.5MB FATFS)
+esp32s2_eis.menu.PartitionScheme.defaultffat.build.partitions=default_ffat
+esp32s2_eis.menu.PartitionScheme.default_8MB=8M with spiffs (3MB APP/1.5MB SPIFFS)
+esp32s2_eis.menu.PartitionScheme.default_8MB.build.partitions=default_8MB
+esp32s2_eis.menu.PartitionScheme.default_8MB.upload.maximum_size=3342336
+esp32s2_eis.menu.PartitionScheme.minimal=Minimal (1.3MB APP/700KB SPIFFS)
+esp32s2_eis.menu.PartitionScheme.minimal.build.partitions=minimal
+esp32s2_eis.menu.PartitionScheme.no_ota=No OTA (2MB APP/2MB SPIFFS)
+esp32s2_eis.menu.PartitionScheme.no_ota.build.partitions=no_ota
+esp32s2_eis.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+esp32s2_eis.menu.PartitionScheme.noota_3g=No OTA (1MB APP/3MB SPIFFS)
+esp32s2_eis.menu.PartitionScheme.noota_3g.build.partitions=noota_3g
+esp32s2_eis.menu.PartitionScheme.noota_3g.upload.maximum_size=1048576
+esp32s2_eis.menu.PartitionScheme.noota_ffat=No OTA (2MB APP/2MB FATFS)
+esp32s2_eis.menu.PartitionScheme.noota_ffat.build.partitions=noota_ffat
+esp32s2_eis.menu.PartitionScheme.noota_ffat.upload.maximum_size=2097152
+esp32s2_eis.menu.PartitionScheme.noota_3gffat=No OTA (1MB APP/3MB FATFS)
+esp32s2_eis.menu.PartitionScheme.noota_3gffat.build.partitions=noota_3gffat
+esp32s2_eis.menu.PartitionScheme.noota_3gffat.upload.maximum_size=1048576
+esp32s2_eis.menu.PartitionScheme.huge_app=Huge APP (3MB No OTA/1MB SPIFFS)
+esp32s2_eis.menu.PartitionScheme.huge_app.build.partitions=huge_app
+esp32s2_eis.menu.PartitionScheme.huge_app.upload.maximum_size=3145728
+esp32s2_eis.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)
+esp32s2_eis.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+esp32s2_eis.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+esp32s2_eis.menu.PartitionScheme.fatflash=16M Flash (2MB APP/12.5MB FATFS)
+esp32s2_eis.menu.PartitionScheme.fatflash.build.partitions=ffat
+esp32s2_eis.menu.PartitionScheme.fatflash.upload.maximum_size=2097152
+esp32s2_eis.menu.PartitionScheme.app3M_fat9M_16MB=16M Flash (3MB APP/9.9MB FATFS)
+esp32s2_eis.menu.PartitionScheme.app3M_fat9M_16MB.build.partitions=app3M_fat9M_16MB
+esp32s2_eis.menu.PartitionScheme.app3M_fat9M_16MB.upload.maximum_size=3145728
+esp32s2_eis.menu.PartitionScheme.rainmaker=RainMaker
+esp32s2_eis.menu.PartitionScheme.rainmaker.build.partitions=rainmaker
+esp32s2_eis.menu.PartitionScheme.rainmaker.upload.maximum_size=3145728
+
+esp32s2_eis.menu.CPUFreq.240=240MHz (WiFi)
+esp32s2_eis.menu.CPUFreq.240.build.f_cpu=240000000L
+esp32s2_eis.menu.CPUFreq.160=160MHz (WiFi)
+esp32s2_eis.menu.CPUFreq.160.build.f_cpu=160000000L
+esp32s2_eis.menu.CPUFreq.80=80MHz (WiFi)
+esp32s2_eis.menu.CPUFreq.80.build.f_cpu=80000000L
+esp32s2_eis.menu.CPUFreq.40=40MHz
+esp32s2_eis.menu.CPUFreq.40.build.f_cpu=40000000L
+esp32s2_eis.menu.CPUFreq.20=20MHz
+esp32s2_eis.menu.CPUFreq.20.build.f_cpu=20000000L
+esp32s2_eis.menu.CPUFreq.10=10MHz
+esp32s2_eis.menu.CPUFreq.10.build.f_cpu=10000000L
+
+esp32s2_eis.menu.FlashMode.qio=QIO
+esp32s2_eis.menu.FlashMode.qio.build.flash_mode=dio
+esp32s2_eis.menu.FlashMode.qio.build.boot=qio
+esp32s2_eis.menu.FlashMode.dio=DIO
+esp32s2_eis.menu.FlashMode.dio.build.flash_mode=dio
+esp32s2_eis.menu.FlashMode.dio.build.boot=dio
+esp32s2_eis.menu.FlashMode.qout=QOUT
+esp32s2_eis.menu.FlashMode.qout.build.flash_mode=dout
+esp32s2_eis.menu.FlashMode.qout.build.boot=qout
+esp32s2_eis.menu.FlashMode.dout=DOUT
+esp32s2_eis.menu.FlashMode.dout.build.flash_mode=dout
+esp32s2_eis.menu.FlashMode.dout.build.boot=dout
+
+esp32s2_eis.menu.FlashFreq.80=80MHz
+esp32s2_eis.menu.FlashFreq.80.build.flash_freq=80m
+esp32s2_eis.menu.FlashFreq.40=40MHz
+esp32s2_eis.menu.FlashFreq.40.build.flash_freq=40m
+
+esp32s2_eis.menu.FlashSize.4M=4MB (32Mb)
+esp32s2_eis.menu.FlashSize.4M.build.flash_size=4MB
+esp32s2_eis.menu.FlashSize.8M=8MB (64Mb)
+esp32s2_eis.menu.FlashSize.8M.build.flash_size=8MB
+esp32s2_eis.menu.FlashSize.8M.build.partitions=default_8MB
+esp32s2_eis.menu.FlashSize.2M=2MB (16Mb)
+esp32s2_eis.menu.FlashSize.2M.build.flash_size=2MB
+esp32s2_eis.menu.FlashSize.2M.build.partitions=minimal
+esp32s2_eis.menu.FlashSize.16M=16MB (128Mb)
+esp32s2_eis.menu.FlashSize.16M.build.flash_size=16MB
+
+esp32s2_eis.menu.UploadSpeed.921600=921600
+esp32s2_eis.menu.UploadSpeed.921600.upload.speed=921600
+esp32s2_eis.menu.UploadSpeed.115200=115200
+esp32s2_eis.menu.UploadSpeed.115200.upload.speed=115200
+esp32s2_eis.menu.UploadSpeed.256000.windows=256000
+esp32s2_eis.menu.UploadSpeed.256000.upload.speed=256000
+esp32s2_eis.menu.UploadSpeed.230400.windows.upload.speed=256000
+esp32s2_eis.menu.UploadSpeed.230400=230400
+esp32s2_eis.menu.UploadSpeed.230400.upload.speed=230400
+esp32s2_eis.menu.UploadSpeed.460800.linux=460800
+esp32s2_eis.menu.UploadSpeed.460800.macosx=460800
+esp32s2_eis.menu.UploadSpeed.460800.upload.speed=460800
+esp32s2_eis.menu.UploadSpeed.512000.windows=512000
+esp32s2_eis.menu.UploadSpeed.512000.upload.speed=512000
+
+esp32s2_eis.menu.DebugLevel.none=None
+esp32s2_eis.menu.DebugLevel.none.build.code_debug=0
+esp32s2_eis.menu.DebugLevel.error=Error
+esp32s2_eis.menu.DebugLevel.error.build.code_debug=1
+esp32s2_eis.menu.DebugLevel.warn=Warn
+esp32s2_eis.menu.DebugLevel.warn.build.code_debug=2
+esp32s2_eis.menu.DebugLevel.info=Info
+esp32s2_eis.menu.DebugLevel.info.build.code_debug=3
+esp32s2_eis.menu.DebugLevel.debug=Debug
+esp32s2_eis.menu.DebugLevel.debug.build.code_debug=4
+esp32s2_eis.menu.DebugLevel.verbose=Verbose
+esp32s2_eis.menu.DebugLevel.verbose.build.code_debug=5
+
+esp32s2_eis.menu.EraseFlash.none=Disabled
+esp32s2_eis.menu.EraseFlash.none.upload.erase_cmd=
+esp32s2_eis.menu.EraseFlash.all=Enabled
+esp32s2_eis.menu.EraseFlash.all.upload.erase_cmd=-e
+
+###############################################################
+#					ESP32S3 Dev Module EIS
+###############################################################
+esp32s3_eis.name=FLPrpog: ESP32S3 Dev Module
+esp32s3_eis.vid.0=0x303a
+esp32s3_eis.pid.0=0x1001
+
+esp32s3_eis.bootloader.tool=esptool_py
+esp32s3_eis.bootloader.tool.default=esptool_py
+
+esp32s3_eis.upload.tool=esptool_py
+esp32s3_eis.upload.tool.default=esptool_py
+esp32s3_eis.upload.tool.network=esp_ota
+
+esp32s3_eis.upload.maximum_size=1310720
+esp32s3_eis.upload.maximum_data_size=327680
+esp32s3_eis.upload.flags=
+esp32s3_eis.upload.extra_flags=
+esp32s3_eis.upload.use_1200bps_touch=false
+esp32s3_eis.upload.wait_for_upload_port=false
+
+esp32s3_eis.serial.disableDTR=false
+esp32s3_eis.serial.disableRTS=false
+
+esp32s3_eis.build.tarch=xtensa
+esp32s3_eis.build.bootloader_addr=0x0
+esp32s3_eis.build.target=esp32s3
+esp32s3_eis.build.mcu=esp32s3
+esp32s3_eis.build.core=esp32
+esp32s3_eis.build.variant=esp32s3
+esp32s3_eis.build.board=ESP32S3_DEV_EIS
+
+esp32s3_eis.build.usb_mode=1
+esp32s3_eis.build.cdc_on_boot=0
+esp32s3_eis.build.msc_on_boot=0
+esp32s3_eis.build.dfu_on_boot=0
+esp32s3_eis.build.f_cpu=240000000L
+esp32s3_eis.build.flash_size=4MB
+esp32s3_eis.build.flash_freq=80m
+esp32s3_eis.build.flash_mode=dio
+esp32s3_eis.build.boot=qio
+esp32s3_eis.build.boot_freq=80m
+esp32s3_eis.build.partitions=default
+esp32s3_eis.build.defines=
+esp32s3_eis.build.loop_core=
+esp32s3_eis.build.event_core=
+esp32s3_eis.build.psram_type=qspi
+esp32s3_eis.build.memory_type={build.boot}_{build.psram_type}
+
+## IDE 2.0 Seems to not update the value
+esp32s3_eis.menu.JTAGAdapter.default=Disabled
+esp32s3_eis.menu.JTAGAdapter.default.build.copy_jtag_files=0
+esp32s3_eis.menu.JTAGAdapter.builtin=Integrated USB JTAG
+esp32s3_eis.menu.JTAGAdapter.builtin.build.openocdscript=esp32s3-builtin.cfg
+esp32s3_eis.menu.JTAGAdapter.builtin.build.copy_jtag_files=1
+esp32s3_eis.menu.JTAGAdapter.external=FTDI Adapter
+esp32s3_eis.menu.JTAGAdapter.external.build.openocdscript=esp32s3-ftdi.cfg
+esp32s3_eis.menu.JTAGAdapter.external.build.copy_jtag_files=1
+esp32s3_eis.menu.JTAGAdapter.bridge=ESP USB Bridge
+esp32s3_eis.menu.JTAGAdapter.bridge.build.openocdscript=esp32s3-bridge.cfg
+esp32s3_eis.menu.JTAGAdapter.bridge.build.copy_jtag_files=1
+
+esp32s3_eis.menu.PSRAM.disabled=Disabled
+esp32s3_eis.menu.PSRAM.disabled.build.defines=
+esp32s3_eis.menu.PSRAM.disabled.build.psram_type=qspi
+esp32s3_eis.menu.PSRAM.enabled=QSPI PSRAM
+esp32s3_eis.menu.PSRAM.enabled.build.defines=-DBOARD_HAS_PSRAM
+esp32s3_eis.menu.PSRAM.enabled.build.psram_type=qspi
+esp32s3_eis.menu.PSRAM.opi=OPI PSRAM
+esp32s3_eis.menu.PSRAM.opi.build.defines=-DBOARD_HAS_PSRAM
+esp32s3_eis.menu.PSRAM.opi.build.psram_type=opi
+
+esp32s3_eis.menu.FlashMode.qio=QIO 80MHz
+esp32s3_eis.menu.FlashMode.qio.build.flash_mode=dio
+esp32s3_eis.menu.FlashMode.qio.build.boot=qio
+esp32s3_eis.menu.FlashMode.qio.build.boot_freq=80m
+esp32s3_eis.menu.FlashMode.qio.build.flash_freq=80m
+esp32s3_eis.menu.FlashMode.qio120=QIO 120MHz
+esp32s3_eis.menu.FlashMode.qio120.build.flash_mode=dio
+esp32s3_eis.menu.FlashMode.qio120.build.boot=qio
+esp32s3_eis.menu.FlashMode.qio120.build.boot_freq=120m
+esp32s3_eis.menu.FlashMode.qio120.build.flash_freq=80m
+esp32s3_eis.menu.FlashMode.dio=DIO 80MHz
+esp32s3_eis.menu.FlashMode.dio.build.flash_mode=dio
+esp32s3_eis.menu.FlashMode.dio.build.boot=dio
+esp32s3_eis.menu.FlashMode.dio.build.boot_freq=80m
+esp32s3_eis.menu.FlashMode.dio.build.flash_freq=80m
+esp32s3_eis.menu.FlashMode.opi=OPI 80MHz
+esp32s3_eis.menu.FlashMode.opi.build.flash_mode=dout
+esp32s3_eis.menu.FlashMode.opi.build.boot=opi
+esp32s3_eis.menu.FlashMode.opi.build.boot_freq=80m
+esp32s3_eis.menu.FlashMode.opi.build.flash_freq=80m
+
+esp32s3_eis.menu.FlashSize.4M=4MB (32Mb)
+esp32s3_eis.menu.FlashSize.4M.build.flash_size=4MB
+esp32s3_eis.menu.FlashSize.8M=8MB (64Mb)
+esp32s3_eis.menu.FlashSize.8M.build.flash_size=8MB
+esp32s3_eis.menu.FlashSize.8M.build.partitions=default_8MB
+esp32s3_eis.menu.FlashSize.16M=16MB (128Mb)
+esp32s3_eis.menu.FlashSize.16M.build.flash_size=16MB
+esp32s3_eis.menu.FlashSize.32M=32MB (256Mb)
+esp32s3_eis.menu.FlashSize.32M.build.flash_size=32MB
+esp32s3_eis.menu.FlashSize.32M.build.partitions=app5M_fat24M_32MB
+
+esp32s3_eis.menu.LoopCore.1=Core 1
+esp32s3_eis.menu.LoopCore.1.build.loop_core=-DARDUINO_RUNNING_CORE=1
+esp32s3_eis.menu.LoopCore.0=Core 0
+esp32s3_eis.menu.LoopCore.0.build.loop_core=-DARDUINO_RUNNING_CORE=0
+
+esp32s3_eis.menu.EventsCore.1=Core 1
+esp32s3_eis.menu.EventsCore.1.build.event_core=-DARDUINO_EVENT_RUNNING_CORE=1
+esp32s3_eis.menu.EventsCore.0=Core 0
+esp32s3_eis.menu.EventsCore.0.build.event_core=-DARDUINO_EVENT_RUNNING_CORE=0
+
+esp32s3_eis.menu.USBMode.hwcdc=Hardware CDC and JTAG
+esp32s3_eis.menu.USBMode.hwcdc.build.usb_mode=1
+esp32s3_eis.menu.USBMode.default=USB-OTG (TinyUSB)
+esp32s3_eis.menu.USBMode.default.build.usb_mode=0
+
+esp32s3_eis.menu.CDCOnBoot.default=Disabled
+esp32s3_eis.menu.CDCOnBoot.default.build.cdc_on_boot=0
+esp32s3_eis.menu.CDCOnBoot.cdc=Enabled
+esp32s3_eis.menu.CDCOnBoot.cdc.build.cdc_on_boot=1
+
+esp32s3_eis.menu.MSCOnBoot.default=Disabled
+esp32s3_eis.menu.MSCOnBoot.default.build.msc_on_boot=0
+esp32s3_eis.menu.MSCOnBoot.msc=Enabled (Requires USB-OTG Mode)
+esp32s3_eis.menu.MSCOnBoot.msc.build.msc_on_boot=1
+
+esp32s3_eis.menu.DFUOnBoot.default=Disabled
+esp32s3_eis.menu.DFUOnBoot.default.build.dfu_on_boot=0
+esp32s3_eis.menu.DFUOnBoot.dfu=Enabled (Requires USB-OTG Mode)
+esp32s3_eis.menu.DFUOnBoot.dfu.build.dfu_on_boot=1
+
+esp32s3_eis.menu.UploadMode.default=UART0 / Hardware CDC
+esp32s3_eis.menu.UploadMode.default.upload.use_1200bps_touch=false
+esp32s3_eis.menu.UploadMode.default.upload.wait_for_upload_port=false
+esp32s3_eis.menu.UploadMode.cdc=USB-OTG CDC (TinyUSB)
+esp32s3_eis.menu.UploadMode.cdc.upload.use_1200bps_touch=true
+esp32s3_eis.menu.UploadMode.cdc.upload.wait_for_upload_port=true
+
+esp32s3_eis.menu.PartitionScheme.default=Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)
+esp32s3_eis.menu.PartitionScheme.default.build.partitions=default
+esp32s3_eis.menu.PartitionScheme.defaultffat=Default 4MB with ffat (1.2MB APP/1.5MB FATFS)
+esp32s3_eis.menu.PartitionScheme.defaultffat.build.partitions=default_ffat
+esp32s3_eis.menu.PartitionScheme.default_8MB=8M with spiffs (3MB APP/1.5MB SPIFFS)
+esp32s3_eis.menu.PartitionScheme.default_8MB.build.partitions=default_8MB
+esp32s3_eis.menu.PartitionScheme.default_8MB.upload.maximum_size=3342336
+esp32s3_eis.menu.PartitionScheme.minimal=Minimal (1.3MB APP/700KB SPIFFS)
+esp32s3_eis.menu.PartitionScheme.minimal.build.partitions=minimal
+esp32s3_eis.menu.PartitionScheme.no_ota=No OTA (2MB APP/2MB SPIFFS)
+esp32s3_eis.menu.PartitionScheme.no_ota.build.partitions=no_ota
+esp32s3_eis.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+esp32s3_eis.menu.PartitionScheme.noota_3g=No OTA (1MB APP/3MB SPIFFS)
+esp32s3_eis.menu.PartitionScheme.noota_3g.build.partitions=noota_3g
+esp32s3_eis.menu.PartitionScheme.noota_3g.upload.maximum_size=1048576
+esp32s3_eis.menu.PartitionScheme.noota_ffat=No OTA (2MB APP/2MB FATFS)
+esp32s3_eis.menu.PartitionScheme.noota_ffat.build.partitions=noota_ffat
+esp32s3_eis.menu.PartitionScheme.noota_ffat.upload.maximum_size=2097152
+esp32s3_eis.menu.PartitionScheme.noota_3gffat=No OTA (1MB APP/3MB FATFS)
+esp32s3_eis.menu.PartitionScheme.noota_3gffat.build.partitions=noota_3gffat
+esp32s3_eis.menu.PartitionScheme.noota_3gffat.upload.maximum_size=1048576
+esp32s3_eis.menu.PartitionScheme.huge_app=Huge APP (3MB No OTA/1MB SPIFFS)
+esp32s3_eis.menu.PartitionScheme.huge_app.build.partitions=huge_app
+esp32s3_eis.menu.PartitionScheme.huge_app.upload.maximum_size=3145728
+esp32s3_eis.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)
+esp32s3_eis.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+esp32s3_eis.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+esp32s3_eis.menu.PartitionScheme.fatflash=16M Flash (2MB APP/12.5MB FATFS)
+esp32s3_eis.menu.PartitionScheme.fatflash.build.partitions=ffat
+esp32s3_eis.menu.PartitionScheme.fatflash.upload.maximum_size=2097152
+esp32s3_eis.menu.PartitionScheme.app3M_fat9M_16MB=16M Flash (3MB APP/9.9MB FATFS)
+esp32s3_eis.menu.PartitionScheme.app3M_fat9M_16MB.build.partitions=app3M_fat9M_16MB
+esp32s3_eis.menu.PartitionScheme.app3M_fat9M_16MB.upload.maximum_size=3145728
+esp32s3_eis.menu.PartitionScheme.rainmaker=RainMaker
+esp32s3_eis.menu.PartitionScheme.rainmaker.build.partitions=rainmaker
+esp32s3_eis.menu.PartitionScheme.rainmaker.upload.maximum_size=3145728
+esp32s3_eis.menu.PartitionScheme.app5M_fat24M_32MB=32M Flash (4.8MB APP/22MB FATFS)
+esp32s3_eis.menu.PartitionScheme.app5M_fat24M_32MB.build.partitions=large_fat_32MB
+esp32s3_eis.menu.PartitionScheme.app5M_fat24M_32MB.upload.maximum_size=4718592
+esp32s3_eis.menu.PartitionScheme.app5M_little24M_32MB=32M Flash (4.8MB APP/22MB LittleFS)
+esp32s3_eis.menu.PartitionScheme.app5M_little24M_32MB.build.partitions=large_littlefs_32MB
+esp32s3_eis.menu.PartitionScheme.app5M_little24M_32MB.upload.maximum_size=4718592
+
+esp32s3_eis.menu.CPUFreq.240=240MHz (WiFi)
+esp32s3_eis.menu.CPUFreq.240.build.f_cpu=240000000L
+esp32s3_eis.menu.CPUFreq.160=160MHz (WiFi)
+esp32s3_eis.menu.CPUFreq.160.build.f_cpu=160000000L
+esp32s3_eis.menu.CPUFreq.80=80MHz (WiFi)
+esp32s3_eis.menu.CPUFreq.80.build.f_cpu=80000000L
+esp32s3_eis.menu.CPUFreq.40=40MHz
+esp32s3_eis.menu.CPUFreq.40.build.f_cpu=40000000L
+esp32s3_eis.menu.CPUFreq.20=20MHz
+esp32s3_eis.menu.CPUFreq.20.build.f_cpu=20000000L
+esp32s3_eis.menu.CPUFreq.10=10MHz
+esp32s3_eis.menu.CPUFreq.10.build.f_cpu=10000000L
+
+esp32s3_eis.menu.UploadSpeed.921600=921600
+esp32s3_eis.menu.UploadSpeed.921600.upload.speed=921600
+esp32s3_eis.menu.UploadSpeed.115200=115200
+esp32s3_eis.menu.UploadSpeed.115200.upload.speed=115200
+esp32s3_eis.menu.UploadSpeed.256000.windows=256000
+esp32s3_eis.menu.UploadSpeed.256000.upload.speed=256000
+esp32s3_eis.menu.UploadSpeed.230400.windows.upload.speed=256000
+esp32s3_eis.menu.UploadSpeed.230400=230400
+esp32s3_eis.menu.UploadSpeed.230400.upload.speed=230400
+esp32s3_eis.menu.UploadSpeed.460800.linux=460800
+esp32s3_eis.menu.UploadSpeed.460800.macosx=460800
+esp32s3_eis.menu.UploadSpeed.460800.upload.speed=460800
+esp32s3_eis.menu.UploadSpeed.512000.windows=512000
+esp32s3_eis.menu.UploadSpeed.512000.upload.speed=512000
+
+esp32s3_eis.menu.DebugLevel.none=None
+esp32s3_eis.menu.DebugLevel.none.build.code_debug=0
+esp32s3_eis.menu.DebugLevel.error=Error
+esp32s3_eis.menu.DebugLevel.error.build.code_debug=1
+esp32s3_eis.menu.DebugLevel.warn=Warn
+esp32s3_eis.menu.DebugLevel.warn.build.code_debug=2
+esp32s3_eis.menu.DebugLevel.info=Info
+esp32s3_eis.menu.DebugLevel.info.build.code_debug=3
+esp32s3_eis.menu.DebugLevel.debug=Debug
+esp32s3_eis.menu.DebugLevel.debug.build.code_debug=4
+esp32s3_eis.menu.DebugLevel.verbose=Verbose
+esp32s3_eis.menu.DebugLevel.verbose.build.code_debug=5
+
+esp32s3_eis.menu.EraseFlash.none=Disabled
+esp32s3_eis.menu.EraseFlash.none.upload.erase_cmd=
+esp32s3_eis.menu.EraseFlash.all=Enabled
+esp32s3_eis.menu.EraseFlash.all.upload.erase_cmd=-e
+
+###############################################################
+#					ESP32S3 Dev Module EIS BLE
+###############################################################
+esp32s3_eis_ble.name=FLPrpog: ESP32S3 Dev Module BLE
+esp32s3_eis_ble.vid.0=0x303a
+esp32s3_eis_ble.pid.0=0x1001
+
+esp32s3_eis_ble.bootloader.tool=esptool_py
+esp32s3_eis_ble.bootloader.tool.default=esptool_py
+
+esp32s3_eis_ble.upload.tool=esptool_py
+esp32s3_eis_ble.upload.tool.default=esptool_py
+esp32s3_eis_ble.upload.tool.network=esp_ota
+
+esp32s3_eis_ble.upload.maximum_size=1310720
+esp32s3_eis_ble.upload.maximum_data_size=327680
+esp32s3_eis_ble.upload.flags=
+esp32s3_eis_ble.upload.extra_flags=
+esp32s3_eis_ble.upload.use_1200bps_touch=false
+esp32s3_eis_ble.upload.wait_for_upload_port=false
+
+esp32s3_eis_ble.serial.disableDTR=false
+esp32s3_eis_ble.serial.disableRTS=false
+
+esp32s3_eis_ble.build.tarch=xtensa
+esp32s3_eis_ble.build.bootloader_addr=0x0
+esp32s3_eis_ble.build.target=esp32s3
+esp32s3_eis_ble.build.mcu=esp32s3
+esp32s3_eis_ble.build.core=esp32
+esp32s3_eis_ble.build.variant=esp32s3
+esp32s3_eis_ble.build.board=ESP32S3_DEV_EIS_BLE
+
+esp32s3_eis_ble.build.usb_mode=1
+esp32s3_eis_ble.build.cdc_on_boot=0
+esp32s3_eis_ble.build.msc_on_boot=0
+esp32s3_eis_ble.build.dfu_on_boot=0
+esp32s3_eis_ble.build.f_cpu=240000000L
+esp32s3_eis_ble.build.flash_size=4MB
+esp32s3_eis_ble.build.flash_freq=80m
+esp32s3_eis_ble.build.flash_mode=dio
+esp32s3_eis_ble.build.boot=qio
+esp32s3_eis_ble.build.boot_freq=80m
+esp32s3_eis_ble.build.partitions=default
+esp32s3_eis_ble.build.defines=
+esp32s3_eis_ble.build.loop_core=
+esp32s3_eis_ble.build.event_core=
+esp32s3_eis_ble.build.psram_type=qspi
+esp32s3_eis_ble.build.memory_type={build.boot}_{build.psram_type}
+
+## IDE 2.0 Seems to not update the value
+esp32s3_eis_ble.menu.JTAGAdapter.default=Disabled
+esp32s3_eis_ble.menu.JTAGAdapter.default.build.copy_jtag_files=0
+esp32s3_eis_ble.menu.JTAGAdapter.builtin=Integrated USB JTAG
+esp32s3_eis_ble.menu.JTAGAdapter.builtin.build.openocdscript=esp32s3-builtin.cfg
+esp32s3_eis_ble.menu.JTAGAdapter.builtin.build.copy_jtag_files=1
+esp32s3_eis_ble.menu.JTAGAdapter.external=FTDI Adapter
+esp32s3_eis_ble.menu.JTAGAdapter.external.build.openocdscript=esp32s3-ftdi.cfg
+esp32s3_eis_ble.menu.JTAGAdapter.external.build.copy_jtag_files=1
+esp32s3_eis_ble.menu.JTAGAdapter.bridge=ESP USB Bridge
+esp32s3_eis_ble.menu.JTAGAdapter.bridge.build.openocdscript=esp32s3-bridge.cfg
+esp32s3_eis_ble.menu.JTAGAdapter.bridge.build.copy_jtag_files=1
+
+esp32s3_eis_ble.menu.PSRAM.disabled=Disabled
+esp32s3_eis_ble.menu.PSRAM.disabled.build.defines=
+esp32s3_eis_ble.menu.PSRAM.disabled.build.psram_type=qspi
+esp32s3_eis_ble.menu.PSRAM.enabled=QSPI PSRAM
+esp32s3_eis_ble.menu.PSRAM.enabled.build.defines=-DBOARD_HAS_PSRAM
+esp32s3_eis_ble.menu.PSRAM.enabled.build.psram_type=qspi
+esp32s3_eis_ble.menu.PSRAM.opi=OPI PSRAM
+esp32s3_eis_ble.menu.PSRAM.opi.build.defines=-DBOARD_HAS_PSRAM
+esp32s3_eis_ble.menu.PSRAM.opi.build.psram_type=opi
+
+esp32s3_eis_ble.menu.FlashMode.qio=QIO 80MHz
+esp32s3_eis_ble.menu.FlashMode.qio.build.flash_mode=dio
+esp32s3_eis_ble.menu.FlashMode.qio.build.boot=qio
+esp32s3_eis_ble.menu.FlashMode.qio.build.boot_freq=80m
+esp32s3_eis_ble.menu.FlashMode.qio.build.flash_freq=80m
+esp32s3_eis_ble.menu.FlashMode.qio120=QIO 120MHz
+esp32s3_eis_ble.menu.FlashMode.qio120.build.flash_mode=dio
+esp32s3_eis_ble.menu.FlashMode.qio120.build.boot=qio
+esp32s3_eis_ble.menu.FlashMode.qio120.build.boot_freq=120m
+esp32s3_eis_ble.menu.FlashMode.qio120.build.flash_freq=80m
+esp32s3_eis_ble.menu.FlashMode.dio=DIO 80MHz
+esp32s3_eis_ble.menu.FlashMode.dio.build.flash_mode=dio
+esp32s3_eis_ble.menu.FlashMode.dio.build.boot=dio
+esp32s3_eis_ble.menu.FlashMode.dio.build.boot_freq=80m
+esp32s3_eis_ble.menu.FlashMode.dio.build.flash_freq=80m
+esp32s3_eis_ble.menu.FlashMode.opi=OPI 80MHz
+esp32s3_eis_ble.menu.FlashMode.opi.build.flash_mode=dout
+esp32s3_eis_ble.menu.FlashMode.opi.build.boot=opi
+esp32s3_eis_ble.menu.FlashMode.opi.build.boot_freq=80m
+esp32s3_eis_ble.menu.FlashMode.opi.build.flash_freq=80m
+
+esp32s3_eis_ble.menu.FlashSize.4M=4MB (32Mb)
+esp32s3_eis_ble.menu.FlashSize.4M.build.flash_size=4MB
+esp32s3_eis_ble.menu.FlashSize.8M=8MB (64Mb)
+esp32s3_eis_ble.menu.FlashSize.8M.build.flash_size=8MB
+esp32s3_eis_ble.menu.FlashSize.8M.build.partitions=default_8MB
+esp32s3_eis_ble.menu.FlashSize.16M=16MB (128Mb)
+esp32s3_eis_ble.menu.FlashSize.16M.build.flash_size=16MB
+esp32s3_eis_ble.menu.FlashSize.32M=32MB (256Mb)
+esp32s3_eis_ble.menu.FlashSize.32M.build.flash_size=32MB
+esp32s3_eis_ble.menu.FlashSize.32M.build.partitions=app5M_fat24M_32MB
+
+esp32s3_eis_ble.menu.LoopCore.1=Core 1
+esp32s3_eis_ble.menu.LoopCore.1.build.loop_core=-DARDUINO_RUNNING_CORE=1
+esp32s3_eis_ble.menu.LoopCore.0=Core 0
+esp32s3_eis_ble.menu.LoopCore.0.build.loop_core=-DARDUINO_RUNNING_CORE=0
+
+esp32s3_eis_ble.menu.EventsCore.1=Core 1
+esp32s3_eis_ble.menu.EventsCore.1.build.event_core=-DARDUINO_EVENT_RUNNING_CORE=1
+esp32s3_eis_ble.menu.EventsCore.0=Core 0
+esp32s3_eis_ble.menu.EventsCore.0.build.event_core=-DARDUINO_EVENT_RUNNING_CORE=0
+
+esp32s3_eis_ble.menu.USBMode.hwcdc=Hardware CDC and JTAG
+esp32s3_eis_ble.menu.USBMode.hwcdc.build.usb_mode=1
+esp32s3_eis_ble.menu.USBMode.default=USB-OTG (TinyUSB)
+esp32s3_eis_ble.menu.USBMode.default.build.usb_mode=0
+
+esp32s3_eis_ble.menu.CDCOnBoot.default=Disabled
+esp32s3_eis_ble.menu.CDCOnBoot.default.build.cdc_on_boot=0
+esp32s3_eis_ble.menu.CDCOnBoot.cdc=Enabled
+esp32s3_eis_ble.menu.CDCOnBoot.cdc.build.cdc_on_boot=1
+
+esp32s3_eis_ble.menu.MSCOnBoot.default=Disabled
+esp32s3_eis_ble.menu.MSCOnBoot.default.build.msc_on_boot=0
+esp32s3_eis_ble.menu.MSCOnBoot.msc=Enabled (Requires USB-OTG Mode)
+esp32s3_eis_ble.menu.MSCOnBoot.msc.build.msc_on_boot=1
+
+esp32s3_eis_ble.menu.DFUOnBoot.default=Disabled
+esp32s3_eis_ble.menu.DFUOnBoot.default.build.dfu_on_boot=0
+esp32s3_eis_ble.menu.DFUOnBoot.dfu=Enabled (Requires USB-OTG Mode)
+esp32s3_eis_ble.menu.DFUOnBoot.dfu.build.dfu_on_boot=1
+
+esp32s3_eis_ble.menu.UploadMode.default=UART0 / Hardware CDC
+esp32s3_eis_ble.menu.UploadMode.default.upload.use_1200bps_touch=false
+esp32s3_eis_ble.menu.UploadMode.default.upload.wait_for_upload_port=false
+esp32s3_eis_ble.menu.UploadMode.cdc=USB-OTG CDC (TinyUSB)
+esp32s3_eis_ble.menu.UploadMode.cdc.upload.use_1200bps_touch=true
+esp32s3_eis_ble.menu.UploadMode.cdc.upload.wait_for_upload_port=true
+
+esp32s3_eis_ble.menu.PartitionScheme.default=Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)
+esp32s3_eis_ble.menu.PartitionScheme.default.build.partitions=default
+esp32s3_eis_ble.menu.PartitionScheme.defaultffat=Default 4MB with ffat (1.2MB APP/1.5MB FATFS)
+esp32s3_eis_ble.menu.PartitionScheme.defaultffat.build.partitions=default_ffat
+esp32s3_eis_ble.menu.PartitionScheme.default_8MB=8M with spiffs (3MB APP/1.5MB SPIFFS)
+esp32s3_eis_ble.menu.PartitionScheme.default_8MB.build.partitions=default_8MB
+esp32s3_eis_ble.menu.PartitionScheme.default_8MB.upload.maximum_size=3342336
+esp32s3_eis_ble.menu.PartitionScheme.minimal=Minimal (1.3MB APP/700KB SPIFFS)
+esp32s3_eis_ble.menu.PartitionScheme.minimal.build.partitions=minimal
+esp32s3_eis_ble.menu.PartitionScheme.no_ota=No OTA (2MB APP/2MB SPIFFS)
+esp32s3_eis_ble.menu.PartitionScheme.no_ota.build.partitions=no_ota
+esp32s3_eis_ble.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+esp32s3_eis_ble.menu.PartitionScheme.noota_3g=No OTA (1MB APP/3MB SPIFFS)
+esp32s3_eis_ble.menu.PartitionScheme.noota_3g.build.partitions=noota_3g
+esp32s3_eis_ble.menu.PartitionScheme.noota_3g.upload.maximum_size=1048576
+esp32s3_eis_ble.menu.PartitionScheme.noota_ffat=No OTA (2MB APP/2MB FATFS)
+esp32s3_eis_ble.menu.PartitionScheme.noota_ffat.build.partitions=noota_ffat
+esp32s3_eis_ble.menu.PartitionScheme.noota_ffat.upload.maximum_size=2097152
+esp32s3_eis_ble.menu.PartitionScheme.noota_3gffat=No OTA (1MB APP/3MB FATFS)
+esp32s3_eis_ble.menu.PartitionScheme.noota_3gffat.build.partitions=noota_3gffat
+esp32s3_eis_ble.menu.PartitionScheme.noota_3gffat.upload.maximum_size=1048576
+esp32s3_eis_ble.menu.PartitionScheme.huge_app=Huge APP (3MB No OTA/1MB SPIFFS)
+esp32s3_eis_ble.menu.PartitionScheme.huge_app.build.partitions=huge_app
+esp32s3_eis_ble.menu.PartitionScheme.huge_app.upload.maximum_size=3145728
+esp32s3_eis_ble.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)
+esp32s3_eis_ble.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+esp32s3_eis_ble.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+esp32s3_eis_ble.menu.PartitionScheme.fatflash=16M Flash (2MB APP/12.5MB FATFS)
+esp32s3_eis_ble.menu.PartitionScheme.fatflash.build.partitions=ffat
+esp32s3_eis_ble.menu.PartitionScheme.fatflash.upload.maximum_size=2097152
+esp32s3_eis_ble.menu.PartitionScheme.app3M_fat9M_16MB=16M Flash (3MB APP/9.9MB FATFS)
+esp32s3_eis_ble.menu.PartitionScheme.app3M_fat9M_16MB.build.partitions=app3M_fat9M_16MB
+esp32s3_eis_ble.menu.PartitionScheme.app3M_fat9M_16MB.upload.maximum_size=3145728
+esp32s3_eis_ble.menu.PartitionScheme.rainmaker=RainMaker
+esp32s3_eis_ble.menu.PartitionScheme.rainmaker.build.partitions=rainmaker
+esp32s3_eis_ble.menu.PartitionScheme.rainmaker.upload.maximum_size=3145728
+esp32s3_eis_ble.menu.PartitionScheme.app5M_fat24M_32MB=32M Flash (4.8MB APP/22MB FATFS)
+esp32s3_eis_ble.menu.PartitionScheme.app5M_fat24M_32MB.build.partitions=large_fat_32MB
+esp32s3_eis_ble.menu.PartitionScheme.app5M_fat24M_32MB.upload.maximum_size=4718592
+esp32s3_eis_ble.menu.PartitionScheme.app5M_little24M_32MB=32M Flash (4.8MB APP/22MB LittleFS)
+esp32s3_eis_ble.menu.PartitionScheme.app5M_little24M_32MB.build.partitions=large_littlefs_32MB
+esp32s3_eis_ble.menu.PartitionScheme.app5M_little24M_32MB.upload.maximum_size=4718592
+
+esp32s3_eis_ble.menu.CPUFreq.240=240MHz (WiFi)
+esp32s3_eis_ble.menu.CPUFreq.240.build.f_cpu=240000000L
+esp32s3_eis_ble.menu.CPUFreq.160=160MHz (WiFi)
+esp32s3_eis_ble.menu.CPUFreq.160.build.f_cpu=160000000L
+esp32s3_eis_ble.menu.CPUFreq.80=80MHz (WiFi)
+esp32s3_eis_ble.menu.CPUFreq.80.build.f_cpu=80000000L
+esp32s3_eis_ble.menu.CPUFreq.40=40MHz
+esp32s3_eis_ble.menu.CPUFreq.40.build.f_cpu=40000000L
+esp32s3_eis_ble.menu.CPUFreq.20=20MHz
+esp32s3_eis_ble.menu.CPUFreq.20.build.f_cpu=20000000L
+esp32s3_eis_ble.menu.CPUFreq.10=10MHz
+esp32s3_eis_ble.menu.CPUFreq.10.build.f_cpu=10000000L
+
+esp32s3_eis_ble.menu.UploadSpeed.921600=921600
+esp32s3_eis_ble.menu.UploadSpeed.921600.upload.speed=921600
+esp32s3_eis_ble.menu.UploadSpeed.115200=115200
+esp32s3_eis_ble.menu.UploadSpeed.115200.upload.speed=115200
+esp32s3_eis_ble.menu.UploadSpeed.256000.windows=256000
+esp32s3_eis_ble.menu.UploadSpeed.256000.upload.speed=256000
+esp32s3_eis_ble.menu.UploadSpeed.230400.windows.upload.speed=256000
+esp32s3_eis_ble.menu.UploadSpeed.230400=230400
+esp32s3_eis_ble.menu.UploadSpeed.230400.upload.speed=230400
+esp32s3_eis_ble.menu.UploadSpeed.460800.linux=460800
+esp32s3_eis_ble.menu.UploadSpeed.460800.macosx=460800
+esp32s3_eis_ble.menu.UploadSpeed.460800.upload.speed=460800
+esp32s3_eis_ble.menu.UploadSpeed.512000.windows=512000
+esp32s3_eis_ble.menu.UploadSpeed.512000.upload.speed=512000
+
+esp32s3_eis_ble.menu.DebugLevel.none=None
+esp32s3_eis_ble.menu.DebugLevel.none.build.code_debug=0
+esp32s3_eis_ble.menu.DebugLevel.error=Error
+esp32s3_eis_ble.menu.DebugLevel.error.build.code_debug=1
+esp32s3_eis_ble.menu.DebugLevel.warn=Warn
+esp32s3_eis_ble.menu.DebugLevel.warn.build.code_debug=2
+esp32s3_eis_ble.menu.DebugLevel.info=Info
+esp32s3_eis_ble.menu.DebugLevel.info.build.code_debug=3
+esp32s3_eis_ble.menu.DebugLevel.debug=Debug
+esp32s3_eis_ble.menu.DebugLevel.debug.build.code_debug=4
+esp32s3_eis_ble.menu.DebugLevel.verbose=Verbose
+esp32s3_eis_ble.menu.DebugLevel.verbose.build.code_debug=5
+
+esp32s3_eis_ble.menu.EraseFlash.none=Disabled
+esp32s3_eis_ble.menu.EraseFlash.none.upload.erase_cmd=
+esp32s3_eis_ble.menu.EraseFlash.all=Enabled
+esp32s3_eis_ble.menu.EraseFlash.all.upload.erase_cmd=-e
+
+
+###############################################################
+#					ESP32C3 Dev Module EIS
+###############################################################
+esp32c3_eis.name=FLPrpog: ESP32C3-Dev-Module
+esp32c3_eis.vid.0=0x303a
+esp32c3_eis.pid.0=0x1001
+
+esp32c3_eis.bootloader.tool=esptool_py
+esp32c3_eis.bootloader.tool.default=esptool_py
+
+esp32c3_eis.upload.tool=esptool_py
+esp32c3_eis.upload.tool.default=esptool_py
+esp32c3_eis.upload.tool.network=esp_ota
+
+esp32c3_eis.upload.maximum_size=1310720
+esp32c3_eis.upload.maximum_data_size=327680
+esp32c3_eis.upload.flags=
+esp32c3_eis.upload.extra_flags=
+esp32c3_eis.upload.use_1200bps_touch=false
+esp32c3_eis.upload.wait_for_upload_port=false
+
+esp32c3_eis.serial.disableDTR=false
+esp32c3_eis.serial.disableRTS=false
+
+esp32c3_eis.build.tarch=riscv32
+esp32c3_eis.build.target=esp
+esp32c3_eis.build.mcu=esp32c3
+esp32c3_eis.build.core=esp32
+esp32c3_eis.build.variant=esp32c3
+esp32c3_eis.build.board=ESP32C3_DEV_EIS
+esp32c3_eis.build.bootloader_addr=0x0
+
+esp32c3_eis.build.cdc_on_boot=0
+esp32c3_eis.build.f_cpu=160000000L
+esp32c3_eis.build.flash_size=4MB
+esp32c3_eis.build.flash_freq=80m
+esp32c3_eis.build.flash_mode=qio
+esp32c3_eis.build.boot=qio
+esp32c3_eis.build.partitions=default
+esp32c3_eis.build.defines=
+
+## IDE 2.0 Seems to not update the value
+esp32c3_eis.menu.JTAGAdapter.default=Disabled
+esp32c3_eis.menu.JTAGAdapter.default.build.copy_jtag_files=0
+esp32c3_eis.menu.JTAGAdapter.builtin=Integrated USB JTAG
+esp32c3_eis.menu.JTAGAdapter.builtin.build.openocdscript=esp32c3-builtin.cfg
+esp32c3_eis.menu.JTAGAdapter.builtin.build.copy_jtag_files=1
+esp32c3_eis.menu.JTAGAdapter.external=FTDI Adapter
+esp32c3_eis.menu.JTAGAdapter.external.build.openocdscript=esp32c3-ftdi.cfg
+esp32c3_eis.menu.JTAGAdapter.external.build.copy_jtag_files=1
+esp32c3_eis.menu.JTAGAdapter.bridge=ESP USB Bridge
+esp32c3_eis.menu.JTAGAdapter.bridge.build.openocdscript=esp32c3-bridge.cfg
+esp32c3_eis.menu.JTAGAdapter.bridge.build.copy_jtag_files=1
+
+esp32c3_eis.menu.CDCOnBoot.default=Disabled
+esp32c3_eis.menu.CDCOnBoot.default.build.cdc_on_boot=0
+esp32c3_eis.menu.CDCOnBoot.cdc=Enabled
+esp32c3_eis.menu.CDCOnBoot.cdc.build.cdc_on_boot=1
+
+esp32c3_eis.menu.PartitionScheme.default=Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)
+esp32c3_eis.menu.PartitionScheme.default.build.partitions=default
+esp32c3_eis.menu.PartitionScheme.defaultffat=Default 4MB with ffat (1.2MB APP/1.5MB FATFS)
+esp32c3_eis.menu.PartitionScheme.defaultffat.build.partitions=default_ffat
+esp32c3_eis.menu.PartitionScheme.default_8MB=8M with spiffs (3MB APP/1.5MB SPIFFS)
+esp32c3_eis.menu.PartitionScheme.default_8MB.build.partitions=default_8MB
+esp32c3_eis.menu.PartitionScheme.default_8MB.upload.maximum_size=3342336
+esp32c3_eis.menu.PartitionScheme.minimal=Minimal (1.3MB APP/700KB SPIFFS)
+esp32c3_eis.menu.PartitionScheme.minimal.build.partitions=minimal
+esp32c3_eis.menu.PartitionScheme.no_ota=No OTA (2MB APP/2MB SPIFFS)
+esp32c3_eis.menu.PartitionScheme.no_ota.build.partitions=no_ota
+esp32c3_eis.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+esp32c3_eis.menu.PartitionScheme.noota_3g=No OTA (1MB APP/3MB SPIFFS)
+esp32c3_eis.menu.PartitionScheme.noota_3g.build.partitions=noota_3g
+esp32c3_eis.menu.PartitionScheme.noota_3g.upload.maximum_size=1048576
+esp32c3_eis.menu.PartitionScheme.noota_ffat=No OTA (2MB APP/2MB FATFS)
+esp32c3_eis.menu.PartitionScheme.noota_ffat.build.partitions=noota_ffat
+esp32c3_eis.menu.PartitionScheme.noota_ffat.upload.maximum_size=2097152
+esp32c3_eis.menu.PartitionScheme.noota_3gffat=No OTA (1MB APP/3MB FATFS)
+esp32c3_eis.menu.PartitionScheme.noota_3gffat.build.partitions=noota_3gffat
+esp32c3_eis.menu.PartitionScheme.noota_3gffat.upload.maximum_size=1048576
+esp32c3_eis.menu.PartitionScheme.huge_app=Huge APP (3MB No OTA/1MB SPIFFS)
+esp32c3_eis.menu.PartitionScheme.huge_app.build.partitions=huge_app
+esp32c3_eis.menu.PartitionScheme.huge_app.upload.maximum_size=3145728
+esp32c3_eis.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)
+esp32c3_eis.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+esp32c3_eis.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+esp32c3_eis.menu.PartitionScheme.fatflash=16M Flash (2MB APP/12.5MB FATFS)
+esp32c3_eis.menu.PartitionScheme.fatflash.build.partitions=ffat
+esp32c3_eis.menu.PartitionScheme.fatflash.upload.maximum_size=2097152
+esp32c3_eis.menu.PartitionScheme.app3M_fat9M_16MB=16M Flash (3MB APP/9.9MB FATFS)
+esp32c3_eis.menu.PartitionScheme.app3M_fat9M_16MB.build.partitions=app3M_fat9M_16MB
+esp32c3_eis.menu.PartitionScheme.app3M_fat9M_16MB.upload.maximum_size=3145728
+esp32c3_eis.menu.PartitionScheme.rainmaker=RainMaker
+esp32c3_eis.menu.PartitionScheme.rainmaker.build.partitions=rainmaker
+esp32c3_eis.menu.PartitionScheme.rainmaker.upload.maximum_size=3145728
+
+esp32c3_eis.menu.CPUFreq.160=160MHz (WiFi)
+esp32c3_eis.menu.CPUFreq.160.build.f_cpu=160000000L
+esp32c3_eis.menu.CPUFreq.80=80MHz (WiFi)
+esp32c3_eis.menu.CPUFreq.80.build.f_cpu=80000000L
+esp32c3_eis.menu.CPUFreq.40=40MHz
+esp32c3_eis.menu.CPUFreq.40.build.f_cpu=40000000L
+esp32c3_eis.menu.CPUFreq.20=20MHz
+esp32c3_eis.menu.CPUFreq.20.build.f_cpu=20000000L
+esp32c3_eis.menu.CPUFreq.10=10MHz
+esp32c3_eis.menu.CPUFreq.10.build.f_cpu=10000000L
+
+esp32c3_eis.menu.FlashMode.qio=QIO
+esp32c3_eis.menu.FlashMode.qio.build.flash_mode=dio
+esp32c3_eis.menu.FlashMode.qio.build.boot=qio
+esp32c3_eis.menu.FlashMode.dio=DIO
+esp32c3_eis.menu.FlashMode.dio.build.flash_mode=dio
+esp32c3_eis.menu.FlashMode.dio.build.boot=dio
+esp32c3_eis.menu.FlashMode.qout=QOUT
+esp32c3_eis.menu.FlashMode.qout.build.flash_mode=dout
+esp32c3_eis.menu.FlashMode.qout.build.boot=qout
+esp32c3_eis.menu.FlashMode.dout=DOUT
+esp32c3_eis.menu.FlashMode.dout.build.flash_mode=dout
+esp32c3_eis.menu.FlashMode.dout.build.boot=dout
+
+esp32c3_eis.menu.FlashFreq.80=80MHz
+esp32c3_eis.menu.FlashFreq.80.build.flash_freq=80m
+esp32c3_eis.menu.FlashFreq.40=40MHz
+esp32c3_eis.menu.FlashFreq.40.build.flash_freq=40m
+
+esp32c3_eis.menu.FlashSize.4M=4MB (32Mb)
+esp32c3_eis.menu.FlashSize.4M.build.flash_size=4MB
+esp32c3_eis.menu.FlashSize.8M=8MB (64Mb)
+esp32c3_eis.menu.FlashSize.8M.build.flash_size=8MB
+esp32c3_eis.menu.FlashSize.8M.build.partitions=default_8MB
+esp32c3_eis.menu.FlashSize.2M=2MB (16Mb)
+esp32c3_eis.menu.FlashSize.2M.build.flash_size=2MB
+esp32c3_eis.menu.FlashSize.2M.build.partitions=minimal
+esp32c3_eis.menu.FlashSize.16M=16MB (128Mb)
+esp32c3_eis.menu.FlashSize.16M.build.flash_size=16MB
+
+esp32c3_eis.menu.UploadSpeed.921600=921600
+esp32c3_eis.menu.UploadSpeed.921600.upload.speed=921600
+esp32c3_eis.menu.UploadSpeed.115200=115200
+esp32c3_eis.menu.UploadSpeed.115200.upload.speed=115200
+esp32c3_eis.menu.UploadSpeed.256000.windows=256000
+esp32c3_eis.menu.UploadSpeed.256000.upload.speed=256000
+esp32c3_eis.menu.UploadSpeed.230400.windows.upload.speed=256000
+esp32c3_eis.menu.UploadSpeed.230400=230400
+esp32c3_eis.menu.UploadSpeed.230400.upload.speed=230400
+esp32c3_eis.menu.UploadSpeed.460800.linux=460800
+esp32c3_eis.menu.UploadSpeed.460800.macosx=460800
+esp32c3_eis.menu.UploadSpeed.460800.upload.speed=460800
+esp32c3_eis.menu.UploadSpeed.512000.windows=512000
+esp32c3_eis.menu.UploadSpeed.512000.upload.speed=512000
+
+esp32c3_eis.menu.DebugLevel.none=None
+esp32c3_eis.menu.DebugLevel.none.build.code_debug=0
+esp32c3_eis.menu.DebugLevel.error=Error
+esp32c3_eis.menu.DebugLevel.error.build.code_debug=1
+esp32c3_eis.menu.DebugLevel.warn=Warn
+esp32c3_eis.menu.DebugLevel.warn.build.code_debug=2
+esp32c3_eis.menu.DebugLevel.info=Info
+esp32c3_eis.menu.DebugLevel.info.build.code_debug=3
+esp32c3_eis.menu.DebugLevel.debug=Debug
+esp32c3_eis.menu.DebugLevel.debug.build.code_debug=4
+esp32c3_eis.menu.DebugLevel.verbose=Verbose
+esp32c3_eis.menu.DebugLevel.verbose.build.code_debug=5
+
+esp32c3_eis.menu.EraseFlash.none=Disabled
+esp32c3_eis.menu.EraseFlash.none.upload.erase_cmd=
+esp32c3_eis.menu.EraseFlash.all=Enabled
+esp32c3_eis.menu.EraseFlash.all.upload.erase_cmd=-e
+
+###############################################################
+#					ESP32C3 Dev Module EIS BLE
+###############################################################
+esp32c3_eis_ble.name=FLPrpog: ESP32C3 Dev Module BLE
+esp32c3_eis_ble.vid.0=0x303a
+esp32c3_eis_ble.pid.0=0x1001
+
+esp32c3_eis_ble.bootloader.tool=esptool_py
+esp32c3_eis_ble.bootloader.tool.default=esptool_py
+
+esp32c3_eis_ble.upload.tool=esptool_py
+esp32c3_eis_ble.upload.tool.default=esptool_py
+esp32c3_eis_ble.upload.tool.network=esp_ota
+
+esp32c3_eis_ble.upload.maximum_size=1310720
+esp32c3_eis_ble.upload.maximum_data_size=327680
+esp32c3_eis_ble.upload.flags=
+esp32c3_eis_ble.upload.extra_flags=
+esp32c3_eis_ble.upload.use_1200bps_touch=false
+esp32c3_eis_ble.upload.wait_for_upload_port=false
+
+esp32c3_eis_ble.serial.disableDTR=false
+esp32c3_eis_ble.serial.disableRTS=false
+
+esp32c3_eis_ble.build.tarch=riscv32
+esp32c3_eis_ble.build.target=esp
+esp32c3_eis_ble.build.mcu=esp32c3
+esp32c3_eis_ble.build.core=esp32
+esp32c3_eis_ble.build.variant=esp32c3
+esp32c3_eis_ble.build.board=ESP32C3_DEV_EIS_BLE
+esp32c3_eis_ble.build.bootloader_addr=0x0
+
+esp32c3_eis_ble.build.cdc_on_boot=0
+esp32c3_eis_ble.build.f_cpu=160000000L
+esp32c3_eis_ble.build.flash_size=4MB
+esp32c3_eis_ble.build.flash_freq=80m
+esp32c3_eis_ble.build.flash_mode=qio
+esp32c3_eis_ble.build.boot=qio
+esp32c3_eis_ble.build.partitions=default
+esp32c3_eis_ble.build.defines=
+
+## IDE 2.0 Seems to not update the value
+esp32c3_eis_ble.menu.JTAGAdapter.default=Disabled
+esp32c3_eis_ble.menu.JTAGAdapter.default.build.copy_jtag_files=0
+esp32c3_eis_ble.menu.JTAGAdapter.builtin=Integrated USB JTAG
+esp32c3_eis_ble.menu.JTAGAdapter.builtin.build.openocdscript=esp32c3-builtin.cfg
+esp32c3_eis_ble.menu.JTAGAdapter.builtin.build.copy_jtag_files=1
+esp32c3_eis_ble.menu.JTAGAdapter.external=FTDI Adapter
+esp32c3_eis_ble.menu.JTAGAdapter.external.build.openocdscript=esp32c3-ftdi.cfg
+esp32c3_eis_ble.menu.JTAGAdapter.external.build.copy_jtag_files=1
+esp32c3_eis_ble.menu.JTAGAdapter.bridge=ESP USB Bridge
+esp32c3_eis_ble.menu.JTAGAdapter.bridge.build.openocdscript=esp32c3-bridge.cfg
+esp32c3_eis_ble.menu.JTAGAdapter.bridge.build.copy_jtag_files=1
+
+esp32c3_eis_ble.menu.CDCOnBoot.default=Disabled
+esp32c3_eis_ble.menu.CDCOnBoot.default.build.cdc_on_boot=0
+esp32c3_eis_ble.menu.CDCOnBoot.cdc=Enabled
+esp32c3_eis_ble.menu.CDCOnBoot.cdc.build.cdc_on_boot=1
+
+esp32c3_eis_ble.menu.PartitionScheme.default=Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)
+esp32c3_eis_ble.menu.PartitionScheme.default.build.partitions=default
+esp32c3_eis_ble.menu.PartitionScheme.defaultffat=Default 4MB with ffat (1.2MB APP/1.5MB FATFS)
+esp32c3_eis_ble.menu.PartitionScheme.defaultffat.build.partitions=default_ffat
+esp32c3_eis_ble.menu.PartitionScheme.default_8MB=8M with spiffs (3MB APP/1.5MB SPIFFS)
+esp32c3_eis_ble.menu.PartitionScheme.default_8MB.build.partitions=default_8MB
+esp32c3_eis_ble.menu.PartitionScheme.default_8MB.upload.maximum_size=3342336
+esp32c3_eis_ble.menu.PartitionScheme.minimal=Minimal (1.3MB APP/700KB SPIFFS)
+esp32c3_eis_ble.menu.PartitionScheme.minimal.build.partitions=minimal
+esp32c3_eis_ble.menu.PartitionScheme.no_ota=No OTA (2MB APP/2MB SPIFFS)
+esp32c3_eis_ble.menu.PartitionScheme.no_ota.build.partitions=no_ota
+esp32c3_eis_ble.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+esp32c3_eis_ble.menu.PartitionScheme.noota_3g=No OTA (1MB APP/3MB SPIFFS)
+esp32c3_eis_ble.menu.PartitionScheme.noota_3g.build.partitions=noota_3g
+esp32c3_eis_ble.menu.PartitionScheme.noota_3g.upload.maximum_size=1048576
+esp32c3_eis_ble.menu.PartitionScheme.noota_ffat=No OTA (2MB APP/2MB FATFS)
+esp32c3_eis_ble.menu.PartitionScheme.noota_ffat.build.partitions=noota_ffat
+esp32c3_eis_ble.menu.PartitionScheme.noota_ffat.upload.maximum_size=2097152
+esp32c3_eis_ble.menu.PartitionScheme.noota_3gffat=No OTA (1MB APP/3MB FATFS)
+esp32c3_eis_ble.menu.PartitionScheme.noota_3gffat.build.partitions=noota_3gffat
+esp32c3_eis_ble.menu.PartitionScheme.noota_3gffat.upload.maximum_size=1048576
+esp32c3_eis_ble.menu.PartitionScheme.huge_app=Huge APP (3MB No OTA/1MB SPIFFS)
+esp32c3_eis_ble.menu.PartitionScheme.huge_app.build.partitions=huge_app
+esp32c3_eis_ble.menu.PartitionScheme.huge_app.upload.maximum_size=3145728
+esp32c3_eis_ble.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)
+esp32c3_eis_ble.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+esp32c3_eis_ble.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+esp32c3_eis_ble.menu.PartitionScheme.fatflash=16M Flash (2MB APP/12.5MB FATFS)
+esp32c3_eis_ble.menu.PartitionScheme.fatflash.build.partitions=ffat
+esp32c3_eis_ble.menu.PartitionScheme.fatflash.upload.maximum_size=2097152
+esp32c3_eis_ble.menu.PartitionScheme.app3M_fat9M_16MB=16M Flash (3MB APP/9.9MB FATFS)
+esp32c3_eis_ble.menu.PartitionScheme.app3M_fat9M_16MB.build.partitions=app3M_fat9M_16MB
+esp32c3_eis_ble.menu.PartitionScheme.app3M_fat9M_16MB.upload.maximum_size=3145728
+esp32c3_eis_ble.menu.PartitionScheme.rainmaker=RainMaker
+esp32c3_eis_ble.menu.PartitionScheme.rainmaker.build.partitions=rainmaker
+esp32c3_eis_ble.menu.PartitionScheme.rainmaker.upload.maximum_size=3145728
+
+esp32c3_eis_ble.menu.CPUFreq.160=160MHz (WiFi)
+esp32c3_eis_ble.menu.CPUFreq.160.build.f_cpu=160000000L
+esp32c3_eis_ble.menu.CPUFreq.80=80MHz (WiFi)
+esp32c3_eis_ble.menu.CPUFreq.80.build.f_cpu=80000000L
+esp32c3_eis_ble.menu.CPUFreq.40=40MHz
+esp32c3_eis_ble.menu.CPUFreq.40.build.f_cpu=40000000L
+esp32c3_eis_ble.menu.CPUFreq.20=20MHz
+esp32c3_eis_ble.menu.CPUFreq.20.build.f_cpu=20000000L
+esp32c3_eis_ble.menu.CPUFreq.10=10MHz
+esp32c3_eis_ble.menu.CPUFreq.10.build.f_cpu=10000000L
+
+esp32c3_eis_ble.menu.FlashMode.qio=QIO
+esp32c3_eis_ble.menu.FlashMode.qio.build.flash_mode=dio
+esp32c3_eis_ble.menu.FlashMode.qio.build.boot=qio
+esp32c3_eis_ble.menu.FlashMode.dio=DIO
+esp32c3_eis_ble.menu.FlashMode.dio.build.flash_mode=dio
+esp32c3_eis_ble.menu.FlashMode.dio.build.boot=dio
+esp32c3_eis_ble.menu.FlashMode.qout=QOUT
+esp32c3_eis_ble.menu.FlashMode.qout.build.flash_mode=dout
+esp32c3_eis_ble.menu.FlashMode.qout.build.boot=qout
+esp32c3_eis_ble.menu.FlashMode.dout=DOUT
+esp32c3_eis_ble.menu.FlashMode.dout.build.flash_mode=dout
+esp32c3_eis_ble.menu.FlashMode.dout.build.boot=dout
+
+esp32c3_eis_ble.menu.FlashFreq.80=80MHz
+esp32c3_eis_ble.menu.FlashFreq.80.build.flash_freq=80m
+esp32c3_eis_ble.menu.FlashFreq.40=40MHz
+esp32c3_eis_ble.menu.FlashFreq.40.build.flash_freq=40m
+
+esp32c3_eis_ble.menu.FlashSize.4M=4MB (32Mb)
+esp32c3_eis_ble.menu.FlashSize.4M.build.flash_size=4MB
+esp32c3_eis_ble.menu.FlashSize.8M=8MB (64Mb)
+esp32c3_eis_ble.menu.FlashSize.8M.build.flash_size=8MB
+esp32c3_eis_ble.menu.FlashSize.8M.build.partitions=default_8MB
+esp32c3_eis_ble.menu.FlashSize.2M=2MB (16Mb)
+esp32c3_eis_ble.menu.FlashSize.2M.build.flash_size=2MB
+esp32c3_eis_ble.menu.FlashSize.2M.build.partitions=minimal
+esp32c3_eis_ble.menu.FlashSize.16M=16MB (128Mb)
+esp32c3_eis_ble.menu.FlashSize.16M.build.flash_size=16MB
+
+esp32c3_eis_ble.menu.UploadSpeed.921600=921600
+esp32c3_eis_ble.menu.UploadSpeed.921600.upload.speed=921600
+esp32c3_eis_ble.menu.UploadSpeed.115200=115200
+esp32c3_eis_ble.menu.UploadSpeed.115200.upload.speed=115200
+esp32c3_eis_ble.menu.UploadSpeed.256000.windows=256000
+esp32c3_eis_ble.menu.UploadSpeed.256000.upload.speed=256000
+esp32c3_eis_ble.menu.UploadSpeed.230400.windows.upload.speed=256000
+esp32c3_eis_ble.menu.UploadSpeed.230400=230400
+esp32c3_eis_ble.menu.UploadSpeed.230400.upload.speed=230400
+esp32c3_eis_ble.menu.UploadSpeed.460800.linux=460800
+esp32c3_eis_ble.menu.UploadSpeed.460800.macosx=460800
+esp32c3_eis_ble.menu.UploadSpeed.460800.upload.speed=460800
+esp32c3_eis_ble.menu.UploadSpeed.512000.windows=512000
+esp32c3_eis_ble.menu.UploadSpeed.512000.upload.speed=512000
+
+esp32c3_eis_ble.menu.DebugLevel.none=None
+esp32c3_eis_ble.menu.DebugLevel.none.build.code_debug=0
+esp32c3_eis_ble.menu.DebugLevel.error=Error
+esp32c3_eis_ble.menu.DebugLevel.error.build.code_debug=1
+esp32c3_eis_ble.menu.DebugLevel.warn=Warn
+esp32c3_eis_ble.menu.DebugLevel.warn.build.code_debug=2
+esp32c3_eis_ble.menu.DebugLevel.info=Info
+esp32c3_eis_ble.menu.DebugLevel.info.build.code_debug=3
+esp32c3_eis_ble.menu.DebugLevel.debug=Debug
+esp32c3_eis_ble.menu.DebugLevel.debug.build.code_debug=4
+esp32c3_eis_ble.menu.DebugLevel.verbose=Verbose
+esp32c3_eis_ble.menu.DebugLevel.verbose.build.code_debug=5
+
+esp32c3_eis_ble.menu.EraseFlash.none=Disabled
+esp32c3_eis_ble.menu.EraseFlash.none.upload.erase_cmd=
+esp32c3_eis_ble.menu.EraseFlash.all=Enabled
+esp32c3_eis_ble.menu.EraseFlash.all.upload.erase_cmd=-e
+
+
+############################## ################################
+#                ESP32C3 SuperMini
+##############################################################
+esp32c3_sm_eis.name=FLPrpog: ESP32C3 Super Mini
+esp32c3_sm_eis.vid.0=0x303a
+esp32c3_sm_eis.pid.0=0x1001
+
+esp32c3_sm_eis.bootloader.tool=esptool_py
+esp32c3_sm_eis.bootloader.tool.default=esptool_py
+
+esp32c3_sm_eis.upload.tool=esptool_py
+esp32c3_sm_eis.upload.tool.default=esptool_py
+esp32c3_sm_eis.upload.tool.network=esp_ota
+
+esp32c3_sm_eis.upload.maximum_size=1310720
+esp32c3_sm_eis.upload.maximum_data_size=327680
+esp32c3_sm_eis.upload.flags=
+esp32c3_sm_eis.upload.extra_flags=
+esp32c3_sm_eis.upload.use_1200bps_touch=false
+esp32c3_sm_eis.upload.wait_for_upload_port=false
+
+esp32c3_sm_eis.serial.disableDTR=false
+esp32c3_sm_eis.serial.disableRTS=false
+
+esp32c3_sm_eis.build.tarch=riscv32
+esp32c3_sm_eis.build.target=esp
+esp32c3_sm_eis.build.mcu=esp32c3
+esp32c3_sm_eis.build.core=esp32
+esp32c3_sm_eis.build.variant=esp32c3
+esp32c3_sm_eis.build.board=ESP32C3_SUPER_MINI_EIS
+esp32c3_sm_eis.build.bootloader_addr=0x0
+
+esp32c3_sm_eis.build.cdc_on_boot=0
+esp32c3_sm_eis.build.f_cpu=160000000L
+esp32c3_sm_eis.build.flash_size=4MB
+esp32c3_sm_eis.build.flash_freq=80m
+esp32c3_sm_eis.build.flash_mode=qio
+esp32c3_sm_eis.build.boot=qio
+esp32c3_sm_eis.build.partitions=default
+esp32c3_sm_eis.build.defines=
+
+esp32c3_sm_eis.menu.CDCOnBoot.default=Enabled
+esp32c3_sm_eis.menu.CDCOnBoot.default.build.cdc_on_boot=1
+esp32c3_sm_eis.menu.CDCOnBoot.cdc=Enabled
+esp32c3_sm_eis.menu.CDCOnBoot.cdc.build.cdc_on_boot=1
+
+esp32c3_sm_eis.menu.PartitionScheme.default=Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)
+esp32c3_sm_eis.menu.PartitionScheme.default.build.partitions=default
+esp32c3_sm_eis.menu.PartitionScheme.defaultffat=Default 4MB with ffat (1.2MB APP/1.5MB FATFS)
+esp32c3_sm_eis.menu.PartitionScheme.defaultffat.build.partitions=default_ffat
+esp32c3_sm_eis.menu.PartitionScheme.default_8MB=8M with spiffs (3MB APP/1.5MB SPIFFS)
+esp32c3_sm_eis.menu.PartitionScheme.default_8MB.build.partitions=default_8MB
+esp32c3_sm_eis.menu.PartitionScheme.default_8MB.upload.maximum_size=3342336
+esp32c3_sm_eis.menu.PartitionScheme.minimal=Minimal (1.3MB APP/700KB SPIFFS)
+esp32c3_sm_eis.menu.PartitionScheme.minimal.build.partitions=minimal
+esp32c3_sm_eis.menu.PartitionScheme.no_ota=No OTA (2MB APP/2MB SPIFFS)
+esp32c3_sm_eis.menu.PartitionScheme.no_ota.build.partitions=no_ota
+esp32c3_sm_eis.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+esp32c3_sm_eis.menu.PartitionScheme.noota_3g=No OTA (1MB APP/3MB SPIFFS)
+esp32c3_sm_eis.menu.PartitionScheme.noota_3g.build.partitions=noota_3g
+esp32c3_sm_eis.menu.PartitionScheme.noota_3g.upload.maximum_size=1048576
+esp32c3_sm_eis.menu.PartitionScheme.noota_ffat=No OTA (2MB APP/2MB FATFS)
+esp32c3_sm_eis.menu.PartitionScheme.noota_ffat.build.partitions=noota_ffat
+esp32c3_sm_eis.menu.PartitionScheme.noota_ffat.upload.maximum_size=2097152
+esp32c3_sm_eis.menu.PartitionScheme.noota_3gffat=No OTA (1MB APP/3MB FATFS)
+esp32c3_sm_eis.menu.PartitionScheme.noota_3gffat.build.partitions=noota_3gffat
+esp32c3_sm_eis.menu.PartitionScheme.noota_3gffat.upload.maximum_size=1048576
+esp32c3_sm_eis.menu.PartitionScheme.huge_app=Huge APP (3MB No OTA/1MB SPIFFS)
+esp32c3_sm_eis.menu.PartitionScheme.huge_app.build.partitions=huge_app
+esp32c3_sm_eis.menu.PartitionScheme.huge_app.upload.maximum_size=3145728
+esp32c3_sm_eis.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)
+esp32c3_sm_eis.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+esp32c3_sm_eis.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+esp32c3_sm_eis.menu.PartitionScheme.fatflash=16M Flash (2MB APP/12.5MB FATFS)
+esp32c3_sm_eis.menu.PartitionScheme.fatflash.build.partitions=ffat
+esp32c3_sm_eis.menu.PartitionScheme.fatflash.upload.maximum_size=2097152
+esp32c3_sm_eis.menu.PartitionScheme.app3M_fat9M_16MB=16M Flash (3MB APP/9.9MB FATFS)
+esp32c3_sm_eis.menu.PartitionScheme.app3M_fat9M_16MB.build.partitions=app3M_fat9M_16MB
+esp32c3_sm_eis.menu.PartitionScheme.app3M_fat9M_16MB.upload.maximum_size=3145728
+esp32c3_sm_eis.menu.PartitionScheme.rainmaker=RainMaker
+esp32c3_sm_eis.menu.PartitionScheme.rainmaker.build.partitions=rainmaker
+esp32c3_sm_eis.menu.PartitionScheme.rainmaker.upload.maximum_size=3145728
+
+esp32c3_sm_eis.menu.CPUFreq.160=160MHz (WiFi)
+esp32c3_sm_eis.menu.CPUFreq.160.build.f_cpu=160000000L
+esp32c3_sm_eis.menu.CPUFreq.80=80MHz (WiFi)
+esp32c3_sm_eis.menu.CPUFreq.80.build.f_cpu=80000000L
+esp32c3_sm_eis.menu.CPUFreq.40=40MHz
+esp32c3_sm_eis.menu.CPUFreq.40.build.f_cpu=40000000L
+esp32c3_sm_eis.menu.CPUFreq.20=20MHz
+esp32c3_sm_eis.menu.CPUFreq.20.build.f_cpu=20000000L
+esp32c3_sm_eis.menu.CPUFreq.10=10MHz
+esp32c3_sm_eis.menu.CPUFreq.10.build.f_cpu=10000000L
+
+esp32c3_sm_eis.menu.FlashMode.qio=QIO
+esp32c3_sm_eis.menu.FlashMode.qio.build.flash_mode=dio
+esp32c3_sm_eis.menu.FlashMode.qio.build.boot=qio
+esp32c3_sm_eis.menu.FlashMode.dio=DIO
+esp32c3_sm_eis.menu.FlashMode.dio.build.flash_mode=dio
+esp32c3_sm_eis.menu.FlashMode.dio.build.boot=dio
+esp32c3_sm_eis.menu.FlashMode.qout=QOUT
+esp32c3_sm_eis.menu.FlashMode.qout.build.flash_mode=dout
+esp32c3_sm_eis.menu.FlashMode.qout.build.boot=qout
+esp32c3_sm_eis.menu.FlashMode.dout=DOUT
+esp32c3_sm_eis.menu.FlashMode.dout.build.flash_mode=dout
+esp32c3_sm_eis.menu.FlashMode.dout.build.boot=dout
+
+esp32c3_sm_eis.menu.FlashFreq.80=80MHz
+esp32c3_sm_eis.menu.FlashFreq.80.build.flash_freq=80m
+esp32c3_sm_eis.menu.FlashFreq.40=40MHz
+esp32c3_sm_eis.menu.FlashFreq.40.build.flash_freq=40m
+
+esp32c3_sm_eis.menu.FlashSize.4M=4MB (32Mb)
+esp32c3_sm_eis.menu.FlashSize.4M.build.flash_size=4MB
+esp32c3_sm_eis.menu.FlashSize.8M=8MB (64Mb)
+esp32c3_sm_eis.menu.FlashSize.8M.build.flash_size=8MB
+esp32c3_sm_eis.menu.FlashSize.8M.build.partitions=default_8MB
+esp32c3_sm_eis.menu.FlashSize.2M=2MB (16Mb)
+esp32c3_sm_eis.menu.FlashSize.2M.build.flash_size=2MB
+esp32c3_sm_eis.menu.FlashSize.2M.build.partitions=minimal
+esp32c3_sm_eis.menu.FlashSize.16M=16MB (128Mb)
+esp32c3_sm_eis.menu.FlashSize.16M.build.flash_size=16MB
+
+esp32c3_sm_eis.menu.UploadSpeed.921600=921600
+esp32c3_sm_eis.menu.UploadSpeed.921600.upload.speed=921600
+esp32c3_sm_eis.menu.UploadSpeed.115200=115200
+esp32c3_sm_eis.menu.UploadSpeed.115200.upload.speed=115200
+esp32c3_sm_eis.menu.UploadSpeed.256000.windows=256000
+esp32c3_sm_eis.menu.UploadSpeed.256000.upload.speed=256000
+esp32c3_sm_eis.menu.UploadSpeed.230400.windows.upload.speed=256000
+esp32c3_sm_eis.menu.UploadSpeed.230400=230400
+esp32c3_sm_eis.menu.UploadSpeed.230400.upload.speed=230400
+esp32c3_sm_eis.menu.UploadSpeed.460800.linux=460800
+esp32c3_sm_eis.menu.UploadSpeed.460800.macosx=460800
+esp32c3_sm_eis.menu.UploadSpeed.460800.upload.speed=460800
+esp32c3_sm_eis.menu.UploadSpeed.512000.windows=512000
+esp32c3_sm_eis.menu.UploadSpeed.512000.upload.speed=512000
+
+esp32c3_sm_eis.menu.DebugLevel.none=None
+esp32c3_sm_eis.menu.DebugLevel.none.build.code_debug=0
+esp32c3_sm_eis.menu.DebugLevel.error=Error
+esp32c3_sm_eis.menu.DebugLevel.error.build.code_debug=1
+esp32c3_sm_eis.menu.DebugLevel.warn=Warn
+esp32c3_sm_eis.menu.DebugLevel.warn.build.code_debug=2
+esp32c3_sm_eis.menu.DebugLevel.info=Info
+esp32c3_sm_eis.menu.DebugLevel.info.build.code_debug=3
+esp32c3_sm_eis.menu.DebugLevel.debug=Debug
+esp32c3_sm_eis.menu.DebugLevel.debug.build.code_debug=4
+esp32c3_sm_eis.menu.DebugLevel.verbose=Verbose
+esp32c3_sm_eis.menu.DebugLevel.verbose.build.code_debug=5
+
+esp32c3_sm_eis.menu.EraseFlash.none=Disabled
+esp32c3_sm_eis.menu.EraseFlash.none.upload.erase_cmd=
+esp32c3_sm_eis.menu.EraseFlash.all=Enabled
+esp32c3_sm_eis.menu.EraseFlash.all.upload.erase_cmd=-e
+
+##############################################################
+#                ESP32C3 Super Mini BLE 
+##############################################################
+esp32c3_sm_ble_eis.name=FLPrpog: ESP32C3 Super Mini BLE
+esp32c3_sm_ble_eis.vid.0=0x303a
+esp32c3_sm_ble_eis.pid.0=0x1001
+
+esp32c3_sm_ble_eis.bootloader.tool=esptool_py
+esp32c3_sm_ble_eis.bootloader.tool.default=esptool_py
+
+esp32c3_sm_ble_eis.upload.tool=esptool_py
+esp32c3_sm_ble_eis.upload.tool.default=esptool_py
+esp32c3_sm_ble_eis.upload.tool.network=esp_ota
+
+esp32c3_sm_ble_eis.upload.maximum_size=1310720
+esp32c3_sm_ble_eis.upload.maximum_data_size=327680
+esp32c3_sm_ble_eis.upload.flags=
+esp32c3_sm_ble_eis.upload.extra_flags=
+esp32c3_sm_ble_eis.upload.use_1200bps_touch=false
+esp32c3_sm_ble_eis.upload.wait_for_upload_port=false
+
+esp32c3_sm_ble_eis.serial.disableDTR=false
+esp32c3_sm_ble_eis.serial.disableRTS=false
+
+esp32c3_sm_ble_eis.build.tarch=riscv32
+esp32c3_sm_ble_eis.build.target=esp
+esp32c3_sm_ble_eis.build.mcu=esp32c3
+esp32c3_sm_ble_eis.build.core=esp32
+esp32c3_sm_ble_eis.build.variant=esp32c3
+esp32c3_sm_ble_eis.build.board=ESP32C3_SUPER_MINI_EIS_BLE
+esp32c3_sm_ble_eis.build.bootloader_addr=0x0
+
+esp32c3_sm_ble_eis.build.cdc_on_boot=0
+esp32c3_sm_ble_eis.build.f_cpu=160000000L
+esp32c3_sm_ble_eis.build.flash_size=4MB
+esp32c3_sm_ble_eis.build.flash_freq=80m
+esp32c3_sm_ble_eis.build.flash_mode=qio
+esp32c3_sm_ble_eis.build.boot=qio
+esp32c3_sm_ble_eis.build.partitions=default
+esp32c3_sm_ble_eis.build.defines=
+
+esp32c3_sm_ble_eis.menu.CDCOnBoot.default=Enabled
+esp32c3_sm_ble_eis.menu.CDCOnBoot.default.build.cdc_on_boot=1
+esp32c3_sm_ble_eis.menu.CDCOnBoot.cdc=Enabled
+esp32c3_sm_ble_eis.menu.CDCOnBoot.cdc.build.cdc_on_boot=1
+
+esp32c3_sm_ble_eis.menu.PartitionScheme.default=Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)
+esp32c3_sm_ble_eis.menu.PartitionScheme.default.build.partitions=default
+esp32c3_sm_ble_eis.menu.PartitionScheme.defaultffat=Default 4MB with ffat (1.2MB APP/1.5MB FATFS)
+esp32c3_sm_ble_eis.menu.PartitionScheme.defaultffat.build.partitions=default_ffat
+esp32c3_sm_ble_eis.menu.PartitionScheme.default_8MB=8M with spiffs (3MB APP/1.5MB SPIFFS)
+esp32c3_sm_ble_eis.menu.PartitionScheme.default_8MB.build.partitions=default_8MB
+esp32c3_sm_ble_eis.menu.PartitionScheme.default_8MB.upload.maximum_size=3342336
+esp32c3_sm_ble_eis.menu.PartitionScheme.minimal=Minimal (1.3MB APP/700KB SPIFFS)
+esp32c3_sm_ble_eis.menu.PartitionScheme.minimal.build.partitions=minimal
+esp32c3_sm_ble_eis.menu.PartitionScheme.no_ota=No OTA (2MB APP/2MB SPIFFS)
+esp32c3_sm_ble_eis.menu.PartitionScheme.no_ota.build.partitions=no_ota
+esp32c3_sm_ble_eis.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+esp32c3_sm_ble_eis.menu.PartitionScheme.noota_3g=No OTA (1MB APP/3MB SPIFFS)
+esp32c3_sm_ble_eis.menu.PartitionScheme.noota_3g.build.partitions=noota_3g
+esp32c3_sm_ble_eis.menu.PartitionScheme.noota_3g.upload.maximum_size=1048576
+esp32c3_sm_ble_eis.menu.PartitionScheme.noota_ffat=No OTA (2MB APP/2MB FATFS)
+esp32c3_sm_ble_eis.menu.PartitionScheme.noota_ffat.build.partitions=noota_ffat
+esp32c3_sm_ble_eis.menu.PartitionScheme.noota_ffat.upload.maximum_size=2097152
+esp32c3_sm_ble_eis.menu.PartitionScheme.noota_3gffat=No OTA (1MB APP/3MB FATFS)
+esp32c3_sm_ble_eis.menu.PartitionScheme.noota_3gffat.build.partitions=noota_3gffat
+esp32c3_sm_ble_eis.menu.PartitionScheme.noota_3gffat.upload.maximum_size=1048576
+esp32c3_sm_ble_eis.menu.PartitionScheme.huge_app=Huge APP (3MB No OTA/1MB SPIFFS)
+esp32c3_sm_ble_eis.menu.PartitionScheme.huge_app.build.partitions=huge_app
+esp32c3_sm_ble_eis.menu.PartitionScheme.huge_app.upload.maximum_size=3145728
+esp32c3_sm_ble_eis.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)
+esp32c3_sm_ble_eis.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+esp32c3_sm_ble_eis.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+esp32c3_sm_ble_eis.menu.PartitionScheme.fatflash=16M Flash (2MB APP/12.5MB FATFS)
+esp32c3_sm_ble_eis.menu.PartitionScheme.fatflash.build.partitions=ffat
+esp32c3_sm_ble_eis.menu.PartitionScheme.fatflash.upload.maximum_size=2097152
+esp32c3_sm_ble_eis.menu.PartitionScheme.app3M_fat9M_16MB=16M Flash (3MB APP/9.9MB FATFS)
+esp32c3_sm_ble_eis.menu.PartitionScheme.app3M_fat9M_16MB.build.partitions=app3M_fat9M_16MB
+esp32c3_sm_ble_eis.menu.PartitionScheme.app3M_fat9M_16MB.upload.maximum_size=3145728
+esp32c3_sm_ble_eis.menu.PartitionScheme.rainmaker=RainMaker
+esp32c3_sm_ble_eis.menu.PartitionScheme.rainmaker.build.partitions=rainmaker
+esp32c3_sm_ble_eis.menu.PartitionScheme.rainmaker.upload.maximum_size=3145728
+
+esp32c3_sm_ble_eis.menu.CPUFreq.160=160MHz (WiFi)
+esp32c3_sm_ble_eis.menu.CPUFreq.160.build.f_cpu=160000000L
+esp32c3_sm_ble_eis.menu.CPUFreq.80=80MHz (WiFi)
+esp32c3_sm_ble_eis.menu.CPUFreq.80.build.f_cpu=80000000L
+esp32c3_sm_ble_eis.menu.CPUFreq.40=40MHz
+esp32c3_sm_ble_eis.menu.CPUFreq.40.build.f_cpu=40000000L
+esp32c3_sm_ble_eis.menu.CPUFreq.20=20MHz
+esp32c3_sm_ble_eis.menu.CPUFreq.20.build.f_cpu=20000000L
+esp32c3_sm_ble_eis.menu.CPUFreq.10=10MHz
+esp32c3_sm_ble_eis.menu.CPUFreq.10.build.f_cpu=10000000L
+
+esp32c3_sm_ble_eis.menu.FlashMode.qio=QIO
+esp32c3_sm_ble_eis.menu.FlashMode.qio.build.flash_mode=dio
+esp32c3_sm_ble_eis.menu.FlashMode.qio.build.boot=qio
+esp32c3_sm_ble_eis.menu.FlashMode.dio=DIO
+esp32c3_sm_ble_eis.menu.FlashMode.dio.build.flash_mode=dio
+esp32c3_sm_ble_eis.menu.FlashMode.dio.build.boot=dio
+esp32c3_sm_ble_eis.menu.FlashMode.qout=QOUT
+esp32c3_sm_ble_eis.menu.FlashMode.qout.build.flash_mode=dout
+esp32c3_sm_ble_eis.menu.FlashMode.qout.build.boot=qout
+esp32c3_sm_ble_eis.menu.FlashMode.dout=DOUT
+esp32c3_sm_ble_eis.menu.FlashMode.dout.build.flash_mode=dout
+esp32c3_sm_ble_eis.menu.FlashMode.dout.build.boot=dout
+
+esp32c3_sm_ble_eis.menu.FlashFreq.80=80MHz
+esp32c3_sm_ble_eis.menu.FlashFreq.80.build.flash_freq=80m
+esp32c3_sm_ble_eis.menu.FlashFreq.40=40MHz
+esp32c3_sm_ble_eis.menu.FlashFreq.40.build.flash_freq=40m
+
+esp32c3_sm_ble_eis.menu.FlashSize.4M=4MB (32Mb)
+esp32c3_sm_ble_eis.menu.FlashSize.4M.build.flash_size=4MB
+esp32c3_sm_ble_eis.menu.FlashSize.8M=8MB (64Mb)
+esp32c3_sm_ble_eis.menu.FlashSize.8M.build.flash_size=8MB
+esp32c3_sm_ble_eis.menu.FlashSize.8M.build.partitions=default_8MB
+esp32c3_sm_ble_eis.menu.FlashSize.2M=2MB (16Mb)
+esp32c3_sm_ble_eis.menu.FlashSize.2M.build.flash_size=2MB
+esp32c3_sm_ble_eis.menu.FlashSize.2M.build.partitions=minimal
+esp32c3_sm_ble_eis.menu.FlashSize.16M=16MB (128Mb)
+esp32c3_sm_ble_eis.menu.FlashSize.16M.build.flash_size=16MB
+
+esp32c3_sm_ble_eis.menu.UploadSpeed.921600=921600
+esp32c3_sm_ble_eis.menu.UploadSpeed.921600.upload.speed=921600
+esp32c3_sm_ble_eis.menu.UploadSpeed.115200=115200
+esp32c3_sm_ble_eis.menu.UploadSpeed.115200.upload.speed=115200
+esp32c3_sm_ble_eis.menu.UploadSpeed.256000.windows=256000
+esp32c3_sm_ble_eis.menu.UploadSpeed.256000.upload.speed=256000
+esp32c3_sm_ble_eis.menu.UploadSpeed.230400.windows.upload.speed=256000
+esp32c3_sm_ble_eis.menu.UploadSpeed.230400=230400
+esp32c3_sm_ble_eis.menu.UploadSpeed.230400.upload.speed=230400
+esp32c3_sm_ble_eis.menu.UploadSpeed.460800.linux=460800
+esp32c3_sm_ble_eis.menu.UploadSpeed.460800.macosx=460800
+esp32c3_sm_ble_eis.menu.UploadSpeed.460800.upload.speed=460800
+esp32c3_sm_ble_eis.menu.UploadSpeed.512000.windows=512000
+esp32c3_sm_ble_eis.menu.UploadSpeed.512000.upload.speed=512000
+
+esp32c3_sm_ble_eis.menu.DebugLevel.none=None
+esp32c3_sm_ble_eis.menu.DebugLevel.none.build.code_debug=0
+esp32c3_sm_ble_eis.menu.DebugLevel.error=Error
+esp32c3_sm_ble_eis.menu.DebugLevel.error.build.code_debug=1
+esp32c3_sm_ble_eis.menu.DebugLevel.warn=Warn
+esp32c3_sm_ble_eis.menu.DebugLevel.warn.build.code_debug=2
+esp32c3_sm_ble_eis.menu.DebugLevel.info=Info
+esp32c3_sm_ble_eis.menu.DebugLevel.info.build.code_debug=3
+esp32c3_sm_ble_eis.menu.DebugLevel.debug=Debug
+esp32c3_sm_ble_eis.menu.DebugLevel.debug.build.code_debug=4
+esp32c3_sm_ble_eis.menu.DebugLevel.verbose=Verbose
+esp32c3_sm_ble_eis.menu.DebugLevel.verbose.build.code_debug=5
+
+esp32c3_sm_ble_eis.menu.EraseFlash.none=Disabled
+esp32c3_sm_ble_eis.menu.EraseFlash.none.upload.erase_cmd=
+esp32c3_sm_ble_eis.menu.EraseFlash.all=Enabled
+esp32c3_sm_ble_eis.menu.EraseFlash.all.upload.erase_cmd=-e
+
+
+##############################################################
+#                ESP32C3 STAMP-C3 EIS
+##############################################################
+eis_stamp_c3.name=FLPrpog: ESP32C3-STAMP-C3
+eis_stamp_c3.vid.0=0x303a
+eis_stamp_c3.pid.0=0x1001
+
+eis_stamp_c3.bootloader.tool=esptool_py
+eis_stamp_c3.bootloader.tool.default=esptool_py
+
+eis_stamp_c3.upload.tool=esptool_py
+eis_stamp_c3.upload.tool.default=esptool_py
+eis_stamp_c3.upload.tool.network=esp_ota
+
+eis_stamp_c3.upload.maximum_size=1310720
+eis_stamp_c3.upload.maximum_data_size=327680
+eis_stamp_c3.upload.flags=
+eis_stamp_c3.upload.extra_flags=
+eis_stamp_c3.upload.use_1200bps_touch=false
+eis_stamp_c3.upload.wait_for_upload_port=false
+
+eis_stamp_c3.serial.disableDTR=false
+eis_stamp_c3.serial.disableRTS=false
+
+eis_stamp_c3.build.tarch=riscv32
+eis_stamp_c3.build.target=esp
+eis_stamp_c3.build.mcu=esp32c3
+eis_stamp_c3.build.core=esp32
+eis_stamp_c3.build.variant=esp32c3
+eis_stamp_c3.build.board=ESP32C3_STAMP_C3_EIS
+eis_stamp_c3.build.bootloader_addr=0x0
+
+eis_stamp_c3.build.cdc_on_boot=0
+eis_stamp_c3.build.f_cpu=160000000L
+eis_stamp_c3.build.flash_size=4MB
+eis_stamp_c3.build.flash_freq=80m
+eis_stamp_c3.build.flash_mode=qio
+eis_stamp_c3.build.boot=qio
+eis_stamp_c3.build.partitions=default
+eis_stamp_c3.build.defines=
+
+eis_stamp_c3.menu.CDCOnBoot.default=Disabled
+eis_stamp_c3.menu.CDCOnBoot.default.build.cdc_on_boot=0
+eis_stamp_c3.menu.CDCOnBoot.cdc=Enabled
+eis_stamp_c3.menu.CDCOnBoot.cdc.build.cdc_on_boot=1
+
+eis_stamp_c3.menu.PartitionScheme.default=Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)
+eis_stamp_c3.menu.PartitionScheme.default.build.partitions=default
+eis_stamp_c3.menu.PartitionScheme.defaultffat=Default 4MB with ffat (1.2MB APP/1.5MB FATFS)
+eis_stamp_c3.menu.PartitionScheme.defaultffat.build.partitions=default_ffat
+eis_stamp_c3.menu.PartitionScheme.default_8MB=8M with spiffs (3MB APP/1.5MB SPIFFS)
+eis_stamp_c3.menu.PartitionScheme.default_8MB.build.partitions=default_8MB
+eis_stamp_c3.menu.PartitionScheme.default_8MB.upload.maximum_size=3342336
+eis_stamp_c3.menu.PartitionScheme.minimal=Minimal (1.3MB APP/700KB SPIFFS)
+eis_stamp_c3.menu.PartitionScheme.minimal.build.partitions=minimal
+eis_stamp_c3.menu.PartitionScheme.no_ota=No OTA (2MB APP/2MB SPIFFS)
+eis_stamp_c3.menu.PartitionScheme.no_ota.build.partitions=no_ota
+eis_stamp_c3.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+eis_stamp_c3.menu.PartitionScheme.noota_3g=No OTA (1MB APP/3MB SPIFFS)
+eis_stamp_c3.menu.PartitionScheme.noota_3g.build.partitions=noota_3g
+eis_stamp_c3.menu.PartitionScheme.noota_3g.upload.maximum_size=1048576
+eis_stamp_c3.menu.PartitionScheme.noota_ffat=No OTA (2MB APP/2MB FATFS)
+eis_stamp_c3.menu.PartitionScheme.noota_ffat.build.partitions=noota_ffat
+eis_stamp_c3.menu.PartitionScheme.noota_ffat.upload.maximum_size=2097152
+eis_stamp_c3.menu.PartitionScheme.noota_3gffat=No OTA (1MB APP/3MB FATFS)
+eis_stamp_c3.menu.PartitionScheme.noota_3gffat.build.partitions=noota_3gffat
+eis_stamp_c3.menu.PartitionScheme.noota_3gffat.upload.maximum_size=1048576
+eis_stamp_c3.menu.PartitionScheme.huge_app=Huge APP (3MB No OTA/1MB SPIFFS)
+eis_stamp_c3.menu.PartitionScheme.huge_app.build.partitions=huge_app
+eis_stamp_c3.menu.PartitionScheme.huge_app.upload.maximum_size=3145728
+eis_stamp_c3.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)
+eis_stamp_c3.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+eis_stamp_c3.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+eis_stamp_c3.menu.PartitionScheme.fatflash=16M Flash (2MB APP/12.5MB FATFS)
+eis_stamp_c3.menu.PartitionScheme.fatflash.build.partitions=ffat
+eis_stamp_c3.menu.PartitionScheme.fatflash.upload.maximum_size=2097152
+eis_stamp_c3.menu.PartitionScheme.app3M_fat9M_16MB=16M Flash (3MB APP/9.9MB FATFS)
+eis_stamp_c3.menu.PartitionScheme.app3M_fat9M_16MB.build.partitions=app3M_fat9M_16MB
+eis_stamp_c3.menu.PartitionScheme.app3M_fat9M_16MB.upload.maximum_size=3145728
+eis_stamp_c3.menu.PartitionScheme.rainmaker=RainMaker
+eis_stamp_c3.menu.PartitionScheme.rainmaker.build.partitions=rainmaker
+eis_stamp_c3.menu.PartitionScheme.rainmaker.upload.maximum_size=3145728
+
+eis_stamp_c3.menu.CPUFreq.160=160MHz (WiFi)
+eis_stamp_c3.menu.CPUFreq.160.build.f_cpu=160000000L
+eis_stamp_c3.menu.CPUFreq.80=80MHz (WiFi)
+eis_stamp_c3.menu.CPUFreq.80.build.f_cpu=80000000L
+eis_stamp_c3.menu.CPUFreq.40=40MHz
+eis_stamp_c3.menu.CPUFreq.40.build.f_cpu=40000000L
+eis_stamp_c3.menu.CPUFreq.20=20MHz
+eis_stamp_c3.menu.CPUFreq.20.build.f_cpu=20000000L
+eis_stamp_c3.menu.CPUFreq.10=10MHz
+eis_stamp_c3.menu.CPUFreq.10.build.f_cpu=10000000L
+
+eis_stamp_c3.menu.FlashMode.qio=QIO
+eis_stamp_c3.menu.FlashMode.qio.build.flash_mode=dio
+eis_stamp_c3.menu.FlashMode.qio.build.boot=qio
+eis_stamp_c3.menu.FlashMode.dio=DIO
+eis_stamp_c3.menu.FlashMode.dio.build.flash_mode=dio
+eis_stamp_c3.menu.FlashMode.dio.build.boot=dio
+eis_stamp_c3.menu.FlashMode.qout=QOUT
+eis_stamp_c3.menu.FlashMode.qout.build.flash_mode=dout
+eis_stamp_c3.menu.FlashMode.qout.build.boot=qout
+eis_stamp_c3.menu.FlashMode.dout=DOUT
+eis_stamp_c3.menu.FlashMode.dout.build.flash_mode=dout
+eis_stamp_c3.menu.FlashMode.dout.build.boot=dout
+
+eis_stamp_c3.menu.FlashFreq.80=80MHz
+eis_stamp_c3.menu.FlashFreq.80.build.flash_freq=80m
+eis_stamp_c3.menu.FlashFreq.40=40MHz
+eis_stamp_c3.menu.FlashFreq.40.build.flash_freq=40m
+
+eis_stamp_c3.menu.FlashSize.4M=4MB (32Mb)
+eis_stamp_c3.menu.FlashSize.4M.build.flash_size=4MB
+eis_stamp_c3.menu.FlashSize.8M=8MB (64Mb)
+eis_stamp_c3.menu.FlashSize.8M.build.flash_size=8MB
+eis_stamp_c3.menu.FlashSize.8M.build.partitions=default_8MB
+eis_stamp_c3.menu.FlashSize.2M=2MB (16Mb)
+eis_stamp_c3.menu.FlashSize.2M.build.flash_size=2MB
+eis_stamp_c3.menu.FlashSize.2M.build.partitions=minimal
+eis_stamp_c3.menu.FlashSize.16M=16MB (128Mb)
+eis_stamp_c3.menu.FlashSize.16M.build.flash_size=16MB
+
+eis_stamp_c3.menu.UploadSpeed.921600=921600
+eis_stamp_c3.menu.UploadSpeed.921600.upload.speed=921600
+eis_stamp_c3.menu.UploadSpeed.115200=115200
+eis_stamp_c3.menu.UploadSpeed.115200.upload.speed=115200
+eis_stamp_c3.menu.UploadSpeed.256000.windows=256000
+eis_stamp_c3.menu.UploadSpeed.256000.upload.speed=256000
+eis_stamp_c3.menu.UploadSpeed.230400.windows.upload.speed=256000
+eis_stamp_c3.menu.UploadSpeed.230400=230400
+eis_stamp_c3.menu.UploadSpeed.230400.upload.speed=230400
+eis_stamp_c3.menu.UploadSpeed.460800.linux=460800
+eis_stamp_c3.menu.UploadSpeed.460800.macosx=460800
+eis_stamp_c3.menu.UploadSpeed.460800.upload.speed=460800
+eis_stamp_c3.menu.UploadSpeed.512000.windows=512000
+eis_stamp_c3.menu.UploadSpeed.512000.upload.speed=512000
+
+eis_stamp_c3.menu.DebugLevel.none=None
+eis_stamp_c3.menu.DebugLevel.none.build.code_debug=0
+eis_stamp_c3.menu.DebugLevel.error=Error
+eis_stamp_c3.menu.DebugLevel.error.build.code_debug=1
+eis_stamp_c3.menu.DebugLevel.warn=Warn
+eis_stamp_c3.menu.DebugLevel.warn.build.code_debug=2
+eis_stamp_c3.menu.DebugLevel.info=Info
+eis_stamp_c3.menu.DebugLevel.info.build.code_debug=3
+eis_stamp_c3.menu.DebugLevel.debug=Debug
+eis_stamp_c3.menu.DebugLevel.debug.build.code_debug=4
+eis_stamp_c3.menu.DebugLevel.verbose=Verbose
+eis_stamp_c3.menu.DebugLevel.verbose.build.code_debug=5
+
+eis_stamp_c3.menu.EraseFlash.none=Disabled
+eis_stamp_c3.menu.EraseFlash.none.upload.erase_cmd=
+eis_stamp_c3.menu.EraseFlash.all=Enabled
+eis_stamp_c3.menu.EraseFlash.all.upload.erase_cmd=-e
+
+##############################################################
+#                 ESP32C3 STAMP-C3U EIS
+##############################################################
+eis_stamp_c3u.name=FLPrpog: ESP32C3-STAMP-C3U
+eis_stamp_c3u.vid.0=0x303a
+eis_stamp_c3u.pid.0=0x1001
+
+eis_stamp_c3u.bootloader.tool=esptool_py
+eis_stamp_c3u.bootloader.tool.default=esptool_py
+
+eis_stamp_c3u.upload.tool=esptool_py
+eis_stamp_c3u.upload.tool.default=esptool_py
+eis_stamp_c3u.upload.tool.network=esp_ota
+
+eis_stamp_c3u.upload.maximum_size=1310720
+eis_stamp_c3u.upload.maximum_data_size=327680
+eis_stamp_c3u.upload.flags=
+eis_stamp_c3u.upload.extra_flags=
+eis_stamp_c3u.upload.use_1200bps_touch=false
+eis_stamp_c3u.upload.wait_for_upload_port=false
+
+eis_stamp_c3u.serial.disableDTR=false
+eis_stamp_c3u.serial.disableRTS=false
+
+eis_stamp_c3u.build.tarch=riscv32
+eis_stamp_c3u.build.target=esp
+eis_stamp_c3u.build.mcu=esp32c3
+eis_stamp_c3u.build.core=esp32
+eis_stamp_c3u.build.variant=esp32c3
+eis_stamp_c3u.build.board=ESP32C3_STAMP_C3U_EIS
+eis_stamp_c3u.build.bootloader_addr=0x0
+
+eis_stamp_c3u.build.cdc_on_boot=0
+eis_stamp_c3u.build.f_cpu=160000000L
+eis_stamp_c3u.build.flash_size=4MB
+eis_stamp_c3u.build.flash_freq=80m
+eis_stamp_c3u.build.flash_mode=qio
+eis_stamp_c3u.build.boot=qio
+eis_stamp_c3u.build.partitions=default
+eis_stamp_c3u.build.defines=
+
+eis_stamp_c3u.menu.CDCOnBoot.default=Disabled
+eis_stamp_c3u.menu.CDCOnBoot.default.build.cdc_on_boot=0
+eis_stamp_c3u.menu.CDCOnBoot.cdc=Enabled
+eis_stamp_c3u.menu.CDCOnBoot.cdc.build.cdc_on_boot=1
+
+eis_stamp_c3u.menu.PartitionScheme.default=Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)
+eis_stamp_c3u.menu.PartitionScheme.default.build.partitions=default
+eis_stamp_c3u.menu.PartitionScheme.defaultffat=Default 4MB with ffat (1.2MB APP/1.5MB FATFS)
+eis_stamp_c3u.menu.PartitionScheme.defaultffat.build.partitions=default_ffat
+eis_stamp_c3u.menu.PartitionScheme.default_8MB=8M with spiffs (3MB APP/1.5MB SPIFFS)
+eis_stamp_c3u.menu.PartitionScheme.default_8MB.build.partitions=default_8MB
+eis_stamp_c3u.menu.PartitionScheme.default_8MB.upload.maximum_size=3342336
+eis_stamp_c3u.menu.PartitionScheme.minimal=Minimal (1.3MB APP/700KB SPIFFS)
+eis_stamp_c3u.menu.PartitionScheme.minimal.build.partitions=minimal
+eis_stamp_c3u.menu.PartitionScheme.no_ota=No OTA (2MB APP/2MB SPIFFS)
+eis_stamp_c3u.menu.PartitionScheme.no_ota.build.partitions=no_ota
+eis_stamp_c3u.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+eis_stamp_c3u.menu.PartitionScheme.noota_3g=No OTA (1MB APP/3MB SPIFFS)
+eis_stamp_c3u.menu.PartitionScheme.noota_3g.build.partitions=noota_3g
+eis_stamp_c3u.menu.PartitionScheme.noota_3g.upload.maximum_size=1048576
+eis_stamp_c3u.menu.PartitionScheme.noota_ffat=No OTA (2MB APP/2MB FATFS)
+eis_stamp_c3u.menu.PartitionScheme.noota_ffat.build.partitions=noota_ffat
+eis_stamp_c3u.menu.PartitionScheme.noota_ffat.upload.maximum_size=2097152
+eis_stamp_c3u.menu.PartitionScheme.noota_3gffat=No OTA (1MB APP/3MB FATFS)
+eis_stamp_c3u.menu.PartitionScheme.noota_3gffat.build.partitions=noota_3gffat
+eis_stamp_c3u.menu.PartitionScheme.noota_3gffat.upload.maximum_size=1048576
+eis_stamp_c3u.menu.PartitionScheme.huge_app=Huge APP (3MB No OTA/1MB SPIFFS)
+eis_stamp_c3u.menu.PartitionScheme.huge_app.build.partitions=huge_app
+eis_stamp_c3u.menu.PartitionScheme.huge_app.upload.maximum_size=3145728
+eis_stamp_c3u.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)
+eis_stamp_c3u.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+eis_stamp_c3u.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+eis_stamp_c3u.menu.PartitionScheme.fatflash=16M Flash (2MB APP/12.5MB FATFS)
+eis_stamp_c3u.menu.PartitionScheme.fatflash.build.partitions=ffat
+eis_stamp_c3u.menu.PartitionScheme.fatflash.upload.maximum_size=2097152
+eis_stamp_c3u.menu.PartitionScheme.app3M_fat9M_16MB=16M Flash (3MB APP/9.9MB FATFS)
+eis_stamp_c3u.menu.PartitionScheme.app3M_fat9M_16MB.build.partitions=app3M_fat9M_16MB
+eis_stamp_c3u.menu.PartitionScheme.app3M_fat9M_16MB.upload.maximum_size=3145728
+eis_stamp_c3u.menu.PartitionScheme.rainmaker=RainMaker
+eis_stamp_c3u.menu.PartitionScheme.rainmaker.build.partitions=rainmaker
+eis_stamp_c3u.menu.PartitionScheme.rainmaker.upload.maximum_size=3145728
+
+eis_stamp_c3u.menu.CPUFreq.160=160MHz (WiFi)
+eis_stamp_c3u.menu.CPUFreq.160.build.f_cpu=160000000L
+eis_stamp_c3u.menu.CPUFreq.80=80MHz (WiFi)
+eis_stamp_c3u.menu.CPUFreq.80.build.f_cpu=80000000L
+eis_stamp_c3u.menu.CPUFreq.40=40MHz
+eis_stamp_c3u.menu.CPUFreq.40.build.f_cpu=40000000L
+eis_stamp_c3u.menu.CPUFreq.20=20MHz
+eis_stamp_c3u.menu.CPUFreq.20.build.f_cpu=20000000L
+eis_stamp_c3u.menu.CPUFreq.10=10MHz
+eis_stamp_c3u.menu.CPUFreq.10.build.f_cpu=10000000L
+
+eis_stamp_c3u.menu.FlashMode.qio=QIO
+eis_stamp_c3u.menu.FlashMode.qio.build.flash_mode=dio
+eis_stamp_c3u.menu.FlashMode.qio.build.boot=qio
+eis_stamp_c3u.menu.FlashMode.dio=DIO
+eis_stamp_c3u.menu.FlashMode.dio.build.flash_mode=dio
+eis_stamp_c3u.menu.FlashMode.dio.build.boot=dio
+eis_stamp_c3u.menu.FlashMode.qout=QOUT
+eis_stamp_c3u.menu.FlashMode.qout.build.flash_mode=dout
+eis_stamp_c3u.menu.FlashMode.qout.build.boot=qout
+eis_stamp_c3u.menu.FlashMode.dout=DOUT
+eis_stamp_c3u.menu.FlashMode.dout.build.flash_mode=dout
+eis_stamp_c3u.menu.FlashMode.dout.build.boot=dout
+
+eis_stamp_c3u.menu.FlashFreq.80=80MHz
+eis_stamp_c3u.menu.FlashFreq.80.build.flash_freq=80m
+eis_stamp_c3u.menu.FlashFreq.40=40MHz
+eis_stamp_c3u.menu.FlashFreq.40.build.flash_freq=40m
+
+eis_stamp_c3u.menu.FlashSize.4M=4MB (32Mb)
+eis_stamp_c3u.menu.FlashSize.4M.build.flash_size=4MB
+eis_stamp_c3u.menu.FlashSize.8M=8MB (64Mb)
+eis_stamp_c3u.menu.FlashSize.8M.build.flash_size=8MB
+eis_stamp_c3u.menu.FlashSize.8M.build.partitions=default_8MB
+eis_stamp_c3u.menu.FlashSize.2M=2MB (16Mb)
+eis_stamp_c3u.menu.FlashSize.2M.build.flash_size=2MB
+eis_stamp_c3u.menu.FlashSize.2M.build.partitions=minimal
+eis_stamp_c3u.menu.FlashSize.16M=16MB (128Mb)
+eis_stamp_c3u.menu.FlashSize.16M.build.flash_size=16MB
+
+eis_stamp_c3u.menu.UploadSpeed.921600=921600
+eis_stamp_c3u.menu.UploadSpeed.921600.upload.speed=921600
+eis_stamp_c3u.menu.UploadSpeed.115200=115200
+eis_stamp_c3u.menu.UploadSpeed.115200.upload.speed=115200
+eis_stamp_c3u.menu.UploadSpeed.256000.windows=256000
+eis_stamp_c3u.menu.UploadSpeed.256000.upload.speed=256000
+eis_stamp_c3u.menu.UploadSpeed.230400.windows.upload.speed=256000
+eis_stamp_c3u.menu.UploadSpeed.230400=230400
+eis_stamp_c3u.menu.UploadSpeed.230400.upload.speed=230400
+eis_stamp_c3u.menu.UploadSpeed.460800.linux=460800
+eis_stamp_c3u.menu.UploadSpeed.460800.macosx=460800
+eis_stamp_c3u.menu.UploadSpeed.460800.upload.speed=460800
+eis_stamp_c3u.menu.UploadSpeed.512000.windows=512000
+eis_stamp_c3u.menu.UploadSpeed.512000.upload.speed=512000
+
+eis_stamp_c3u.menu.DebugLevel.none=None
+eis_stamp_c3u.menu.DebugLevel.none.build.code_debug=0
+eis_stamp_c3u.menu.DebugLevel.error=Error
+eis_stamp_c3u.menu.DebugLevel.error.build.code_debug=1
+eis_stamp_c3u.menu.DebugLevel.warn=Warn
+eis_stamp_c3u.menu.DebugLevel.warn.build.code_debug=2
+eis_stamp_c3u.menu.DebugLevel.info=Info
+eis_stamp_c3u.menu.DebugLevel.info.build.code_debug=3
+eis_stamp_c3u.menu.DebugLevel.debug=Debug
+eis_stamp_c3u.menu.DebugLevel.debug.build.code_debug=4
+eis_stamp_c3u.menu.DebugLevel.verbose=Verbose
+eis_stamp_c3u.menu.DebugLevel.verbose.build.code_debug=5
+
+eis_stamp_c3u.menu.EraseFlash.none=Disabled
+eis_stamp_c3u.menu.EraseFlash.none.upload.erase_cmd=
+eis_stamp_c3u.menu.EraseFlash.all=Enabled
+eis_stamp_c3u.menu.EraseFlash.all.upload.erase_cmd=-e
+
+##############################################################
+#           	ESP32C3 TTGO T-OI PLUS EIS
+##############################################################
+ttgo-t-oi-eis.name=FLPrpog: ESP32C3-TTGO-T-OI-PLUS
+
+ttgo-t-oi-eis.bootloader.tool=esptool_py
+ttgo-t-oi-eis.bootloader.tool.default=esptool_py
+
+ttgo-t-oi-eis.upload.tool=esptool_py
+ttgo-t-oi-eis.upload.tool.default=esptool_py
+ttgo-t-oi-eis.upload.tool.network=esp_ota
+
+ttgo-t-oi-eis.upload.maximum_size=1310720
+ttgo-t-oi-eis.upload.maximum_data_size=327680
+ttgo-t-oi-eis.upload.flags=
+ttgo-t-oi-eis.upload.extra_flags=
+
+ttgo-t-oi-eis.serial.disableDTR=false
+ttgo-t-oi-eis.serial.disableRTS=false
+
+ttgo-t-oi-eis.build.tarch=riscv32
+ttgo-t-oi-eis.build.target=esp
+ttgo-t-oi-eis.build.mcu=esp32c3
+ttgo-t-oi-eis.build.core=esp32
+ttgo-t-oi-eis.build.variant=esp32c3
+ttgo-t-oi-eis.build.board=ESP32C3_TTGO_T_OI_PLUS_EIS
+ttgo-t-oi-eis.build.bootloader_addr=0x0
+
+ttgo-t-oi-eis.build.cdc_on_boot=0
+ttgo-t-oi-eis.build.f_cpu=160000000L
+ttgo-t-oi-eis.build.flash_size=4MB
+ttgo-t-oi-eis.build.flash_freq=80m
+ttgo-t-oi-eis.build.flash_mode=qio
+ttgo-t-oi-eis.build.boot=qio
+ttgo-t-oi-eis.build.partitions=default
+ttgo-t-oi-eis.build.defines=
+
+ttgo-t-oi-eis.menu.PartitionScheme.default=Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)
+ttgo-t-oi-eis.menu.PartitionScheme.default.build.partitions=default
+ttgo-t-oi-eis.menu.PartitionScheme.defaultffat=Default 4MB with ffat (1.2MB APP/1.5MB FATFS)
+ttgo-t-oi-eis.menu.PartitionScheme.defaultffat.build.partitions=default_ffat
+ttgo-t-oi-eis.menu.PartitionScheme.minimal=Minimal (1.3MB APP/700KB SPIFFS)
+ttgo-t-oi-eis.menu.PartitionScheme.minimal.build.partitions=minimal
+ttgo-t-oi-eis.menu.PartitionScheme.no_ota=No OTA (2MB APP/2MB SPIFFS)
+ttgo-t-oi-eis.menu.PartitionScheme.no_ota.build.partitions=no_ota
+ttgo-t-oi-eis.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+ttgo-t-oi-eis.menu.PartitionScheme.noota_3g=No OTA (1MB APP/3MB SPIFFS)
+ttgo-t-oi-eis.menu.PartitionScheme.noota_3g.build.partitions=noota_3g
+ttgo-t-oi-eis.menu.PartitionScheme.noota_3g.upload.maximum_size=1048576
+ttgo-t-oi-eis.menu.PartitionScheme.noota_ffat=No OTA (2MB APP/2MB FATFS)
+ttgo-t-oi-eis.menu.PartitionScheme.noota_ffat.build.partitions=noota_ffat
+ttgo-t-oi-eis.menu.PartitionScheme.noota_ffat.upload.maximum_size=2097152
+ttgo-t-oi-eis.menu.PartitionScheme.noota_3gffat=No OTA (1MB APP/3MB FATFS)
+ttgo-t-oi-eis.menu.PartitionScheme.noota_3gffat.build.partitions=noota_3gffat
+ttgo-t-oi-eis.menu.PartitionScheme.noota_3gffat.upload.maximum_size=1048576
+ttgo-t-oi-eis.menu.PartitionScheme.huge_app=Huge APP (3MB No OTA/1MB SPIFFS)
+ttgo-t-oi-eis.menu.PartitionScheme.huge_app.build.partitions=huge_app
+ttgo-t-oi-eis.menu.PartitionScheme.huge_app.upload.maximum_size=3145728
+ttgo-t-oi-eis.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)
+ttgo-t-oi-eis.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+ttgo-t-oi-eis.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+
+ttgo-t-oi-eis.menu.CPUFreq.160=160MHz (WiFi)
+ttgo-t-oi-eis.menu.CPUFreq.160.build.f_cpu=160000000L
+ttgo-t-oi-eis.menu.CPUFreq.80=80MHz (WiFi)
+ttgo-t-oi-eis.menu.CPUFreq.80.build.f_cpu=80000000L
+ttgo-t-oi-eis.menu.CPUFreq.40=40MHz
+ttgo-t-oi-eis.menu.CPUFreq.40.build.f_cpu=40000000L
+ttgo-t-oi-eis.menu.CPUFreq.20=20MHz
+ttgo-t-oi-eis.menu.CPUFreq.20.build.f_cpu=20000000L
+ttgo-t-oi-eis.menu.CPUFreq.10=10MHz
+ttgo-t-oi-eis.menu.CPUFreq.10.build.f_cpu=10000000L
+
+ttgo-t-oi-eis.menu.FlashMode.qio=QIO
+ttgo-t-oi-eis.menu.FlashMode.qio.build.flash_mode=dio
+ttgo-t-oi-eis.menu.FlashMode.qio.build.boot=qio
+ttgo-t-oi-eis.menu.FlashMode.dio=DIO
+ttgo-t-oi-eis.menu.FlashMode.dio.build.flash_mode=dio
+ttgo-t-oi-eis.menu.FlashMode.dio.build.boot=dio
+ttgo-t-oi-eis.menu.FlashMode.qout=QOUT
+ttgo-t-oi-eis.menu.FlashMode.qout.build.flash_mode=dout
+ttgo-t-oi-eis.menu.FlashMode.qout.build.boot=qout
+ttgo-t-oi-eis.menu.FlashMode.dout=DOUT
+ttgo-t-oi-eis.menu.FlashMode.dout.build.flash_mode=dout
+ttgo-t-oi-eis.menu.FlashMode.dout.build.boot=dout
+
+ttgo-t-oi-eis.menu.FlashFreq.80=80MHz
+ttgo-t-oi-eis.menu.FlashFreq.80.build.flash_freq=80m
+ttgo-t-oi-eis.menu.FlashFreq.40=40MHz
+ttgo-t-oi-eis.menu.FlashFreq.40.build.flash_freq=40m
+
+ttgo-t-oi-eis.menu.FlashSize.4M=4MB (32Mb)
+ttgo-t-oi-eis.menu.FlashSize.4M.build.flash_size=4MB
+
+ttgo-t-oi-eis.menu.UploadSpeed.921600=921600
+ttgo-t-oi-eis.menu.UploadSpeed.921600.upload.speed=921600
+ttgo-t-oi-eis.menu.UploadSpeed.115200=115200
+ttgo-t-oi-eis.menu.UploadSpeed.115200.upload.speed=115200
+ttgo-t-oi-eis.menu.UploadSpeed.256000.windows=256000
+ttgo-t-oi-eis.menu.UploadSpeed.256000.upload.speed=256000
+ttgo-t-oi-eis.menu.UploadSpeed.230400.windows.upload.speed=256000
+ttgo-t-oi-eis.menu.UploadSpeed.230400=230400
+ttgo-t-oi-eis.menu.UploadSpeed.230400.upload.speed=230400
+ttgo-t-oi-eis.menu.UploadSpeed.460800.linux=460800
+ttgo-t-oi-eis.menu.UploadSpeed.460800.macosx=460800
+ttgo-t-oi-eis.menu.UploadSpeed.460800.upload.speed=460800
+ttgo-t-oi-eis.menu.UploadSpeed.512000.windows=512000
+ttgo-t-oi-eis.menu.UploadSpeed.512000.upload.speed=512000
+
+ttgo-t-oi-eis.menu.DebugLevel.none=None
+ttgo-t-oi-eis.menu.DebugLevel.none.build.code_debug=0
+ttgo-t-oi-eis.menu.DebugLevel.error=Error
+ttgo-t-oi-eis.menu.DebugLevel.error.build.code_debug=1
+ttgo-t-oi-eis.menu.DebugLevel.warn=Warn
+ttgo-t-oi-eis.menu.DebugLevel.warn.build.code_debug=2
+ttgo-t-oi-eis.menu.DebugLevel.info=Info
+ttgo-t-oi-eis.menu.DebugLevel.info.build.code_debug=3
+ttgo-t-oi-eis.menu.DebugLevel.debug=Debug
+ttgo-t-oi-eis.menu.DebugLevel.debug.build.code_debug=4
+ttgo-t-oi-eis.menu.DebugLevel.verbose=Verbose
+ttgo-t-oi-eis.menu.DebugLevel.verbose.build.code_debug=5
+
+ttgo-t-oi-eis.menu.EraseFlash.none=Disabled
+ttgo-t-oi-eis.menu.EraseFlash.none.upload.erase_cmd=
+ttgo-t-oi-eis.menu.EraseFlash.all=Enabled
+ttgo-t-oi-eis.menu.EraseFlash.all.upload.erase_cmd=-e
+
+##############################################################
+#						ESP32C3 LuatOS USB EIS
+##############################################################
+luatos-usb-eis.name=FLPrpog: ESP32C3-LuatOS-USB
+luatos-usb-eis.vid.0=0x303a
+luatos-usb-eis.pid.0=0x1001
+
+luatos-usb-eis.bootloader.tool=esptool_py
+luatos-usb-eis.bootloader.tool.default=esptool_py
+
+luatos-usb-eis.upload.tool=esptool_py
+luatos-usb-eis.upload.tool.default=esptool_py
+luatos-usb-eis.upload.tool.network=esp_ota
+
+luatos-usb-eis.upload.maximum_size=1310720
+luatos-usb-eis.upload.maximum_data_size=327680
+luatos-usb-eis.upload.flags=
+luatos-usb-eis.upload.extra_flags=
+luatos-usb-eis.upload.use_1200bps_touch=false
+luatos-usb-eis.upload.wait_for_upload_port=false
+
+luatos-usb-eis.serial.disableDTR=false
+luatos-usb-eis.serial.disableRTS=false
+
+luatos-usb-eis.build.tarch=riscv32
+luatos-usb-eis.build.target=esp
+luatos-usb-eis.build.mcu=esp32c3
+luatos-usb-eis.build.core=esp32
+luatos-usb-eis.build.variant=esp32c3
+luatos-usb-eis.build.board=ESP32C3_LUATOS_USB_EIS
+luatos-usb-eis.build.bootloader_addr=0x0
+
+luatos-usb-eis.build.cdc_on_boot=0
+luatos-usb-eis.build.f_cpu=160000000L
+luatos-usb-eis.build.flash_size=4MB
+luatos-usb-eis.build.flash_freq=80m
+luatos-usb-eis.build.flash_mode=qio
+luatos-usb-eis.build.boot=qio
+luatos-usb-eis.build.partitions=default
+luatos-usb-eis.build.defines=
+
+luatos-usb-eis.menu.CDCOnBoot.cdc=Enabled
+luatos-usb-eis.menu.CDCOnBoot.cdc.build.cdc_on_boot=1
+luatos-usb-eis.menu.CDCOnBoot.default=Disabled
+luatos-usb-eis.menu.CDCOnBoot.default.build.cdc_on_boot=0
+
+luatos-usb-eis.menu.PartitionScheme.default=Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)
+luatos-usb-eis.menu.PartitionScheme.default.build.partitions=default
+luatos-usb-eis.menu.PartitionScheme.defaultffat=Default 4MB with ffat (1.2MB APP/1.5MB FATFS)
+luatos-usb-eis.menu.PartitionScheme.defaultffat.build.partitions=default_ffat
+luatos-usb-eis.menu.PartitionScheme.default_8MB=8M with spiffs (3MB APP/1.5MB SPIFFS)
+luatos-usb-eis.menu.PartitionScheme.default_8MB.build.partitions=default_8MB
+luatos-usb-eis.menu.PartitionScheme.default_8MB.upload.maximum_size=3342336
+luatos-usb-eis.menu.PartitionScheme.minimal=Minimal (1.3MB APP/700KB SPIFFS)
+luatos-usb-eis.menu.PartitionScheme.minimal.build.partitions=minimal
+luatos-usb-eis.menu.PartitionScheme.no_ota=No OTA (2MB APP/2MB SPIFFS)
+luatos-usb-eis.menu.PartitionScheme.no_ota.build.partitions=no_ota
+luatos-usb-eis.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+luatos-usb-eis.menu.PartitionScheme.noota_3g=No OTA (1MB APP/3MB SPIFFS)
+luatos-usb-eis.menu.PartitionScheme.noota_3g.build.partitions=noota_3g
+luatos-usb-eis.menu.PartitionScheme.noota_3g.upload.maximum_size=1048576
+luatos-usb-eis.menu.PartitionScheme.noota_ffat=No OTA (2MB APP/2MB FATFS)
+luatos-usb-eis.menu.PartitionScheme.noota_ffat.build.partitions=noota_ffat
+luatos-usb-eis.menu.PartitionScheme.noota_ffat.upload.maximum_size=2097152
+luatos-usb-eis.menu.PartitionScheme.noota_3gffat=No OTA (1MB APP/3MB FATFS)
+luatos-usb-eis.menu.PartitionScheme.noota_3gffat.build.partitions=noota_3gffat
+luatos-usb-eis.menu.PartitionScheme.noota_3gffat.upload.maximum_size=1048576
+luatos-usb-eis.menu.PartitionScheme.huge_app=Huge APP (3MB No OTA/1MB SPIFFS)
+luatos-usb-eis.menu.PartitionScheme.huge_app.build.partitions=huge_app
+luatos-usb-eis.menu.PartitionScheme.huge_app.upload.maximum_size=3145728
+luatos-usb-eis.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)
+luatos-usb-eis.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+luatos-usb-eis.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+luatos-usb-eis.menu.PartitionScheme.fatflash=16M Flash (2MB APP/12.5MB FATFS)
+luatos-usb-eis.menu.PartitionScheme.fatflash.build.partitions=ffat
+luatos-usb-eis.menu.PartitionScheme.fatflash.upload.maximum_size=2097152
+luatos-usb-eis.menu.PartitionScheme.app3M_fat9M_16MB=16M Flash (3MB APP/9.9MB FATFS)
+luatos-usb-eis.menu.PartitionScheme.app3M_fat9M_16MB.build.partitions=app3M_fat9M_16MB
+luatos-usb-eis.menu.PartitionScheme.app3M_fat9M_16MB.upload.maximum_size=3145728
+luatos-usb-eis.menu.PartitionScheme.rainmaker=RainMaker
+luatos-usb-eis.menu.PartitionScheme.rainmaker.build.partitions=rainmaker
+luatos-usb-eis.menu.PartitionScheme.rainmaker.upload.maximum_size=3145728
+
+luatos-usb-eis.menu.CPUFreq.160=160MHz (WiFi)
+luatos-usb-eis.menu.CPUFreq.160.build.f_cpu=160000000L
+luatos-usb-eis.menu.CPUFreq.80=80MHz (WiFi)
+luatos-usb-eis.menu.CPUFreq.80.build.f_cpu=80000000L
+luatos-usb-eis.menu.CPUFreq.40=40MHz
+luatos-usb-eis.menu.CPUFreq.40.build.f_cpu=40000000L
+luatos-usb-eis.menu.CPUFreq.20=20MHz
+luatos-usb-eis.menu.CPUFreq.20.build.f_cpu=20000000L
+luatos-usb-eis.menu.CPUFreq.10=10MHz
+luatos-usb-eis.menu.CPUFreq.10.build.f_cpu=10000000L
+
+#luatos-usb-eis.menu.FlashMode.qio=QIO
+#luatos-usb-eis.menu.FlashMode.qio.build.flash_mode=dio
+#luatos-usb-eis.menu.FlashMode.qio.build.boot=qio
+luatos-usb-eis.menu.FlashMode.dio=DIO
+luatos-usb-eis.menu.FlashMode.dio.build.flash_mode=dio
+luatos-usb-eis.menu.FlashMode.dio.build.boot=dio
+#luatos-usb-eis.menu.FlashMode.qout=QOUT
+#luatos-usb-eis.menu.FlashMode.qout.build.flash_mode=dout
+#luatos-usb-eis.menu.FlashMode.qout.build.boot=qout
+#luatos-usb-eis.menu.FlashMode.dout=DOUT
+#luatos-usb-eis.menu.FlashMode.dout.build.flash_mode=dout
+#luatos-usb-eis.menu.FlashMode.dout.build.boot=dout
+
+luatos-usb-eis.menu.FlashFreq.80=80MHz
+luatos-usb-eis.menu.FlashFreq.80.build.flash_freq=80m
+luatos-usb-eis.menu.FlashFreq.40=40MHz
+luatos-usb-eis.menu.FlashFreq.40.build.flash_freq=40m
+
+luatos-usb-eis.menu.FlashSize.4M=4MB (32Mb)
+luatos-usb-eis.menu.FlashSize.4M.build.flash_size=4MB
+luatos-usb-eis.menu.FlashSize.8M=8MB (64Mb)
+luatos-usb-eis.menu.FlashSize.8M.build.flash_size=8MB
+luatos-usb-eis.menu.FlashSize.8M.build.partitions=default_8MB
+luatos-usb-eis.menu.FlashSize.2M=2MB (16Mb)
+luatos-usb-eis.menu.FlashSize.2M.build.flash_size=2MB
+luatos-usb-eis.menu.FlashSize.2M.build.partitions=minimal
+luatos-usb-eis.menu.FlashSize.16M=16MB (128Mb)
+luatos-usb-eis.menu.FlashSize.16M.build.flash_size=16MB
+
+luatos-usb-eis.menu.UploadSpeed.921600=921600
+luatos-usb-eis.menu.UploadSpeed.921600.upload.speed=921600
+luatos-usb-eis.menu.UploadSpeed.115200=115200
+luatos-usb-eis.menu.UploadSpeed.115200.upload.speed=115200
+luatos-usb-eis.menu.UploadSpeed.256000.windows=256000
+luatos-usb-eis.menu.UploadSpeed.256000.upload.speed=256000
+luatos-usb-eis.menu.UploadSpeed.230400.windows.upload.speed=256000
+luatos-usb-eis.menu.UploadSpeed.230400=230400
+luatos-usb-eis.menu.UploadSpeed.230400.upload.speed=230400
+luatos-usb-eis.menu.UploadSpeed.460800.linux=460800
+luatos-usb-eis.menu.UploadSpeed.460800.macosx=460800
+luatos-usb-eis.menu.UploadSpeed.460800.upload.speed=460800
+luatos-usb-eis.menu.UploadSpeed.512000.windows=512000
+luatos-usb-eis.menu.UploadSpeed.512000.upload.speed=512000
+
+luatos-usb-eis.menu.DebugLevel.none=None
+luatos-usb-eis.menu.DebugLevel.none.build.code_debug=0
+luatos-usb-eis.menu.DebugLevel.error=Error
+luatos-usb-eis.menu.DebugLevel.error.build.code_debug=1
+luatos-usb-eis.menu.DebugLevel.warn=Warn
+luatos-usb-eis.menu.DebugLevel.warn.build.code_debug=2
+luatos-usb-eis.menu.DebugLevel.info=Info
+luatos-usb-eis.menu.DebugLevel.info.build.code_debug=3
+luatos-usb-eis.menu.DebugLevel.debug=Debug
+luatos-usb-eis.menu.DebugLevel.debug.build.code_debug=4
+luatos-usb-eis.menu.DebugLevel.verbose=Verbose
+luatos-usb-eis.menu.DebugLevel.verbose.build.code_debug=5
+
+luatos-usb-eis.menu.EraseFlash.none=Disabled
+luatos-usb-eis.menu.EraseFlash.none.upload.erase_cmd=
+luatos-usb-eis.menu.EraseFlash.all=Enabled
+luatos-usb-eis.menu.EraseFlash.all.upload.erase_cmd=-e
+
+##############################################################
+#						ESP32C3LuatOS Classic EIS
+##############################################################
+luatos-classic-eis.name=FLPrpog: ESP32C3-LuatOS-Classic
+luatos-classic-eis.vid.0=0x303a
+luatos-classic-eis.pid.0=0x1001
+
+luatos-classic-eis.bootloader.tool=esptool_py
+luatos-classic-eis.bootloader.tool.default=esptool_py
+
+luatos-classic-eis.upload.tool=esptool_py
+luatos-classic-eis.upload.tool.default=esptool_py
+luatos-classic-eis.upload.tool.network=esp_ota
+
+luatos-classic-eis.upload.maximum_size=1310720
+luatos-classic-eis.upload.maximum_data_size=327680
+luatos-classic-eis.upload.flags=
+luatos-classic-eis.upload.extra_flags=
+luatos-classic-eis.upload.use_1200bps_touch=false
+luatos-classic-eis.upload.wait_for_upload_port=false
+
+luatos-classic-eis.serial.disableDTR=false
+luatos-classic-eis.serial.disableRTS=false
+
+luatos-classic-eis.build.tarch=riscv32
+luatos-classic-eis.build.target=esp
+luatos-classic-eis.build.mcu=esp32c3
+luatos-classic-eis.build.core=esp32
+luatos-classic-eis.build.variant=esp32c3
+luatos-classic-eis.build.board=ESP32C3_LUATOS_CLASSIC_EIS
+luatos-classic-eis.build.bootloader_addr=0x0
+
+luatos-classic-eis.build.cdc_on_boot=0
+luatos-classic-eis.build.f_cpu=160000000L
+luatos-classic-eis.build.flash_size=4MB
+luatos-classic-eis.build.flash_freq=80m
+luatos-classic-eis.build.flash_mode=qio
+luatos-classic-eis.build.boot=qio
+luatos-classic-eis.build.partitions=default
+luatos-classic-eis.build.defines=
+
+luatos-classic-eis.menu.CDCOnBoot.default=Disabled
+luatos-classic-eis.menu.CDCOnBoot.default.build.cdc_on_boot=0
+luatos-classic-eis.menu.CDCOnBoot.cdc=Enabled
+luatos-classic-eis.menu.CDCOnBoot.cdc.build.cdc_on_boot=1
+
+luatos-classic-eis.menu.PartitionScheme.default=Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)
+luatos-classic-eis.menu.PartitionScheme.default.build.partitions=default
+luatos-classic-eis.menu.PartitionScheme.defaultffat=Default 4MB with ffat (1.2MB APP/1.5MB FATFS)
+luatos-classic-eis.menu.PartitionScheme.defaultffat.build.partitions=default_ffat
+luatos-classic-eis.menu.PartitionScheme.default_8MB=8M with spiffs (3MB APP/1.5MB SPIFFS)
+luatos-classic-eis.menu.PartitionScheme.default_8MB.build.partitions=default_8MB
+luatos-classic-eis.menu.PartitionScheme.default_8MB.upload.maximum_size=3342336
+luatos-classic-eis.menu.PartitionScheme.minimal=Minimal (1.3MB APP/700KB SPIFFS)
+luatos-classic-eis.menu.PartitionScheme.minimal.build.partitions=minimal
+luatos-classic-eis.menu.PartitionScheme.no_ota=No OTA (2MB APP/2MB SPIFFS)
+luatos-classic-eis.menu.PartitionScheme.no_ota.build.partitions=no_ota
+luatos-classic-eis.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+luatos-classic-eis.menu.PartitionScheme.noota_3g=No OTA (1MB APP/3MB SPIFFS)
+luatos-classic-eis.menu.PartitionScheme.noota_3g.build.partitions=noota_3g
+luatos-classic-eis.menu.PartitionScheme.noota_3g.upload.maximum_size=1048576
+luatos-classic-eis.menu.PartitionScheme.noota_ffat=No OTA (2MB APP/2MB FATFS)
+luatos-classic-eis.menu.PartitionScheme.noota_ffat.build.partitions=noota_ffat
+luatos-classic-eis.menu.PartitionScheme.noota_ffat.upload.maximum_size=2097152
+luatos-classic-eis.menu.PartitionScheme.noota_3gffat=No OTA (1MB APP/3MB FATFS)
+luatos-classic-eis.menu.PartitionScheme.noota_3gffat.build.partitions=noota_3gffat
+luatos-classic-eis.menu.PartitionScheme.noota_3gffat.upload.maximum_size=1048576
+luatos-classic-eis.menu.PartitionScheme.huge_app=Huge APP (3MB No OTA/1MB SPIFFS)
+luatos-classic-eis.menu.PartitionScheme.huge_app.build.partitions=huge_app
+luatos-classic-eis.menu.PartitionScheme.huge_app.upload.maximum_size=3145728
+luatos-classic-eis.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)
+luatos-classic-eis.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+luatos-classic-eis.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+luatos-classic-eis.menu.PartitionScheme.fatflash=16M Flash (2MB APP/12.5MB FATFS)
+luatos-classic-eis.menu.PartitionScheme.fatflash.build.partitions=ffat
+luatos-classic-eis.menu.PartitionScheme.fatflash.upload.maximum_size=2097152
+luatos-classic-eis.menu.PartitionScheme.app3M_fat9M_16MB=16M Flash (3MB APP/9.9MB FATFS)
+luatos-classic-eis.menu.PartitionScheme.app3M_fat9M_16MB.build.partitions=app3M_fat9M_16MB
+luatos-classic-eis.menu.PartitionScheme.app3M_fat9M_16MB.upload.maximum_size=3145728
+luatos-classic-eis.menu.PartitionScheme.rainmaker=RainMaker
+luatos-classic-eis.menu.PartitionScheme.rainmaker.build.partitions=rainmaker
+luatos-classic-eis.menu.PartitionScheme.rainmaker.upload.maximum_size=3145728
+
+luatos-classic-eis.menu.CPUFreq.160=160MHz (WiFi)
+luatos-classic-eis.menu.CPUFreq.160.build.f_cpu=160000000L
+luatos-classic-eis.menu.CPUFreq.80=80MHz (WiFi)
+luatos-classic-eis.menu.CPUFreq.80.build.f_cpu=80000000L
+luatos-classic-eis.menu.CPUFreq.40=40MHz
+luatos-classic-eis.menu.CPUFreq.40.build.f_cpu=40000000L
+luatos-classic-eis.menu.CPUFreq.20=20MHz
+luatos-classic-eis.menu.CPUFreq.20.build.f_cpu=20000000L
+luatos-classic-eis.menu.CPUFreq.10=10MHz
+luatos-classic-eis.menu.CPUFreq.10.build.f_cpu=10000000L
+
+#luatos-classic-eis.menu.FlashMode.qio=QIO
+#luatos-classic-eis.menu.FlashMode.qio.build.flash_mode=dio
+#luatos-classic-eis.menu.FlashMode.qio.build.boot=qio
+luatos-classic-eis.menu.FlashMode.dio=DIO
+luatos-classic-eis.menu.FlashMode.dio.build.flash_mode=dio
+luatos-classic-eis.menu.FlashMode.dio.build.boot=dio
+#luatos-classic-eis.menu.FlashMode.qout=QOUT
+#luatos-classic-eis.menu.FlashMode.qout.build.flash_mode=dout
+#luatos-classic-eis.menu.FlashMode.qout.build.boot=qout
+#luatos-classic-eis.menu.FlashMode.dout=DOUT
+#luatos-classic-eis.menu.FlashMode.dout.build.flash_mode=dout
+#luatos-classic-eis.menu.FlashMode.dout.build.boot=dout
+
+luatos-classic-eis.menu.FlashFreq.80=80MHz
+luatos-classic-eis.menu.FlashFreq.80.build.flash_freq=80m
+luatos-classic-eis.menu.FlashFreq.40=40MHz
+luatos-classic-eis.menu.FlashFreq.40.build.flash_freq=40m
+
+luatos-classic-eis.menu.FlashSize.4M=4MB (32Mb)
+luatos-classic-eis.menu.FlashSize.4M.build.flash_size=4MB
+luatos-classic-eis.menu.FlashSize.8M=8MB (64Mb)
+luatos-classic-eis.menu.FlashSize.8M.build.flash_size=8MB
+luatos-classic-eis.menu.FlashSize.8M.build.partitions=default_8MB
+luatos-classic-eis.menu.FlashSize.2M=2MB (16Mb)
+luatos-classic-eis.menu.FlashSize.2M.build.flash_size=2MB
+luatos-classic-eis.menu.FlashSize.2M.build.partitions=minimal
+luatos-classic-eis.menu.FlashSize.16M=16MB (128Mb)
+luatos-classic-eis.menu.FlashSize.16M.build.flash_size=16MB
+
+luatos-classic-eis.menu.UploadSpeed.921600=921600
+luatos-classic-eis.menu.UploadSpeed.921600.upload.speed=921600
+luatos-classic-eis.menu.UploadSpeed.115200=115200
+luatos-classic-eis.menu.UploadSpeed.115200.upload.speed=115200
+luatos-classic-eis.menu.UploadSpeed.256000.windows=256000
+luatos-classic-eis.menu.UploadSpeed.256000.upload.speed=256000
+luatos-classic-eis.menu.UploadSpeed.230400.windows.upload.speed=256000
+luatos-classic-eis.menu.UploadSpeed.230400=230400
+luatos-classic-eis.menu.UploadSpeed.230400.upload.speed=230400
+luatos-classic-eis.menu.UploadSpeed.460800.linux=460800
+luatos-classic-eis.menu.UploadSpeed.460800.macosx=460800
+luatos-classic-eis.menu.UploadSpeed.460800.upload.speed=460800
+luatos-classic-eis.menu.UploadSpeed.512000.windows=512000
+luatos-classic-eis.menu.UploadSpeed.512000.upload.speed=512000
+
+luatos-classic-eis.menu.DebugLevel.none=None
+luatos-classic-eis.menu.DebugLevel.none.build.code_debug=0
+luatos-classic-eis.menu.DebugLevel.error=Error
+luatos-classic-eis.menu.DebugLevel.error.build.code_debug=1
+luatos-classic-eis.menu.DebugLevel.warn=Warn
+luatos-classic-eis.menu.DebugLevel.warn.build.code_debug=2
+luatos-classic-eis.menu.DebugLevel.info=Info
+luatos-classic-eis.menu.DebugLevel.info.build.code_debug=3
+luatos-classic-eis.menu.DebugLevel.debug=Debug
+luatos-classic-eis.menu.DebugLevel.debug.build.code_debug=4
+luatos-classic-eis.menu.DebugLevel.verbose=Verbose
+luatos-classic-eis.menu.DebugLevel.verbose.build.code_debug=5
+
+luatos-classic-eis.menu.EraseFlash.none=Disabled
+luatos-classic-eis.menu.EraseFlash.none.upload.erase_cmd=
+luatos-classic-eis.menu.EraseFlash.all=Enabled
+luatos-classic-eis.menu.EraseFlash.all.upload.erase_cmd=-e
+
+##############################################################
+#						M5Stack-Core-ESP32 EIS
+##############################################################
+m5stack-core-esp32_eis.name=FLPrpog: ESP32S-M5Stack-Core
+
+m5stack-core-esp32_eis.bootloader.tool=esptool_py
+m5stack-core-esp32_eis.bootloader.tool.default=esptool_py
+
+m5stack-core-esp32_eis.upload.tool=esptool_py
+m5stack-core-esp32_eis.upload.tool.default=esptool_py
+m5stack-core-esp32_eis.upload.tool.network=esp_ota
+
+m5stack-core-esp32_eis.upload.maximum_size=1310720
+m5stack-core-esp32_eis.upload.maximum_data_size=327680
+m5stack-core-esp32_eis.upload.flags=
+m5stack-core-esp32_eis.upload.extra_flags=
+
+m5stack-core-esp32_eis.serial.disableDTR=true
+m5stack-core-esp32_eis.serial.disableRTS=true
+
+m5stack-core-esp32_eis.build.tarch=xtensa
+m5stack-core-esp32_eis.build.bootloader_addr=0x1000
+m5stack-core-esp32_eis.build.target=esp32
+m5stack-core-esp32_eis.build.mcu=esp32
+m5stack-core-esp32_eis.build.core=esp32
+m5stack-core-esp32_eis.build.variant=m5stack_core_esp32
+m5stack-core-esp32_eis.build.board=M5Stack_Core_ESP32_EIS
+
+m5stack-core-esp32_eis.build.f_cpu=240000000L
+m5stack-core-esp32_eis.build.flash_size=4MB
+m5stack-core-esp32_eis.build.flash_mode=dio
+m5stack-core-esp32_eis.build.boot=dio
+m5stack-core-esp32_eis.build.partitions=default
+m5stack-core-esp32_eis.build.defines=
+
+m5stack-core-esp32_eis.menu.FlashMode.qio=QIO
+m5stack-core-esp32_eis.menu.FlashMode.qio.build.flash_mode=dio
+m5stack-core-esp32_eis.menu.FlashMode.qio.build.boot=qio
+m5stack-core-esp32_eis.menu.FlashMode.dio=DIO
+m5stack-core-esp32_eis.menu.FlashMode.dio.build.flash_mode=dio
+m5stack-core-esp32_eis.menu.FlashMode.dio.build.boot=dio
+m5stack-core-esp32_eis.menu.FlashMode.qout=QOUT
+m5stack-core-esp32_eis.menu.FlashMode.qout.build.flash_mode=dout
+m5stack-core-esp32_eis.menu.FlashMode.qout.build.boot=qout
+m5stack-core-esp32_eis.menu.FlashMode.dout=DOUT
+m5stack-core-esp32_eis.menu.FlashMode.dout.build.flash_mode=dout
+m5stack-core-esp32_eis.menu.FlashMode.dout.build.boot=dout
+
+m5stack-core-esp32_eis.menu.FlashFreq.80=80MHz
+m5stack-core-esp32_eis.menu.FlashFreq.80.build.flash_freq=80m
+m5stack-core-esp32_eis.menu.FlashFreq.40=40MHz
+m5stack-core-esp32_eis.menu.FlashFreq.40.build.flash_freq=40m
+
+m5stack-core-esp32_eis.menu.PartitionScheme.default=Default
+m5stack-core-esp32_eis.menu.PartitionScheme.default.build.partitions=default
+m5stack-core-esp32_eis.menu.PartitionScheme.no_ota=No OTA (Large APP)
+m5stack-core-esp32_eis.menu.PartitionScheme.no_ota.build.partitions=no_ota
+m5stack-core-esp32_eis.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+m5stack-core-esp32_eis.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (Large APPS with OTA)
+m5stack-core-esp32_eis.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+m5stack-core-esp32_eis.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+
+m5stack-core-esp32_eis.menu.UploadSpeed.921600=921600
+m5stack-core-esp32_eis.menu.UploadSpeed.921600.upload.speed=921600
+m5stack-core-esp32_eis.menu.UploadSpeed.115200=115200
+m5stack-core-esp32_eis.menu.UploadSpeed.115200.upload.speed=115200
+m5stack-core-esp32_eis.menu.UploadSpeed.256000.windows=256000
+m5stack-core-esp32_eis.menu.UploadSpeed.256000.upload.speed=256000
+m5stack-core-esp32_eis.menu.UploadSpeed.230400.windows.upload.speed=256000
+m5stack-core-esp32_eis.menu.UploadSpeed.230400=230400
+m5stack-core-esp32_eis.menu.UploadSpeed.230400.upload.speed=230400
+m5stack-core-esp32_eis.menu.UploadSpeed.460800.linux=460800
+m5stack-core-esp32_eis.menu.UploadSpeed.460800.macosx=460800
+m5stack-core-esp32_eis.menu.UploadSpeed.460800.upload.speed=460800
+m5stack-core-esp32_eis.menu.UploadSpeed.512000.windows=512000
+m5stack-core-esp32_eis.menu.UploadSpeed.512000.upload.speed=512000
+
+m5stack-core-esp32_eis.menu.DebugLevel.none=None
+m5stack-core-esp32_eis.menu.DebugLevel.none.build.code_debug=0
+m5stack-core-esp32_eis.menu.DebugLevel.error=Error
+m5stack-core-esp32_eis.menu.DebugLevel.error.build.code_debug=1
+m5stack-core-esp32_eis.menu.DebugLevel.warn=Warn
+m5stack-core-esp32_eis.menu.DebugLevel.warn.build.code_debug=2
+m5stack-core-esp32_eis.menu.DebugLevel.info=Info
+m5stack-core-esp32_eis.menu.DebugLevel.info.build.code_debug=3
+m5stack-core-esp32_eis.menu.DebugLevel.debug=Debug
+m5stack-core-esp32_eis.menu.DebugLevel.debug.build.code_debug=4
+m5stack-core-esp32_eis.menu.DebugLevel.verbose=Verbose
+m5stack-core-esp32_eis.menu.DebugLevel.verbose.build.code_debug=5
+
+m5stack-core-esp32_eis.menu.EraseFlash.none=Disabled
+m5stack-core-esp32_eis.menu.EraseFlash.none.upload.erase_cmd=
+m5stack-core-esp32_eis.menu.EraseFlash.all=Enabled
+m5stack-core-esp32_eis.menu.EraseFlash.all.upload.erase_cmd=-e
+
+##############################################################
+#						M5Stack-Core-ESP32 EIS-BTH
+##############################################################
+m5stack-core-esp32_eis_bth.name=FLPrpog: ESP32S-M5Stack-Core-BTH
+
+m5stack-core-esp32_eis_bth.bootloader.tool=esptool_py
+m5stack-core-esp32_eis_bth.bootloader.tool.default=esptool_py
+
+m5stack-core-esp32_eis_bth.upload.tool=esptool_py
+m5stack-core-esp32_eis_bth.upload.tool.default=esptool_py
+m5stack-core-esp32_eis_bth.upload.tool.network=esp_ota
+
+m5stack-core-esp32_eis_bth.upload.maximum_size=1310720
+m5stack-core-esp32_eis_bth.upload.maximum_data_size=327680
+m5stack-core-esp32_eis_bth.upload.flags=
+m5stack-core-esp32_eis_bth.upload.extra_flags=
+
+m5stack-core-esp32_eis_bth.serial.disableDTR=true
+m5stack-core-esp32_eis_bth.serial.disableRTS=true
+
+m5stack-core-esp32_eis_bth.build.tarch=xtensa
+m5stack-core-esp32_eis_bth.build.bootloader_addr=0x1000
+m5stack-core-esp32_eis_bth.build.target=esp32
+m5stack-core-esp32_eis_bth.build.mcu=esp32
+m5stack-core-esp32_eis_bth.build.core=esp32
+m5stack-core-esp32_eis_bth.build.variant=m5stack_core_esp32
+m5stack-core-esp32_eis_bth.build.board=M5Stack_Core_ESP32_EIS_BTH
+
+m5stack-core-esp32_eis_bth.build.f_cpu=240000000L
+m5stack-core-esp32_eis_bth.build.flash_size=4MB
+m5stack-core-esp32_eis_bth.build.flash_mode=dio
+m5stack-core-esp32_eis_bth.build.boot=dio
+m5stack-core-esp32_eis_bth.build.partitions=default
+m5stack-core-esp32_eis_bth.build.defines=
+
+m5stack-core-esp32_eis_bth.menu.FlashMode.qio=QIO
+m5stack-core-esp32_eis_bth.menu.FlashMode.qio.build.flash_mode=dio
+m5stack-core-esp32_eis_bth.menu.FlashMode.qio.build.boot=qio
+m5stack-core-esp32_eis_bth.menu.FlashMode.dio=DIO
+m5stack-core-esp32_eis_bth.menu.FlashMode.dio.build.flash_mode=dio
+m5stack-core-esp32_eis_bth.menu.FlashMode.dio.build.boot=dio
+m5stack-core-esp32_eis_bth.menu.FlashMode.qout=QOUT
+m5stack-core-esp32_eis_bth.menu.FlashMode.qout.build.flash_mode=dout
+m5stack-core-esp32_eis_bth.menu.FlashMode.qout.build.boot=qout
+m5stack-core-esp32_eis_bth.menu.FlashMode.dout=DOUT
+m5stack-core-esp32_eis_bth.menu.FlashMode.dout.build.flash_mode=dout
+m5stack-core-esp32_eis_bth.menu.FlashMode.dout.build.boot=dout
+
+m5stack-core-esp32_eis_bth.menu.FlashFreq.80=80MHz
+m5stack-core-esp32_eis_bth.menu.FlashFreq.80.build.flash_freq=80m
+m5stack-core-esp32_eis_bth.menu.FlashFreq.40=40MHz
+m5stack-core-esp32_eis_bth.menu.FlashFreq.40.build.flash_freq=40m
+
+m5stack-core-esp32_eis_bth.menu.PartitionScheme.default=Default
+m5stack-core-esp32_eis_bth.menu.PartitionScheme.default.build.partitions=default
+m5stack-core-esp32_eis_bth.menu.PartitionScheme.no_ota=No OTA (Large APP)
+m5stack-core-esp32_eis_bth.menu.PartitionScheme.no_ota.build.partitions=no_ota
+m5stack-core-esp32_eis_bth.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+m5stack-core-esp32_eis_bth.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (Large APPS with OTA)
+m5stack-core-esp32_eis_bth.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+m5stack-core-esp32_eis_bth.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+
+m5stack-core-esp32_eis_bth.menu.UploadSpeed.921600=921600
+m5stack-core-esp32_eis_bth.menu.UploadSpeed.921600.upload.speed=921600
+m5stack-core-esp32_eis_bth.menu.UploadSpeed.115200=115200
+m5stack-core-esp32_eis_bth.menu.UploadSpeed.115200.upload.speed=115200
+m5stack-core-esp32_eis_bth.menu.UploadSpeed.256000.windows=256000
+m5stack-core-esp32_eis_bth.menu.UploadSpeed.256000.upload.speed=256000
+m5stack-core-esp32_eis_bth.menu.UploadSpeed.230400.windows.upload.speed=256000
+m5stack-core-esp32_eis_bth.menu.UploadSpeed.230400=230400
+m5stack-core-esp32_eis_bth.menu.UploadSpeed.230400.upload.speed=230400
+m5stack-core-esp32_eis_bth.menu.UploadSpeed.460800.linux=460800
+m5stack-core-esp32_eis_bth.menu.UploadSpeed.460800.macosx=460800
+m5stack-core-esp32_eis_bth.menu.UploadSpeed.460800.upload.speed=460800
+m5stack-core-esp32_eis_bth.menu.UploadSpeed.512000.windows=512000
+m5stack-core-esp32_eis_bth.menu.UploadSpeed.512000.upload.speed=512000
+
+m5stack-core-esp32_eis_bth.menu.DebugLevel.none=None
+m5stack-core-esp32_eis_bth.menu.DebugLevel.none.build.code_debug=0
+m5stack-core-esp32_eis_bth.menu.DebugLevel.error=Error
+m5stack-core-esp32_eis_bth.menu.DebugLevel.error.build.code_debug=1
+m5stack-core-esp32_eis_bth.menu.DebugLevel.warn=Warn
+m5stack-core-esp32_eis_bth.menu.DebugLevel.warn.build.code_debug=2
+m5stack-core-esp32_eis_bth.menu.DebugLevel.info=Info
+m5stack-core-esp32_eis_bth.menu.DebugLevel.info.build.code_debug=3
+m5stack-core-esp32_eis_bth.menu.DebugLevel.debug=Debug
+m5stack-core-esp32_eis_bth.menu.DebugLevel.debug.build.code_debug=4
+m5stack-core-esp32_eis_bth.menu.DebugLevel.verbose=Verbose
+m5stack-core-esp32_eis_bth.menu.DebugLevel.verbose.build.code_debug=5
+
+m5stack-core-esp32_eis_bth.menu.EraseFlash.none=Disabled
+m5stack-core-esp32_eis_bth.menu.EraseFlash.none.upload.erase_cmd=
+m5stack-core-esp32_eis_bth.menu.EraseFlash.all=Enabled
+m5stack-core-esp32_eis_bth.menu.EraseFlash.all.upload.erase_cmd=-e
+
+
+##############################################################
+#						M5Stack-ATOM EIS
+##############################################################
+m5stack-atom_eis.name=FLPrpog: ESP32S-M5Stack-ATOM
+
+m5stack-atom_eis.bootloader.tool=esptool_py
+m5stack-atom_eis.bootloader.tool.default=esptool_py
+
+m5stack-atom_eis.upload.tool=esptool_py
+m5stack-atom_eis.upload.tool.default=esptool_py
+m5stack-atom_eis.upload.tool.network=esp_ota
+
+m5stack-atom_eis.upload.maximum_size=1310720
+m5stack-atom_eis.upload.maximum_data_size=327680
+m5stack-atom_eis.upload.flags=
+m5stack-atom_eis.upload.extra_flags=
+
+m5stack-atom_eis.serial.disableDTR=true
+m5stack-atom_eis.serial.disableRTS=true
+
+m5stack-atom_eis.build.tarch=xtensa
+m5stack-atom_eis.build.bootloader_addr=0x1000
+m5stack-atom_eis.build.target=esp32
+m5stack-atom_eis.build.mcu=esp32
+m5stack-atom_eis.build.core=esp32
+m5stack-atom_eis.build.variant=m5stack_atom
+m5stack-atom_eis.build.board=M5Stack_ATOM_EIS
+
+m5stack-atom_eis.build.f_cpu=240000000L
+m5stack-atom_eis.build.flash_size=4MB
+m5stack-atom_eis.build.flash_freq=80m
+m5stack-atom_eis.build.flash_mode=dio
+m5stack-atom_eis.build.boot=dio
+m5stack-atom_eis.build.partitions=default
+m5stack-atom_eis.build.defines=
+
+m5stack-atom_eis.menu.LoopCore.1=Core 1
+m5stack-atom_eis.menu.LoopCore.1.build.loop_core=-DARDUINO_RUNNING_CORE=1
+m5stack-atom_eis.menu.LoopCore.0=Core 0
+m5stack-atom_eis.menu.LoopCore.0.build.loop_core=-DARDUINO_RUNNING_CORE=0
+
+m5stack-atom_eis.menu.EventsCore.1=Core 1
+m5stack-atom_eis.menu.EventsCore.1.build.event_core=-DARDUINO_EVENT_RUNNING_CORE=1
+m5stack-atom_eis.menu.EventsCore.0=Core 0
+m5stack-atom_eis.menu.EventsCore.0.build.event_core=-DARDUINO_EVENT_RUNNING_CORE=0
+
+m5stack-atom_eis.menu.PartitionScheme.default=Default
+m5stack-atom_eis.menu.PartitionScheme.default.build.partitions=default
+m5stack-atom_eis.menu.PartitionScheme.no_ota=No OTA (Large APP)
+m5stack-atom_eis.menu.PartitionScheme.no_ota.build.partitions=no_ota
+m5stack-atom_eis.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+m5stack-atom_eis.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (Large APPS with OTA)
+m5stack-atom_eis.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+m5stack-atom_eis.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+
+m5stack-atom_eis.menu.UploadSpeed.1500000=1500000
+m5stack-atom_eis.menu.UploadSpeed.1500000.upload.speed=1500000
+m5stack-atom_eis.menu.UploadSpeed.750000=750000
+m5stack-atom_eis.menu.UploadSpeed.750000.upload.speed=750000
+m5stack-atom_eis.menu.UploadSpeed.500000=500000
+m5stack-atom_eis.menu.UploadSpeed.500000.upload.speed=500000
+m5stack-atom_eis.menu.UploadSpeed.250000=250000
+m5stack-atom_eis.menu.UploadSpeed.250000.upload.speed=250000
+m5stack-atom_eis.menu.UploadSpeed.115200=115200
+m5stack-atom_eis.menu.UploadSpeed.115200.upload.speed=115200
+
+m5stack-atom_eis.menu.DebugLevel.none=None
+m5stack-atom_eis.menu.DebugLevel.none.build.code_debug=0
+m5stack-atom_eis.menu.DebugLevel.error=Error
+m5stack-atom_eis.menu.DebugLevel.error.build.code_debug=1
+m5stack-atom_eis.menu.DebugLevel.warn=Warn
+m5stack-atom_eis.menu.DebugLevel.warn.build.code_debug=2
+m5stack-atom_eis.menu.DebugLevel.info=Info
+m5stack-atom_eis.menu.DebugLevel.info.build.code_debug=3
+m5stack-atom_eis.menu.DebugLevel.debug=Debug
+m5stack-atom_eis.menu.DebugLevel.debug.build.code_debug=4
+m5stack-atom_eis.menu.DebugLevel.verbose=Verbose
+m5stack-atom_eis.menu.DebugLevel.verbose.build.code_debug=5
+
+m5stack-atom_eis.menu.EraseFlash.none=Disabled
+m5stack-atom_eis.menu.EraseFlash.none.upload.erase_cmd=
+m5stack-atom_eis.menu.EraseFlash.all=Enabled
+m5stack-atom_eis.menu.EraseFlash.all.upload.erase_cmd=-e
+
+##############################################################
+#						M5Stack-ATOM-BLE EIS
+##############################################################
+
+m5stack-atom_eis_bth.name=FLPrpog: ESP32S-M5Stack-ATOM-BTH
+
+m5stack-atom_eis_bth.bootloader.tool=esptool_py
+m5stack-atom_eis_bth.bootloader.tool.default=esptool_py
+
+m5stack-atom_eis_bth.upload.tool=esptool_py
+m5stack-atom_eis_bth.upload.tool.default=esptool_py
+m5stack-atom_eis_bth.upload.tool.network=esp_ota
+
+m5stack-atom_eis_bth.upload.maximum_size=1310720
+m5stack-atom_eis_bth.upload.maximum_data_size=327680
+m5stack-atom_eis_bth.upload.flags=
+m5stack-atom_eis_bth.upload.extra_flags=
+
+m5stack-atom_eis_bth.serial.disableDTR=true
+m5stack-atom_eis_bth.serial.disableRTS=true
+
+m5stack-atom_eis_bth.build.tarch=xtensa
+m5stack-atom_eis_bth.build.bootloader_addr=0x1000
+m5stack-atom_eis_bth.build.target=esp32
+m5stack-atom_eis_bth.build.mcu=esp32
+m5stack-atom_eis_bth.build.core=esp32
+m5stack-atom_eis_bth.build.variant=m5stack_atom
+m5stack-atom_eis_bth.build.board=M5Stack_ATOM_EIS_BTH
+
+m5stack-atom_eis_bth.build.f_cpu=240000000L
+m5stack-atom_eis_bth.build.flash_size=4MB
+m5stack-atom_eis_bth.build.flash_freq=80m
+m5stack-atom_eis_bth.build.flash_mode=dio
+m5stack-atom_eis_bth.build.boot=dio
+m5stack-atom_eis_bth.build.partitions=default
+m5stack-atom_eis_bth.build.defines=
+
+m5stack-atom_eis_bth.menu.LoopCore.1=Core 1
+m5stack-atom_eis_bth.menu.LoopCore.1.build.loop_core=-DARDUINO_RUNNING_CORE=1
+m5stack-atom_eis_bth.menu.LoopCore.0=Core 0
+m5stack-atom_eis_bth.menu.LoopCore.0.build.loop_core=-DARDUINO_RUNNING_CORE=0
+
+m5stack-atom_eis_bth.menu.EventsCore.1=Core 1
+m5stack-atom_eis_bth.menu.EventsCore.1.build.event_core=-DARDUINO_EVENT_RUNNING_CORE=1
+m5stack-atom_eis_bth.menu.EventsCore.0=Core 0
+m5stack-atom_eis_bth.menu.EventsCore.0.build.event_core=-DARDUINO_EVENT_RUNNING_CORE=0
+
+m5stack-atom_eis_bth.menu.PartitionScheme.default=Default
+m5stack-atom_eis_bth.menu.PartitionScheme.default.build.partitions=default
+m5stack-atom_eis_bth.menu.PartitionScheme.no_ota=No OTA (Large APP)
+m5stack-atom_eis_bth.menu.PartitionScheme.no_ota.build.partitions=no_ota
+m5stack-atom_eis_bth.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+m5stack-atom_eis_bth.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (Large APPS with OTA)
+m5stack-atom_eis_bth.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+m5stack-atom_eis_bth.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+
+m5stack-atom_eis_bth.menu.UploadSpeed.1500000=1500000
+m5stack-atom_eis_bth.menu.UploadSpeed.1500000.upload.speed=1500000
+m5stack-atom_eis_bth.menu.UploadSpeed.750000=750000
+m5stack-atom_eis_bth.menu.UploadSpeed.750000.upload.speed=750000
+m5stack-atom_eis_bth.menu.UploadSpeed.500000=500000
+m5stack-atom_eis_bth.menu.UploadSpeed.500000.upload.speed=500000
+m5stack-atom_eis_bth.menu.UploadSpeed.250000=250000
+m5stack-atom_eis_bth.menu.UploadSpeed.250000.upload.speed=250000
+m5stack-atom_eis_bth.menu.UploadSpeed.115200=115200
+m5stack-atom_eis_bth.menu.UploadSpeed.115200.upload.speed=115200
+
+m5stack-atom_eis_bth.menu.DebugLevel.none=None
+m5stack-atom_eis_bth.menu.DebugLevel.none.build.code_debug=0
+m5stack-atom_eis_bth.menu.DebugLevel.error=Error
+m5stack-atom_eis_bth.menu.DebugLevel.error.build.code_debug=1
+m5stack-atom_eis_bth.menu.DebugLevel.warn=Warn
+m5stack-atom_eis_bth.menu.DebugLevel.warn.build.code_debug=2
+m5stack-atom_eis_bth.menu.DebugLevel.info=Info
+m5stack-atom_eis_bth.menu.DebugLevel.info.build.code_debug=3
+m5stack-atom_eis_bth.menu.DebugLevel.debug=Debug
+m5stack-atom_eis_bth.menu.DebugLevel.debug.build.code_debug=4
+m5stack-atom_eis_bth.menu.DebugLevel.verbose=Verbose
+m5stack-atom_eis_bth.menu.DebugLevel.verbose.build.code_debug=5
+
+m5stack-atom_eis_bth.menu.EraseFlash.none=Disabled
+m5stack-atom_eis_bth.menu.EraseFlash.none.upload.erase_cmd=
+m5stack-atom_eis_bth.menu.EraseFlash.all=Enabled
+m5stack-atom_eis_bth.menu.EraseFlash.all.upload.erase_cmd=-e
+
+
+
+##############################################################
+#						STAMP PICO EIS
+##############################################################
+esp32_pico_eis.name=FLPrpog: ESP32S-STAMP-PICO
+
+esp32_pico_eis.bootloader.tool=esptool_py
+esp32_pico_eis.bootloader.tool.default=esptool_py
+
+esp32_pico_eis.upload.tool=esptool_py
+esp32_pico_eis.upload.tool.default=esptool_py
+esp32_pico_eis.upload.tool.network=esp_ota
+
+esp32_pico_eis.upload.maximum_size=1310720
+esp32_pico_eis.upload.maximum_data_size=327680
+esp32_pico_eis.upload.flags=
+esp32_pico_eis.upload.extra_flags=
+
+esp32_pico_eis.serial.disableDTR=true
+esp32_pico_eis.serial.disableRTS=true
+
+esp32_pico_eis.build.tarch=xtensa
+esp32_pico_eis.build.bootloader_addr=0x1000
+esp32_pico_eis.build.target=esp32
+esp32_pico_eis.build.mcu=esp32
+esp32_pico_eis.build.core=esp32
+esp32_pico_eis.build.variant=m5stack_atom
+esp32_pico_eis.build.board=ESP32S_STAMP_PICO_EIS
+
+esp32_pico_eis.build.f_cpu=240000000L
+esp32_pico_eis.build.flash_size=4MB
+esp32_pico_eis.build.flash_freq=80m
+esp32_pico_eis.build.flash_mode=dio
+esp32_pico_eis.build.boot=dio
+esp32_pico_eis.build.partitions=default
+esp32_pico_eis.build.defines=
+
+esp32_pico_eis.menu.LoopCore.1=Core 1
+esp32_pico_eis.menu.LoopCore.1.build.loop_core=-DARDUINO_RUNNING_CORE=1
+esp32_pico_eis.menu.LoopCore.0=Core 0
+esp32_pico_eis.menu.LoopCore.0.build.loop_core=-DARDUINO_RUNNING_CORE=0
+
+esp32_pico_eis.menu.EventsCore.1=Core 1
+esp32_pico_eis.menu.EventsCore.1.build.event_core=-DARDUINO_EVENT_RUNNING_CORE=1
+esp32_pico_eis.menu.EventsCore.0=Core 0
+esp32_pico_eis.menu.EventsCore.0.build.event_core=-DARDUINO_EVENT_RUNNING_CORE=0
+
+esp32_pico_eis.menu.PartitionScheme.default=Default
+esp32_pico_eis.menu.PartitionScheme.default.build.partitions=default
+esp32_pico_eis.menu.PartitionScheme.no_ota=No OTA (Large APP)
+esp32_pico_eis.menu.PartitionScheme.no_ota.build.partitions=no_ota
+esp32_pico_eis.menu.PartitionScheme.no_ota.upload.maximum_size=2097152
+esp32_pico_eis.menu.PartitionScheme.min_spiffs=Minimal SPIFFS (Large APPS with OTA)
+esp32_pico_eis.menu.PartitionScheme.min_spiffs.build.partitions=min_spiffs
+esp32_pico_eis.menu.PartitionScheme.min_spiffs.upload.maximum_size=1966080
+
+esp32_pico_eis.menu.UploadSpeed.1500000=1500000
+esp32_pico_eis.menu.UploadSpeed.1500000.upload.speed=1500000
+esp32_pico_eis.menu.UploadSpeed.750000=750000
+esp32_pico_eis.menu.UploadSpeed.750000.upload.speed=750000
+esp32_pico_eis.menu.UploadSpeed.500000=500000
+esp32_pico_eis.menu.UploadSpeed.500000.upload.speed=500000
+esp32_pico_eis.menu.UploadSpeed.250000=250000
+esp32_pico_eis.menu.UploadSpeed.250000.upload.speed=250000
+esp32_pico_eis.menu.UploadSpeed.115200=115200
+esp32_pico_eis.menu.UploadSpeed.115200.upload.speed=115200
+
+esp32_pico_eis.menu.DebugLevel.none=None
+esp32_pico_eis.menu.DebugLevel.none.build.code_debug=0
+esp32_pico_eis.menu.DebugLevel.error=Error
+esp32_pico_eis.menu.DebugLevel.error.build.code_debug=1
+esp32_pico_eis.menu.DebugLevel.warn=Warn
+esp32_pico_eis.menu.DebugLevel.warn.build.code_debug=2
+esp32_pico_eis.menu.DebugLevel.info=Info
+esp32_pico_eis.menu.DebugLevel.info.build.code_debug=3
+esp32_pico_eis.menu.DebugLevel.debug=Debug
+esp32_pico_eis.menu.DebugLevel.debug.build.code_debug=4
+esp32_pico_eis.menu.DebugLevel.verbose=Verbose
+esp32_pico_eis.menu.DebugLevel.verbose.build.code_debug=5
+
+esp32_pico_eis.menu.EraseFlash.none=Disabled
+esp32_pico_eis.menu.EraseFlash.none.upload.erase_cmd=
+esp32_pico_eis.menu.EraseFlash.all=Enabled
+esp32_pico_eis.menu.EraseFlash.all.upload.erase_cmd=-e
+
+##############################################################
+
+###FLPROG_END
+
