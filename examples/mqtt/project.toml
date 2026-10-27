@@ -1,0 +1,6 @@
+[project]
+name = "mqtt"
+description = "Температура и кнопка уходят в MQTT, светодиод включается сообщением из брокера"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

@@ -1,0 +1,75 @@
+[block]
+type = "mqtt"
+name = "MQTT клиент"
+symbol = "MQTT"
+group = "Сеть"
+description = "Подключение к MQTT-брокеру через Wi-Fi или Ethernet; блоки «MQTT публикация» и «MQTT подписка» работают через него."
+single = true
+includes = ["flprogNetwork.h"]
+
+[[output]]
+name = "connected"
+type = "bool"
+description = "true, пока есть соединение с брокером"
+
+[[output]]
+name = "error"
+type = "int"
+description = "Код последней ошибки клиента (0 — нет ошибки; 7 — сеть, 10 — брокер отказал, 12 — таймаут)"
+
+[[param]]
+name = "net"
+type = "string"
+default = "wifi"
+description = "Сеть: wifi (блок «Wi-Fi клиент») или ethernet (блок «Ethernet W5500»)"
+
+[[param]]
+name = "broker"
+type = "string"
+default = "broker.hivemq.com"
+description = "Адрес брокера: имя или IP"
+
+[[param]]
+name = "port"
+type = "int"
+default = 1883
+min = 1
+max = 65535
+description = "TCP-порт брокера (1883 — без шифрования)"
+
+[[param]]
+name = "client_id"
+type = "string"
+default = ""
+description = "Идентификатор клиента; пусто — flp-<номер чипа>. Должен быть уникален на брокере"
+
+[[param]]
+name = "user"
+type = "string"
+default = ""
+description = "Логин; пусто — подключение без авторизации"
+
+[[param]]
+name = "password"
+type = "string"
+default = ""
+when = 'user != ""'
+show = "secret"
+local = "broker"
+description = "Пароль. Хранится в программе отдельно для каждого брокера, в файл проекта не попадает"
+
+[[param]]
+name = "keepalive"
+type = "int"
+default = 60
+min = 5
+max = 600
+description = "Интервал проверки связи, секунд"
+
+[[param]]
+name = "max_subscriptions"
+type = "int"
+default = 4
+min = 1
+max = 32
+description = "Сколько разных подписок держит клиент (по ~128 байт ОЗУ каждая); шаблоны + и # позволяют покрыть много топиков одной"

@@ -54,6 +54,8 @@ fn environment() -> Environment<'static> {
 /// Code of one block split into sketch sections.
 #[derive(Debug, Default, PartialEq)]
 struct Sections {
+    /// `// @defines`: macros placed before the includes (library settings).
+    defines: String,
     global: String,
     setup: String,
     looped: String,
@@ -65,7 +67,7 @@ struct Sections {
     once_functions: String,
 }
 
-const SECTION_LIST: &str = "// @global, // @setup, // @loop, // @functions";
+const SECTION_LIST: &str = "// @defines, // @global, // @setup, // @loop, // @functions";
 
 fn render_block(
     env: &Environment,
@@ -182,6 +184,47 @@ fn render_block(
     let mut flag = flag;
     let mut value = value;
     let mut input = input;
+    if kind == "web_net" {
+        // The defaults of the form are the settings made in the editor on the Wi-Fi and
+        // Ethernet blocks: the page starts from them after every flash.
+        const INHERIT: [(&str, &str); 8] = [
+            ("init_ssid", "ssid"),
+            ("init_password", "password"),
+            ("init_dhcp", "dhcp"),
+            ("init_ip", "ip"),
+            ("init_gateway", "gateway"),
+            ("init_subnet", "subnet"),
+            ("init_ap_ssid", "ap_ssid"),
+            ("init_ap_password", "ap_password"),
+        ];
+        for (init, from) in INHERIT {
+            let found = ["wifi", "ethernet"].iter().find_map(|k| {
+                program
+                    .blocks
+                    .iter()
+                    .filter(|b| b.block.kind == *k && !b.param_vars.contains_key(from))
+                    .find_map(|b| Some((b, b.params.get(from)?, b.lib.def.param(from)?.kind)))
+            });
+            let Some((_, v, pk)) = found else { continue };
+            if matches!(v, ParamValue::Text(s) if s.is_empty()) {
+                continue;
+            }
+            param.insert(init, param_value(pk, v));
+            value.insert(init, raw_value(pk, v));
+        }
+        let mode = program
+            .blocks
+            .iter()
+            .filter(|b| b.block.kind == "wifi")
+            .find_map(|b| match b.params.get("wifi_mode") {
+                Some(ParamValue::Int(m)) if (0..=2).contains(m) => Some(*m),
+                _ => None,
+            });
+        if let Some(m) = mode {
+            value.insert("init_mode", Value::from(m));
+            param.insert("init_mode", Value::from(m.to_string()));
+        }
+    }
     if matches!(kind.as_str(), "wifi" | "ethernet")
         && program.blocks.iter().any(|b| b.block.kind == "web_net")
     {
@@ -438,6 +481,7 @@ fn split_sections(text: &str) -> Result<Sections, String> {
         if let Some(name) = marker.strip_prefix("// @") {
             let words: Vec<&str> = name.split_whitespace().collect();
             current = Some(match words.as_slice() {
+                ["defines"] => &mut sections.defines,
                 ["global"] => &mut sections.global,
                 ["setup"] => &mut sections.setup,
                 ["loop"] => &mut sections.looped,
@@ -473,6 +517,7 @@ fn split_sections(text: &str) -> Result<Sections, String> {
         }
     }
     for s in [
+        &mut sections.defines,
         &mut sections.global,
         &mut sections.setup,
         &mut sections.looped,
@@ -496,6 +541,17 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
         program.project.config.project.name
     );
     let _ = writeln!(out, "// Порядок выполнения: {}", order.join(" → "));
+    let defines: Vec<&str> = rendered
+        .iter()
+        .map(|(_, sec)| sec.defines.as_str())
+        .filter(|d| !d.is_empty())
+        .collect();
+    if !defines.is_empty() {
+        out.push('\n');
+        for d in defines {
+            let _ = writeln!(out, "{d}");
+        }
+    }
     out.push_str("\n#include <Arduino.h>\n");
     for header in program.includes() {
         let _ = writeln!(out, "#include <{header}>");

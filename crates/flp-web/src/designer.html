@@ -62,6 +62,7 @@ label.f { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--muted
 <header>
   <h1>Веб-интерфейс ESP32</h1>
   <button id="addHost" hidden>Добавить блок «Веб-интерфейс»</button>
+  <select id="addWidget" title="Добавить виджет на текущую страницу"></select>
   <span class="hint" id="hostHint"></span>
 </header>
 
@@ -83,7 +84,7 @@ label.f { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--muted
 "use strict";
 const GROUP = "Веб-интерфейс";
 const COLOR_PARAMS = ["color", "back", "bg"];
-const COLS = 12, CW = 60, CH = 44, GAP = 6;
+const COLS = 24, CW = 30, CH = 22, GAP = 4;
 const $ = (id) => document.getElementById(id);
 let types = {}, schema = null, selected = null, pageHtml = "", curPage = 1;
 
@@ -124,7 +125,7 @@ function pageNames(host) {
 function rect(b) {
   return {
     c: num(widgetParam(b, "col", 1), 1), r: num(widgetParam(b, "row", 1), 1),
-    w: num(widgetParam(b, "w", 3), 3), h: num(widgetParam(b, "h", 1), 1),
+    w: num(widgetParam(b, "w", 6), 6), h: num(widgetParam(b, "h", 2), 2),
   };
 }
 
@@ -148,7 +149,7 @@ function render() {
   // grid
   const g = $("grid");
   g.textContent = "";
-  const rows = Math.max(8, ...widgets.map((b) => rect(b).r + rect(b).h));
+  const rows = Math.max(16, ...widgets.map((b) => rect(b).r + rect(b).h));
   g.style.width = COLS * (CW + GAP) - GAP + "px";
   g.style.height = rows * (CH + GAP) - GAP + "px";
   g.style.backgroundImage = "linear-gradient(var(--cell) 1px, transparent 1px), linear-gradient(90deg, var(--cell) 1px, transparent 1px)";
@@ -275,7 +276,7 @@ function renderProps() {
     if (host) for (const hp of types.web_ui.params) el.appendChild(paramField(host, hp));
     const p = document.createElement("p");
     p.className = "hint";
-    p.textContent = "Добавьте виджет слева и перетащите его в сетку. Выделите виджет, чтобы настроить подпись, единицы и привязку к схеме.";
+    p.textContent = "Добавьте виджет списком «＋ Добавить виджет» вверху и перетащите его в сетку. Выделите виджет, чтобы настроить подпись, единицы и привязку к схеме.";
     el.appendChild(p);
     return;
   }
@@ -388,18 +389,21 @@ function renderPreview(widgets, host) {
     const min = num(g("min", 0), 0), max = num(g("max", 0), 0);
     layout.i.push({
       k, l: String(g("caption", "")), u: String(g("unit", "")), c: r.c, r: r.r, w: r.w, h: r.h, g: pageOf(b),
-      d: k === "value" ? num(g("decimals", 1), 1) : (k === "gauge" ? 1 : 3),
+      d: k === "value" || k === "tank" ? num(g("decimals", k === "tank" ? 0 : 1), 1) : (k === "gauge" ? 1 : 3),
       a: min, b: max, s: num(g("step", 1), 1),
       o: String(g("color", "")), q: String(g("back", "")),
     });
     const last = layout.i[layout.i.length - 1];
+    if (k === "icon") last.a = num(g("icon", 0), 0);
+    if (k === "image") { last.u = String(g("url", "")); last.a = g("fit", true) ? 1 : 0; }
+    if (k === "clock") { last.a = g("seconds", true) ? 1 : 0; last.b = g("date", true) ? 1 : 0; }
     if (k === "chart") last.s = num(g("period", 5), 5);
-    if (k === "shape") { last.a = num(g("shape", 0), 0); last.b = num(g("thickness", 2), 2); last.l = ""; }
+    if (k === "shape") { last.a = num(g("shape", 0), 0); last.b = num(g("thickness", 2), 2); last.l = String(g("caption", "")); }
     let v = 0;
     if (k === "switch") v = g("initial", false) ? 1 : 0;
     else if (k === "slider" || k === "input") v = num(g("initial", 0), 0);
-    else if (k === "led") v = 1;
-    else if (k === "gauge") v = (min + max) / 2;
+    else if (k === "led" || k === "icon") v = 1;
+    else if (k === "gauge" || k === "tank") v = (min + max) / 2;
     else if (k === "value") v = 12.3;
     else if (k === "text") v = "Текст со входа";
     else if (k === "net") v = [g("ssid", ""), "", g("dhcp", true) ? "1" : "0", g("ip", ""), g("gateway", ""), g("subnet", ""), g("ap_ssid", ""), "", String(g("init_mode", 0)), String(g("init_ap_delay", 30))].join("\n");
@@ -430,10 +434,35 @@ $("modeView").onclick = () => setMode(true);
 
 $("addHost").onclick = () => act(async () => { await api("add_block", { type: "web_ui", id: "ui" }); });
 
+function fillPalette() {
+  const sel = $("addWidget");
+  sel.textContent = "";
+  sel.appendChild(new Option("＋ Добавить виджет…", ""));
+  for (const t of Object.values(types).filter((x) => x.type !== "web_ui").sort((a, b) => a.name.localeCompare(b.name, "ru"))) {
+    sel.appendChild(new Option(t.name, t.type));
+  }
+}
+$("addWidget").onchange = (ev) => {
+  const type = ev.target.value;
+  ev.target.value = "";
+  if (!type) return;
+  act(async () => {
+    const used = new Set((schema.logic.block || []).map((b) => b.id));
+    const base = type.slice(4);
+    let n = 1, id = base;
+    while (used.has(id)) id = base + ++n;
+    const bottom = Math.max(0, ...(schema.logic.block || []).filter((b) => isWidget(b) && pageOf(b) === curPage).map((b) => rect(b).r + rect(b).h - 1));
+    await api("add_block", { type, id });
+    await api("set_params", { id, params: { page: curPage, col: 1, row: bottom + 1 } });
+    selected = id;
+  });
+};
+
 (async function init() {
   try {
     const list = await api("list_block_types", { filter: "web_" });
     for (const t of list) if (t.group === GROUP) types[t.type] = t;
+    fillPalette();
     const r = await fetch("/ui_page.html");
     if (!r.ok) throw new Error(await r.text());
     pageHtml = await r.text();
@@ -441,7 +470,7 @@ $("addHost").onclick = () => act(async () => { await api("add_block", { type: "w
     say("Готово. Изменения сохраняются в проект сразу; прошивку соберите в редакторе схемы или командой flp build.");
   } catch (e) { say(e.message, true); }
 })();
-// widgets are created in the editor: pick up changes made there
+// the editor may change widgets too: pick up its changes
 let lastSchema = "";
 setInterval(async () => {
   if (document.hidden || document.activeElement?.closest?.("#props")) return;

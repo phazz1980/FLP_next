@@ -1,0 +1,31 @@
+// @global
+uint32_t {{ id }}_seq = 0;
+bool {{ id }}_subscribed = false;
+// @loop
+{
+  // The client keeps the subscription across reconnects; ask again only until it is accepted.
+  if (!{{ id }}_subscribed && flpMqtt.connected()) {
+    {{ id }}_subscribed = flpMqtt.subscribe({{ param.topic }});
+  }
+  {{ output.received }} = false;
+  if ({{ id }}_seq != flpMqttSeq) {
+    {{ id }}_seq = flpMqttSeq;
+    if (flp_mqtt_match({{ param.topic }}, flpMqttTopic.c_str())) {
+      {{ output.received }} = true;
+{% if value.kind == "int" %}
+      {{ output.out_i }} = flpMqttPayload.toInt();
+{% elif value.kind == "float" %}
+      {{ output.out_f }} = flpMqttPayload.toFloat();
+{% elif value.kind == "bool" %}
+      {
+        String p = flpMqttPayload;
+        p.trim();
+        p.toLowerCase();
+        {{ output.out_b }} = p == "1" || p == "true" || p == "on";
+      }
+{% else %}
+      {{ output.out }} = flpMqttPayload;
+{% endif %}
+    }
+  }
+}

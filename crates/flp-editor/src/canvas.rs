@@ -20,11 +20,12 @@ use crate::debugview::{self, Place};
 use crate::dialogs::Dialog;
 use crate::theme::Palette;
 
-const HEAD_H: f32 = 16.0;
-const ROW_H: f32 = 14.0;
-const TAG_H: f32 = 18.0;
+// Sizes are multiples of the grid so that every port sits on a grid line.
+const HEAD_H: f32 = 20.0;
+const ROW_H: f32 = 20.0;
+const TAG_H: f32 = 20.0;
 const PORT_R: f32 = 3.0;
-const GRID: f32 = 20.0;
+const GRID: f32 = 10.0;
 const SHEET_HEADER: f32 = 40.0;
 const SHEET_MIN_BODY: f32 = 300.0;
 const SHEET_MIN_W: f32 = 1200.0;
@@ -38,6 +39,8 @@ pub enum DragItem {
     Block(String),
     /// Variable: the side the first link comes to decides read or write.
     Var(String),
+    /// Web widget (block id) from the page list: a copy of it is placed on the sheet.
+    Widget(String),
     /// Setting or port of a service block (Wi-Fi...) taken out to the board.
     Setting {
         id: String,
@@ -169,7 +172,7 @@ fn size(block: &Block, def: Option<&BlockDef>) -> Vec2 {
     let text = label(block, def);
     match kind_of(block, def) {
         Kind::Tag { en, .. } => Vec2::new(
-            text_w(&text, 11.0) + 18.0,
+            ((text_w(&text, 11.0) + 18.0) / GRID).ceil() * GRID,
             if en { TAG_H * 2.0 } else { TAG_H },
         ),
         Kind::Box => {
@@ -188,7 +191,10 @@ fn size(block: &Block, def: Option<&BlockDef>) -> Vec2 {
             };
             let ports_w = longest(&ins) + longest(&outs) + 22.0;
             let w = (text_w(&text, 11.0) + 16.0).max(ports_w).max(64.0);
-            Vec2::new((w / 4.0).ceil() * 4.0, HEAD_H + rows as f32 * ROW_H + 4.0)
+            Vec2::new(
+                (w / GRID).ceil() * GRID,
+                HEAD_H + rows as f32 * ROW_H + 10.0,
+            )
         }
     }
 }
@@ -386,18 +392,24 @@ fn value_text(v: &ParamValue) -> String {
     }
 }
 
-/// Orthogonal route from an output to an input, in screen space.
-fn route(a: Pos2, b: Pos2, step: f32) -> Vec<Pos2> {
-    if b.x - a.x >= 2.0 * step {
-        let mx = (a.x + b.x) * 0.5;
+/// Whether a link runs left to right (one vertical segment) or has to go around.
+fn is_forward(a: Pos2, b: Pos2, step: f32) -> bool {
+    b.x - a.x >= 2.0 * step
+}
+
+/// Orthogonal route from an output to an input, in screen space. `bend` moves the
+/// middle segment: its x for a forward link, its y for a backward one.
+fn route(a: Pos2, b: Pos2, step: f32, bend: Option<f32>) -> Vec<Pos2> {
+    if is_forward(a, b, step) {
+        let mx = bend.map_or((a.x + b.x) * 0.5, |x| x.clamp(a.x + 2.0, b.x - 2.0));
         vec![a, Pos2::new(mx, a.y), Pos2::new(mx, b.y), b]
     } else {
         // Backwards: go around below the lower end.
-        let my = if (b.y - a.y).abs() > 3.0 * step {
+        let my = bend.unwrap_or(if (b.y - a.y).abs() > 3.0 * step {
             (a.y + b.y) * 0.5
         } else {
             a.y.max(b.y) + 2.5 * step
-        };
+        });
         vec![
             a,
             Pos2::new(a.x + step, a.y),
@@ -663,6 +675,11 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let dbg = app.debug.as_ref();
     let click_pos = bg.clicked().then(|| bg.interact_pointer_pos()).flatten();
     let mut clicked_link = None;
+    let mut wire_click = None;
+    let mut wire_edit: Option<(flp_core::PortRef, Option<f32>)> = None;
+    let mut wire_end = false;
+    let mut wire_break: Option<(flp_core::PortRef, bool)> = None;
+    let ctx = ui.ctx().clone();
     // Live values above the input end of each wire; drawn after the blocks to stay on top.
     let mut wire_labels = Vec::new();
     let mut text_labels = Vec::new();
@@ -675,15 +692,50 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         let sheet_of = |id: &str| project.layout.blocks.get(id).map(|p| p.sheet);
         let (from_sheet, to_sheet) = (sheet_of(&link.from.block), sheet_of(&link.to.block));
         // Links between sheets are broken into two labelled stubs, as in FLProg.
+        let key = flp_core::Layout::wire_key(&link.to);
+        let route_cfg = project.layout.wires.get(&key).copied().unwrap_or_default();
         let cross = from_sheet != to_sheet;
+        // Links inside a sheet can be broken by hand in the same way.
+        let broken = cross || route_cfg.broken;
         let stub = 24.0 * z;
-        let lines: Vec<Vec<Pos2>> = if cross {
+        let mut handle = None;
+        let mut menu_areas: Vec<Rect> = Vec::new();
+        let lines: Vec<Vec<Pos2>> = if broken {
+            if !cross {
+                menu_areas = vec![
+                    Rect::from_two_pos(a, a + Vec2::new(stub, 0.0)).expand(5.0),
+                    Rect::from_two_pos(b - Vec2::new(stub, 0.0), b).expand(5.0),
+                ];
+            }
             vec![
                 vec![a, a + Vec2::new(stub, 0.0)],
                 vec![b - Vec2::new(stub, 0.0), b],
             ]
         } else {
-            vec![rounded(&route(a, b, 12.0 * z), 6.0 * z)]
+            let forward = is_forward(a, b, 12.0 * z);
+            let band = bands.iter().find(|band| Some(band.sheet) == from_sheet);
+            let bend = route_cfg.bend.zip(band).map(|(v, band)| {
+                if forward {
+                    xf.pos(Pos2::new(v, 0.0)).x
+                } else {
+                    xf.pos(Pos2::new(0.0, band.body_top() + v)).y
+                }
+            });
+            let raw = route(a, b, 12.0 * z, bend);
+            // The middle segment can be dragged to reroute the link.
+            let seg = if forward {
+                (raw[1], raw[2])
+            } else {
+                (raw[2], raw[3])
+            };
+            if let (Some(band), true) = (band, seg.0.distance(seg.1) > 4.0) {
+                handle = Some((Rect::from_two_pos(seg.0, seg.1).expand(4.0), forward, *band));
+            }
+            menu_areas = vec![Rect::from_center_size(
+                seg.0.lerp(seg.1, 0.5),
+                Vec2::splat(12.0),
+            )];
+            vec![rounded(&raw, 6.0 * z)]
         };
         let is_sel = selected.as_ref() == Some(&Selection::Link(link.to.clone()));
         let color = signal_color(&pal, ty);
@@ -704,6 +756,55 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             text_labels.push((b, text.to_owned()));
         }
         let stroke = Stroke::new(if is_sel { width + 1.4 } else { width }, color);
+        if let Some((area, forward, band)) = handle {
+            let resp = ui.interact(
+                area,
+                Id::unique(("wire", &link.to)),
+                Sense::click_and_drag(),
+            );
+            if resp.hovered() || resp.dragged() {
+                ctx.set_cursor_icon(if forward {
+                    egui::CursorIcon::ResizeHorizontal
+                } else {
+                    egui::CursorIcon::ResizeVertical
+                });
+            }
+            if resp.clicked() {
+                wire_click = Some(link.to.clone());
+            }
+            if resp.double_clicked() {
+                wire_edit = Some((link.to.clone(), None));
+            } else if let (true, Some(p)) = (resp.dragged(), resp.interact_pointer_pos()) {
+                let w = xf.world(p);
+                let snap = |v: f32| (v / GRID).round() * GRID;
+                let bend = if forward {
+                    snap(w.x)
+                } else {
+                    snap(w.y - band.body_top())
+                };
+                wire_edit = Some((link.to.clone(), Some(bend)));
+            }
+            if resp.drag_stopped() {
+                wire_end = true;
+            }
+            resp.on_hover_text("Потяните, чтобы изменить путь; двойной щелчок — путь по умолчанию");
+        }
+        if !cross {
+            for (i, area) in menu_areas.iter().enumerate() {
+                let resp = ui.interact(*area, Id::unique(("wire-menu", &key, i)), Sense::click());
+                resp.context_menu(|ui| {
+                    let label = if route_cfg.broken {
+                        "Соединить линией"
+                    } else {
+                        "Разорвать связь"
+                    };
+                    if ui.button(label).clicked() {
+                        wire_break = Some((link.to.clone(), !route_cfg.broken));
+                        ui.close();
+                    }
+                });
+            }
+        }
         for pts in &lines {
             painter.line(pts.clone(), stroke);
             if click_pos.is_some_and(|p| near_polyline(pts, p, 5.0)) {
@@ -1019,7 +1120,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             } else {
                 (p, h.pos)
             };
-            let pts = rounded(&route(a, b, 12.0 * z), 6.0 * z);
+            let pts = rounded(&route(a, b, 12.0 * z, None), 6.0 * z);
             painter.line(
                 pts,
                 Stroke::new(1.6, signal_color(&pal, h.ty).gamma_multiply(0.7)),
@@ -1133,6 +1234,9 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     if bg.clicked() {
         app.select(clicked_link.map(Selection::Link));
     }
+    if let Some(to) = wire_click {
+        app.select(Some(Selection::Link(to)));
+    }
     if let Some(s) = framed {
         app.select(s);
     }
@@ -1198,6 +1302,22 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             let _ = doc.edit(&lib, Some(format!("move:{id}")), |p| p.move_block(id, pos));
             doc.end_edit();
         }
+        if let Some((to, bend)) = wire_edit {
+            let key = format!("wire:{}.{}", to.block, to.port);
+            let _ = doc.edit(&lib, Some(key), |p| {
+                p.set_wire_bend(&to, bend);
+                Ok::<_, flp_core::EditError>(())
+            });
+        }
+        if wire_end {
+            doc.end_edit();
+        }
+        if let Some((to, broken)) = wire_break {
+            let _ = doc.edit(&lib, None, |p| {
+                p.set_wire_broken(&to, broken);
+                Ok::<_, flp_core::EditError>(())
+            });
+        }
         if let Some((from, to)) = connect {
             if let Err(e) = doc.edit(&lib, None, |p| p.connect(&lib, from, to)) {
                 problems.push(e.to_string());
@@ -1207,6 +1327,9 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             let result = match item {
                 DragItem::Block(kind) => doc.edit(&lib, None, |p| p.add_block(&lib, &kind, pos)),
                 DragItem::Var(name) => doc.edit(&lib, None, |p| p.add_var_block(&name, false, pos)),
+                DragItem::Widget(id) => doc.edit(&lib, None, |p| {
+                    crate::netpanel::copy_widget(p, &lib, &id, pos)
+                }),
                 DragItem::Setting { id, name, ty, feed } => doc.edit(&lib, None, |p| {
                     crate::netpanel::pull_out(p, &lib, &id, &name, ty, feed, pos)
                 }),
@@ -1491,14 +1614,35 @@ mod tests {
 
     #[test]
     fn forward_route_has_two_bends() {
-        let r = route(Pos2::new(0.0, 0.0), Pos2::new(100.0, 40.0), 12.0);
+        let r = route(Pos2::new(0.0, 0.0), Pos2::new(100.0, 40.0), 12.0, None);
         assert_eq!(r.len(), 4);
         assert_eq!(r[1], Pos2::new(50.0, 0.0));
     }
 
     #[test]
+    fn bend_moves_the_middle_segment() {
+        let r = route(
+            Pos2::new(0.0, 0.0),
+            Pos2::new(100.0, 40.0),
+            12.0,
+            Some(30.0),
+        );
+        assert_eq!((r[1].x, r[2].x), (30.0, 30.0));
+        // Never leaves the span between the ports.
+        let r = route(
+            Pos2::new(0.0, 0.0),
+            Pos2::new(100.0, 40.0),
+            12.0,
+            Some(500.0),
+        );
+        assert_eq!(r[1].x, 98.0);
+        let r = route(Pos2::new(100.0, 0.0), Pos2::new(0.0, 0.0), 12.0, Some(77.0));
+        assert_eq!((r[2].y, r[3].y), (77.0, 77.0));
+    }
+
+    #[test]
     fn backward_route_goes_around() {
-        let r = route(Pos2::new(100.0, 0.0), Pos2::new(0.0, 0.0), 12.0);
+        let r = route(Pos2::new(100.0, 0.0), Pos2::new(0.0, 0.0), 12.0, None);
         assert_eq!(r.len(), 6);
         assert!(r[2].y > 0.0);
     }

@@ -1,0 +1,6 @@
+// @global
+FlpUiItem {{ id }}_ui = {"web_clock", {{ param.caption }}, "", {{ value.col }}, {{ value.row }}, {{ value.w }}, {{ value.h }}, {{ value.page }}, false, 0, {{ 1 if value.seconds else 0 }}, {{ 1 if value.date else 0 }}, 0, 0};
+// @setup
+flpUiAdd(&{{ id }}_ui);
+{{ id }}_ui.color = {{ param.color }};
+{{ id }}_ui.back = {{ param.back }};

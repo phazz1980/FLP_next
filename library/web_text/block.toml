@@ -23,7 +23,7 @@ show = "hidden"
 type = "int"
 label = "Колонка"
 default = 1
-description = "Левая колонка сетки страницы (1–12)"
+description = "Левая колонка сетки страницы (1–24)"
 
 [[param]]
 name = "row"
@@ -38,16 +38,16 @@ name = "w"
 show = "hidden"
 type = "int"
 label = "Ширина"
-default = 6
-description = "Ширина в колонках сетки (1–12)"
+default = 12
+description = "Ширина в колонках сетки (1–24)"
 
 [[param]]
 name = "h"
 show = "hidden"
 type = "int"
 label = "Высота"
-default = 1
-description = "Высота в строках сетки"
+default = 2
+description = "Высота в строках сетки (строка — 24 px)"
 
 [[param]]
 name = "page"

@@ -63,7 +63,8 @@ fn service(
     let Some(doc) = &app.doc else { return };
     let logic = &doc.project.logic;
     let block = logic.blocks.iter().find(|b| b.kind == kind);
-    egui::CollapsingHeader::new(title)
+    ui.add_space(4.0);
+    egui::CollapsingHeader::new(egui::RichText::new(title).strong())
         .id_salt(("net", kind))
         .default_open(block.is_some())
         .show(ui, |ui| {
@@ -205,10 +206,62 @@ fn service(
                                     _ => String::new(),
                                 };
                                 let secret = p.show == flp_core::ParamShow::Secret;
+                                let reveal = ui.make_persistent_id(("net_reveal", &b.id, &p.name));
+                                let shown = secret
+                                    && ui.data(|d| d.get_temp::<bool>(reveal)).unwrap_or(false);
                                 let edit = egui::TextEdit::singleline(&mut v)
-                                    .password(secret)
+                                    .password(secret && !shown)
                                     .desired_width(110.0);
-                                if ui.add(edit).changed() {
+                                // Parameters kept by the program under this one's value
+                                // (SSID -> password).
+                                let dependents: Vec<&flp_core::ParamDef> = def
+                                    .params
+                                    .iter()
+                                    .filter(|q| q.local.as_deref() == Some(p.name.as_str()))
+                                    .collect();
+                                let changed = if dependents.is_empty() {
+                                    ui.add(edit).changed()
+                                } else {
+                                    // Remembered keys (entered SSIDs) are suggested while typing.
+                                    let known: std::collections::BTreeSet<&str> = dependents
+                                        .iter()
+                                        .flat_map(|q| app.local.keys(kind, &q.name))
+                                        .collect();
+                                    let id = ui.make_persistent_id(("net_suggest", &b.id, &p.name));
+                                    let out = egui::CompletionPopup::new(id)
+                                        .word_boundary(|_| false)
+                                        .show(ui, edit, |query| {
+                                            let typed = query.text.to_lowercase();
+                                            known
+                                                .iter()
+                                                .filter(|k| {
+                                                    **k != query.text
+                                                        && k.to_lowercase().contains(&typed)
+                                                })
+                                                .map(|k| egui::Suggestion::new(*k))
+                                                .collect()
+                                        });
+                                    out.accepted.is_some() || out.text_edit.response.changed()
+                                };
+                                if secret
+                                    && ui
+                                        .selectable_label(shown, "\u{1f441}")
+                                        .on_hover_text("Показать или скрыть")
+                                        .clicked()
+                                {
+                                    ui.data_mut(|d| d.insert_temp(reveal, !shown));
+                                }
+                                if changed {
+                                    // A new key brings its stored values (the password of that SSID).
+                                    for q in &dependents {
+                                        let stored =
+                                            app.local.get(kind, &q.name, &v).unwrap_or_default();
+                                        actions.push(NetAction::SetParam {
+                                            id: b.id.clone(),
+                                            name: q.name.clone(),
+                                            value: ParamValue::Text(stored.to_owned()),
+                                        });
+                                    }
                                     actions.push(set(ParamValue::Text(v)));
                                 }
                             }
@@ -235,6 +288,7 @@ fn service(
                 }
             }
         });
+    ui.separator();
 }
 
 fn widget_blocks(logic: &flp_core::Logic) -> impl Iterator<Item = &flp_core::Block> {
@@ -317,30 +371,64 @@ fn pages_section(
                 actions.push(NetAction::DeletePage(i));
             }
         });
-        for w in widget_blocks(logic).filter(|w| widget_page(w, names.len()) == i + 1) {
-            let caption = match w.params.get("caption") {
-                Some(ParamValue::Text(c)) if !c.is_empty() => c.as_str(),
-                _ => "без имени",
-            };
-            let sel = app.selection.as_ref().is_some_and(|s| s.has_block(&w.id));
-            let resp = ui
-                .selectable_label(sel, format!("   {caption} ({})", w.id))
-                .on_hover_text("Щелчок — найти на плате, двойной щелчок — параметры");
-            if resp.double_clicked() {
-                actions.push(NetAction::Settings(w.id.clone()));
-            } else if resp.clicked() {
-                actions.push(NetAction::Focus(w.id.clone()));
+        ui.indent(("page", i), |ui| {
+            for w in widget_blocks(logic).filter(|w| widget_page(w, names.len()) == i + 1) {
+                let caption = match w.params.get("caption") {
+                    Some(ParamValue::Text(c)) if !c.is_empty() => c.as_str(),
+                    _ => "без имени",
+                };
+                let sel = app.selection.as_ref().is_some_and(|s| s.has_block(&w.id));
+                let text = egui::RichText::new(format!("{caption} ({})", w.id));
+                let text = if sel { text.strong() } else { text };
+                let resp = ui
+                    .dnd_drag_source(
+                        Id::unique(("widget", &w.id)),
+                        DragItem::Widget(w.id.clone()),
+                        |ui| ui.label(text),
+                    )
+                    .response
+                    .on_hover_text(
+                        "Щелчок — найти на плате, двойной щелчок — параметры.                          Перетащите на плату — появится такой же виджет.",
+                    );
+                if resp.double_clicked() {
+                    actions.push(NetAction::Settings(w.id.clone()));
+                } else if resp.clicked() {
+                    actions.push(NetAction::Focus(w.id.clone()));
+                }
             }
-        }
+        });
     }
     ui.horizontal(|ui| {
-        if ui.button("+ Добавить страницу").clicked() {
+        if ui.small_button("+ страница").clicked() {
             actions.push(NetAction::AddPage);
         }
-        if ui.button("+ Добавить виджет").clicked() {
+        if ui.small_button("+ виджет").clicked() {
             actions.push(NetAction::NewWidget(0));
         }
     });
+}
+
+/// Places a copy of the widget `id` (same type and parameters, new id) at `pos`; it goes
+/// to the free cell below the content of the same page.
+pub fn copy_widget(
+    p: &mut flp_core::Project,
+    lib: &flp_core::Library,
+    id: &str,
+    pos: flp_core::BlockPos,
+) -> Result<String, flp_core::EditError> {
+    let frag = p.copy_fragment(&[id.to_owned()]);
+    let mut ids = p.paste_fragment(lib, &frag, pos)?;
+    let new = ids
+        .pop()
+        .ok_or_else(|| flp_core::EditError::NoBlock(id.to_owned()))?;
+    let page = match frag.blocks.first().and_then(|b| b.params.get("page")) {
+        Some(ParamValue::Int(i)) => *i,
+        _ => 1,
+    };
+    let (col, row) = free_cell(lib, &p.logic, page.max(1) as usize);
+    p.set_param(lib, &new, "col", Some(ParamValue::Int(col)))?;
+    p.set_param(lib, &new, "row", Some(ParamValue::Int(row)))?;
+    Ok(new)
 }
 
 /// Kinds of the library blocks that are web page widgets.
@@ -697,5 +785,26 @@ mod tests {
         // An empty second page starts at the top.
         assert_eq!(free_cell(&lib, &p.logic, 2), (1, 1));
         assert!(widget_kinds(&lib).contains(&"web_button".to_owned()));
+    }
+
+    #[test]
+    fn dropped_widget_is_a_copy_with_its_own_id_and_cell() {
+        let (lib, _) =
+            Library::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library")).unwrap();
+        let mut p = Project::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/web_ui"
+        ))
+        .unwrap();
+        let src = p.logic.block("sld").unwrap().clone();
+        let new = copy_widget(&mut p, &lib, "sld", POS).unwrap();
+        assert_ne!(new, "sld");
+        let copy = p.logic.block(&new).unwrap();
+        assert_eq!(copy.kind, src.kind);
+        assert_eq!(copy.params.get("caption"), src.params.get("caption"));
+        assert_ne!(copy.params.get("row"), src.params.get("row"));
+        // A second drop gives yet another id.
+        let again = copy_widget(&mut p, &lib, "sld", POS).unwrap();
+        assert_ne!(again, new);
     }
 }

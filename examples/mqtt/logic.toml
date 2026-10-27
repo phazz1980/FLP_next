@@ -1,0 +1,63 @@
+# MQTT через Wi-Fi: flp/temp — температура (по изменению), flp/button — кнопка (по изменению),
+# flp/led (1/0, on/off) — включает светодиод.
+
+[[block]]
+id = "wifi"
+type = "wifi"
+ssid = "MyNetwork"
+
+[[block]]
+id = "broker"
+type = "mqtt"
+broker = "broker.hivemq.com"
+user = "device"
+
+[[block]]
+id = "sensor"
+type = "ds18b20"
+pin = 4
+
+[[block]]
+id = "temp_pub"
+type = "mqtt_publish"
+topic = "flp/temp"
+trigger = 1
+deadband = 0.2
+decimals = 1
+
+[[block]]
+id = "button"
+type = "digital_in"
+pin = 13
+pullup = true
+inverted = true
+
+[[block]]
+id = "button_pub"
+type = "mqtt_publish"
+topic = "flp/button"
+retain = true
+trigger = 1
+
+[[block]]
+id = "led_sub"
+type = "mqtt_subscribe"
+topic = "flp/led"
+kind = "bool"
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[link]]
+from = "sensor.temp"
+to   = "temp_pub.value"
+
+[[link]]
+from = "button.out"
+to   = "button_pub.value"
+
+[[link]]
+from = "led_sub.out_b"
+to   = "led.in"

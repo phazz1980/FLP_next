@@ -19,8 +19,8 @@ type = "web_label"
 caption = "Управление"
 col = 1
 row = 1
-w = 12
-h = 1
+w = 24
+h = 2
 
 [[block]]
 id = "sw"
@@ -28,27 +28,27 @@ type = "web_switch"
 caption = "Свет"
 color = "#f5a623"
 col = 1
-row = 2
-w = 4
-h = 1
+row = 3
+w = 8
+h = 2
 
 [[block]]
 id = "btn"
 type = "web_button"
 caption = "Нажать"
-col = 5
-row = 2
-w = 4
-h = 1
+col = 9
+row = 3
+w = 8
+h = 2
 
 [[block]]
 id = "lamp"
 type = "web_led"
 caption = "Светодиод"
-col = 9
-row = 2
-w = 4
-h = 1
+col = 17
+row = 3
+w = 8
+h = 2
 
 [[block]]
 id = "sld"
@@ -60,9 +60,9 @@ step = 5.0
 initial = 25.0
 unit = "%"
 col = 1
-row = 3
-w = 8
-h = 1
+row = 5
+w = 16
+h = 2
 
 [[block]]
 id = "inp"
@@ -73,10 +73,10 @@ max = 150.0
 step = 0.5
 initial = 21.5
 unit = "°C"
-col = 9
-row = 3
-w = 4
-h = 1
+col = 17
+row = 5
+w = 8
+h = 2
 
 [[block]]
 id = "val"
@@ -85,9 +85,9 @@ caption = "Ползунок"
 unit = "%"
 decimals = 0
 col = 1
-row = 4
-w = 4
-h = 2
+row = 7
+w = 8
+h = 4
 
 [[block]]
 id = "bar"
@@ -96,19 +96,19 @@ caption = "Шкала"
 min = 0.0
 max = 100.0
 unit = "%"
-col = 5
-row = 4
-w = 8
-h = 2
+col = 9
+row = 7
+w = 16
+h = 4
 
 [[block]]
 id = "info"
 type = "web_text"
 caption = "Состояние"
 col = 1
-row = 6
-w = 12
-h = 1
+row = 11
+w = 24
+h = 2
 
 [[block]]
 id = "any"
@@ -164,9 +164,9 @@ shape = 0
 thickness = 2
 color = "#4a90d9"
 col = 1
-row = 7
-w = 12
-h = 1
+row = 13
+w = 24
+h = 2
 
 [[block]]
 id = "box"
@@ -175,9 +175,9 @@ shape = 3
 thickness = 3
 color = "#e94f37"
 col = 1
-row = 8
-w = 2
-h = 2
+row = 15
+w = 4
+h = 4
 
 [[block]]
 id = "trend"
@@ -189,20 +189,101 @@ max = 100.0
 period = 2
 points = 60
 color = "#7ed321"
-col = 3
-row = 8
-w = 10
-h = 4
+col = 5
+row = 15
+w = 20
+h = 8
 
 [[block]]
 id = "net"
 type = "web_net"
 init_ssid = "MyNetwork"
 col = 1
-row = 12
-w = 6
-h = 5
+row = 23
+w = 16
+h = 10
 
 [[link]]
 from = "sld.out"
 to   = "trend.in"
+
+[[block]]
+id = "tank"
+type = "web_tank"
+caption = "Ёмкость"
+unit = "%"
+min = 0.0
+max = 100.0
+col = 1
+row = 33
+w = 4
+h = 8
+color = "#4a90d9"
+
+[[link]]
+from = "sld.out"
+to   = "tank.in"
+
+[[block]]
+id = "clock"
+type = "web_clock"
+caption = "Время"
+col = 5
+row = 33
+w = 8
+h = 4
+
+[[block]]
+id = "pic"
+type = "web_image"
+caption = "Схема"
+url = "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b0/ESP32_Espressif_ESP-WROOM-32_Wi-Fi_Bluetooth_Module.jpg/320px-ESP32_Espressif_ESP-WROOM-32_Wi-Fi_Bluetooth_Module.jpg"
+col = 13
+row = 33
+w = 8
+h = 8
+
+[[block]]
+id = "fan"
+type = "web_icon"
+caption = "Вентилятор"
+icon = 1
+color = "#2da44e"
+col = 21
+row = 33
+w = 4
+h = 6
+
+[[link]]
+from = "sw.out"
+to   = "fan.in"
+
+[[block]]
+id = "arrow"
+type = "web_shape"
+shape = 4
+thickness = 3
+color = "#4a90d9"
+col = 1
+row = 41
+w = 8
+h = 3
+
+[[block]]
+id = "panel"
+type = "web_shape"
+shape = 10
+caption = "Насос"
+col = 9
+row = 41
+w = 16
+h = 6
+
+[[block]]
+id = "sepv"
+type = "web_shape"
+shape = 9
+col = 12
+row = 42
+w = 1
+h = 4

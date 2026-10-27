@@ -1,0 +1,56 @@
+{% set t = input_type.value %}
+{% set ct = {"bool": "bool", "int": "int32_t", "float": "float", "string": "String"}[t] %}
+// @global
+bool {{ id }}_pending = false;
+{% if value.trigger == 0 %}
+bool {{ id }}_prev = false;
+{% elif value.trigger == 1 %}
+{{ ct }} {{ id }}_last;
+bool {{ id }}_started = false;
+{% else %}
+uint32_t {{ id }}_t = 0;
+{% endif %}
+// @loop
+{
+{% if value.trigger == 0 %}
+  if ({{ input.en }} && !{{ id }}_prev) {
+    {{ id }}_pending = true;
+  }
+  {{ id }}_prev = {{ input.en }};
+{% elif value.trigger == 1 %}
+{% if t == "float" and value.deadband > 0 %}
+  bool changed = !{{ id }}_started || fabsf({{ input.value }} - {{ id }}_last) >= {{ param.deadband }};
+{% else %}
+  bool changed = !{{ id }}_started || {{ input.value }} != {{ id }}_last;
+{% endif %}
+  if ({{ input.en }} && changed) {
+    {{ id }}_pending = true;
+  }
+{% else %}
+  if ({{ input.en }} && millis() - {{ id }}_t >= {{ param.period }}) {
+    {{ id }}_pending = true;
+  }
+{% endif %}
+  {{ output.sent }} = false;
+  if ({{ id }}_pending && flpMqtt.connected()) {
+{% if t == "string" %}
+    String text = {{ input.value }};
+{% elif t == "float" %}
+    String text = String({{ input.value }}, {{ param.decimals }});
+{% elif t == "bool" %}
+    String text = {{ input.value }} ? "1" : "0";
+{% else %}
+    String text = String({{ input.value }});
+{% endif %}
+    if (flpMqtt.publish({{ param.topic }}, text.c_str(), {{ "true" if value.retain else "false" }})) {
+      {{ output.sent }} = true;
+      {{ id }}_pending = false;
+{% if value.trigger == 1 %}
+      {{ id }}_last = {{ input.value }};
+      {{ id }}_started = true;
+{% elif value.trigger == 2 %}
+      {{ id }}_t = millis();
+{% endif %}
+    }
+  }
+}

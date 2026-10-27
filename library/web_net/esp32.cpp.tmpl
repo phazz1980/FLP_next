@@ -1,3 +1,6 @@
+// @defines
+// Tells the web page block to add the network form handlers (/ui/net, /ui/scan).
+#define FLP_WEB_NET
 // @global once
 // Network settings shared with the Wi-Fi and Ethernet blocks: ssid, password, dhcp, ip, gateway, subnet, ap ssid, ap password, mode, ap delay.
 struct FlpNet {
@@ -39,6 +42,20 @@ static bool {{ id }}_ssidok(const String &s) {
 }
 // @setup
 {{ id }}_prefs.begin("flp", false);
+// Defaults come from the editor: when they change (a new flash with other settings), the saved page values are dropped.
+{
+  String init[10] = { {{ param.init_ssid }}, {{ param.init_password }}, "{{ 1 if value.init_dhcp else 0 }}", {{ param.init_ip }}, {{ param.init_gateway }}, {{ param.init_subnet }}, {{ param.init_ap_ssid }}, {{ param.init_ap_password }}, "{{ value.init_mode }}", "{{ value.init_ap_delay }}"};
+  uint32_t sig = 2166136261UL;
+  for (int k = 0; k < 10; k++) {
+    for (size_t n = 0; n < init[k].length(); n++) sig = (sig ^ (uint8_t)init[k][n]) * 16777619UL;
+    sig = (sig ^ 0xFF) * 16777619UL;
+  }
+  if ({{ id }}_prefs.getUInt("{{ id[:12] }}_h", 0) != sig) {
+    static const char *keys[10] = {"_s", "_p", "_d", "_i", "_g", "_m", "_a", "_b", "_o", "_w"};
+    for (int k = 0; k < 10; k++) {{ id }}_prefs.remove((String("{{ id[:12] }}") + keys[k]).c_str());
+    {{ id }}_prefs.putUInt("{{ id[:12] }}_h", sig);
+  }
+}
 flpNet.f[0] = {{ id }}_prefs.getString("{{ id[:12] }}_s", {{ param.init_ssid }});
 flpNet.f[1] = {{ id }}_prefs.getString("{{ id[:12] }}_p", {{ param.init_password }});
 flpNet.f[2] = {{ id }}_prefs.getString("{{ id[:12] }}_d", "{{ 1 if value.init_dhcp else 0 }}");

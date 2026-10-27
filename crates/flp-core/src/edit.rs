@@ -7,7 +7,9 @@
 
 use crate::ident::is_valid_ident;
 use crate::vars::{Var, VAR_GET, VAR_PARAM, VAR_SET, WRITE_ENABLE};
-use crate::{Block, BlockPos, Library, Link, ParamValue, PortRef, Project, SignalType};
+use crate::{
+    Block, BlockPos, Layout, Library, Link, ParamValue, PortRef, Project, SignalType, WireRoute,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EditError {
@@ -214,6 +216,8 @@ impl Project {
             .links
             .retain(|l| l.from.block != id && l.to.block != id);
         self.layout.blocks.remove(id);
+        let prefix = format!("{id}.");
+        self.layout.wires.retain(|k, _| !k.starts_with(&prefix));
         Ok(())
     }
 
@@ -239,6 +243,21 @@ impl Project {
         }
         if let Some(pos) = self.layout.blocks.remove(old) {
             self.layout.blocks.insert(new.to_owned(), pos);
+        }
+        let prefix = format!("{old}.");
+        let moved: Vec<String> = self
+            .layout
+            .wires
+            .keys()
+            .filter(|k| k.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for key in moved {
+            if let Some(route) = self.layout.wires.remove(&key) {
+                self.layout
+                    .wires
+                    .insert(format!("{new}.{}", &key[prefix.len()..]), route);
+            }
         }
         Ok(())
     }
@@ -270,11 +289,33 @@ impl Project {
             return Err(EditError::TypeMismatch { from, to });
         }
         self.logic.links.retain(|l| l.to != to);
+        self.layout.wires.remove(&Layout::wire_key(&to));
         if let Some(b) = self.logic.blocks.iter_mut().find(|b| b.id == to.block) {
             b.consts.remove(&to.port);
         }
         self.logic.links.push(Link { from, to });
         Ok(())
+    }
+
+    /// Sets (or with `None` clears) the manual position of the middle segment of a link.
+    pub fn set_wire_bend(&mut self, to: &PortRef, bend: Option<f32>) {
+        self.change_wire(to, |w| w.bend = bend);
+    }
+
+    /// Breaks a link into two labelled stubs on the sheet, or joins it back.
+    pub fn set_wire_broken(&mut self, to: &PortRef, broken: bool) {
+        self.change_wire(to, |w| w.broken = broken);
+    }
+
+    fn change_wire(&mut self, to: &PortRef, f: impl FnOnce(&mut WireRoute)) {
+        let key = Layout::wire_key(to);
+        let mut route = self.layout.wires.get(&key).copied().unwrap_or_default();
+        f(&mut route);
+        if route == WireRoute::default() {
+            self.layout.wires.remove(&key);
+        } else {
+            self.layout.wires.insert(key, route);
+        }
     }
 
     /// Puts a constant on an input (dropping its link) or removes it (`None`).
@@ -298,6 +339,7 @@ impl Project {
             Some(v) => {
                 block.consts.insert(input.port.clone(), v);
                 self.logic.links.retain(|l| &l.to != input);
+                self.layout.wires.remove(&Layout::wire_key(input));
             }
             None => {
                 block.consts.remove(&input.port);
@@ -440,6 +482,7 @@ impl Project {
     pub fn disconnect(&mut self, to: &PortRef) -> bool {
         let before = self.logic.links.len();
         self.logic.links.retain(|l| &l.to != to);
+        self.layout.wires.remove(&Layout::wire_key(to));
         self.logic.links.len() != before
     }
 
@@ -878,6 +921,38 @@ mod tests {
         assert!(p.rename_block("button", "a b").is_err());
         p.remove_block("button").unwrap();
         assert!(p.logic.links.is_empty());
+    }
+
+    #[test]
+    fn manual_route_follows_its_link() {
+        let lib = library();
+        let mut p = project();
+        let a = p.add_block(&lib, "src", POS).unwrap();
+        let s = p.add_block(&lib, "sink", POS).unwrap();
+        let to = PortRef::new(&s, "in");
+        p.connect(&lib, PortRef::new(&a, "out"), to.clone())
+            .unwrap();
+        p.set_wire_bend(&to, Some(120.0));
+        assert_eq!(p.layout.wires[&format!("{s}.in")].bend, Some(120.0));
+        // Renaming the target carries the route along.
+        p.rename_block(&s, "target").unwrap();
+        assert!(p.layout.wires.contains_key("target.in"));
+        // A new link into the input starts with the automatic route.
+        let to = PortRef::new("target", "in");
+        p.connect(&lib, PortRef::new(&a, "out"), to.clone())
+            .unwrap();
+        assert!(p.layout.wires.is_empty());
+        p.set_wire_bend(&to, Some(60.0));
+        assert!(p.disconnect(&to));
+        assert!(p.layout.wires.is_empty());
+        p.set_wire_bend(&to, Some(60.0));
+        p.remove_block("target").unwrap();
+        assert!(p.layout.wires.is_empty());
+        // Breaking a link keeps only the flag; joining it again leaves nothing behind.
+        p.set_wire_broken(&to, true);
+        assert!(p.layout.wires["target.in"].broken);
+        p.set_wire_broken(&to, false);
+        assert!(p.layout.wires.is_empty());
     }
 
     #[test]

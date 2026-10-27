@@ -22,7 +22,7 @@ mod toml_io;
 pub use check::{bindable_type, check, check_project, Diagnostic, Report, Severity};
 pub use edit::{EditError, Fragment};
 pub use error::{Error, Result};
-pub use layout::{BlockPos, Layout, SheetInfo};
+pub use layout::{BlockPos, Layout, SheetInfo, WireRoute};
 pub use library::{
     save_block, user_library_dir, BlockDef, Choice, Library, LibraryBlock, ParamDef, ParamKind,
     ParamShow, PinMode, PortDef, SignalType,

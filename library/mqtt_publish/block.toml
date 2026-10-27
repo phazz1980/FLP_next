@@ -1,0 +1,84 @@
+[block]
+type = "mqtt_publish"
+name = "MQTT публикация"
+symbol = "MQTT →"
+group = "Сеть"
+description = "Публикует значение любого типа в топик MQTT: по фронту en, при изменении значения или периодически."
+
+[[input]]
+name = "en"
+type = "bool"
+default = true
+description = "Разрешение отправки; не подключён — разрешено всегда"
+
+[[input]]
+name = "value"
+type = "any"
+description = "Что публиковать: bool (1/0), int, float или строка — тип берётся от подключённого выхода"
+
+[[output]]
+name = "sent"
+type = "bool"
+description = "true в цикле, когда сообщение ушло брокеру"
+
+[[param]]
+name = "topic"
+label = "топик"
+type = "string"
+default = "flp/value"
+description = "Топик, например home/kitchen/temperature"
+
+[[param]]
+name = "retain"
+label = "хранить на брокере"
+type = "bool"
+default = false
+description = "Брокер хранит последнее значение и отдаёт его новым подписчикам"
+
+[[param]]
+name = "trigger"
+label = "когда отправлять"
+type = "int"
+default = 1
+min = 0
+max = 2
+description = "По фронту en, при изменении значения (пока en = true) или периодически (пока en = true)"
+
+[[param.choice]]
+value = 0
+label = "По фронту en"
+
+[[param.choice]]
+value = 1
+label = "По изменению значения"
+
+[[param.choice]]
+value = 2
+label = "Периодически"
+
+[[param]]
+name = "period"
+label = "период, мс"
+type = "int"
+default = 5000
+min = 100
+when = "trigger == 2"
+description = "Как часто отправлять"
+
+[[param]]
+name = "deadband"
+label = "мёртвая зона"
+type = "float"
+default = 0.0
+min = 0.0
+when = "trigger == 1"
+description = "Для float: изменение меньше этого не считается"
+
+[[param]]
+name = "decimals"
+label = "знаков после точки"
+type = "int"
+default = 2
+min = 0
+max = 6
+description = "Для float: сколько знаков после десятичной точки"

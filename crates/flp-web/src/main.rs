@@ -214,7 +214,7 @@ fn handle(
     Ok(())
 }
 
-/// The page the device serves at `/ui`: it is the raw string in the `web_ui` block template,
+/// The page the device serves at `/`: it is the raw string in the `web_ui` block template,
 /// so the preview in the constructor is always the page that goes into the firmware.
 fn device_page(library: &Path) -> Result<String, String> {
     const OPEN: &str = "R\"FLPUI(";

@@ -566,6 +566,11 @@ fn pins(project: &Project, lib: &Library) -> Value {
 
 /// Check result in a compact form for the model.
 pub fn report(project: &Project, lib: &Library) -> Value {
+    // Secrets kept outside the project take part in the check, as in generation.
+    let project = &match LocalValues::open_default() {
+        Ok(store) => project.with_local(lib, &store),
+        Err(_) => project.clone(),
+    };
     let r = check_project(project, lib);
     let list = |sev: Severity| -> Vec<String> {
         r.diagnostics

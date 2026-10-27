@@ -1,0 +1,100 @@
+[block]
+type = "web_tank"
+name = "Веб-ёмкость"
+symbol = "TNK"
+group = "Веб-интерфейс"
+description = "Пассивный виджет: вертикальная ёмкость на веб-странице, уровень заполнения по значению входа между min и max. Только показывает значение."
+memory = true
+
+[[input]]
+name = "in"
+type = "float"
+
+[[param]]
+name = "caption"
+type = "string"
+label = "Подпись"
+default = "Уровень"
+description = "Подпись виджета на странице"
+
+[[param]]
+name = "min"
+type = "float"
+label = "Минимум"
+default = 0.0
+description = "Значение пустой ёмкости"
+
+[[param]]
+name = "max"
+type = "float"
+label = "Максимум"
+default = 100.0
+description = "Значение полной ёмкости"
+
+[[param]]
+name = "unit"
+type = "string"
+label = "Единица"
+default = "%"
+description = "Единица измерения рядом со значением"
+
+[[param]]
+name = "decimals"
+type = "int"
+label = "Знаков после точки"
+default = 0
+description = "Сколько знаков после точки показывать"
+
+[[param]]
+name = "col"
+show = "hidden"
+type = "int"
+label = "Колонка"
+default = 1
+description = "Левая колонка сетки страницы (1–24)"
+
+[[param]]
+name = "row"
+show = "hidden"
+type = "int"
+label = "Строка"
+default = 1
+description = "Верхняя строка сетки страницы (1, 2, …)"
+
+[[param]]
+name = "w"
+show = "hidden"
+type = "int"
+label = "Ширина"
+default = 4
+description = "Ширина в колонках сетки (1–24)"
+
+[[param]]
+name = "h"
+show = "hidden"
+type = "int"
+label = "Высота"
+default = 8
+description = "Высота в строках сетки (строка — 24 px)"
+
+[[param]]
+name = "page"
+show = "hidden"
+type = "int"
+label = "Страница"
+default = 1
+description = "Номер страницы веб-интерфейса (1, 2, …); названия страниц задаются в блоке «Веб-интерфейс»"
+
+[[param]]
+name = "color"
+type = "string"
+label = "Цвет"
+default = ""
+description = "Основной цвет виджета (шкала, линия графика, включённое состояние): #rrggbb или название, например red. Пусто — цвет страницы по умолчанию"
+
+[[param]]
+name = "back"
+type = "string"
+label = "Цвет фона"
+default = ""
+description = "Цвет фона плитки виджета: #rrggbb или название. Пусто — по умолчанию"

@@ -1,0 +1,119 @@
+[block]
+type = "web_icon"
+name = "Веб-значок"
+symbol = "ICO"
+group = "Веб-интерфейс"
+description = "Графический значок на веб-странице (вентилятор, клапан, капля, пламя и т. п.): серый, пока на входе false, и цветной, когда true. Вентилятор и поток при включении вращаются. Для мнемосхем: вместе с линиями, стрелками и фигурами."
+memory = true
+
+[[input]]
+name = "in"
+type = "bool"
+
+[[param]]
+name = "caption"
+type = "string"
+label = "Подпись"
+default = ""
+description = "Подпись под значком (может быть пустой)"
+
+[[param]]
+name = "icon"
+type = "int"
+label = "Значок"
+default = 0
+description = "Какой значок нарисовать"
+
+[[param.choice]]
+value = 0
+label = "Лампа"
+
+[[param.choice]]
+value = 1
+label = "Вентилятор"
+
+[[param.choice]]
+value = 2
+label = "Клапан"
+
+[[param.choice]]
+value = 3
+label = "Капля (вода)"
+
+[[param.choice]]
+value = 4
+label = "Пламя (нагрев)"
+
+[[param.choice]]
+value = 5
+label = "Колокольчик (сигнал)"
+
+[[param.choice]]
+value = 6
+label = "Снежинка (охлаждение)"
+
+[[param.choice]]
+value = 7
+label = "Замок"
+
+[[param.choice]]
+value = 8
+label = "Термометр"
+
+[[param.choice]]
+value = 9
+label = "Волны (поток)"
+
+[[param]]
+name = "col"
+show = "hidden"
+type = "int"
+label = "Колонка"
+default = 1
+description = "Левая колонка сетки страницы (1–24)"
+
+[[param]]
+name = "row"
+show = "hidden"
+type = "int"
+label = "Строка"
+default = 1
+description = "Верхняя строка сетки страницы (1, 2, …)"
+
+[[param]]
+name = "w"
+show = "hidden"
+type = "int"
+label = "Ширина"
+default = 4
+description = "Ширина в колонках сетки (1–24)"
+
+[[param]]
+name = "h"
+show = "hidden"
+type = "int"
+label = "Высота"
+default = 6
+description = "Высота в строках сетки (строка — 24 px)"
+
+[[param]]
+name = "page"
+show = "hidden"
+type = "int"
+label = "Страница"
+default = 1
+description = "Номер страницы веб-интерфейса (1, 2, …); названия страниц задаются в блоке «Веб-интерфейс»"
+
+[[param]]
+name = "color"
+type = "string"
+label = "Цвет"
+default = ""
+description = "Основной цвет виджета (шкала, линия графика, включённое состояние): #rrggbb или название, например red. Пусто — цвет страницы по умолчанию"
+
+[[param]]
+name = "back"
+type = "string"
+label = "Цвет фона"
+default = ""
+description = "Цвет фона плитки виджета: #rrggbb или название. Пусто — по умолчанию"

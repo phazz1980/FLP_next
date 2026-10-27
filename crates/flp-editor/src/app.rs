@@ -1564,7 +1564,9 @@ impl EditorApp {
                 }
                 if ui
                     .add_enabled(has_doc, egui::Button::new("Конструктор веб-интерфейса..."))
-                    .on_hover_text("Страница управления на ESP32 (/ui): откроется в браузере")
+                    .on_hover_text(
+                        "Страница управления на ESP32 (главная страница): откроется в браузере",
+                    )
                     .clicked()
                 {
                     self.open_web_designer();

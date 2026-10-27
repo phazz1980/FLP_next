@@ -12,6 +12,9 @@ pub struct Layout {
     /// Positions keyed by block id.
     #[serde(rename = "block", default, skip_serializing_if = "BTreeMap::is_empty")]
     pub blocks: BTreeMap<String, BlockPos>,
+    /// Hand-set routes keyed by the input the link enters ("block.port").
+    #[serde(rename = "wire", default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub wires: BTreeMap<String, WireRoute>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -23,9 +26,26 @@ pub struct SheetInfo {
     pub comment: String,
 }
 
+/// Manual route of a link. A link without an entry is routed automatically.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct WireRoute {
+    /// Where the middle segment runs, in sheet coordinates: x of the vertical segment
+    /// for a link going forward, y of the horizontal one for a link going back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bend: Option<f32>,
+    /// Drawn as two labelled stubs, like a link between sheets.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub broken: bool,
+}
+
 impl Layout {
     pub fn is_empty(&self) -> bool {
-        self.sheets.is_empty() && self.blocks.is_empty()
+        self.sheets.is_empty() && self.blocks.is_empty() && self.wires.is_empty()
+    }
+
+    /// Key of a link in `wires`.
+    pub fn wire_key(to: &crate::PortRef) -> String {
+        format!("{}.{}", to.block, to.port)
     }
 
     pub fn sheet(&self, number: u32) -> Option<&SheetInfo> {

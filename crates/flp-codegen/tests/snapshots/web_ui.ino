@@ -1,5 +1,8 @@
 // Сгенерировано FLP_next из проекта «web_ui». Ручные правки будут перезаписаны.
-// Порядок выполнения: wifi → ui → head → sw → btn → sld → inp → val → bar → any → lamp → led → txt → info → line → box → trend → net
+// Порядок выполнения: wifi → ui → head → sw → btn → sld → inp → val → bar → any → lamp → led → txt → info → line → box → trend → net → tank → clock → pic → fan → arrow → panel → sepv
+
+// Tells the web page block to add the network form handlers (/ui/net, /ui/scan).
+#define FLP_WEB_NET
 
 #include <Arduino.h>
 #include <flprogNetwork.h>
@@ -116,7 +119,7 @@ body{margin:0;background:var(--b);color:var(--f);font:15px system-ui,sans-serif;
 h1{font-size:18px;margin:0 0 10px}
 @media(max-width:900px){ #n{width:64px}#n a{justify-content:center;padding:8px 0}#n a span{display:none}}
 @media(max-width:600px){body{flex-direction:column}#n{width:auto;height:auto;position:static;flex-direction:row;overflow-x:auto;padding:8px}#n a{padding:6px 12px}#n a span{display:inline}#n a i{display:none}}
-#gs>div{display:grid;grid-template-columns:repeat(12,1fr);grid-auto-rows:56px;gap:8px}
+#gs>div{display:grid;grid-template-columns:repeat(24,1fr);grid-auto-rows:24px;gap:8px}
 #gs>div.sy{display:block;max-width:560px}
 .w{background:var(--c);border-radius:8px;padding:6px 10px;display:flex;flex-direction:column;justify-content:center;min-width:0;overflow:hidden}
 .w small{opacity:.7;font-size:12px}
@@ -133,6 +136,24 @@ button,input{font:inherit;color:inherit}
 .r{display:flex;align-items:center;gap:8px}
 .bar{height:10px;border-radius:5px;background:#8884;overflow:hidden;margin-top:4px}
 .bar i{display:block;height:100%;background:var(--a)}
+.ic0{align-items:center}
+.ic{flex:1;min-height:0;width:100%;color:#888;transition:color .2s}
+.ic.on{color:var(--g)}
+.ic.sp svg{animation:spn 1.2s linear infinite}
+@keyframes spn{to{transform:rotate(360deg)}}
+.w.nw{overflow:auto;gap:6px;padding:10px 14px}
+.nw h4{margin:8px 0 0;font-size:12px;text-transform:uppercase;letter-spacing:.06em;opacity:.6;font-weight:600}
+.nr{display:grid;grid-template-columns:minmax(110px,38%) 1fr;align-items:center;gap:10px}
+.nr small{opacity:.85}
+.nr input[type=checkbox]{justify-self:start;width:18px;height:18px}
+.nr select,.nw select{width:100%;box-sizing:border-box;background:transparent;color:inherit;border:1px solid #8886;border-radius:6px;padding:4px}
+.nr select option,.nw select option{color:#222}
+.nr input:disabled,.nr select:disabled{opacity:.45}
+.nb{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
+.nb .bt{margin-top:0}.nb select{flex:1;min-width:140px;width:auto}
+.tk{width:44px;align-self:stretch;min-height:40px;border-radius:6px;background:#8884;overflow:hidden;display:flex;flex-direction:column-reverse;flex:none}
+.tk i{display:block;width:100%;background:var(--a)}
+.w.tkw .r{flex:1;min-height:0}
 input[type=range]{width:100%}
 input[type=number],input[type=password],input[type=text]{width:100%;box-sizing:border-box;background:transparent;border:1px solid #8886;border-radius:6px;padding:4px}
 table{border-collapse:collapse;width:100%}
@@ -143,7 +164,8 @@ td:first-child{opacity:.7}
 .btn:active,.bt:active{transform:scale(.96);filter:brightness(.88)}
 .led{transition:background-color .2s,box-shadow .2s}
 .bar i{transition:width .3s}
-@media(prefers-reduced-motion:reduce){.btn,.bt,.led,.bar i{transition:none}.btn:active,.bt:active{transform:none}}
+.tk i{transition:height .3s}
+@media(prefers-reduced-motion:reduce){.btn,.bt,.led,.bar i,.tk i,.ic{transition:none}.ic.sp svg{animation:none}.btn:active,.bt:active{transform:none}}
 #lg{max-width:320px;margin:60px auto;display:flex;flex-direction:column;gap:8px}
 </style></head><body><nav id="n" hidden></nav><div id="m"><h1 id="t"></h1><div id="gs"></div></div><script>
 var GS=document.getElementById('gs'),N=document.getElementById('n'),T=document.getElementById('t'),M=document.getElementById('m'),E=[],P=[],A=[],K='';
@@ -157,11 +179,16 @@ function mk(d,i){
  if(d.q)w.style.background=d.q;
  if(d.o){w.style.setProperty('--a',d.o);if(k!='button'&&k!='switch')w.style.setProperty('--g',d.o)}
  if(k=='shape'){
-  var s=h('div'),t=Math.max(1,d.b||2),c=d.o||'currentColor',m=d.a;w.style.background='none';w.style.padding='0';
+  var s=h('div'),t=Math.max(1,d.b||2),c=d.o||'currentColor',m=d.a;if(m!=10){w.style.background='none';w.style.padding='0'}
   s.style.boxSizing='border-box';
   if(m==0){s.style.borderTop=t+'px solid '+c;s.style.width='100%'}
   else if(m==1){s.style.borderLeft=t+'px solid '+c;s.style.height='100%';s.style.alignSelf='center'}
-  else{s.style.border=t+'px solid '+c;s.style.width=s.style.height='100%';s.style.background=d.q||'none';s.style.borderRadius=m==3?'50%':'8px'}
+  else if(m==8){s.style.borderTop='1px solid '+c;s.style.opacity='.4';s.style.width='100%'}
+  else if(m==9){s.style.borderLeft='1px solid '+c;s.style.opacity='.4';s.style.height='100%';s.style.alignSelf='center'}
+  else if(m==10){w.style.background=d.q||'';w.style.padding='6px 10px';w.style.justifyContent='flex-start';if(d.l)w.appendChild(h('small','',d.l));return[w,function(){}]}
+  else if(m>=4&&m<=6){var P=['M0 50H78M58 24L96 50L58 76','M50 0V78M24 58L50 96L76 58','M50 6L96 94H4Z'];
+   s.style.width=s.style.height='100%';s.innerHTML='<svg viewBox="0 0 100 100" preserveAspectRatio="none" width="100%" height="100%"><path d="'+P[m-4]+'" fill="'+(m==6?(d.q||'none'):'none')+'" stroke="'+c+'" stroke-width="'+t+'" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>'}
+  else{s.style.border=t+'px solid '+c;s.style.width=s.style.height='100%';s.style.background=d.q||'none';s.style.borderRadius=m==3?'50%':(m==7?'24px':'8px')}
   w.appendChild(s);return[w,function(){}]}
  if(k=='label'){w.appendChild(h('b','',d.l));return[w,function(){}]}
  if(k=='button'||k=='switch'){
@@ -183,10 +210,11 @@ function mk(d,i){
   return[w,function(v){if(document.activeElement!=n)n.value=v}]}
  if(k=='net'){
   var nf={},nm=[['o','Режим Wi-Fi','select'],['s','Сеть Wi-Fi','text'],['p','Пароль (пусто — не менять)','password'],['d','Адрес по DHCP','checkbox'],['i','IP-адрес','text'],['g','Шлюз','text'],['m','Маска','text'],['a','Своя точка доступа','text'],['b','Пароль точки (пусто — не менять)','password'],['w','Задержка точки без связи, с','number']],bt=h('button','bt','Сохранить'),ms=h('small','',''),sc=h('button','bt','Сканировать'),sl=h('select');
-  w.className='w cht';w.appendChild(h('b','',d.l));
+  w.className='w cht nw';w.appendChild(h('b','',d.l));
   nm.forEach(function(r){var l=h('label','r'),e=r[2]=='select'?h('select'):h('input');
    if(r[2]=='select')['Клиент','Точка доступа','Клиент и точка','Клиент, при отсутствии связи — точка'].forEach(function(t,j){e.appendChild(new Option(t,j))});else e.type=r[2];
-   l.appendChild(h('small','',r[1]));l.appendChild(e);if(r[2]=='text')e.style.flex='1';w.appendChild(l);nf[r[0]]=e});
+   if(r[0]=='o')w.appendChild(h('h4','','Подключение'));if(r[0]=='a')w.appendChild(h('h4','','Точка доступа'));
+   l.className='nr';l.appendChild(h('small','',r[1]));l.appendChild(e);w.appendChild(l);nf[r[0]]=e});
   function ds(){['i','g','m'].forEach(function(c){nf[c].disabled=nf.d.checked});
    var m=+nf.o.value;['s','p'].forEach(function(c){nf[c].disabled=m==1});['a','b'].forEach(function(c){nf[c].disabled=m==0});nf.w.disabled=m!=3;sc.disabled=m==1}
   nf.d.onchange=nf.o.onchange=ds;
@@ -205,9 +233,28 @@ function mk(d,i){
    t.split('\n').forEach(function(x){var p=x.split('\t');if(p[0])sl.appendChild(new Option(p[0]+' ('+p[1]+' дБм)',p[0]))});
    sl.style.display='';sc.disabled=false;ms.textContent='Найдено сетей: '+(sl.options.length-1)}).catch(function(){sc.disabled=false;ms.textContent='Ошибка сканирования'})}
   sc.onclick=function(){sc.disabled=true;ms.textContent='Сканирование...';scn()};
-  w.appendChild(sc);w.appendChild(sl);w.appendChild(bt);w.appendChild(ms);
+  var br=h('div','nb');br.appendChild(sc);br.appendChild(sl);br.appendChild(bt);w.appendChild(br);w.appendChild(ms);
   return[w,function(v){if(w.contains(document.activeElement))return;var a=String(v).split('\n');
    nf.s.value=a[0]||'';nf.d.checked=a[2]!='0';nf.i.value=a[3]||'';nf.g.value=a[4]||'';nf.m.value=a[5]||'';nf.a.value=a[6]||'';nf.o.value=a[8]||'0';nf.w.value=a[9]||'30';ds()}]}
+ if(k=='tank'){
+  var q=h('b','',''),a=h('i'),z=h('div','tk'),r=h('div','r');w.className='w tkw';z.appendChild(a);
+  w.appendChild(h('small','',d.l));r.appendChild(z);r.appendChild(q);w.appendChild(r);
+  return[w,function(v){q.textContent=(+v).toFixed(d.d)+u;a.style.height=Math.max(0,Math.min(100,(v-d.a)/(d.b-d.a)*100))+'%'}]}
+ if(k=='clock'){
+  var q=h('b','',''),e=h('small','','');w.appendChild(h('small','',d.l));w.appendChild(q);w.appendChild(e);
+  function tk(){var t=new Date(),p=function(n){return(n<10?'0':'')+n};
+   q.textContent=p(t.getHours())+':'+p(t.getMinutes())+(d.a?':'+p(t.getSeconds()):'');
+   e.textContent=d.b?t.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'long',year:'numeric'}):''}
+  tk();setInterval(tk,1000);return[w,function(){}]}
+ if(k=='image'){
+  var m=h('img');m.src=d.u;m.alt=d.l;m.style.cssText='width:100%;flex:1;min-height:0;object-fit:'+(d.a?'contain':'cover');
+  if(d.l)w.appendChild(h('small','',d.l));w.appendChild(m);return[w,function(){}]}
+ if(k=='icon'){
+  var I=['<circle cx="32" cy="32" r="22"/><path d="M32 10V4M10 32H4M54 32h6"/><path d="M10 54h44"/>','<circle cx="32" cy="32" r="4"/><path d="M32 28C32 8 46 8 46 18C46 26 36 28 32 28zM36 32C56 32 56 46 46 46C38 46 36 36 36 32zM32 36C32 56 18 56 18 46C18 38 28 36 32 36zM28 32C8 32 8 18 18 18C26 18 28 28 28 32z"/>','<path d="M8 12L32 32L8 52zM56 12L32 32L56 52z"/><path d="M32 32V8"/>','<path d="M32 6C32 6 14 28 14 40a18 18 0 0 0 36 0C50 28 32 6 32 6z"/>','<path d="M32 4C36 20 50 26 50 42a18 18 0 0 1-36 0C14 34 20 30 22 22C26 28 30 26 32 4z"/>','<path d="M32 6a14 14 0 0 0-14 14c0 12-8 14-8 24h44c0-10-8-12-8-24A14 14 0 0 0 32 6zM26 52a6 6 0 0 0 12 0"/>','<path d="M32 4V60M8 18L56 46M8 46L56 18"/>','<rect x="12" y="28" width="40" height="30" rx="4"/><path d="M20 28V20a12 12 0 0 1 24 0v8"/>','<path d="M24 8a8 8 0 0 1 16 0V36a14 14 0 1 1-16 0z"/>','<path d="M4 44c8-8 16-8 28 0s20 8 28 0M4 28c8-8 16-8 28 0s20 8 28 0"/>'];
+  var sv=h('div','ic'),n=Math.max(0,Math.min(I.length-1,d.a|0));
+  sv.innerHTML='<svg viewBox="0 0 64 64" width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">'+I[n]+'</svg>';
+  w.className='w ic0';if(d.l)w.appendChild(h('small','',d.l));w.appendChild(sv);
+  return[w,function(v){sv.classList.toggle('on',v!=0);sv.classList.toggle('sp',v!=0&&(n==1||n==6))}]}
  if(k=='led'){
   var r=h('div','r'),l=h('div','led');r.appendChild(l);r.appendChild(h('span','',d.l));w.appendChild(r);
   return[w,function(v){l.classList.toggle('on',v!=0)}]}
@@ -270,47 +317,73 @@ F('/ui/layout').then(function(r){if(r.status==403){lg(K!='');throw 0}return r.js
 </script></body></html>)FLPUI";
 
 // head: web_label
-FlpUiItem head_ui = {"web_label", "Управление", "", 1, 1, 12, 1, 1, false, 0, 0, 0, 0, 0};
+FlpUiItem head_ui = {"web_label", "Управление", "", 1, 1, 24, 2, 1, false, 0, 0, 0, 0, 0};
 
 // sw: web_switch
-FlpUiItem sw_ui = {"web_switch", "Свет", "", 1, 2, 4, 1, 1, true, 0, 0, 0, 0, 0};
+FlpUiItem sw_ui = {"web_switch", "Свет", "", 1, 3, 8, 2, 1, true, 0, 0, 0, 0, 0};
 
 // btn: web_button
-FlpUiItem btn_ui = {"web_button", "Нажать", "", 5, 2, 4, 1, 1, true, 0, 0, 0, 0, 0};
+FlpUiItem btn_ui = {"web_button", "Нажать", "", 9, 3, 8, 2, 1, true, 0, 0, 0, 0, 0};
 
 // sld: web_slider
-FlpUiItem sld_ui = {"web_slider", "Ползунок", "%", 1, 3, 8, 1, 1, true, 25.0f, 0.0f, 100.0f, 5.0f, 3};
+FlpUiItem sld_ui = {"web_slider", "Ползунок", "%", 1, 5, 16, 2, 1, true, 25.0f, 0.0f, 100.0f, 5.0f, 3};
 
 // inp: web_input
-FlpUiItem inp_ui = {"web_input", "Уставка", "°C", 9, 3, 4, 1, 1, true, 21.5f, -50.0f, 150.0f, 0.5f, 3};
+FlpUiItem inp_ui = {"web_input", "Уставка", "°C", 17, 5, 8, 2, 1, true, 21.5f, -50.0f, 150.0f, 0.5f, 3};
 
 // val: web_value
-FlpUiItem val_ui = {"web_value", "Ползунок", "%", 1, 4, 4, 2, 1, false, 0, 0, 0, 0, 0};
+FlpUiItem val_ui = {"web_value", "Ползунок", "%", 1, 7, 8, 4, 1, false, 0, 0, 0, 0, 0};
 
 // bar: web_gauge
-FlpUiItem bar_ui = {"web_gauge", "Шкала", "%", 5, 4, 8, 2, 1, false, 0, 0.0f, 100.0f, 0, 1};
+FlpUiItem bar_ui = {"web_gauge", "Шкала", "%", 9, 7, 16, 4, 1, false, 0, 0.0f, 100.0f, 0, 1};
 
 // lamp: web_led
-FlpUiItem lamp_ui = {"web_led", "Светодиод", "", 9, 2, 4, 1, 1, false, 0, 0, 0, 0, 0};
+FlpUiItem lamp_ui = {"web_led", "Светодиод", "", 17, 3, 8, 2, 1, false, 0, 0, 0, 0, 0};
 
 // info: web_text
-FlpUiItem info_ui = {"web_text", "Состояние", "", 1, 6, 12, 1, 1, false, 0, 0, 0, 0, 0};
+FlpUiItem info_ui = {"web_text", "Состояние", "", 1, 11, 24, 2, 1, false, 0, 0, 0, 0, 0};
 
 // line: web_shape
 // The shape code travels in `lo` and the thickness in `hi` (a shape has no value).
-FlpUiItem line_ui = {"web_shape", "", "", 1, 7, 12, 1, 1, false, 0, 0, 2, 0, 0};
+FlpUiItem line_ui = {"web_shape", "", "", 1, 13, 24, 2, 1, false, 0, 0, 2, 0, 0};
 
 // box: web_shape
 // The shape code travels in `lo` and the thickness in `hi` (a shape has no value).
-FlpUiItem box_ui = {"web_shape", "", "", 1, 8, 2, 2, 1, false, 0, 3, 3, 0, 0};
+FlpUiItem box_ui = {"web_shape", "", "", 1, 15, 4, 4, 1, false, 0, 3, 3, 0, 0};
 
 // trend: web_chart
 float trend_buf[60];
-FlpUiItem trend_ui = {"web_chart", "Ползунок", "%", 3, 8, 10, 4, 1, false, 0, 0.0f, 100.0f, 2, 1, String(), trend_buf, 60};
+FlpUiItem trend_ui = {"web_chart", "Ползунок", "%", 5, 15, 20, 8, 1, false, 0, 0.0f, 100.0f, 2, 1, String(), trend_buf, 60};
 
 // net: web_net
-FlpUiItem net_ui = {"web_net", "Настройки сети", "", 1, 12, 6, 5, 1, true, 0, 0, 0, 0, 0};
+FlpUiItem net_ui = {"web_net", "Настройки сети", "", 1, 23, 16, 10, 1, true, 0, 0, 0, 0, 0};
 Preferences net_prefs;
+
+// tank: web_tank
+FlpUiItem tank_ui = {"web_tank", "Ёмкость", "%", 1, 33, 4, 8, 1, false, 0, 0.0f, 100.0f, 0, 0};
+
+// clock: web_clock
+FlpUiItem clock_ui = {"web_clock", "Время", "", 5, 33, 8, 4, 1, false, 0, 1, 1, 0, 0};
+
+// pic: web_image
+// The image address travels in `unit`; the fit mode in `lo`.
+FlpUiItem pic_ui = {"web_image", "Схема", "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b0/ESP32_Espressif_ESP-WROOM-32_Wi-Fi_Bluetooth_Module.jpg/320px-ESP32_Espressif_ESP-WROOM-32_Wi-Fi_Bluetooth_Module.jpg", 13, 33, 8, 8, 1, false, 0, 1, 0, 0, 0};
+
+// fan: web_icon
+// The icon number travels in `lo`.
+FlpUiItem fan_ui = {"web_icon", "Вентилятор", "", 21, 33, 4, 6, 1, false, 0, 1, 0, 0, 0};
+
+// arrow: web_shape
+// The shape code travels in `lo` and the thickness in `hi` (a shape has no value).
+FlpUiItem arrow_ui = {"web_shape", "", "", 1, 41, 8, 3, 1, false, 0, 4, 3, 0, 0};
+
+// panel: web_shape
+// The shape code travels in `lo` and the thickness in `hi` (a shape has no value).
+FlpUiItem panel_ui = {"web_shape", "Насос", "", 9, 41, 16, 6, 1, false, 0, 10, 2, 0, 0};
+
+// sepv: web_shape
+// The shape code travels in `lo` and the thickness in `hi` (a shape has no value).
+FlpUiItem sepv_ui = {"web_shape", "", "", 12, 42, 1, 4, 1, false, 0, 9, 2, 0, 0};
 
 // wifi: wifi
 void wifi_up_reply(const char *status, const char *text) {
@@ -448,7 +521,11 @@ bool ui_allowed(FLProgNetworkHttpServer *server) {
   return false;
 }
 void ui_page(FLProgNetworkHttpServer *server) {
-  server->sendProgmem(200, "text/html; charset=utf-8", ui_html);
+  // The page is far bigger than the response buffer: stream it straight from flash.
+  if (!server->sendStreamProgmem(200, "text/html; charset=utf-8", ui_html, strlen(ui_html))) {
+    // The legacy server mode cannot stream from flash: write the page to the client directly (the 200 header is added).
+    server->write((const uint8_t *)ui_html, strlen(ui_html));
+  }
 }
 void ui_layout(FLProgNetworkHttpServer *server) {
   if (!ui_allowed(server)) return;
@@ -512,6 +589,7 @@ void ui_set(FLProgNetworkHttpServer *server) {
   }
   server->send(200, "text/plain", "ok");
 }
+#ifdef FLP_WEB_NET
 // Network settings form: the widget block validates and saves what is stored here.
 void ui_net(FLProgNetworkHttpServer *server) {
   if (!ui_allowed(server)) return;
@@ -546,12 +624,17 @@ void ui_scan(FLProgNetworkHttpServer *server) {
   } else {
     for (int k = 0; k < n; k++) {
       String s = WiFi.SSID(k);
-      if (s.length()) o += s + "\t" + String(WiFi.RSSI(k)) + "\n";
+      if (!s.length() || o.startsWith(s + "\t") || o.indexOf("\n" + s + "\t") >= 0) continue;
+      String line = s + "\t" + String(WiFi.RSSI(k)) + "\n";
+      // The server answers with at most 2 KB: the strongest networks (the scan is sorted by signal), each name once.
+      if (o.length() + line.length() > 1800) break;
+      o += line;
     }
     WiFi.scanDelete();
   }
   server->send(200, "text/plain", o);
 }
+#endif
 // Chart history, oldest point first.
 void ui_hist(FLProgNetworkHttpServer *server) {
   if (!ui_allowed(server)) return;
@@ -640,13 +723,15 @@ void setup() {
   wifi_ota.setHostname("wifi");
 
   // ui: web_ui
-  flpWebSrv.addHandler("/ui", ui_page);
+  flpWebSrv.addHandler("/", ui_page);
   flpWebSrv.addHandler("/ui/layout", ui_layout);
   flpWebSrv.addHandler("/ui/state", ui_state);
   flpWebSrv.addHandler("/ui/set", ui_set);
   flpWebSrv.addHandler("/ui/hist", ui_hist);
+  #ifdef FLP_WEB_NET
   flpWebSrv.addHandler("/ui/net", ui_net);
   flpWebSrv.addHandler("/ui/scan", ui_scan);
+  #endif
   flpWebSrv.addHandler("/ui/info", ui_info);
 
   // head: web_label
@@ -714,13 +799,27 @@ void setup() {
 
   // net: web_net
   net_prefs.begin("flp", false);
+  // Defaults come from the editor: when they change (a new flash with other settings), the saved page values are dropped.
+  {
+    String init[10] = { "MyNetwork", "", "1", "192.168.1.177", "192.168.1.1", "255.255.255.0", "FLP_ESP32", "", "0", "30"};
+    uint32_t sig = 2166136261UL;
+    for (int k = 0; k < 10; k++) {
+      for (size_t n = 0; n < init[k].length(); n++) sig = (sig ^ (uint8_t)init[k][n]) * 16777619UL;
+      sig = (sig ^ 0xFF) * 16777619UL;
+    }
+    if (net_prefs.getUInt("net_h", 0) != sig) {
+      static const char *keys[10] = {"_s", "_p", "_d", "_i", "_g", "_m", "_a", "_b", "_o", "_w"};
+      for (int k = 0; k < 10; k++) net_prefs.remove((String("net") + keys[k]).c_str());
+      net_prefs.putUInt("net_h", sig);
+    }
+  }
   flpNet.f[0] = net_prefs.getString("net_s", "MyNetwork");
   flpNet.f[1] = net_prefs.getString("net_p", "");
   flpNet.f[2] = net_prefs.getString("net_d", "1");
   flpNet.f[3] = net_prefs.getString("net_i", "192.168.1.177");
   flpNet.f[4] = net_prefs.getString("net_g", "192.168.1.1");
   flpNet.f[5] = net_prefs.getString("net_m", "255.255.255.0");
-  flpNet.f[6] = net_prefs.getString("net_a", "");
+  flpNet.f[6] = net_prefs.getString("net_a", "FLP_ESP32");
   flpNet.f[7] = net_prefs.getString("net_b", "");
   flpNet.f[8] = net_prefs.getString("net_o", "0");
   flpNet.f[9] = net_prefs.getString("net_w", "30");
@@ -728,6 +827,41 @@ void setup() {
   flpUiAdd(&net_ui);
   net_ui.color = "";
   net_ui.back = "";
+
+  // tank: web_tank
+  flpUiAdd(&tank_ui);
+  tank_ui.color = "#4a90d9";
+  tank_ui.back = "";
+
+  // clock: web_clock
+  flpUiAdd(&clock_ui);
+  clock_ui.color = "";
+  clock_ui.back = "";
+
+  // pic: web_image
+  flpUiAdd(&pic_ui);
+  pic_ui.color = "";
+  pic_ui.back = "";
+
+  // fan: web_icon
+  flpUiAdd(&fan_ui);
+  fan_ui.color = "#2da44e";
+  fan_ui.back = "";
+
+  // arrow: web_shape
+  flpUiAdd(&arrow_ui);
+  arrow_ui.color = "#4a90d9";
+  arrow_ui.back = "";
+
+  // panel: web_shape
+  flpUiAdd(&panel_ui);
+  panel_ui.color = "";
+  panel_ui.back = "";
+
+  // sepv: web_shape
+  flpUiAdd(&sepv_ui);
+  sepv_ui.color = "";
+  sepv_ui.back = "";
 }
 
 void loop() {
@@ -902,4 +1036,10 @@ void loop() {
   net_gateway = flpNet.f[4];
   net_subnet = flpNet.f[5];
   net_mode = flpNet.f[8].toInt();
+
+  // tank: web_tank
+  tank_ui.value = sld_out;
+
+  // fan: web_icon
+  fan_ui.value = sw_out ? 1 : 0;
 }

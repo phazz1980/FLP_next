@@ -1,0 +1,69 @@
+// @defines
+#define FLPROG_MQTT_MAX_SUBSCRIPTIONS {{ param.max_subscriptions }}U
+// @global
+// Shared MQTT client: mqtt_publish / mqtt_subscribe blocks use it.
+FLProgNetworkMqttClient flpMqtt;
+bool {{ id }}_bound = false;
+// The last received message, shared by all subscriptions.
+String flpMqttTopic;
+String flpMqttPayload;
+uint32_t flpMqttSeq = 0;
+
+// @functions once
+void flp_mqtt_receive(const char *topic, const uint8_t *payload, size_t length, bool retained) {
+  (void)retained;
+  flpMqttTopic = topic;
+  flpMqttPayload = "";
+  flpMqttPayload.reserve(length);
+  for (size_t i = 0; i < length; i++) {
+    flpMqttPayload += (char)payload[i];
+  }
+  flpMqttSeq++;
+}
+
+// Topic against a filter with + (one level) and # (the rest).
+bool flp_mqtt_match(const char *f, const char *t) {
+  for (;;) {
+    const char *fe = strchr(f, '/');
+    const char *te = strchr(t, '/');
+    size_t fn = fe ? (size_t)(fe - f) : strlen(f);
+    size_t tn = te ? (size_t)(te - t) : strlen(t);
+    if (fn == 1 && *f == '#') {
+      return true;
+    }
+    if (!(fn == 1 && *f == '+') && (fn != tn || strncmp(f, t, fn) != 0)) {
+      return false;
+    }
+    if (!fe || !te) {
+      return !fe && !te;
+    }
+    f = fe + 1;
+    t = te + 1;
+  }
+}
+
+// @loop
+if (!{{ id }}_bound) {
+  // Attach once; the client reconnects by itself after that.
+  {{ id }}_bound = flpMqtt.begin({% if value.net == "ethernet" %}flpEth{% else %}flpWifi{% endif %});
+  if ({{ id }}_bound) {
+    flpMqtt.setBroker({{ param.broker }});
+    flpMqtt.setPort({{ param.port }});
+{% if value.client_id %}
+    flpMqtt.setClientId({{ param.client_id }});
+{% else %}
+    char cid[24];
+    snprintf(cid, sizeof(cid), "flp-%08lx", (unsigned long)ESP.getEfuseMac());
+    flpMqtt.setClientId(cid);
+{% endif %}
+{% if value.user %}
+    flpMqtt.setCredentials({{ param.user }}, {{ param.password }});
+{% endif %}
+    flpMqtt.setKeepAlive({{ param.keepalive }});
+    flpMqtt.setMessageCallback(flp_mqtt_receive);
+    flpMqtt.setAutoReconnect(true);
+    flpMqtt.connect();
+  }
+}
+{{ output.connected }} = flpMqtt.connected();
+{{ output.error }} = flpMqtt.error();

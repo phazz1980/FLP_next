@@ -431,7 +431,16 @@ impl ArduinoCli {
         on_line: &mut dyn FnMut(&str),
     ) -> Result<(), BuildError> {
         let args = upload_args(&plain_path(work_dir), board, port);
-        let status = self.run(&args, false, on_line)?;
+        let mut chip_mismatch = false;
+        let status = self.run(&args, false, &mut |line| {
+            chip_mismatch |= line.contains("This chip is");
+            on_line(line);
+        })?;
+        if chip_mismatch && !status.success() {
+            on_line(
+                "Подсказка: в плату впаян другой чип, чем выбран в проекте —                  выберите подходящую плату в настройках платы.",
+            );
+        }
         check_status("заливка", status)
     }
 

@@ -28,6 +28,41 @@ label = "Прямоугольник"
 value = 3
 label = "Круг (эллипс)"
 
+[[param.choice]]
+value = 4
+label = "Стрелка вправо"
+
+[[param.choice]]
+value = 5
+label = "Стрелка вниз"
+
+[[param.choice]]
+value = 6
+label = "Треугольник"
+
+[[param.choice]]
+value = 7
+label = "Скруглённый прямоугольник"
+
+[[param.choice]]
+value = 8
+label = "Разделитель горизонтальный (тонкий)"
+
+[[param.choice]]
+value = 9
+label = "Разделитель вертикальный (тонкий)"
+
+[[param.choice]]
+value = 10
+label = "Панель (плитка с подписью)"
+
+[[param]]
+name = "caption"
+type = "string"
+label = "Подпись"
+default = ""
+description = "Подпись панели (вверху слева); у остальных фигур не показывается"
+
 [[param]]
 name = "thickness"
 type = "int"
@@ -57,7 +92,7 @@ show = "hidden"
 type = "int"
 label = "Колонка"
 default = 1
-description = "Левая колонка сетки страницы (1–12)"
+description = "Левая колонка сетки страницы (1–24)"
 
 [[param]]
 name = "row"
@@ -72,16 +107,16 @@ name = "w"
 show = "hidden"
 type = "int"
 label = "Ширина"
-default = 4
-description = "Ширина в колонках сетки (1–12)"
+default = 8
+description = "Ширина в колонках сетки (1–24)"
 
 [[param]]
 name = "h"
 show = "hidden"
 type = "int"
 label = "Высота"
-default = 1
-description = "Высота в строках сетки"
+default = 2
+description = "Высота в строках сетки (строка — 24 px)"
 
 [[param]]
 name = "page"

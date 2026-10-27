@@ -1,0 +1,7 @@
+// @global
+// The image address travels in `unit`; the fit mode in `lo`.
+FlpUiItem {{ id }}_ui = {"web_image", {{ param.caption }}, {{ param.url }}, {{ value.col }}, {{ value.row }}, {{ value.w }}, {{ value.h }}, {{ value.page }}, false, 0, {{ 1 if value.fit else 0 }}, 0, 0, 0};
+// @setup
+flpUiAdd(&{{ id }}_ui);
+{{ id }}_ui.color = {{ param.color }};
+{{ id }}_ui.back = {{ param.back }};

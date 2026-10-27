@@ -1,0 +1,65 @@
+[block]
+type = "mqtt_subscribe"
+name = "MQTT подписка"
+symbol = "MQTT ←"
+group = "Сеть"
+description = "Принимает сообщения из топика MQTT (допустимы шаблоны + и #) и выдаёт последнее значение нужного типа."
+
+[[output]]
+name = "out"
+type = "string"
+when = 'kind == "string"'
+description = "Последнее сообщение текстом"
+
+[[output]]
+name = "out_i"
+type = "int"
+when = 'kind == "int"'
+description = "Последнее сообщение как целое число"
+
+[[output]]
+name = "out_f"
+type = "float"
+when = 'kind == "float"'
+description = "Последнее сообщение как число"
+
+[[output]]
+name = "out_b"
+type = "bool"
+when = 'kind == "bool"'
+description = "Последнее сообщение как bool: 1, true, on — true"
+
+[[output]]
+name = "received"
+type = "bool"
+description = "true в одном цикле, когда пришло сообщение"
+
+[[param]]
+name = "topic"
+label = "топик"
+type = "string"
+default = "flp/command"
+description = "Топик или шаблон: + — один уровень, # — весь остаток"
+
+[[param]]
+name = "kind"
+label = "тип значения"
+type = "string"
+default = "string"
+description = "Во что превращать сообщение: string, int, float или bool"
+
+[[param.choice]]
+value = "string"
+label = "Строка"
+
+[[param.choice]]
+value = "int"
+label = "Целое"
+
+[[param.choice]]
+value = "float"
+label = "Дробное"
+
+[[param.choice]]
+value = "bool"
+label = "Логическое"
