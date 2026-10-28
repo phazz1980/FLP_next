@@ -138,6 +138,7 @@ pub struct EditorApp {
     pub block_editor: Option<crate::blockedit::BlockEditor>,
     /// Open "Project code" window.
     pub code_view: Option<crate::codeview::CodeView>,
+    pub help: Option<crate::help::HelpWindow>,
     /// User block waiting for the delete confirmation.
     pub block_delete: Option<String>,
     /// Selected upload port; empty means automatic.
@@ -240,6 +241,7 @@ impl EditorApp {
             theme_editor: None,
             block_editor: None,
             code_view: None,
+            help: None,
             block_delete: None,
             port: String::new(),
             ports: Vec::new(),
@@ -610,6 +612,9 @@ impl EditorApp {
                 let user = lib.iter().filter(|b| lib.is_user(&b.def.info.kind)).count();
                 let builtin = lib.len() - user;
                 self.lib = lib;
+                if let Some(help) = &mut self.help {
+                    help.blocks_dirty = true;
+                }
                 for e in errors {
                     self.info(LogLevel::Warning, format!("Блок пропущен: {e}"));
                 }
@@ -1512,6 +1517,34 @@ impl EditorApp {
         self.selection = selection;
     }
 
+    /// Opens the help window on `target` (`page` or `page#anchor`).
+    pub fn open_help(&mut self, target: &str) {
+        match &mut self.help {
+            Some(help) => help.goto(target),
+            None => self.help = Some(crate::help::HelpWindow::new(&self.lib, target)),
+        }
+    }
+
+    /// Help page of the selected block, or the start page without one.
+    fn help_target(&self) -> String {
+        let kind = match (&self.selection, &self.doc) {
+            (Some(Selection::Block(id)), Some(doc)) => doc
+                .project
+                .logic
+                .blocks
+                .iter()
+                .find(|b| b.id == *id)
+                .map(|b| b.kind.as_str()),
+            _ => None,
+        };
+        match kind.and_then(|k| self.lib.get(k)) {
+            Some(block) if !block.def.info.hidden => {
+                format!("{}/{}", crate::help::BLOCKS, block.def.info.kind)
+            }
+            _ => crate::help::START.to_owned(),
+        }
+    }
+
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let shortcut = |m, k| KeyboardShortcut::new(m, k);
         let pressed = |s: KeyboardShortcut| ctx.input_mut(|i| i.consume_shortcut(&s));
@@ -1529,6 +1562,10 @@ impl EditorApp {
             || pressed(shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z))
         {
             self.redo();
+        }
+        if pressed(shortcut(Modifiers::NONE, Key::F1)) {
+            let target = self.help_target();
+            self.open_help(&target);
         }
         if pressed(shortcut(Modifiers::NONE, Key::F7)) {
             self.run_check();
@@ -1812,6 +1849,22 @@ impl EditorApp {
                 }
             });
             ui.menu_button("Справка", |ui| {
+                if ui
+                    .add(egui::Button::new("Содержание").shortcut_text("F1"))
+                    .clicked()
+                {
+                    self.open_help(crate::help::START);
+                    ui.close();
+                }
+                if ui.button("Справочник блоков").clicked() {
+                    self.open_help(crate::help::BLOCKS);
+                    ui.close();
+                }
+                if ui.button("Частые ошибки").clicked() {
+                    self.open_help(crate::help::ERRORS);
+                    ui.close();
+                }
+                ui.separator();
                 ui.weak(format!("FLP_next {}", update::CURRENT));
                 ui.separator();
                 if ui
@@ -2231,6 +2284,7 @@ impl eframe::App for EditorApp {
         crate::themeedit::show(self, &ctx);
         crate::blockedit::show(self, &ctx);
         crate::codeview::show(self, &ctx);
+        crate::help::show(self, &ctx);
         crate::blockedit::delete_dialog(self, &ctx);
         let pal = self.theme.palette;
         if let Some(d) = &mut self.debug {

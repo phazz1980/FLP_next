@@ -22,21 +22,56 @@ enum Block<'a> {
 enum Span<'a> {
     Text(&'a str, Emphasis),
     Code(&'a str),
+    /// Label and target of `[label](target)`.
+    Link(&'a str, &'a str),
+}
+
+/// Anchor of a heading: lower case, words joined by `-`, punctuation dropped.
+pub fn slug(title: &str) -> String {
+    let mut out = String::new();
+    for c in title.trim().chars() {
+        if c.is_alphanumeric() {
+            out.extend(c.to_lowercase());
+        } else if (c.is_whitespace() || c == '-') && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_end_matches('-').to_owned()
+}
+
+/// Draws `text` as Markdown. A click on a `help:` link returns its target
+/// (`page#anchor`); other links open in the browser.
+pub fn show_linked(ui: &mut Ui, text: &str, anchor: Option<&str>) -> Option<String> {
+    let url = show_inner(ui, text, anchor)?;
+    match url.strip_prefix("help:") {
+        Some(target) => Some(target.to_owned()),
+        None => {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct Emphasis {
     bold: bool,
     italic: bool,
-    link: bool,
 }
 
 /// Draws `text` as formatted Markdown, wrapping at the available width.
 pub fn show(ui: &mut Ui, text: &str) {
+    show_linked(ui, text, None);
+}
+
+fn show_inner(ui: &mut Ui, text: &str, anchor: Option<&str>) -> Option<String> {
+    let mut clicked = None;
     for block in parse(text) {
         match block {
             Block::Heading(level, text) => {
                 ui.add_space(if level == 1 { 2.0 } else { 6.0 });
+                if anchor.is_some_and(|a| a == slug(&text)) {
+                    ui.scroll_to_cursor(Some(egui::Align::TOP));
+                }
                 let size = match level {
                     1 => 20.0,
                     2 => 17.0,
@@ -46,31 +81,36 @@ pub fn show(ui: &mut Ui, text: &str) {
                 rich(ui, &text, FontId::proportional(size), color);
                 ui.add_space(2.0);
             }
-            Block::Paragraph(text) => body(ui, &text),
+            Block::Paragraph(text) => clicked = body(ui, &text).or(clicked),
             Block::Item(marker, text) => {
-                ui.horizontal_top(|ui| {
-                    ui.add_space(8.0);
-                    ui.label(marker);
-                    ui.vertical(|ui| body(ui, &text));
-                });
+                let url = ui
+                    .horizontal_top(|ui| {
+                        ui.add_space(8.0);
+                        ui.label(marker);
+                        ui.vertical(|ui| body(ui, &text)).inner
+                    })
+                    .inner;
+                clicked = url.or(clicked);
             }
             Block::Quote(text) => {
                 let bar = ui.visuals().widgets.noninteractive.bg_stroke.color;
-                egui::Frame::new()
+                let quote = egui::Frame::new()
                     .inner_margin(egui::Margin {
                         left: 8,
                         ..Default::default()
                     })
                     .show(ui, |ui| {
                         let rect = ui.max_rect();
-                        body(ui, &text);
+                        let url = body(ui, &text);
                         let x = rect.left() - 5.0;
                         ui.painter().vline(
                             x,
                             rect.top()..=ui.min_rect().bottom(),
                             Stroke::new(3.0, bar),
                         );
+                        url
                     });
+                clicked = quote.inner.or(clicked);
             }
             Block::Code(lines) => {
                 egui::Frame::new()
@@ -87,12 +127,50 @@ pub fn show(ui: &mut Ui, text: &str) {
             Block::Gap => ui.add_space(6.0),
         }
     }
+    clicked
 }
 
-fn body(ui: &mut Ui, text: &str) {
+/// Draws a paragraph; returns the target of a link clicked in it.
+fn body(ui: &mut Ui, text: &str) -> Option<String> {
     let font = TextStyle::Body.resolve(ui.style());
     let color = ui.visuals().text_color();
-    rich(ui, text, font, color);
+    let spans = inline(text);
+    if !spans.iter().any(|s| matches!(s, Span::Link(..))) {
+        rich(ui, text, font, color);
+        return None;
+    }
+    // Links need their own widgets to be clickable, so the paragraph is a row of them.
+    let mut clicked = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for span in spans {
+            match span {
+                Span::Text(s, e) => {
+                    let mut t = egui::RichText::new(s).font(font.clone());
+                    if e.bold {
+                        t = t.color(ui.visuals().strong_text_color());
+                    }
+                    if e.italic {
+                        t = t.italics();
+                    }
+                    ui.label(t);
+                }
+                Span::Code(s) => {
+                    ui.label(
+                        egui::RichText::new(s)
+                            .monospace()
+                            .background_color(ui.visuals().code_bg_color),
+                    );
+                }
+                Span::Link(label, url) => {
+                    if ui.link(label).clicked() {
+                        clicked = Some(url.to_owned());
+                    }
+                }
+            }
+        }
+    });
+    clicked
 }
 
 fn rich(ui: &mut Ui, text: &str, font: FontId, color: Color32) {
@@ -110,9 +188,7 @@ fn layout(ui: &Ui, text: &str, font: FontId, color: Color32) -> LayoutJob {
                 // The default fonts have no bold face: bold is the strong text colour.
                 let format = TextFormat {
                     font_id: font.clone(),
-                    color: if e.link {
-                        visuals.hyperlink_color
-                    } else if e.bold {
+                    color: if e.bold {
                         visuals.strong_text_color()
                     } else {
                         color
@@ -129,6 +205,16 @@ fn layout(ui: &Ui, text: &str, font: FontId, color: Color32) -> LayoutJob {
                     font_id: mono.clone(),
                     color,
                     background: visuals.code_bg_color,
+                    ..Default::default()
+                },
+            ),
+            // Not clickable here (headings, table cells): only the label.
+            Span::Link(label, _) => job.append(
+                label,
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color: visuals.hyperlink_color,
                     ..Default::default()
                 },
             ),
@@ -316,18 +402,12 @@ fn inline<'a>(text: &'a str) -> Vec<Span<'a>> {
                 continue;
             }
             b'[' => {
-                // [text](url) shows the text only.
                 if let Some(close) = text[i..].find("](") {
                     if let Some(end) = text[i + close..].find(')') {
                         flush(&mut spans, start, i, emphasis);
                         let label = &text[i + 1..i + close];
-                        spans.push(Span::Text(
-                            label,
-                            Emphasis {
-                                link: true,
-                                ..emphasis
-                            },
-                        ));
+                        let url = &text[i + close + 2..i + close + end];
+                        spans.push(Span::Link(label, url));
                         i += close + end + 1;
                         start = i;
                         continue;
@@ -377,10 +457,6 @@ mod tests {
             bold: true,
             ..plain
         };
-        let link = Emphasis {
-            link: true,
-            ..plain
-        };
         assert_eq!(
             inline("a `x_y` **b** [c](http://d) *"),
             vec![
@@ -389,10 +465,16 @@ mod tests {
                 Span::Text(" ", plain),
                 Span::Text("b", bold),
                 Span::Text(" ", plain),
-                Span::Text("c", link),
+                Span::Link("c", "http://d"),
                 Span::Text(" ", plain),
             ]
         );
+    }
+
+    #[test]
+    fn slug_of_heading() {
+        assert_eq!(slug("Что такое «Цикл»?"), "что-такое-цикл");
+        assert_eq!(slug("  Два  слова - тут "), "два-слова-тут");
     }
 
     #[test]

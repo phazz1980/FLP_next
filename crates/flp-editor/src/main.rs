@@ -19,6 +19,7 @@ mod console;
 mod debugview;
 mod dialogs;
 mod doc;
+mod help;
 mod job;
 mod markdown;
 mod netpanel;
