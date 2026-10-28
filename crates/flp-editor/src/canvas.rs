@@ -753,6 +753,8 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let mut wire_edit: Option<(flp_core::PortRef, Option<f32>)> = None;
     let mut wire_end = false;
     let mut wire_break: Option<(flp_core::PortRef, bool)> = None;
+    // Block a click on a broken link's stub leads to: the far end of the link.
+    let mut wire_jump: Option<String> = None;
     let ctx = ui.ctx().clone();
     // Live values above the input end of each wire; drawn after the blocks to stay on top.
     let mut wire_labels = Vec::new();
@@ -885,16 +887,21 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 clicked_link = Some(link.to.clone());
             }
         }
+        // Both stubs of a broken link are the same link: a click goes to its other end.
+        let mut stub_areas = [
+            Rect::from_two_pos(a, a + Vec2::new(stub, 0.0)).expand(5.0),
+            Rect::from_two_pos(b - Vec2::new(stub, 0.0), b).expand(5.0),
+        ];
         if cross {
             let sheet = |s: Option<u32>| s.map_or("?".to_owned(), |s| s.to_string());
-            painter.text(
+            stub_areas[0] = stub_areas[0].union(painter.text(
                 a + Vec2::new(stub + 3.0 * z, 0.0),
                 Align2::LEFT_CENTER,
                 format!("→ П{}: {}.{}", sheet(to_sheet), link.to.block, link.to.port),
                 font(10.0),
                 color,
-            );
-            painter.text(
+            ));
+            stub_areas[1] = stub_areas[1].union(painter.text(
                 b - Vec2::new(stub + 3.0 * z, 0.0),
                 Align2::RIGHT_CENTER,
                 format!(
@@ -905,7 +912,19 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 ),
                 font(10.0),
                 color,
-            );
+            ));
+        }
+        if broken {
+            for (i, (area, target)) in stub_areas.iter().zip([&link.to, &link.from]).enumerate() {
+                let resp = ui.interact(*area, Id::unique(("wire-jump", &key, i)), Sense::click());
+                if resp.hovered() {
+                    ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if resp.clicked() {
+                    wire_jump = Some(target.block.clone());
+                }
+                resp.on_hover_text(format!("Перейти к «{}»", target.block));
+            }
         }
     }
 
@@ -1305,7 +1324,9 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     app.canvas.view = view;
 
     // Apply changes (the document was borrowed for drawing above).
-    if bg.clicked() {
+    if let Some(id) = wire_jump {
+        app.focus_block(&id);
+    } else if bg.clicked() {
         app.select(clicked_link.map(Selection::Link));
     }
     if let Some(to) = wire_click {
