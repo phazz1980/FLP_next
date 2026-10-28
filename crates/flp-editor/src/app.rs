@@ -1847,6 +1847,7 @@ impl EditorApp {
         let mut cancel = false;
         // Left edge of the "new version" notice: the download bar sits right under it.
         let mut notice_x = None;
+        let mut install = None;
         ui.horizontal(|ui| {
             self.status_items(ui, &mut cancel);
             if let Some(release) = &self.new_release {
@@ -1857,6 +1858,16 @@ impl EditorApp {
                 notice_x = Some(link.rect.left());
                 if link.clicked() {
                     self.update_window = true;
+                }
+                // Downloaded: installing waits for the user's yes.
+                if let SelfUpdate::Ready(staged) = &self.self_update {
+                    if ui
+                        .small_button("Установить и перезапустить")
+                        .on_hover_text("Проект сохранится, редактор перезапустится уже новым")
+                        .clicked()
+                    {
+                        install = Some(staged.clone());
+                    }
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1889,6 +1900,9 @@ impl EditorApp {
                         .text(egui::RichText::new(text).small()),
                 );
             });
+        }
+        if let Some(staged) = install {
+            self.apply_update(&ui.ctx().clone(), &staged);
         }
         if cancel {
             self.cancel_job();

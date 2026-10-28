@@ -344,7 +344,7 @@ pub(crate) enum Level {
 }
 
 /// Collapsible group of the project tree: a title (click to fold), compact tools
-/// right-aligned in the same row, and the indented body. Open by default.
+/// next to the title in the same row, and the indented body. Open by default.
 pub(crate) fn group(
     ui: &mut Ui,
     id: impl std::hash::Hash + std::fmt::Debug,
@@ -370,7 +370,8 @@ pub(crate) fn group(
             clicked = ui
                 .add(egui::Label::new(text).sense(egui::Sense::click()))
                 .clicked();
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), tools);
+            // Tools sit right next to the title, not at the panel edge.
+            tools(ui);
         })
         .body(body);
     if clicked {
