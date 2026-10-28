@@ -383,7 +383,7 @@ pub fn save_update_check(on: bool) {
 }
 
 pub fn auto_update() -> bool {
-    load_settings().auto_update.unwrap_or(false)
+    load_settings().auto_update.unwrap_or(true)
 }
 
 pub fn save_auto_update(on: bool) {

@@ -9,6 +9,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
+/// How often the editor looks for a new release while it stays open.
+const UPDATE_RECHECK: Duration = Duration::from_secs(6 * 3600);
+
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText};
 use flp_build::{ArduinoCli, SerialPort};
 use flp_core::project::PROJECT_EXT;
@@ -172,6 +175,8 @@ pub struct EditorApp {
     auto_update: bool,
     /// Running release check; the flag tells whether the user asked for it.
     update_rx: Option<Receiver<(bool, Result<Check, String>)>>,
+    /// When the last update check was started (periodic re-check while the editor stays open).
+    update_checked: Instant,
     /// Newer release found on GitHub.
     new_release: Option<Release>,
     /// The window with the changes of the newer releases is shown.
@@ -255,6 +260,7 @@ impl EditorApp {
             update_check: theme::update_check(),
             auto_update: theme::auto_update(),
             update_rx: None,
+            update_checked: Instant::now(),
             new_release: None,
             update_window: false,
             changes_window: false,
@@ -352,6 +358,7 @@ impl EditorApp {
         if self.update_rx.is_some() {
             return;
         }
+        self.update_checked = Instant::now();
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
         let repo = theme::update_repo();
@@ -443,6 +450,17 @@ impl EditorApp {
         };
     }
 
+    /// Starts the background download of the release found earlier, if it can be installed.
+    fn start_known_release_download(&mut self) {
+        let Some(release) = &self.new_release else {
+            return;
+        };
+        if selfupdate::install_dir().is_some() && matches!(self.self_update, SelfUpdate::Idle(_)) {
+            let url = release.url.clone();
+            self.start_self_update(url, true);
+        }
+    }
+
     fn poll_self_update(&mut self, ctx: &egui::Context) {
         let SelfUpdate::Downloading { rx, auto, .. } = &self.self_update else {
             return;
@@ -497,7 +515,15 @@ impl EditorApp {
         };
         self.update_rx = None;
         match result {
+            // A periodic check that finds the version already announced stays silent.
+            Ok(Check::Newer(release))
+                if !manual
+                    && self.new_release.as_ref().map(|r| &r.version) == Some(&release.version) => {}
             Ok(Check::Newer(release)) => {
+                // A still newer release than the one downloaded earlier: fetch that one instead.
+                if matches!(self.self_update, SelfUpdate::Ready(_)) {
+                    self.self_update = SelfUpdate::Idle(None);
+                }
                 self.info(
                     LogLevel::Info,
                     format!(
@@ -507,15 +533,11 @@ impl EditorApp {
                         release.url
                     ),
                 );
-                let url = release.url.clone();
                 self.new_release = Some(release);
                 // The window opens by itself only when the user asked for the check.
                 self.update_window = manual;
-                if self.auto_update
-                    && selfupdate::install_dir().is_some()
-                    && matches!(self.self_update, SelfUpdate::Idle(_))
-                {
-                    self.start_self_update(url, true);
+                if self.auto_update {
+                    self.start_known_release_download();
                 }
             }
             Ok(Check::UpToDate) if manual => self.info(
@@ -1755,6 +1777,9 @@ impl EditorApp {
                     .changed()
                 {
                     theme::save_auto_update(self.auto_update);
+                    if self.auto_update {
+                        self.start_known_release_download();
+                    }
                 }
                 if let SelfUpdate::Ready(staged) = &self.self_update {
                     let staged = staged.clone();
@@ -1820,15 +1845,17 @@ impl EditorApp {
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         let mut cancel = false;
+        // Left edge of the "new version" notice: the download bar sits right under it.
+        let mut notice_x = None;
         ui.horizontal(|ui| {
             self.status_items(ui, &mut cancel);
             if let Some(release) = &self.new_release {
                 ui.separator();
-                if ui
+                let link = ui
                     .link(format!("Доступна версия {}", release.version))
-                    .on_hover_text("Показать, что изменилось")
-                    .clicked()
-                {
+                    .on_hover_text("Показать, что изменилось");
+                notice_x = Some(link.rect.left());
+                if link.clicked() {
                     self.update_window = true;
                 }
             }
@@ -1836,6 +1863,33 @@ impl EditorApp {
                 ui.weak(format!("v{}", update::CURRENT));
             });
         });
+        if let SelfUpdate::Downloading { done, total, .. } = &self.self_update {
+            let (done, total) = (done.load(Ordering::Relaxed), total.load(Ordering::Relaxed));
+            let mb = |b: u64| b as f64 / 1_048_576.0;
+            let (fraction, text) = if total > 0 {
+                (
+                    done as f32 / total as f32,
+                    format!(
+                        "Скачивание обновления: {:.1} из {:.1} МБ",
+                        mb(done),
+                        mb(total)
+                    ),
+                )
+            } else {
+                (0.0, format!("Скачивание обновления: {:.1} МБ", mb(done)))
+            };
+            ui.horizontal(|ui| {
+                if let Some(x) = notice_x {
+                    ui.add_space((x - ui.min_rect().left()).max(0.0));
+                }
+                ui.add(
+                    egui::ProgressBar::new(fraction)
+                        .desired_width(260.0)
+                        .desired_height(12.0)
+                        .text(egui::RichText::new(text).small()),
+                );
+            });
+        }
         if cancel {
             self.cancel_job();
         }
@@ -1993,6 +2047,12 @@ impl eframe::App for EditorApp {
         self.poll_console(&ctx);
         self.poll_ports();
         self.poll_update();
+        if self.update_check
+            && self.update_rx.is_none()
+            && self.update_checked.elapsed() >= UPDATE_RECHECK
+        {
+            self.start_update_check(&ctx, false);
+        }
         self.cli_window(&ctx);
         self.poll_self_update(&ctx);
         update::changes_window(&ctx, &mut self.changes_window);
