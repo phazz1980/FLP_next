@@ -146,6 +146,7 @@ fn run(
         verbose: !background,
         low_priority: background,
         force: matches!(kind, JobKind::Rebuild),
+        libraries: program.attached_libraries(),
         ..Default::default()
     };
     // Only build stages and diagnostics; compiler command lines stay hidden.

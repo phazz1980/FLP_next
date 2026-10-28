@@ -157,6 +157,7 @@ pub fn build_project(
         } else {
             BuildMode::Release
         },
+        libraries: program.attached_libraries(),
         ..Default::default()
     };
     let tail = |log: &[String]| log[log.len().saturating_sub(15)..].join("\n");

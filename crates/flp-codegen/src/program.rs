@@ -89,6 +89,19 @@ impl<'a> Program<'a> {
         unique(self.blocks.iter().flat_map(|b| &b.lib.def.info.libraries))
     }
 
+    /// Folders with the Arduino libraries attached to the blocks (`lib/` of a block
+    /// folder), for `--libraries`; they need no installation.
+    pub fn attached_libraries(&self) -> Vec<std::path::PathBuf> {
+        let mut dirs: Vec<_> = self
+            .blocks
+            .iter()
+            .filter_map(|b| flp_core::blockfile::library_dirs(&b.lib.dir))
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        dirs
+    }
+
     /// Checks the schema and resolves it. Fails with [`GenError::Schema`] on check errors.
     pub fn build(project: &'a Project, lib: &'a Library) -> Result<Self, GenError> {
         let logic = &project.logic;

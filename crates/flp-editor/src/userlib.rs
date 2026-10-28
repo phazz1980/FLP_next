@@ -40,6 +40,10 @@ enum Action {
     NewBlock(String),
     Ask(Prompt),
     DeleteFolder(String),
+    Import,
+    ImportProject,
+    Export(String),
+    Example(String),
 }
 
 /// Last part of a folder path.
@@ -115,6 +119,10 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui, needle: &str) -> Option<String> {
                 app.block_editor = Some(BlockEditor::new_block(app, &folder));
             }
             Action::Ask(p) => prompt = Some(p),
+            Action::Import => crate::blockio::pick_files(app),
+            Action::ImportProject => crate::blockio::pick_project(app),
+            Action::Export(kind) => crate::blockio::export(app, &kind),
+            Action::Example(kind) => crate::blockio::open_example(app, &kind),
             Action::DeleteFolder(path) => {
                 if delete_folder(app, &path) {
                     selected = None;
@@ -177,6 +185,16 @@ fn toolbar(app: &EditorApp, ui: &mut Ui, selected: Option<&Selected>, actions: &
         {
             actions.push(Action::NewBlock(folder.clone()));
         }
+        ui.menu_button("Импорт", |ui| {
+            if ui.button("Из файла .flpblock...").clicked() {
+                actions.push(Action::Import);
+                ui.close();
+            }
+            if ui.button("Из проекта .flpn...").clicked() {
+                actions.push(Action::ImportProject);
+                ui.close();
+            }
+        });
         let (edit_hint, delete_hint) = match selected {
             Some(Selected::Block(_)) => ("Открыть блок в редакторе", "Удалить блок"),
             Some(Selected::Folder(_)) => ("Переименовать", "Удалить (только пустой)"),
@@ -343,6 +361,16 @@ fn block_row(
                 }
             }
         });
+        if ui.button("Экспорт в файл...").clicked() {
+            actions.push(Action::Export(kind.clone()));
+        }
+        let example = b.dir.join(flp_core::blockfile::EXAMPLE_FILE).is_file();
+        if ui
+            .add_enabled(example, egui::Button::new("Открыть пример"))
+            .clicked()
+        {
+            actions.push(Action::Example(kind.clone()));
+        }
         ui.separator();
         if ui.button("Удалить блок...").clicked() {
             actions.push(Action::DeleteBlock(kind.clone()));

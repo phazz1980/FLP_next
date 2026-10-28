@@ -183,6 +183,7 @@ pub struct EditorApp {
     update_window: bool,
     changes_window: bool,
     report: crate::report::Form,
+    pub import: crate::blockio::Import,
     /// User blocks whose revision differs between the project and the program.
     block_diffs: Vec<flp_core::packed::VersionDiff>,
     /// arduino-cli is missing: the window offers to install it.
@@ -265,6 +266,7 @@ impl EditorApp {
             update_window: false,
             changes_window: false,
             report: Default::default(),
+            import: Default::default(),
             block_diffs: Vec::new(),
             self_update: SelfUpdate::Idle(None),
             cli_prompt: if ArduinoCli::locate().is_ok() {
@@ -798,7 +800,7 @@ impl EditorApp {
         }
     }
 
-    fn request_open(&mut self, path: PathBuf) {
+    pub(crate) fn request_open(&mut self, path: PathBuf) {
         if self.doc.as_ref().is_some_and(|d| d.dirty) {
             self.pending = Some(Pending::Open(path));
         } else {
@@ -2070,6 +2072,8 @@ impl eframe::App for EditorApp {
         self.cli_window(&ctx);
         self.poll_self_update(&ctx);
         update::changes_window(&ctx, &mut self.changes_window);
+        crate::blockio::handle_drops(self, &ctx);
+        crate::blockio::window(self, &ctx);
         if self.report.open {
             let repo = theme::update_repo();
             let board = self.doc.as_ref().map(|d| {

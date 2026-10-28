@@ -11,6 +11,7 @@ mod ai;
 mod app;
 mod assoc;
 mod blockedit;
+mod blockio;
 mod boardcfg;
 mod canvas;
 mod codeview;

@@ -3,7 +3,7 @@
 //! the block and a trial generation of its code.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Color32, Id, RichText, ScrollArea, TextEdit, Ui};
 use flp_core::ident::ident_from_name;
@@ -207,6 +207,114 @@ struct Form {
     params: Vec<ParamRow>,
     template: String,
     docs: String,
+    /// Arduino libraries and the example attached to the block.
+    attach: Attach,
+}
+
+/// Files that live next to `block.toml`: `lib/<Name>/...` and `example.flpn`.
+#[derive(Debug, Clone, PartialEq, Default)]
+struct Attach {
+    libs: Vec<AttachedLib>,
+    example: Example,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct AttachedLib {
+    name: String,
+    /// Folder to copy in on save; `None` - already in the block folder.
+    src: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+enum Example {
+    #[default]
+    None,
+    /// Already in the block folder.
+    Saved,
+    /// Project file to copy in on save.
+    New(PathBuf),
+}
+
+impl Attach {
+    fn from_dir(dir: &Path) -> Self {
+        let mut libs: Vec<AttachedLib> = fs::read_dir(dir.join(flp_core::blockfile::LIB_DIR))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .map(|e| AttachedLib {
+                name: e.file_name().to_string_lossy().into_owned(),
+                src: None,
+            })
+            .collect();
+        libs.sort_by(|a, b| a.name.cmp(&b.name));
+        let example = if dir.join(flp_core::blockfile::EXAMPLE_FILE).is_file() {
+            Example::Saved
+        } else {
+            Example::None
+        };
+        Self { libs, example }
+    }
+
+    /// The same attachments for a copy of the block: everything is copied from `dir`.
+    fn copied_from(dir: &Path) -> Self {
+        let mut a = Self::from_dir(dir);
+        for lib in &mut a.libs {
+            lib.src = Some(dir.join(flp_core::blockfile::LIB_DIR).join(&lib.name));
+        }
+        if a.example == Example::Saved {
+            a.example = Example::New(dir.join(flp_core::blockfile::EXAMPLE_FILE));
+        }
+        a
+    }
+
+    /// Makes the block folder `dir` hold exactly these attachments.
+    fn apply(&mut self, dir: &Path) -> Result<(), String> {
+        let lib_root = dir.join(flp_core::blockfile::LIB_DIR);
+        let err = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
+        if let Ok(entries) = fs::read_dir(&lib_root) {
+            for e in entries.flatten() {
+                if !self.libs.iter().any(|l| e.file_name() == *l.name) {
+                    let _ = fs::remove_dir_all(e.path());
+                }
+            }
+        }
+        for lib in &mut self.libs {
+            let Some(src) = lib.src.take() else { continue };
+            let dest = lib_root.join(&lib.name);
+            let _ = fs::remove_dir_all(&dest);
+            copy_dir(&src, &dest).map_err(|e| err(&src, e))?;
+        }
+        if self.libs.is_empty() {
+            let _ = fs::remove_dir(&lib_root);
+        }
+        let example = dir.join(flp_core::blockfile::EXAMPLE_FILE);
+        match &self.example {
+            Example::None => {
+                let _ = fs::remove_file(&example);
+            }
+            Example::Saved => {}
+            Example::New(src) => {
+                fs::copy(src, &example).map_err(|e| err(src, e))?;
+                self.example = Example::Saved;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn copy_dir(src: &Path, dest: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dest)?;
+    for e in fs::read_dir(src)? {
+        let e = e?;
+        let to = dest.join(e.file_name());
+        if e.path().is_dir() {
+            copy_dir(&e.path(), &to)?;
+        } else {
+            fs::copy(e.path(), to)?;
+        }
+    }
+    Ok(())
 }
 
 impl Form {
@@ -227,6 +335,7 @@ impl Form {
             params: Vec::new(),
             template: NEW_TEMPLATE.into(),
             docs: String::new(),
+            attach: Attach::default(),
         }
     }
 
@@ -257,6 +366,7 @@ impl Form {
             params: def.params.iter().map(ParamRow::from_def).collect(),
             template,
             docs,
+            attach: Attach::from_dir(&block.dir),
         }
     }
 
@@ -384,6 +494,7 @@ enum Tab {
     Params,
     Code,
     Docs,
+    Files,
     Sketch,
 }
 
@@ -433,6 +544,7 @@ impl BlockEditor {
         if !app.lib.is_user(&block.def.info.kind) {
             form.group.clear();
         }
+        form.attach = Attach::copied_from(&block.dir);
         form.name = format!("{} (копия)", form.name);
         form.kind = free_kind(app, &ident_from_name(&form.name));
         Self::with(None, form)
@@ -608,6 +720,7 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
                 (Tab::Params, "Параметры"),
                 (Tab::Code, "Код ESP32"),
                 (Tab::Docs, "Описание"),
+                (Tab::Files, "Библиотека и пример"),
                 (Tab::Sketch, "Пробная генерация"),
             ];
             for (tab, text) in tabs {
@@ -644,6 +757,9 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
                         cols[1].label(RichText::new("Предпросмотр").weak());
                         crate::markdown::show(&mut cols[1], &ed.form.docs);
                     });
+                }
+                Tab::Files => {
+                    ui.add_enabled_ui(editable, |ui| files_tab(ui, &mut ed.form.attach));
                 }
                 Tab::Sketch => sketch_tab(ui, ed, &pal),
             });
@@ -1197,6 +1313,84 @@ fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
     }
 }
 
+fn files_tab(ui: &mut Ui, attach: &mut Attach) {
+    ui.weak(
+        "Библиотека Arduino и пример лежат в папке блока и едут вместе с ним \
+         в файле .flpblock и в проекте. Сборка подхватывает библиотеки сама.",
+    );
+    ui.add_space(6.0);
+    ui.label(RichText::new("Библиотеки").strong());
+    let mut remove = None;
+    for (i, lib) in attach.libs.iter().enumerate() {
+        ui.horizontal(|ui| {
+            ui.label(&lib.name);
+            if lib.src.is_some() {
+                ui.weak("(будет скопирована при сохранении)");
+            }
+            if ui.small_button("Убрать").clicked() {
+                remove = Some(i);
+            }
+        });
+    }
+    if let Some(i) = remove {
+        attach.libs.remove(i);
+    }
+    if attach.libs.is_empty() {
+        ui.weak("Нет прикреплённых библиотек");
+    }
+    if ui
+        .button("Прикрепить библиотеку...")
+        .on_hover_text("Папка библиотеки Arduino (с library.properties или src/)")
+        .clicked()
+    {
+        if let Some(dir) = rfd::FileDialog::new()
+            .set_title("Папка библиотеки Arduino")
+            .pick_folder()
+        {
+            let name = dir
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if !name.is_empty() && !attach.libs.iter().any(|l| l.name == name) {
+                attach.libs.push(AttachedLib {
+                    name,
+                    src: Some(dir),
+                });
+            }
+        }
+    }
+    ui.add_space(10.0);
+    ui.label(RichText::new("Пример использования").strong());
+    match &attach.example {
+        Example::None => {
+            ui.weak("Пример не прикреплён");
+        }
+        Example::Saved => {
+            ui.label("example.flpn");
+        }
+        Example::New(p) => {
+            ui.label(format!("{} (будет скопирован при сохранении)", p.display()));
+        }
+    }
+    ui.horizontal(|ui| {
+        if ui.button("Прикрепить пример...").clicked() {
+            if let Some(file) = rfd::FileDialog::new()
+                .set_title("Проект-пример")
+                .add_filter("Проект FLP", &["flpn"])
+                .pick_file()
+            {
+                attach.example = Example::New(file);
+            }
+        }
+        if ui
+            .add_enabled(attach.example != Example::None, egui::Button::new("Убрать"))
+            .clicked()
+        {
+            attach.example = Example::None;
+        }
+    });
+}
+
 fn sketch_tab(ui: &mut Ui, ed: &BlockEditor, pal: &Palette) {
     match &ed.generated {
         None => {
@@ -1340,6 +1534,12 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
                 LogLevel::Ok,
                 format!("Блок «{}» сохранён в {}", def.info.name, dir.display()),
             );
+            if let Err(e) = ed.form.attach.apply(&dir) {
+                app.info(
+                    LogLevel::Error,
+                    format!("Библиотека или пример не сохранены: {e}"),
+                );
+            }
             ed.original = Some(kind.clone());
             ed.clean = ed.form.clone();
             app.reload_library();

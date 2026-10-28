@@ -2,6 +2,7 @@
 //!
 //! The core knows nothing about GUI, AI or arduino-cli.
 
+pub mod blockfile;
 pub mod check;
 pub mod edit;
 pub mod error;

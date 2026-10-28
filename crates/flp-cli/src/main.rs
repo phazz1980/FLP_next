@@ -84,11 +84,35 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// Блок одним файлом .flpblock (с библиотекой и примером): экспорт и импорт
+    Block {
+        #[command(subcommand)]
+        action: BlockAction,
+    },
     /// Перевести проект из старого формата (папка с project.toml, logic.toml,
     /// layout.toml) в один файл <папка>/<папка>.flpn; старые файлы не удаляются
     Convert {
         /// Папка проекта в старом формате
         project: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum BlockAction {
+    /// Сохранить пользовательский блок в файл
+    Export {
+        /// Тип блока, например `my_pump`
+        kind: String,
+        /// Куда сохранить (по умолчанию `<тип>.flpblock` в текущей папке)
+        file: Option<PathBuf>,
+    },
+    /// Добавить блок из файла в пользовательскую библиотеку
+    Import {
+        /// Файл .flpblock
+        file: PathBuf,
+        /// Заменить существующий пользовательский блок с тем же типом
+        #[arg(long)]
+        replace: bool,
     },
 }
 
@@ -113,7 +137,65 @@ fn main() -> ExitCode {
             force,
         } => run_build(&project, cli.library.as_deref(), debug, force, Some(port)),
         Command::Monitor { project, port } => run_monitor(&project, cli.library.as_deref(), port),
+        Command::Block { action } => run_block(action, cli.library.as_deref()),
         Command::Convert { project } => run_convert(&project, cli.library.as_deref()),
+    }
+}
+
+fn run_block(action: BlockAction, library: Option<&Path>) -> ExitCode {
+    use flp_core::blockfile::{self, Conflict};
+    let here = Path::new(".");
+    let Some(dir) = library
+        .map(Path::to_path_buf)
+        .or_else(|| find_library(here))
+    else {
+        eprintln!(
+            "ошибка: не найдена папка библиотеки блоков `library/`; укажите её через --library"
+        );
+        return ExitCode::FAILURE;
+    };
+    let lib = match Library::load_with_user(&dir) {
+        Ok((lib, _)) => lib,
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let result = match action {
+        BlockAction::Export { kind, file } => {
+            let file = file.unwrap_or_else(|| {
+                PathBuf::from(format!("{kind}.{}", blockfile::EXTENSION))
+            });
+            blockfile::export_block(&lib, &kind, &file)
+                .map(|()| println!("блок «{kind}» сохранён: {}", file.display()))
+        }
+        BlockAction::Import { file, replace } => blockfile::read_block_file(&file).and_then(|inc| {
+            if let Conflict::User(rev) = inc.conflict(&lib) {
+                if !replace {
+                    return Err(format!(
+                        "блок «{}» уже есть (ревизия {rev}, в файле {}); добавьте --replace, чтобы заменить",
+                        inc.kind(),
+                        inc.def.info.version
+                    ));
+                }
+            }
+            let user = flp_core::user_library_dir(&dir);
+            inc.install(&user, &lib).map(|_| {
+                println!(
+                    "блок «{}» добавлен; библиотек: {}, пример: {}",
+                    inc.kind(),
+                    inc.libraries().len(),
+                    if inc.has_example() { "есть" } else { "нет" }
+                )
+            })
+        }),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -187,7 +269,7 @@ fn run_gen(project_dir: &Path, library: Option<&Path>, stdout: bool, debug: bool
         Err(code) => return code,
     };
     let code = match generate(&project, &lib, debug) {
-        Ok((code, _)) => code,
+        Ok((code, ..)) => code,
         Err(exit) => return exit,
     };
     if stdout {
@@ -212,9 +294,9 @@ fn run_build(
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
-    let libraries = match generate(&project, &lib, debug) {
-        Ok((code, libraries)) => match write_sketch(&project, &code) {
-            Ok(()) => libraries,
+    let (libraries, attached) = match generate(&project, &lib, debug) {
+        Ok((code, libraries, attached)) => match write_sketch(&project, &code) {
+            Ok(()) => (libraries, attached),
             Err(exit) => return exit,
         },
         Err(exit) => return exit,
@@ -235,6 +317,7 @@ fn run_build(
             BuildMode::Release
         },
         force,
+        libraries: attached,
         ..Default::default()
     };
     let mut print = |line: &str| println!("{line}");
@@ -277,7 +360,7 @@ fn generate(
     project: &Project,
     lib: &Library,
     debug: bool,
-) -> Result<(String, Vec<String>), ExitCode> {
+) -> Result<(String, Vec<String>, Vec<PathBuf>), ExitCode> {
     let backend = ArduinoCpp { debug };
     // Wi-Fi passwords and other `local` values are kept by the program, not in the file.
     let store = LocalValues::open_default().unwrap_or_else(|e| {
@@ -288,7 +371,7 @@ fn generate(
     let result = Program::build(project, lib).and_then(|program| {
         let code = backend.generate(&program)?;
         let libraries = program.libraries().into_iter().map(String::from).collect();
-        Ok((code, libraries))
+        Ok((code, libraries, program.attached_libraries()))
     });
     match result {
         Ok(generated) => Ok(generated),

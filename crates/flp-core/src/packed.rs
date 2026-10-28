@@ -32,15 +32,12 @@ pub fn pack_user_blocks(logic: &Logic, lib: &Library) -> Vec<(String, Vec<u8>)> 
         } else {
             format!("{PACKED_DIR}/{group}/{kind}")
         };
-        let Ok(files) = fs::read_dir(&block.dir) else {
+        // Attached libraries and the example travel with the block.
+        let Ok(files) = crate::blockfile::read_files(&block.dir) else {
             continue;
         };
-        let mut files: Vec<_> = files.flatten().filter(|f| f.path().is_file()).collect();
-        files.sort_by_key(|f| f.file_name());
-        for file in files {
-            if let (Some(name), Ok(data)) = (file.file_name().to_str(), fs::read(file.path())) {
-                out.push((format!("{prefix}/{name}"), data));
-            }
+        for (name, data) in files {
+            out.push((format!("{prefix}/{name}"), data));
         }
     }
     out
@@ -58,6 +55,7 @@ fn read_packed(project: &Path) -> PackedBlocks {
     let Ok(mut zip) = ZipArchive::new(std::io::BufReader::new(file)) else {
         return blocks;
     };
+    let mut entries: Vec<(Vec<String>, Vec<u8>)> = Vec::new();
     for i in 0..zip.len() {
         let Ok(mut entry) = zip.by_index(i) else {
             continue;
@@ -66,20 +64,34 @@ fn read_packed(project: &Path) -> PackedBlocks {
         let Some(rest) = name.strip_prefix(&format!("{PACKED_DIR}/")) else {
             continue;
         };
-        let parts: Vec<&str> = rest.split('/').collect();
+        let parts: Vec<String> = rest.split('/').map(str::to_owned).collect();
         if entry.is_dir() || parts.len() < 2 || !parts.iter().all(|p| safe_part(p)) {
             continue;
         }
-        let (file_name, dirs) = parts.split_last().expect("checked above");
-        let (kind, group) = dirs.split_last().expect("checked above");
         let mut data = Vec::new();
-        if entry.read_to_end(&mut data).is_err() {
-            continue;
+        if entry.read_to_end(&mut data).is_ok() {
+            entries.push((parts, data));
         }
+    }
+    // A block folder is where its `block.toml` is; deeper files (`lib/...`) belong to it.
+    let dirs: Vec<Vec<String>> = entries
+        .iter()
+        .filter(|(p, _)| p.last().is_some_and(|n| n == "block.toml") && p.len() >= 2)
+        .map(|(p, _)| p[..p.len() - 1].to_vec())
+        .collect();
+    for (parts, data) in entries {
+        let Some(dir) = dirs
+            .iter()
+            .filter(|d| parts.len() > d.len() && parts.starts_with(d))
+            .max_by_key(|d| d.len())
+        else {
+            continue;
+        };
+        let (kind, group) = dir.split_last().expect("block dir is not empty");
         blocks
-            .entry((group.join("/"), (*kind).to_owned()))
+            .entry((group.join("/"), kind.clone()))
             .or_default()
-            .push(((*file_name).to_owned(), data));
+            .push((parts[dir.len()..].join("/"), data));
     }
     blocks
 }
@@ -88,7 +100,7 @@ fn read_packed(project: &Path) -> PackedBlocks {
 fn write_block(user_dir: &Path, group: &str, kind: &str, files: &[PackedFile]) -> bool {
     let dir = user_dir.join(group).join(kind);
     let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).is_ok() && files.iter().all(|(n, d)| fs::write(dir.join(n), d).is_ok())
+    crate::blockfile::write_files(&dir, files).is_ok()
 }
 
 /// Restores the packed user blocks of the project file `project` that are missing in
@@ -128,19 +140,10 @@ fn same_files(files: &[PackedFile], dir: &Path) -> bool {
             .filter(|b| *b != b'\r')
             .collect::<Vec<u8>>()
     };
-    let Ok(read) = fs::read_dir(dir) else {
+    let Ok(read) = crate::blockfile::read_files(dir) else {
         return false;
     };
-    let local: BTreeMap<String, Vec<u8>> = read
-        .flatten()
-        .filter(|f| f.path().is_file())
-        .filter_map(|f| {
-            Some((
-                f.file_name().to_str()?.to_owned(),
-                norm(&fs::read(f.path()).ok()?),
-            ))
-        })
-        .collect();
+    let local: BTreeMap<String, Vec<u8>> = read.into_iter().map(|(n, d)| (n, norm(&d))).collect();
     let packed: BTreeMap<String, Vec<u8>> =
         files.iter().map(|(n, d)| (n.clone(), norm(d))).collect();
     local == packed
@@ -169,6 +172,14 @@ pub fn version_diffs(project: &Path, lib: &Library) -> Vec<VersionDiff> {
                 program,
             })
         })
+        .collect()
+}
+
+/// User blocks packed in the project file `project`, to offer them for import.
+pub fn project_blocks(project: &Path) -> Vec<crate::blockfile::Incoming> {
+    read_packed(project)
+        .into_values()
+        .filter_map(|files| crate::blockfile::Incoming::from_files(files).ok())
         .collect()
 }
 
@@ -212,7 +223,9 @@ mod tests {
         let def: BlockDef =
             toml::from_str("[block]\ntype = \"mine\"\nname = \"N\"\ngroup = \"Раздел/Папка\"\n")
                 .unwrap();
-        save_block(&user.join("Раздел").join("Папка"), &def, "// code", "docs").unwrap();
+        let bdir = save_block(&user.join("Раздел").join("Папка"), &def, "// code", "docs").unwrap();
+        fs::create_dir_all(bdir.join("lib/Fancy")).unwrap();
+        fs::write(bdir.join("lib/Fancy/Fancy.h"), "// lib").unwrap();
         let (lib, _) = Library::load_with_user(&builtin).unwrap();
         assert!(lib.is_user("mine"));
 
@@ -245,6 +258,10 @@ fqbn = \"x:y:z\"
             .map(|(n, d)| (n.as_str(), d.as_slice()))
             .collect();
         project.save_with(&extra).unwrap();
+
+        let offered = project_blocks(&project.path);
+        assert_eq!(offered.len(), 1);
+        assert_eq!(offered[0].libraries(), ["Fancy"]);
 
         // Another computer: no user library at all.
         fs::remove_dir_all(&user).unwrap();
