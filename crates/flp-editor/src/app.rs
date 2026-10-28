@@ -176,6 +176,7 @@ pub struct EditorApp {
     new_release: Option<Release>,
     /// The window with the changes of the newer releases is shown.
     update_window: bool,
+    changes_window: bool,
     /// User blocks whose revision differs between the project and the program.
     block_diffs: Vec<flp_core::packed::VersionDiff>,
     /// arduino-cli is missing: the window offers to install it.
@@ -255,6 +256,7 @@ impl EditorApp {
             update_rx: None,
             new_release: None,
             update_window: false,
+            changes_window: false,
             block_diffs: Vec::new(),
             self_update: SelfUpdate::Idle(None),
             cli_prompt: if ArduinoCli::locate().is_ok() {
@@ -1779,6 +1781,10 @@ impl EditorApp {
                     ui.ctx().open_url(egui::OpenUrl::new_tab(url));
                     ui.close();
                 }
+                if ui.button("Что нового в этой версии").clicked() {
+                    self.changes_window = true;
+                    ui.close();
+                }
                 if let Some(release) = &self.new_release {
                     ui.separator();
                     if ui
@@ -1998,6 +2004,7 @@ impl eframe::App for EditorApp {
         self.poll_update();
         self.cli_window(&ctx);
         self.poll_self_update(&ctx);
+        update::changes_window(&ctx, &mut self.changes_window);
         if let Some(release) = &self.new_release {
             let install = match &self.self_update {
                 SelfUpdate::Idle(e) => update::Install::Idle(e.as_deref()),

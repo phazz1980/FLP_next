@@ -256,6 +256,24 @@ pub enum Install<'a> {
     Ready,
 }
 
+/// Notes of the running version, written with each release.
+const CHANGES: &str = include_str!("../changes.md");
+
+/// Window with the changes of the running version.
+pub fn changes_window(ctx: &egui::Context, open: &mut bool) {
+    egui::Window::new("Что нового")
+        .open(open)
+        .collapsible(false)
+        .resizable(true)
+        .default_width(460.0)
+        .show(ctx, |ui| {
+            ui.strong(format!("Версия {CURRENT}"));
+            for line in CHANGES.lines().filter(|l| !l.trim().is_empty()) {
+                ui.label(format!("• {}", line.trim_start_matches("- ")));
+            }
+        });
+}
+
 /// Returns true when the user pressed "Обновить и перезапустить".
 pub fn window(
     ctx: &egui::Context,
