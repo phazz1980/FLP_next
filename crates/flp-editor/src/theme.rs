@@ -275,6 +275,16 @@ struct Settings {
     auto_update: Option<bool>,
     /// GitHub repository "owner/name" the releases are taken from.
     update_repo: Option<String>,
+    /// Name and contacts entered as the author of a block pack; offered for new packs.
+    author: Option<Author>,
+}
+
+/// Who signs the packs created in this editor.
+#[derive(Serialize, Deserialize, Clone, Default, PartialEq, Eq, Debug)]
+pub struct Author {
+    pub name: String,
+    /// E-mail addresses, links, social networks.
+    pub contacts: Vec<String>,
 }
 
 /// Sizes of the editor panels, kept between runs.
@@ -336,6 +346,15 @@ pub fn saved_choice() -> Option<String> {
 
 pub fn save_choice(name: &str) {
     update_settings(|s| s.theme = Some(name.to_owned()));
+}
+
+/// The author remembered from the last pack that was filled in.
+pub fn author() -> Author {
+    load_settings().author.unwrap_or_default()
+}
+
+pub fn save_author(author: &Author) {
+    update_settings(|s| s.author = Some(author.clone()));
 }
 
 /// Project folder opened last time.

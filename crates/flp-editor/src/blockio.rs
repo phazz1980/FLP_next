@@ -1,10 +1,11 @@
-//! Import and export of user blocks: one block is one `.flpblock` file with its
-//! Arduino libraries and an example project.
+//! Import and export of user blocks: a pack of blocks is one `.flpblocks` file with the
+//! Arduino libraries and examples of its blocks. Single blocks can be taken from a project.
 
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Id, RichText};
 use flp_core::blockfile::{self, Conflict, Incoming};
+use flp_core::pack::{self, IncomingPack, PackImport};
 
 use crate::app::{EditorApp, LogLevel};
 
@@ -21,13 +22,18 @@ struct Entry {
 #[derive(Default)]
 pub struct Import {
     entries: Vec<Entry>,
+    /// A pack read from a file, waiting for the user's decision.
+    pack: Option<PackEntry>,
+}
+
+struct PackEntry {
+    pack: IncomingPack,
+    source: String,
+    /// Replace an installed pack of the same or a newer version.
+    replace: bool,
 }
 
 impl Import {
-    fn is_open(&self) -> bool {
-        !self.entries.is_empty()
-    }
-
     fn add(&mut self, block: Incoming, source: String) {
         // The same type again: the later file wins.
         self.entries.retain(|e| e.block.kind() != block.kind());
@@ -45,21 +51,27 @@ fn name_of(path: &Path) -> String {
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
 }
 
-/// Reads `.flpblock` files and queues the blocks in the import window.
+/// Reads `.flpblocks` files and shows the pack in the import window.
 pub fn add_files(app: &mut EditorApp, paths: &[PathBuf]) {
     for path in paths {
-        match blockfile::read_block_file(path) {
-            Ok(block) => app.import.add(block, name_of(path)),
-            Err(e) => app.info(LogLevel::Error, format!("Блок не прочитан: {e}")),
+        match pack::read_pack_file(path) {
+            Ok(pack) => {
+                app.import.pack = Some(PackEntry {
+                    pack,
+                    source: name_of(path),
+                    replace: false,
+                });
+            }
+            Err(e) => app.info(LogLevel::Error, format!("Набор не прочитан: {e}")),
         }
     }
 }
 
-/// «Импорт…»: choose block files.
+/// «Набор из файла…»: choose a pack file.
 pub fn pick_files(app: &mut EditorApp) {
     let paths = rfd::FileDialog::new()
-        .set_title("Импорт блоков")
-        .add_filter("Блок FLP", &[blockfile::EXTENSION])
+        .set_title("Импорт набора блоков")
+        .add_filter("Набор блоков FLP", &[pack::EXTENSION])
         .pick_files();
     if let Some(paths) = paths {
         add_files(app, &paths);
@@ -87,7 +99,7 @@ pub fn pick_project(app: &mut EditorApp) {
     }
 }
 
-/// Files dropped onto the window: `.flpblock` go to the import window.
+/// Files dropped onto the window: `.flpblocks` go to the import window.
 pub fn handle_drops(app: &mut EditorApp, ctx: &egui::Context) {
     let dropped: Vec<PathBuf> = ctx.input(|i| {
         i.raw
@@ -96,7 +108,7 @@ pub fn handle_drops(app: &mut EditorApp, ctx: &egui::Context) {
             .map(|f| f.path().to_path_buf())
             .filter(|p| {
                 p.extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case(blockfile::EXTENSION))
+                    .is_some_and(|e| e.eq_ignore_ascii_case(pack::EXTENSION))
             })
             .collect()
     });
@@ -105,22 +117,25 @@ pub fn handle_drops(app: &mut EditorApp, ctx: &egui::Context) {
     }
 }
 
-/// «Экспорт в файл…» for the user block `kind`.
-pub fn export(app: &mut EditorApp, kind: &str) {
+/// «Экспорт набора…» for the pack in the folder `folder` of the user library.
+pub fn export_pack(app: &mut EditorApp, folder: &str) {
+    let Some(user_dir) = app.user_lib_dir() else {
+        return;
+    };
     let Some(dest) = rfd::FileDialog::new()
-        .set_title("Экспорт блока")
-        .set_file_name(format!("{kind}.{}", blockfile::EXTENSION))
-        .add_filter("Блок FLP", &[blockfile::EXTENSION])
+        .set_title("Экспорт набора блоков")
+        .set_file_name(format!("{folder}.{}", pack::EXTENSION))
+        .add_filter("Набор блоков FLP", &[pack::EXTENSION])
         .save_file()
     else {
         return;
     };
-    match blockfile::export_block(&app.lib, kind, &dest) {
+    match pack::export_pack(&user_dir, folder, &dest) {
         Ok(()) => app.info(
             LogLevel::Ok,
-            format!("Блок «{kind}» сохранён в {}", dest.display()),
+            format!("Набор «{folder}» сохранён в {}", dest.display()),
         ),
-        Err(e) => app.info(LogLevel::Error, format!("Блок не экспортирован: {e}")),
+        Err(e) => app.info(LogLevel::Error, format!("Набор не экспортирован: {e}")),
     }
 }
 
@@ -145,7 +160,8 @@ pub fn open_example(app: &mut EditorApp, kind: &str) {
 
 /// The import window; installs the checked blocks.
 pub fn window(app: &mut EditorApp, ctx: &egui::Context) {
-    if !app.import.is_open() {
+    pack_window(app, ctx);
+    if app.import.entries.is_empty() {
         return;
     }
     let warn = app.theme.palette.warning;
@@ -244,5 +260,102 @@ fn install(app: &mut EditorApp, entries: &[Entry], conflicts: &[Conflict]) {
     }
     if done {
         app.reload_library();
+    }
+}
+
+/// The window of a pack read from a file: what it holds and what installing does.
+fn pack_window(app: &mut EditorApp, ctx: &egui::Context) {
+    let Some(mut entry) = app.import.pack.take() else {
+        return;
+    };
+    let warn = app.theme.palette.warning;
+    let status = app
+        .user_lib_dir()
+        .map_or(PackImport::New, |dir| entry.pack.status(&dir));
+    let info = entry.pack.info.clone();
+    let kinds = entry.pack.kinds();
+    let mut answer = None;
+    egui::Modal::new(Id::unique("pack_import")).show(ctx, |ui| {
+        ui.label(RichText::new(format!("Набор «{}»", info.name)).strong());
+        ui.weak(format!("версия {} · файл {}", info.version, entry.source));
+        if !info.description.is_empty() {
+            ui.label(&info.description);
+        }
+        pack_credits(ui, &info);
+        ui.label(format!("Блоков: {} ({})", kinds.len(), kinds.join(", ")));
+        match status {
+            PackImport::New => {}
+            PackImport::Update(have) => {
+                ui.colored_label(
+                    warn,
+                    format!(
+                        "Набор уже есть (версия {have}): он будет заменён целиком, \
+                         блоки, которых нет в файле, пропадут."
+                    ),
+                );
+            }
+            PackImport::NotNewer(have) => {
+                ui.colored_label(
+                    warn,
+                    format!(
+                        "Установлен набор той же или более новой версии ({have}, в файле {}).",
+                        info.version
+                    ),
+                );
+                ui.checkbox(&mut entry.replace, "Всё равно заменить целиком");
+            }
+        }
+        ui.add_space(6.0);
+        let allowed = !matches!(status, PackImport::NotNewer(_)) || entry.replace;
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(allowed, egui::Button::new("Установить"))
+                .clicked()
+            {
+                answer = Some(true);
+            }
+            if ui.button("Отмена").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape))
+            {
+                answer = Some(false);
+            }
+        });
+    });
+    match answer {
+        None => app.import.pack = Some(entry),
+        Some(false) => {}
+        Some(true) => {
+            let Some(user_dir) = app.user_lib_dir() else {
+                app.info(LogLevel::Error, "Нет папки библиотеки блоков");
+                return;
+            };
+            match entry.pack.install(&user_dir, &app.lib) {
+                Ok(_) => {
+                    app.info(LogLevel::Ok, format!("Набор «{}» установлен", info.name));
+                    app.reload_library();
+                }
+                Err(e) => app.info(
+                    LogLevel::Error,
+                    format!("Набор «{}» не установлен: {e}", info.name),
+                ),
+            }
+        }
+    }
+}
+
+/// Authors, contacts (as links) and license of a pack.
+pub fn pack_credits(ui: &mut egui::Ui, info: &pack::PackInfo) {
+    if !info.authors.is_empty() {
+        ui.label(format!("Автор: {}", info.authors.join(", ")));
+    }
+    if !info.contacts.is_empty() {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Контакты:");
+            for c in &info.contacts {
+                ui.hyperlink_to(c, pack::contact_url(c));
+            }
+        });
+    }
+    if !info.license.is_empty() {
+        ui.label(format!("Лицензия: {}", info.license));
     }
 }

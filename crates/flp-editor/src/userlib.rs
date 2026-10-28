@@ -1,12 +1,13 @@
 //! "Пользовательские" tab of the block library: the tree «Блоки пользователей» →
-//! sections → folders → blocks, as in FLProg. Sections and folders are plain
-//! folders inside `user_library/`; a block's place in the tree is its group.
+//! packs → folders → blocks. A pack is a top-level folder of `user_library/` with a
+//! `pack.toml` (one version for all its blocks); a block's place in the tree is its group.
 
 use std::fs;
 use std::path::PathBuf;
 
 use eframe::egui::{self, Id, RichText, Ui};
 use flp_core::library::is_valid_folder_name;
+use flp_core::pack::{self, PackInfo};
 
 use crate::app::{EditorApp, LogLevel};
 use crate::blockedit::BlockEditor;
@@ -30,6 +31,62 @@ struct Prompt {
     name: String,
 }
 
+/// Dialog of a new pack, or of the properties of an existing one.
+#[derive(Debug, Clone, Default)]
+struct PackForm {
+    /// Folder of the pack being edited; `None` — a new pack.
+    edit: Option<String>,
+    name: String,
+    description: String,
+    authors: String,
+    /// One contact per line: e-mail, link, social network.
+    contacts: String,
+    license: String,
+    version: u32,
+    error: String,
+}
+
+impl PackForm {
+    fn new() -> Self {
+        let author = crate::theme::author();
+        Self {
+            authors: author.name,
+            contacts: author.contacts.join("\n"),
+            version: 1,
+            ..Self::default()
+        }
+    }
+
+    fn of(folder: &str, info: &PackInfo) -> Self {
+        Self {
+            edit: Some(folder.to_owned()),
+            name: info.name.clone(),
+            description: info.description.clone(),
+            authors: info.authors.join(", "),
+            contacts: info.contacts.join("\n"),
+            license: info.license.clone(),
+            version: info.version,
+            error: String::new(),
+        }
+    }
+
+    fn contacts(&self) -> Vec<String> {
+        self.contacts
+            .lines()
+            .map(|c| c.trim().to_owned())
+            .filter(|c| !c.is_empty())
+            .collect()
+    }
+
+    fn authors(&self) -> Vec<String> {
+        self.authors
+            .split(',')
+            .map(|a| a.trim().to_owned())
+            .filter(|a| !a.is_empty())
+            .collect()
+    }
+}
+
 enum Action {
     Select(Selected),
     Open(String),
@@ -42,7 +99,9 @@ enum Action {
     DeleteFolder(String),
     Import,
     ImportProject,
-    Export(String),
+    NewPack,
+    PackProps(String),
+    ExportPack(String),
     Example(String),
 }
 
@@ -69,6 +128,7 @@ fn folder_word(path: &str) -> &'static str {
 pub fn show(app: &mut EditorApp, ui: &mut Ui, needle: &str) -> Option<String> {
     let sel_id = Id::unique("userlib_selected");
     let prompt_id = Id::unique("userlib_prompt");
+    let form_id = Id::unique("userlib_pack_form");
     let selected: Option<Selected> = ui.data_mut(|d| d.get_temp(sel_id)).flatten();
     let mut actions = Vec::new();
 
@@ -83,6 +143,19 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui, needle: &str) -> Option<String> {
                 found(app, ui, needle, selected.as_ref(), &mut actions);
             }
         });
+
+    let mut form: Option<PackForm> = ui.data_mut(|d| d.get_temp(form_id)).flatten();
+    if let Some(f) = &mut form {
+        match pack_form(app, ui.ctx(), f) {
+            Some(true) => {
+                if apply_pack_form(app, f) {
+                    form = None;
+                }
+            }
+            Some(false) => form = None,
+            None => {}
+        }
+    }
 
     let mut prompt: Option<Prompt> = ui.data_mut(|d| d.get_temp(prompt_id)).flatten();
     if let Some(p) = &mut prompt {
@@ -121,7 +194,16 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui, needle: &str) -> Option<String> {
             Action::Ask(p) => prompt = Some(p),
             Action::Import => crate::blockio::pick_files(app),
             Action::ImportProject => crate::blockio::pick_project(app),
-            Action::Export(kind) => crate::blockio::export(app, &kind),
+            Action::NewPack => form = Some(PackForm::new()),
+            Action::PackProps(folder) => {
+                let info = app
+                    .user_lib_dir()
+                    .and_then(|d| PackInfo::read(&d.join(&folder)).ok());
+                if let Some(info) = info {
+                    form = Some(PackForm::of(&folder, &info));
+                }
+            }
+            Action::ExportPack(folder) => crate::blockio::export_pack(app, &folder),
             Action::Example(kind) => crate::blockio::open_example(app, &kind),
             Action::DeleteFolder(path) => {
                 if delete_folder(app, &path) {
@@ -133,6 +215,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui, needle: &str) -> Option<String> {
     ui.data_mut(|d| {
         d.insert_temp(sel_id, selected);
         d.insert_temp(prompt_id, prompt);
+        d.insert_temp(form_id, form);
     });
     add
 }
@@ -155,21 +238,17 @@ fn toolbar(app: &EditorApp, ui: &mut Ui, selected: Option<&Selected>, actions: &
     let folder = current_folder(app, selected);
     ui.horizontal_wrapped(|ui| {
         if ui
-            .small_button("+ Раздел")
-            .on_hover_text("Новый раздел верхнего уровня")
+            .small_button("+ Набор")
+            .on_hover_text("Новый набор блоков: у всех его блоков одна версия")
             .clicked()
         {
-            actions.push(Action::Ask(Prompt {
-                target: String::new(),
-                rename: false,
-                name: String::new(),
-            }));
+            actions.push(Action::NewPack);
         }
         let in_folder = !folder.is_empty();
         if ui
             .add_enabled(in_folder, egui::Button::new("+ Папка").small())
-            .on_hover_text("Новая папка в выбранном разделе или папке")
-            .on_disabled_hover_text("Сначала выберите раздел или папку")
+            .on_hover_text("Новая папка в выбранном наборе или папке")
+            .on_disabled_hover_text("Сначала выберите набор или папку")
             .clicked()
         {
             actions.push(Action::Ask(Prompt {
@@ -180,13 +259,13 @@ fn toolbar(app: &EditorApp, ui: &mut Ui, selected: Option<&Selected>, actions: &
         }
         if ui
             .small_button("+ Блок")
-            .on_hover_text("Новый блок в выбранном разделе или папке")
+            .on_hover_text("Новый блок в выбранном наборе или папке")
             .clicked()
         {
             actions.push(Action::NewBlock(folder.clone()));
         }
         ui.menu_button("Импорт", |ui| {
-            if ui.button("Из файла .flpblock...").clicked() {
+            if ui.button("Набор из файла .flpblocks...").clicked() {
                 actions.push(Action::Import);
                 ui.close();
             }
@@ -256,7 +335,17 @@ fn folder_contents(
 ) {
     for &sub in folders.iter().filter(|f| parent(f) == path) {
         let is_sel = selected == Some(&Selected::Folder(sub.to_owned()));
-        let mut text = RichText::new(leaf(sub));
+        let pack = if path.is_empty() {
+            app.user_lib_dir()
+                .and_then(|d| PackInfo::read(&d.join(sub)).ok())
+        } else {
+            None
+        };
+        let label = match &pack {
+            Some(info) => format!("{} · v{}", leaf(sub), info.version),
+            None => leaf(sub).to_owned(),
+        };
+        let mut text = RichText::new(label);
         if is_sel {
             text = text.strong().color(ui.visuals().selection.stroke.color);
         }
@@ -269,7 +358,12 @@ fn folder_contents(
         if header.clicked() || header.secondary_clicked() {
             actions.push(Action::Select(Selected::Folder(sub.to_owned())));
         }
-        header.context_menu(|ui| folder_menu(ui, sub, actions));
+        if let Some(info) = &pack {
+            header
+                .clone()
+                .on_hover_ui(|ui| crate::blockio::pack_credits(ui, info));
+        }
+        header.context_menu(|ui| folder_menu(ui, sub, pack.is_some(), actions));
     }
     let mut blocks: Vec<_> = app
         .lib
@@ -361,9 +455,6 @@ fn block_row(
                 }
             }
         });
-        if ui.button("Экспорт в файл...").clicked() {
-            actions.push(Action::Export(kind.clone()));
-        }
         let example = b.dir.join(flp_core::blockfile::EXAMPLE_FILE).is_file();
         if ui
             .add_enabled(example, egui::Button::new("Открыть пример"))
@@ -378,7 +469,18 @@ fn block_row(
     });
 }
 
-fn folder_menu(ui: &mut Ui, path: &str, actions: &mut Vec<Action>) {
+fn folder_menu(ui: &mut Ui, path: &str, is_pack: bool, actions: &mut Vec<Action>) {
+    if is_pack {
+        if ui.button("Свойства набора...").clicked() {
+            actions.push(Action::PackProps(path.to_owned()));
+            ui.close();
+        }
+        if ui.button("Экспорт набора...").clicked() {
+            actions.push(Action::ExportPack(path.to_owned()));
+            ui.close();
+        }
+        ui.separator();
+    }
     if ui.button("Новый блок...").clicked() {
         actions.push(Action::NewBlock(path.to_owned()));
     }
@@ -431,6 +533,108 @@ fn ask_name(app: &EditorApp, ctx: &egui::Context, p: &mut Prompt) -> Option<bool
         });
     });
     answer
+}
+
+/// Pack dialog; Some(true) — OK, Some(false) — cancelled.
+fn pack_form(app: &EditorApp, ctx: &egui::Context, f: &mut PackForm) -> Option<bool> {
+    let editing = f.edit.is_some();
+    let valid = editing || is_valid_folder_name(f.name.trim());
+    let error = app.theme.palette.error;
+    let mut answer = None;
+    egui::Modal::new(Id::unique("userlib_pack_modal")).show(ctx, |ui| {
+        let title = if editing {
+            "Свойства набора"
+        } else {
+            "Новый набор блоков"
+        };
+        ui.label(RichText::new(title).strong());
+        egui::Grid::new("pack_form").num_columns(2).show(ui, |ui| {
+            ui.label("Название");
+            if editing {
+                ui.label(format!("{} · версия {}", f.name, f.version));
+            } else {
+                ui.add(egui::TextEdit::singleline(&mut f.name).desired_width(280.0));
+            }
+            ui.end_row();
+            ui.label("Описание");
+            ui.add(egui::TextEdit::singleline(&mut f.description).desired_width(280.0));
+            ui.end_row();
+            ui.label("Автор");
+            ui.add(egui::TextEdit::singleline(&mut f.authors).desired_width(280.0));
+            ui.end_row();
+            ui.label("Контакты");
+            ui.add(
+                egui::TextEdit::multiline(&mut f.contacts)
+                    .desired_rows(3)
+                    .desired_width(280.0)
+                    .hint_text("почта, ссылка или соцсеть — по одной в строке"),
+            );
+            ui.end_row();
+            ui.label("Лицензия");
+            ui.add(egui::TextEdit::singleline(&mut f.license).desired_width(280.0));
+            ui.end_row();
+        });
+        if !valid && !f.name.trim().is_empty() {
+            ui.colored_label(error, "Нельзя использовать символы < > : \" / \\ | ? *");
+        }
+        if !f.error.is_empty() {
+            ui.colored_label(error, &f.error);
+        }
+        let ok = valid && !f.name.trim().is_empty();
+        ui.horizontal(|ui| {
+            if ui.add_enabled(ok, egui::Button::new("ОК")).clicked() {
+                answer = Some(true);
+            }
+            if ui.button("Отмена").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape))
+            {
+                answer = Some(false);
+            }
+        });
+    });
+    answer
+}
+
+/// Creates the pack or saves its properties; returns whether the dialog may close.
+/// The entered author is remembered for the next packs.
+fn apply_pack_form(app: &mut EditorApp, f: &mut PackForm) -> bool {
+    let Some(user) = app.user_lib_dir() else {
+        f.error = "Нет папки библиотеки блоков".to_owned();
+        return false;
+    };
+    let result = match &f.edit {
+        Some(folder) => {
+            let dir = user.join(folder);
+            PackInfo::read(&dir).and_then(|mut info| {
+                info.description = f.description.trim().to_owned();
+                info.authors = f.authors();
+                info.contacts = f.contacts();
+                info.license = f.license.trim().to_owned();
+                info.write(&dir)
+            })
+        }
+        None => {
+            let mut info = PackInfo::new(f.name.trim());
+            info.description = f.description.trim().to_owned();
+            info.authors = f.authors();
+            info.contacts = f.contacts();
+            info.license = f.license.trim().to_owned();
+            pack::create(&user, &info).map(|_| ())
+        }
+    };
+    match result {
+        Ok(()) => {
+            crate::theme::save_author(&crate::theme::Author {
+                name: f.authors.trim().to_owned(),
+                contacts: f.contacts(),
+            });
+            app.reload_library();
+            true
+        }
+        Err(e) => {
+            f.error = e;
+            false
+        }
+    }
 }
 
 fn folder_path(app: &EditorApp, path: &str) -> Option<PathBuf> {

@@ -4,6 +4,8 @@
 use flp_core::project::PROJECT_EXT;
 
 const PROG_ID: &str = "FLP_next.Project";
+const BLOCK_PROG_ID: &str = "FLP_next.BlockPack";
+const BLOCK_EXT: &str = flp_core::pack::EXTENSION;
 
 /// Registers this executable as the handler of project files.
 #[cfg(windows)]
@@ -20,15 +22,17 @@ pub fn register() -> Result<(), String> {
         let (key, _) = classes.create_subkey(path)?;
         key.set_value("", &value)
     };
-    set(&format!(".{PROJECT_EXT}"), PROG_ID)
-        .and_then(|()| set(PROG_ID, "Проект FLP_next"))
-        .and_then(|()| set(&format!(r"{PROG_ID}\DefaultIcon"), &format!("\"{exe}\",0")))
-        .and_then(|()| {
-            set(
-                &format!(r"{PROG_ID}\shell\open\command"),
-                &format!("\"{exe}\" \"%1\""),
-            )
-        })
+    let class = |ext: &str, prog_id: &str, title: &str| -> std::io::Result<()> {
+        set(&format!(".{ext}"), prog_id)?;
+        set(prog_id, title)?;
+        set(&format!(r"{prog_id}\DefaultIcon"), &format!("\"{exe}\",0"))?;
+        set(
+            &format!(r"{prog_id}\shell\open\command"),
+            &format!("\"{exe}\" \"%1\""),
+        )
+    };
+    class(PROJECT_EXT, PROG_ID, "Проект FLP_next")
+        .and_then(|()| class(BLOCK_EXT, BLOCK_PROG_ID, "Набор блоков FLP_next"))
         .map_err(|e| e.to_string())
 }
 

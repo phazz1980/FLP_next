@@ -520,6 +520,8 @@ pub struct BlockEditor {
     confirm_close: bool,
     /// A built-in block: shown, but cannot be changed.
     read_only: bool,
+    /// Sections, packs and folders a new block may be put into.
+    folders: Vec<String>,
 }
 
 impl BlockEditor {
@@ -527,7 +529,10 @@ impl BlockEditor {
     pub fn new_block(app: &EditorApp, group: &str) -> Self {
         let mut form = Form::new_block(String::new(), group.to_owned());
         form.kind = free_kind(app, &ident_from_name(&form.name));
-        Self::with(None, form)
+        Self {
+            folders: user_folders(app),
+            ..Self::with(None, form)
+        }
     }
 
     /// Opens a library block: a user block for editing, a built-in one read-only.
@@ -550,7 +555,10 @@ impl BlockEditor {
         form.attach = Attach::copied_from(&block.dir);
         form.name = format!("{} (копия)", form.name);
         form.kind = free_kind(app, &ident_from_name(&form.name));
-        Self::with(None, form)
+        Self {
+            folders: user_folders(app),
+            ..Self::with(None, form)
+        }
     }
 
     fn with(original: Option<String>, form: Form) -> Self {
@@ -562,6 +570,7 @@ impl BlockEditor {
             generated: None,
             confirm_close: false,
             read_only: false,
+            folders: Vec::new(),
         }
     }
 
@@ -770,6 +779,10 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
     close
 }
 
+fn user_folders(app: &EditorApp) -> Vec<String> {
+    app.lib.user_folders().map(str::to_owned).collect()
+}
+
 fn header(ui: &mut Ui, ed: &mut BlockEditor) {
     let read_only = ed.read_only;
     let f = &mut ed.form;
@@ -800,10 +813,28 @@ fn header(ui: &mut Ui, ed: &mut BlockEditor) {
             } else {
                 format!("Блоки пользователей / {}", f.group.replace('/', " / "))
             };
-            ui.label(place).on_hover_text(
-                "Раздел и папка в библиотеке. Перенести блок — правая кнопка на нём \
-                 во вкладке «Пользовательские».",
-            );
+            if ed.original.is_none() && !read_only && !ed.folders.is_empty() {
+                // A new block: choose the pack (section or folder) it goes into.
+                egui::ComboBox::from_id_salt("block_place")
+                    .selected_text(place)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut f.group, String::new(), "Блоки пользователей");
+                        for folder in &ed.folders {
+                            ui.selectable_value(
+                                &mut f.group,
+                                folder.clone(),
+                                folder.replace('/', " / "),
+                            );
+                        }
+                    })
+                    .response
+                    .on_hover_text("Набор, раздел или папка, куда сохранить новый блок");
+            } else {
+                ui.label(place).on_hover_text(
+                    "Раздел и папка в библиотеке. Перенести блок — правая кнопка на нём \
+                     во вкладке «Пользовательские».",
+                );
+            }
             ui.end_row();
 
             ui.label("Описание");

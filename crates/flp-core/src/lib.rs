@@ -11,6 +11,7 @@ pub mod layout;
 pub mod library;
 pub mod local;
 pub mod logic;
+pub mod pack;
 pub mod packed;
 pub mod pins;
 pub mod project;

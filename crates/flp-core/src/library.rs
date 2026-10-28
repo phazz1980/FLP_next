@@ -740,6 +740,7 @@ pub fn save_block(lib_dir: &Path, def: &BlockDef, template: &str, docs: &str) ->
     }
     let def = &def;
     let same_def = old_def.is_some_and(|old| old == *def);
+    let mut changed = !same_def;
     if !same_def {
         let text = toml::to_string_pretty(def).map_err(|source| Error::Serialize {
             path: toml_path.clone(),
@@ -754,6 +755,11 @@ pub fn save_block(lib_dir: &Path, def: &BlockDef, template: &str, docs: &str) ->
             continue;
         }
         fs::write(&path, text).map_err(write_err(&path))?;
+        changed = true;
+    }
+    if changed {
+        // A block of a pack: the version belongs to the pack as a whole.
+        crate::pack::bump(lib_dir);
     }
     Ok(dir)
 }

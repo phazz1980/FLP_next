@@ -308,11 +308,19 @@ impl EditorApp {
         }
         app.lib_dir = find_library(project.as_deref());
         app.reload_library();
+        // A block file given on the command line goes to the import window.
+        let (project, block_file) = match project {
+            Some(p) if is_block_file(&p) => (None, Some(p)),
+            other => (other, None),
+        };
         // Start with a project: the given one, the last one or a fresh one.
         let last = theme::last_project().filter(|p| flp_core::project::is_project(p));
         match project.or(last) {
             Some(path) => app.open(&path),
             None => app.create_default_project(),
+        }
+        if let Some(path) = block_file {
+            crate::blockio::add_files(&mut app, &[path]);
         }
         app
     }
@@ -1592,7 +1600,7 @@ impl EditorApp {
                 }
                 if ui
                     .button("Открывать .flpn двойным щелчком")
-                    .on_hover_text("Связать файлы проектов с этим редактором в Проводнике")
+                    .on_hover_text("Связать файлы проектов и наборов блоков (.flpblocks) с этим редактором в Проводнике")
                     .clicked()
                 {
                     match crate::assoc::register() {
@@ -2310,4 +2318,9 @@ fn newest_mtime(dir: &Path) -> Option<SystemTime> {
         }
     }
     newest
+}
+
+fn is_block_file(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case(flp_core::pack::EXTENSION))
 }

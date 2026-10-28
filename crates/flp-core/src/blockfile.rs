@@ -212,11 +212,11 @@ pub fn write_files(dir: &Path, files: &[(String, Vec<u8>)]) -> Result<(), String
     Ok(())
 }
 
-fn safe_part(part: &str) -> bool {
+pub(crate) fn safe_part(part: &str) -> bool {
     !part.is_empty() && part != "." && part != ".." && !part.contains([':', '\\', '/'])
 }
 
-fn safe_path(path: &str) -> bool {
+pub(crate) fn safe_path(path: &str) -> bool {
     !path.starts_with('/') && path.split('/').all(safe_part)
 }
 
