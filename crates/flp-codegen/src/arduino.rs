@@ -12,6 +12,7 @@ use flp_core::vars::VAR_SET;
 use flp_core::{ParamKind, ParamValue, PortRef, SignalType};
 use minijinja::{context, AutoEscape, Environment, UndefinedBehavior, Value};
 
+use crate::tasks::Tasks;
 use crate::{Backend, GenError, Instance, Program, Source};
 
 /// Arduino C++ for ESP32, built by arduino-cli.
@@ -33,11 +34,12 @@ impl Backend for ArduinoCpp {
 
     fn generate(&self, program: &Program) -> Result<String, GenError> {
         let env = environment();
+        let tasks = Tasks::new(program)?;
         let mut rendered = Vec::with_capacity(program.blocks.len());
         for inst in &program.blocks {
-            rendered.push((inst, render_block(&env, program, inst, self.debug)?));
+            rendered.push((inst, render_block(&env, program, &tasks, inst, self.debug)?));
         }
-        Ok(assemble(program, &rendered, self.debug))
+        Ok(assemble(program, &tasks, &rendered, self.debug))
     }
 }
 
@@ -72,6 +74,7 @@ const SECTION_LIST: &str = "// @defines, // @global, // @setup, // @loop, // @fu
 fn render_block(
     env: &Environment,
     program: &Program,
+    tasks: &Tasks,
     inst: &Instance,
     debug: bool,
 ) -> Result<Sections, GenError> {
@@ -100,12 +103,13 @@ fn render_block(
             let expr = match &i.source {
                 Source::Signal { index, invert } => {
                     let signal = &program.signals[*index];
+                    let name = tasks.read_name(program, inst, *index);
                     if *invert {
-                        format!("!{}", signal.name)
+                        format!("!{name}")
                     } else if signal.ty == i.ty {
-                        signal.name.clone()
+                        name
                     } else {
-                        format!("({}){}", cpp_type(i.ty), signal.name)
+                        format!("({}){name}", cpp_type(i.ty))
                     }
                 }
                 Source::Default(value) => constant_literal(i.ty, value),
@@ -280,7 +284,7 @@ fn render_block(
 }
 
 /// UART of a block with `[block.uart]`, with its settings (checked to exist).
-fn uart_of(program: &Program, inst: &Instance) -> Option<(UartConfig, UartAccess)> {
+pub(crate) fn uart_of(program: &Program, inst: &Instance) -> Option<(UartConfig, UartAccess)> {
     let uart = inst.lib.def.info.uart.as_ref()?;
     let Some(ParamValue::Int(n)) = inst.params.get(uart.param.as_str()) else {
         return None;
@@ -422,7 +426,7 @@ fn constant_literal(ty: SignalType, value: &ParamValue) -> String {
 /// Bytes reserved for every string signal and variable at startup.
 const STRING_RESERVE: usize = 32;
 
-fn cpp_type(ty: SignalType) -> &'static str {
+pub(crate) fn cpp_type(ty: SignalType) -> &'static str {
     match ty {
         SignalType::Bool => "bool",
         SignalType::Int => "int32_t",
@@ -432,7 +436,7 @@ fn cpp_type(ty: SignalType) -> &'static str {
     }
 }
 
-fn zero(ty: SignalType) -> &'static str {
+pub(crate) fn zero(ty: SignalType) -> &'static str {
     match ty {
         SignalType::Bool => "false",
         SignalType::Int => "0",
@@ -532,7 +536,12 @@ fn split_sections(text: &str) -> Result<Sections, String> {
     Ok(sections)
 }
 
-fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) -> String {
+fn assemble(
+    program: &Program,
+    tasks: &Tasks,
+    rendered: &[(&Instance, Sections)],
+    debug: bool,
+) -> String {
     let mut out = String::new();
     let order: Vec<&str> = program.blocks.iter().map(|b| b.block.id.as_str()).collect();
     let _ = writeln!(
@@ -556,11 +565,21 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
     for header in program.includes() {
         let _ = writeln!(out, "#include <{header}>");
     }
+    if tasks.any() {
+        out.push_str("#include <freertos/FreeRTOS.h>\n#include <freertos/semphr.h>\n#include <freertos/task.h>\n");
+    }
 
     if !program.signals.is_empty() {
         out.push_str("\n// Выходы блоков\n");
         for s in &program.signals {
             let _ = writeln!(out, "{} {} = {};", cpp_type(s.ty), s.name, zero(s.ty));
+        }
+    }
+
+    if tasks.any() {
+        out.push_str("\n// Обмен сигналами между основной и фоновой задачами\nSemaphoreHandle_t flp_bg_lock;\n");
+        for line in tasks.globals(program) {
+            let _ = writeln!(out, "{line}");
         }
     }
 
@@ -606,7 +625,7 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
     let stats = debug || diagnostics.enabled;
     let looped = rendered
         .iter()
-        .filter(|(_, sec)| !sec.looped.is_empty())
+        .filter(|(inst, sec)| !sec.looped.is_empty() && !tasks.is_background(inst))
         .map(|(inst, _)| *inst);
     let sheets = crate::stats::measured_sheets(program, looped);
     if stats {
@@ -616,11 +635,11 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
         }
     }
     let table = debug.then(|| crate::debug::debug_table(program));
+    // Console input is compiled in only for a block reading USB.
+    let text_in = program.blocks.iter().any(
+        |inst| matches!(uart_of(program, inst), Some((u, UartAccess::Read)) if u.number == flp_core::uart::USB),
+    );
     if let Some(table) = &table {
-        // Console input is compiled in only for a block reading USB.
-        let text_in = program.blocks.iter().any(
-            |inst| matches!(uart_of(program, inst), Some((u, UartAccess::Read)) if u.number == flp_core::uart::USB),
-        );
         out.push_str(&crate::debug::runtime(table, text_in));
     }
     // Forcing: after each block, its forced outputs (and a written variable) win.
@@ -647,7 +666,7 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
     if stats {
         let mut current = None;
         for (inst, sec) in rendered {
-            if sec.looped.is_empty() && forces(inst).is_empty() {
+            if tasks.is_background(inst) || (sec.looped.is_empty() && forces(inst).is_empty()) {
                 continue;
             }
             let sheet = crate::stats::sheet_of(program, inst);
@@ -665,7 +684,72 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
             .unwrap_or_default()
     };
 
+    // Housekeeping that may leave the main loop: reporting and saving touch no
+    // strings and no console input, so the background task can own them.
+    let text_vars = vars.iter().any(|v| v.ty.signal() == SignalType::String);
+    let bg_report = tasks.any() && !text_in && table.as_ref().is_none_or(|t| t.texts.is_empty());
+    let bg_save = tasks.any() && !text_vars;
+    let save = crate::retain::save(vars);
+    let report = if debug {
+        Some("flp_dbg_loop();")
+    } else if stats {
+        Some("flp_st_report();")
+    } else {
+        None
+    };
+    let lock = |lines: Vec<String>| -> Vec<String> {
+        if lines.is_empty() {
+            return lines;
+        }
+        let mut wrapped = vec!["xSemaphoreTake(flp_bg_lock, portMAX_DELAY);".to_owned()];
+        wrapped.extend(lines);
+        wrapped.push("xSemaphoreGive(flp_bg_lock);".to_owned());
+        wrapped
+    };
+    if tasks.any() {
+        out.push_str("\n// Фоновая задача: ядро 0, блоки плат с признаком «фоновая задача»\nvoid flp_bg_task(void *) {\n  for (;;) {\n");
+        let mut body = String::new();
+        let take = lock(tasks.take(program, true));
+        let started = !take.is_empty();
+        push_indented(&mut body, take.into_iter());
+        push_function_body(
+            &mut body,
+            rendered,
+            started,
+            |s| &s.looped,
+            &|_| Vec::new(),
+            &forces,
+            &|inst| tasks.is_background(inst),
+        );
+        let publish = lock(tasks.publish(program, true));
+        if !publish.is_empty() {
+            body.push('\n');
+            push_indented(&mut body, publish.into_iter());
+        }
+        if bg_save && !save.is_empty() {
+            body.push('\n');
+            push_indented(&mut body, save.iter().cloned());
+        }
+        if bg_report {
+            if let Some(call) = report {
+                let _ = writeln!(body, "\n  {call}");
+            }
+        }
+        body.push_str("\n  vTaskDelay(1);\n");
+        for line in body.lines() {
+            if line.is_empty() {
+                out.push('\n');
+            } else {
+                let _ = writeln!(out, "  {line}");
+            }
+        }
+        out.push_str("  }\n}\n");
+    }
+
     out.push_str("\nvoid setup() {\n");
+    if tasks.any() {
+        out.push_str("  flp_bg_lock = xSemaphoreCreateMutex();\n\n");
+    }
     if debug {
         out.push_str("  flp_dbg_setup();\n\n");
     } else if stats {
@@ -709,7 +793,20 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
     }
     let after_shared = after_restore || !once_setup.is_empty();
     let none = |_: &Instance| Vec::new();
-    push_function_body(&mut out, rendered, after_shared, |s| &s.setup, &none, &none);
+    push_function_body(
+        &mut out,
+        rendered,
+        after_shared,
+        |s| &s.setup,
+        &none,
+        &none,
+        &|_| true,
+    );
+    if tasks.any() {
+        out.push_str(
+            "\n  // Фоновая задача стартует после настройки всех блоков\n  xTaskCreatePinnedToCore(flp_bg_task, \"flp_bg\", 10240, nullptr, 1, nullptr, 0);\n",
+        );
+    }
     out.push_str("}\n\nvoid loop() {\n");
     if stats {
         out.push_str("  flp_st_begin();\n\n");
@@ -723,19 +820,34 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
             let _ = writeln!(out, "  // Forced variables\n  {}\n", vars.join(" "));
         }
     }
-    push_function_body(&mut out, rendered, false, |s| &s.looped, &mark, &forces);
-    let save = crate::retain::save(vars);
-    if !save.is_empty() {
+    let take = lock(tasks.take(program, false));
+    let started = !take.is_empty();
+    push_indented(&mut out, take.into_iter());
+    push_function_body(
+        &mut out,
+        rendered,
+        started,
+        |s| &s.looped,
+        &mark,
+        &forces,
+        &|inst| !tasks.is_background(inst),
+    );
+    let publish = lock(tasks.publish(program, false));
+    if !publish.is_empty() {
+        out.push('\n');
+        push_indented(&mut out, publish.into_iter());
+    }
+    if !(bg_save || save.is_empty()) {
         out.push('\n');
         push_indented(&mut out, save.into_iter());
     }
     if stats {
         out.push_str("\n  flp_st_end();\n");
     }
-    if debug {
-        out.push_str("  flp_dbg_loop();\n");
-    } else if stats {
-        out.push_str("  flp_st_report();\n");
+    if !bg_report {
+        if let Some(call) = report {
+            let _ = writeln!(out, "  {call}");
+        }
     }
     out.push_str("}\n");
     out
@@ -743,7 +855,8 @@ fn assemble(program: &Program, rendered: &[(&Instance, Sections)], debug: bool) 
 
 /// Writes the code of each block into a function body; `after` means the body
 /// already has code, so the first block is separated by a blank line too.
-/// `before` and `extra` add lines in front of and after the block code.
+/// `before` and `extra` add lines in front of and after the block code;
+/// `only` selects the blocks.
 fn push_function_body(
     out: &mut String,
     rendered: &[(&Instance, Sections)],
@@ -751,9 +864,13 @@ fn push_function_body(
     section: fn(&Sections) -> &String,
     before: &dyn Fn(&Instance) -> Vec<String>,
     extra: &dyn Fn(&Instance) -> Vec<String>,
+    only: &dyn Fn(&Instance) -> bool,
 ) {
     let mut first = !after;
     for (inst, sec) in rendered {
+        if !only(inst) {
+            continue;
+        }
         let code = section(sec);
         let extra = extra(inst);
         if code.is_empty() && extra.is_empty() {

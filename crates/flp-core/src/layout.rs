@@ -24,6 +24,9 @@ pub struct SheetInfo {
     pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub comment: String,
+    /// The blocks of the sheet run in a background task (the second core of the ESP32).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub background: bool,
 }
 
 /// Manual route of a link. A link without an entry is routed automatically.
@@ -50,6 +53,11 @@ impl Layout {
 
     pub fn sheet(&self, number: u32) -> Option<&SheetInfo> {
         self.sheets.iter().find(|s| s.number == number)
+    }
+
+    /// The blocks of the sheet run in the background task.
+    pub fn is_background(&self, number: u32) -> bool {
+        self.sheet(number).is_some_and(|s| s.background)
     }
 }
 

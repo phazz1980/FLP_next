@@ -3,6 +3,7 @@ type = "modbus_master_write"
 name = "Запись Modbus Master"
 symbol = "MM →"
 group = "Сеть"
+shared = "network"
 description = "Записывает значение в ведомое устройство через блок «Modbus RTU Master»."
 
 [[input]]

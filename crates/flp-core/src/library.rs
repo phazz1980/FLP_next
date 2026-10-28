@@ -184,6 +184,11 @@ pub struct BlockInfo {
     /// not drawn on the sheets and not offered in the library.
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
+    /// The block works through a library object shared with other blocks of the same
+    /// tag (`network`: Wi-Fi, MQTT, web page, Modbus); such blocks cannot run in
+    /// different tasks.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub shared: String,
     /// The block works through a hardware UART set up in the board settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uart: Option<crate::uart::UartUse>,

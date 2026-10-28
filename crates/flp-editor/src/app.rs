@@ -1527,14 +1527,16 @@ impl EditorApp {
                 if examples.is_empty() {
                     ui.label("Папка examples не найдена");
                 }
-                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
-                    for (name, path) in examples {
-                        if ui.button(name).clicked() {
-                            self.request_open(path);
-                            ui.close();
+                egui::ScrollArea::vertical()
+                    .max_height(400.0)
+                    .show(ui, |ui| {
+                        for (name, path) in examples {
+                            if ui.button(name).clicked() {
+                                self.request_open(path);
+                                ui.close();
+                            }
                         }
-                    }
-                });
+                    });
             });
             ui.menu_button("Вид", |ui| panels::theme_menu(self, ui));
             ui.menu_button("Правка", |ui| {

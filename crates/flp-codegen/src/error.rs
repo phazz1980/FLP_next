@@ -29,6 +29,10 @@ pub enum GenError {
         b: PortRef,
     },
 
+    /// Blocks of different tasks (main and background) share something that is not thread-safe.
+    #[error("фоновая задача: {0}")]
+    Task(String),
+
     #[error("{}: {}", .path.display(), .source)]
     Io {
         path: PathBuf,

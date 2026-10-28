@@ -3,6 +3,7 @@ type = "modbus_master_read"
 name = "Чтение Modbus Master"
 symbol = "MM ←"
 group = "Сеть"
+shared = "network"
 description = "Читает значение ведомого устройства, опрошенного блоком «Modbus RTU Master»."
 
 [[output]]

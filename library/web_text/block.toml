@@ -3,6 +3,7 @@ type = "web_text"
 name = "Веб-текст"
 symbol = "STR"
 group = "Веб-интерфейс"
+shared = "network"
 description = "Строка на веб-странице: показывает текст со входа."
 memory = true
 

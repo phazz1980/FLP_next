@@ -1,0 +1,52 @@
+# Координаты блоков для редактора.
+
+[[sheet]]
+number = 2
+name = "Фон"
+background = true
+
+[block.button]
+x = 40.0
+y = 40.0
+sheet = 2
+
+[block.press]
+x = 200.0
+y = 40.0
+sheet = 2
+
+[block.total_r]
+x = 40.0
+y = 160.0
+sheet = 2
+
+[block.one]
+x = 40.0
+y = 240.0
+sheet = 2
+
+[block.next]
+x = 200.0
+y = 180.0
+sheet = 2
+
+[block.total_w]
+x = 360.0
+y = 120.0
+sheet = 2
+
+[block.shown]
+x = 40.0
+y = 40.0
+
+[block.reached]
+x = 200.0
+y = 40.0
+
+[block.led]
+x = 360.0
+y = 40.0
+
+[block.blink_led]
+x = 360.0
+y = 120.0

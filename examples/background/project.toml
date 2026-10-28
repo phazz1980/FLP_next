@@ -1,0 +1,6 @@
+[project]
+name = "background"
+description = "Плата 2 работает в фоновой задаче (ядро 0): медленный вход и сохранение во флеш не задерживают основной цикл"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

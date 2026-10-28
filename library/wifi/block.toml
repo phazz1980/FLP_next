@@ -3,6 +3,7 @@ type = "wifi"
 name = "Wi-Fi клиент"
 symbol = "Wi-Fi"
 group = "Сеть"
+shared = "network"
 description = "Подключение ESP32 к сети Wi-Fi и/или своя точка доступа (библиотека FLProg_Network). Входы и выходы включаются в свойствах блока."
 single = true
 hidden = true

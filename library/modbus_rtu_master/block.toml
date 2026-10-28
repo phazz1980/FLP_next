@@ -3,6 +3,7 @@ type = "modbus_rtu_master"
 name = "Modbus RTU Master"
 symbol = "MB MASTER"
 group = "Сеть"
+shared = "network"
 description = "Ведущее устройство Modbus RTU на UART (RS-485): опрашивает до четырёх ведомых."
 single = true
 includes = ["flprogModbusRTU.h", "flprogUart.h"]

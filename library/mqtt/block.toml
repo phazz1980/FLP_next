@@ -3,6 +3,7 @@ type = "mqtt"
 name = "MQTT клиент"
 symbol = "MQTT"
 group = "Сеть"
+shared = "network"
 description = "Подключение к MQTT-брокеру через Wi-Fi или Ethernet; блоки «MQTT публикация» и «MQTT подписка» работают через него."
 single = true
 includes = ["flprogNetwork.h"]

@@ -3,6 +3,7 @@ type = "web_led"
 name = "Веб-индикатор"
 symbol = "LED"
 group = "Веб-интерфейс"
+shared = "network"
 description = "Лампа на веб-странице: горит, пока на входе true."
 memory = true
 

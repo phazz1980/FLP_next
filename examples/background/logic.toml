@@ -1,0 +1,92 @@
+# Плата 1 (основной цикл): светодиод по порогу счётчика и кнопка-сброс.
+# Плата 2 (фоновая задача): считает нажатия и сохраняет счётчик во флеш.
+# Сигнал press.out идёт из фона в основной цикл через снимок под мьютексом.
+
+[[var]]
+name = "Нажатий всего"
+type = "float"
+retain = true
+description = "Сколько раз нажата кнопка за всё время"
+
+[[block]]
+id = "button"
+type = "digital_in"
+pin = 13
+pullup = true
+inverted = true
+
+[[block]]
+id = "press"
+type = "rising_edge"
+
+[[block]]
+id = "total_r"
+type = "var_get"
+var = "Нажатий всего"
+
+[[block]]
+id = "one"
+type = "constant"
+value = 1.0
+
+[[block]]
+id = "next"
+type = "add"
+
+[[block]]
+id = "total_w"
+type = "var_set"
+var = "Нажатий всего"
+write_enable = true
+
+[[block]]
+id = "shown"
+type = "var_get"
+var = "Нажатий всего"
+
+[[block]]
+id = "reached"
+type = "greater"
+b = 4.5
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[block]]
+id = "blink_led"
+type = "digital_out"
+pin = 4
+
+[[link]]
+from = "button.out"
+to   = "press.in"
+
+[[link]]
+from = "total_r.out"
+to   = "next.a"
+
+[[link]]
+from = "one.out"
+to   = "next.b"
+
+[[link]]
+from = "next.out"
+to   = "total_w.in"
+
+[[link]]
+from = "press.out"
+to   = "total_w.en"
+
+[[link]]
+from = "shown.out"
+to   = "reached.a"
+
+[[link]]
+from = "reached.out"
+to   = "led.in"
+
+[[link]]
+from = "press.out"
+to   = "blink_led.in"

@@ -11,6 +11,7 @@ pub mod preview;
 pub mod program;
 pub mod retain;
 pub mod stats;
+pub mod tasks;
 
 use std::fs;
 use std::path::{Path, PathBuf};

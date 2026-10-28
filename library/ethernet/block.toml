@@ -3,6 +3,7 @@ type = "ethernet"
 name = "Ethernet W5500"
 symbol = "ETH"
 group = "Сеть"
+shared = "network"
 description = "Проводная сеть на модуле W5500 (W5100, W5200) по SPI (библиотека FLProg_Network)."
 single = true
 hidden = true

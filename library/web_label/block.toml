@@ -3,6 +3,7 @@ type = "web_label"
 name = "Заголовок страницы"
 symbol = "TXT"
 group = "Веб-интерфейс"
+shared = "network"
 description = "Статичная надпись на веб-странице (заголовок раздела)."
 memory = true
 

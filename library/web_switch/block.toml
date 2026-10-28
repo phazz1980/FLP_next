@@ -3,6 +3,7 @@ type = "web_switch"
 name = "Веб-переключатель"
 symbol = "SW"
 group = "Веб-интерфейс"
+shared = "network"
 description = "Переключатель на веб-странице: выход держит состояние, пока его не изменят на странице."
 memory = true
 

@@ -565,11 +565,14 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
                 }
                 for s in app.sheets() {
                     let name = doc.project.layout.sheet(s).map_or("", |i| i.name.as_str());
-                    let title = if name.is_empty() {
+                    let mut title = if name.is_empty() {
                         format!("Плата {s}")
                     } else {
                         format!("Плата {s}: {name}")
                     };
+                    if doc.project.layout.is_background(s) {
+                        title.push_str(" (фон)");
+                    }
                     let blocks = by_sheet.remove(&s).unwrap_or_default();
                     let header = egui::CollapsingHeader::new(title)
                         .id_salt(("sheet", s))

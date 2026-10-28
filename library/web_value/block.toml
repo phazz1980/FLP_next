@@ -3,6 +3,7 @@ type = "web_value"
 name = "Веб-значение"
 symbol = "VAL"
 group = "Веб-интерфейс"
+shared = "network"
 description = "Число на веб-странице: показывает значение входа."
 memory = true
 

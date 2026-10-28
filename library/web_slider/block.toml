@@ -3,6 +3,7 @@ type = "web_slider"
 name = "Веб-ползунок"
 symbol = "SLD"
 group = "Веб-интерфейс"
+shared = "network"
 description = "Ползунок на веб-странице: выход — выбранное число между min и max."
 memory = true
 

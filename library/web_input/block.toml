@@ -3,6 +3,7 @@ type = "web_input"
 name = "Веб-ввод числа"
 symbol = "NUM"
 group = "Веб-интерфейс"
+shared = "network"
 description = "Поле ввода числа на веб-странице (уставка): выход — введённое число. Если min равно max, границ нет."
 memory = true
 

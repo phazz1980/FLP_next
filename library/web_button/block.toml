@@ -3,6 +3,7 @@ type = "web_button"
 name = "Веб-кнопка"
 symbol = "BTN"
 group = "Веб-интерфейс"
+shared = "network"
 description = "Кнопка на веб-странице: выход true, пока кнопка нажата."
 memory = true
 

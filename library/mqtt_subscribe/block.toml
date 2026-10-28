@@ -3,6 +3,7 @@ type = "mqtt_subscribe"
 name = "MQTT подписка"
 symbol = "MQTT ←"
 group = "Сеть"
+shared = "network"
 description = "Принимает сообщения из топика MQTT (допустимы шаблоны + и #) и выдаёт последнее значение нужного типа."
 
 [[output]]

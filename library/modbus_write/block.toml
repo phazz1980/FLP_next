@@ -3,6 +3,7 @@ type = "modbus_write"
 name = "Запись Modbus"
 symbol = "MB →"
 group = "Сеть"
+shared = "network"
 description = "Записывает значение в таблицу Modbus TCP Slave, чтобы его прочитал мастер."
 
 [[input]]

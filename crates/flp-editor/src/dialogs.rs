@@ -63,6 +63,7 @@ pub struct SheetDialog {
     number: u32,
     name: String,
     comment: String,
+    background: bool,
 }
 
 enum Outcome {
@@ -199,6 +200,7 @@ impl Dialog {
             number,
             name: info.name,
             comment: info.comment,
+            background: info.background,
         })
     }
 }
@@ -867,6 +869,14 @@ fn sheet_body(ui: &mut Ui, d: &mut SheetDialog) {
             ui.label("Комментарии");
             ui.add(egui::TextEdit::multiline(&mut d.comment).desired_rows(3));
             ui.end_row();
+            ui.label("Фоновая задача");
+            ui.checkbox(&mut d.background, "блоки платы работают на втором ядре")
+                .on_hover_text(
+                    "Блоки этой платы выполняются в отдельной задаче FreeRTOS на ядре 0 (на ESP32 с двумя ядрами), \
+                     не замедляя основной цикл: медленные датчики, запись во флеш, сеть. \
+                     Связи с блоками других плат передают значения снимками в начале и конце прохода.",
+                );
+            ui.end_row();
         });
 }
 
@@ -983,6 +993,7 @@ fn apply(app: &mut EditorApp, dialog: &Dialog) -> Result<(), String> {
                 number: d.number,
                 name: d.name.trim().to_owned(),
                 comment: d.comment.trim().to_owned(),
+                background: d.background,
             };
             doc.edit(&lib, None, |p| {
                 p.set_sheet_info(info);

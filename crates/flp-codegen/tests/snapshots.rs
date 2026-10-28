@@ -627,3 +627,46 @@ fn string_signals_snapshot() {
         "{table}"
     );
 }
+
+/// Sheets marked "background" run in their own task; blocks sharing a library
+/// object with the other task are refused, and without the flag there is no task.
+#[test]
+fn background_sheet_rules() {
+    let lib = library();
+    let code = generate(
+        &Project::load(repo_path("examples/background")).unwrap(),
+        &lib,
+        &ArduinoCpp::RELEASE,
+    )
+    .unwrap();
+    assert!(
+        code.contains("xTaskCreatePinnedToCore(flp_bg_task"),
+        "{code}"
+    );
+    assert!(code.contains("press_out_in = press_out_pub;"), "{code}");
+
+    let mut plain = Project::load(repo_path("examples/background")).unwrap();
+    plain.layout.sheets.clear();
+    let code = generate(&plain, &lib, &ArduinoCpp::RELEASE).unwrap();
+    assert!(!code.contains("flp_bg_task"), "{code}");
+
+    // The broker alone on a background sheet, its publishers in the main task.
+    let mut split = Project::load(repo_path("examples/mqtt")).unwrap();
+    split.layout.sheets.push(flp_core::SheetInfo {
+        number: 2,
+        background: true,
+        ..Default::default()
+    });
+    split.layout.blocks.insert(
+        "broker".into(),
+        flp_core::layout::BlockPos {
+            sheet: 2,
+            x: 0.0,
+            y: 0.0,
+        },
+    );
+    match generate(&split, &lib, &ArduinoCpp::RELEASE) {
+        Err(GenError::Task(m)) => assert!(m.contains("broker"), "{m}"),
+        other => panic!("expected a task error, got {other:?}"),
+    }
+}

@@ -3,6 +3,7 @@ type = "modbus_tcp_slave"
 name = "Modbus TCP Slave"
 symbol = "MB TCP"
 group = "Сеть"
+shared = "network"
 description = "Ведомое устройство Modbus TCP через Wi-Fi или Ethernet: таблицы регистров для SCADA и панелей."
 single = true
 includes = ["flprogModbusTCP.h"]

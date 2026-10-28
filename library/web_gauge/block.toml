@@ -3,6 +3,7 @@ type = "web_gauge"
 name = "Веб-шкала"
 symbol = "BAR"
 group = "Веб-интерфейс"
+shared = "network"
 description = "Шкала на веб-странице: заполняется по значению входа между min и max."
 memory = true
 

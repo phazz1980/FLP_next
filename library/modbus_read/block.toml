@@ -3,6 +3,7 @@ type = "modbus_read"
 name = "Чтение Modbus"
 symbol = "MB ←"
 group = "Сеть"
+shared = "network"
 description = "Читает значение из таблицы Modbus TCP Slave (то, что записал мастер)."
 
 [[output]]
