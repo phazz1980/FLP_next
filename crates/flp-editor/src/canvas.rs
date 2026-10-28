@@ -570,12 +570,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             let tint = Color32::from_rgb(150, 90, 220);
             painter.rect_filled(sheet_rect, 2.0, tint.gamma_multiply(0.10));
             painter.rect_filled(header, 2.0, tint.gamma_multiply(0.30));
-            painter.rect_stroke(
-                sheet_rect,
-                2.0,
-                Stroke::new(2.0, tint),
-                StrokeKind::Inside,
-            );
+            painter.rect_stroke(sheet_rect, 2.0, Stroke::new(2.0, tint), StrokeKind::Inside);
             painter.text(
                 header.right_top() + Vec2::new(-10.0, 4.0 * z),
                 Align2::RIGHT_TOP,

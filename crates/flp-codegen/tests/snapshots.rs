@@ -650,6 +650,27 @@ fn background_sheet_rules() {
     let code = generate(&plain, &lib, &ArduinoCpp::RELEASE).unwrap();
     assert!(!code.contains("flp_bg_task"), "{code}");
 
+    // Single-core chip: no task, the background sheets stay in loop() on periods,
+    // one sheet per pass, phases spread over the period.
+    let mut c3 = Project::load(repo_path("examples/background")).unwrap();
+    c3.config.board.fqbn = "esp32:esp32:esp32c3".into();
+    c3.layout.sheets.push(flp_core::SheetInfo {
+        number: 3,
+        background: true,
+        period: 20,
+        ..Default::default()
+    });
+    c3.layout.blocks.get_mut("blink_led").unwrap().sheet = 3;
+    let code = generate(&c3, &lib, &ArduinoCpp::RELEASE).unwrap();
+    let snapshot =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/background_c3.ino");
+    assert_snapshot(&snapshot, &code);
+    assert!(!code.contains("flp_bg_task"), "{code}");
+    assert!(code.contains("flp_bg2_t = 0u - 10u;"), "{code}");
+    assert!(code.contains("flp_bg3_t = 10u - 20u;"), "{code}");
+    assert!(code.contains("if (flp_bg2_run) {"), "{code}");
+    assert!(code.contains("!flp_bg_one"), "{code}");
+
     // The broker alone on a background sheet, its publishers in the main task.
     let mut split = Project::load(repo_path("examples/mqtt")).unwrap();
     split.layout.sheets.push(flp_core::SheetInfo {

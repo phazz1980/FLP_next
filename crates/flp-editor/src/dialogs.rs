@@ -64,6 +64,7 @@ pub struct SheetDialog {
     name: String,
     comment: String,
     background: bool,
+    period: u32,
 }
 
 enum Outcome {
@@ -201,6 +202,11 @@ impl Dialog {
             name: info.name,
             comment: info.comment,
             background: info.background,
+            period: if info.period == 0 {
+                flp_core::layout::DEFAULT_BACKGROUND_PERIOD_MS
+            } else {
+                info.period
+            },
         })
     }
 }
@@ -877,6 +883,16 @@ fn sheet_body(ui: &mut Ui, d: &mut SheetDialog) {
                      Связи с блоками других плат передают значения снимками в начале и конце прохода.",
                 );
             ui.end_row();
+            if d.background {
+                ui.label("Период, мс");
+                ui.add(egui::DragValue::new(&mut d.period).range(1..=1000).suffix(" мс"))
+                    .on_hover_text(
+                        "Только для одноядерных МК (ESP32-C3, S2…): второго ядра нет, поэтому плата \
+                         остаётся в loop() и выполняется раз в этот период, не больше одной платы за проход; \
+                         фазы фоновых плат разнесены по периоду.",
+                    );
+                ui.end_row();
+            }
         });
 }
 
@@ -994,6 +1010,11 @@ fn apply(app: &mut EditorApp, dialog: &Dialog) -> Result<(), String> {
                 name: d.name.trim().to_owned(),
                 comment: d.comment.trim().to_owned(),
                 background: d.background,
+                period: if d.period == flp_core::layout::DEFAULT_BACKGROUND_PERIOD_MS {
+                    0
+                } else {
+                    d.period
+                },
             };
             doc.edit(&lib, None, |p| {
                 p.set_sheet_info(info);

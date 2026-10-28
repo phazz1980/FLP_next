@@ -583,6 +583,14 @@ fn assemble(
         }
     }
 
+    let gate_globals = tasks.gate_globals();
+    if !gate_globals.is_empty() {
+        out.push_str("\n// Периоды фоновых плат\n");
+        for line in gate_globals {
+            let _ = writeln!(out, "{line}");
+        }
+    }
+
     let vars = &program.project.logic.vars;
     if !vars.is_empty() {
         out.push_str("\n// Переменные\n");
@@ -720,6 +728,7 @@ fn assemble(
             &|_| Vec::new(),
             &forces,
             &|inst| tasks.is_background(inst),
+            &|_| None,
         );
         let publish = lock(tasks.publish(program, true));
         if !publish.is_empty() {
@@ -801,6 +810,7 @@ fn assemble(
         &none,
         &none,
         &|_| true,
+        &|_| None,
     );
     if tasks.any() {
         out.push_str(
@@ -820,7 +830,11 @@ fn assemble(
             let _ = writeln!(out, "  // Forced variables\n  {}\n", vars.join(" "));
         }
     }
-    let take = lock(tasks.take(program, false));
+    let mut take = tasks.gate_prologue();
+    if !take.is_empty() {
+        take.push(String::new());
+    }
+    take.extend(lock(tasks.take(program, false)));
     let started = !take.is_empty();
     push_indented(&mut out, take.into_iter());
     push_function_body(
@@ -831,6 +845,7 @@ fn assemble(
         &mark,
         &forces,
         &|inst| !tasks.is_background(inst),
+        &|inst| tasks.gate(program, inst),
     );
     let publish = lock(tasks.publish(program, false));
     if !publish.is_empty() {
@@ -856,7 +871,8 @@ fn assemble(
 /// Writes the code of each block into a function body; `after` means the body
 /// already has code, so the first block is separated by a blank line too.
 /// `before` and `extra` add lines in front of and after the block code;
-/// `only` selects the blocks.
+/// `only` selects the blocks; `gate` names a flag that the code of a block runs under.
+#[allow(clippy::too_many_arguments)]
 fn push_function_body(
     out: &mut String,
     rendered: &[(&Instance, Sections)],
@@ -865,6 +881,7 @@ fn push_function_body(
     before: &dyn Fn(&Instance) -> Vec<String>,
     extra: &dyn Fn(&Instance) -> Vec<String>,
     only: &dyn Fn(&Instance) -> bool,
+    gate: &dyn Fn(&Instance) -> Option<String>,
 ) {
     let mut first = !after;
     for (inst, sec) in rendered {
@@ -884,7 +901,21 @@ fn push_function_body(
             let _ = writeln!(out, "  {line}");
         }
         let _ = writeln!(out, "  {}", block_comment(inst));
-        push_indented(out, code.lines().map(str::to_owned).chain(extra));
+        match gate(inst).filter(|_| !code.is_empty()) {
+            Some(run) => {
+                let _ = writeln!(out, "  if ({run}) {{");
+                for line in code.lines() {
+                    if line.is_empty() {
+                        out.push('\n');
+                    } else {
+                        let _ = writeln!(out, "    {line}");
+                    }
+                }
+                out.push_str("  }\n");
+                push_indented(out, extra.into_iter());
+            }
+            None => push_indented(out, code.lines().map(str::to_owned).chain(extra)),
+        }
     }
 }
 

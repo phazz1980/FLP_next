@@ -2,6 +2,10 @@
 //! on core 0, the rest in `loop()`. Signals that cross the boundary are passed as
 //! snapshots: the producer publishes its outputs at the end of a pass, the consumer
 //! takes them at the start of its own, both under one mutex.
+//!
+//! A single-core chip gains nothing from a second task, so there the blocks of a
+//! background sheet stay in `loop()` but run on a period of their own, at most one
+//! sheet per pass and with the sheets' phases spread over the period.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -16,6 +20,18 @@ pub struct Tasks {
     background: HashSet<String>,
     /// Signal → the producer runs in the background task.
     crossing: BTreeMap<usize, bool>,
+    /// A real second task (two cores); otherwise the sheets are gated in `loop()`.
+    threaded: bool,
+    /// Gated sheets on a single-core chip: (sheet, period in ms).
+    gates: Vec<(u32, u32)>,
+}
+
+/// Chips with one core (ESP32-S2, C2, C3, C6, H2).
+fn single_core(fqbn: &str) -> bool {
+    let chip = fqbn.rsplit(':').next().unwrap_or("");
+    ["esp32s2", "esp32c2", "esp32c3", "esp32c6", "esp32h2"]
+        .iter()
+        .any(|c| chip.starts_with(c))
 }
 
 impl Tasks {
@@ -30,8 +46,23 @@ impl Tasks {
         let mut tasks = Self {
             background,
             crossing: BTreeMap::new(),
+            threaded: !single_core(&program.project.config.board.fqbn),
+            gates: Vec::new(),
         };
         if tasks.background.is_empty() {
+            return Ok(tasks);
+        }
+        if !tasks.threaded {
+            let sheets: BTreeSet<u32> = program
+                .blocks
+                .iter()
+                .filter(|i| tasks.background.contains(&i.block.id))
+                .map(|i| crate::stats::sheet_of(program, i))
+                .collect();
+            tasks.gates = sheets
+                .into_iter()
+                .map(|s| (s, layout.background_period(s)))
+                .collect();
             return Ok(tasks);
         }
         tasks.check(program)?;
@@ -56,11 +87,61 @@ impl Tasks {
 
     /// There is a background task.
     pub fn any(&self) -> bool {
-        !self.background.is_empty()
+        self.threaded && !self.background.is_empty()
     }
 
     pub fn is_background(&self, inst: &Instance) -> bool {
-        self.background.contains(&inst.block.id)
+        self.threaded && self.background.contains(&inst.block.id)
+    }
+
+    /// Name of the flag that says the (gated) sheet of the block runs in this pass.
+    pub fn gate(&self, program: &Program, inst: &Instance) -> Option<String> {
+        if self.threaded || !self.background.contains(&inst.block.id) {
+            return None;
+        }
+        Some(run_name(crate::stats::sheet_of(program, inst)))
+    }
+
+    /// Timers of the gated sheets; the first run of sheet `i` of `n` is delayed by
+    /// `i / n` of its period.
+    pub fn gate_globals(&self) -> Vec<String> {
+        let n = self.gates.len() as u32;
+        self.gates
+            .iter()
+            .enumerate()
+            .map(|(i, &(sheet, period))| {
+                let offset = i as u32 * period / n;
+                format!(
+                    "uint32_t flp_bg{sheet}_t = {offset}u - {period}u;  // плата {sheet}: раз в {period} мс"
+                )
+            })
+            .collect()
+    }
+
+    /// Start of `loop()`: decides which gated sheet runs in this pass (at most one).
+    pub fn gate_prologue(&self) -> Vec<String> {
+        if self.gates.is_empty() {
+            return Vec::new();
+        }
+        let mut out = vec![
+            "// Фоновые платы на одноядерном МК: каждая раз в свой период, не больше одной за проход"
+                .to_owned(),
+            "uint32_t flp_now = millis();".to_owned(),
+        ];
+        let many = self.gates.len() > 1;
+        if many {
+            out.push("bool flp_bg_one = false;".to_owned());
+        }
+        for &(sheet, period) in &self.gates {
+            out.push(format!("bool {} = false;", run_name(sheet)));
+            let free = if many { "!flp_bg_one && " } else { "" };
+            let taken = if many { " flp_bg_one = true;" } else { "" };
+            out.push(format!(
+                "if ({free}(uint32_t)(flp_now - flp_bg{sheet}_t) >= {period}u) {{ flp_bg{sheet}_t = flp_now; {}= true;{taken} }}",
+                format_args!("{} ", run_name(sheet))
+            ));
+        }
+        out
     }
 
     /// Name of the signal as the consumer reads it: a copy taken at the start of its pass
@@ -194,6 +275,10 @@ impl Tasks {
         }
         Ok(())
     }
+}
+
+fn run_name(sheet: u32) -> String {
+    format!("flp_bg{sheet}_run")
 }
 
 fn pub_name(name: &str) -> String {

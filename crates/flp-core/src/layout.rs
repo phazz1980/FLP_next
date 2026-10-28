@@ -27,7 +27,17 @@ pub struct SheetInfo {
     /// The blocks of the sheet run in a background task (the second core of the ESP32).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub background: bool,
+    /// Period of a background sheet on a single-core chip, ms; 0 is the default.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub period: u32,
 }
+
+fn is_zero(v: &u32) -> bool {
+    *v == 0
+}
+
+/// Default period of a background sheet on a single-core chip, ms.
+pub const DEFAULT_BACKGROUND_PERIOD_MS: u32 = 10;
 
 /// Manual route of a link. A link without an entry is routed automatically.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -58,6 +68,14 @@ impl Layout {
     /// The blocks of the sheet run in the background task.
     pub fn is_background(&self, number: u32) -> bool {
         self.sheet(number).is_some_and(|s| s.background)
+    }
+
+    /// Period of the background sheet when it runs inside `loop()`, ms.
+    pub fn background_period(&self, number: u32) -> u32 {
+        match self.sheet(number).map_or(0, |s| s.period) {
+            0 => DEFAULT_BACKGROUND_PERIOD_MS,
+            p => p,
+        }
     }
 }
 
