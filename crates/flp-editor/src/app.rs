@@ -177,6 +177,7 @@ pub struct EditorApp {
     /// The window with the changes of the newer releases is shown.
     update_window: bool,
     changes_window: bool,
+    report: crate::report::Form,
     /// User blocks whose revision differs between the project and the program.
     block_diffs: Vec<flp_core::packed::VersionDiff>,
     /// arduino-cli is missing: the window offers to install it.
@@ -257,6 +258,7 @@ impl EditorApp {
             new_release: None,
             update_window: false,
             changes_window: false,
+            report: Default::default(),
             block_diffs: Vec::new(),
             self_update: SelfUpdate::Idle(None),
             cli_prompt: if ArduinoCli::locate().is_ok() {
@@ -1764,21 +1766,10 @@ impl EditorApp {
                 ui.separator();
                 if ui
                     .button("Сообщить об ошибке")
-                    .on_hover_text("Откроет страницу GitHub с подготовленным описанием")
+                    .on_hover_text("Форма: описание уйдёт на GitHub")
                     .clicked()
                 {
-                    let repo = theme::update_repo();
-                    let board = self.doc.as_ref().map(|d| {
-                        let b = &d.project.config.board;
-                        (crate::boardcfg::board_name(b), b.fqbn.clone())
-                    });
-                    let url = crate::report::issue_url(&crate::report::Context {
-                        repo: &repo,
-                        version: update::CURRENT,
-                        board: board.as_ref().map(|(n, f)| (*n, f.as_str())),
-                        log: self.log.iter().map(|l| l.text.clone()).collect(),
-                    });
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                    self.report.open = true;
                     ui.close();
                 }
                 if ui.button("Что нового в этой версии").clicked() {
@@ -2005,6 +1996,22 @@ impl eframe::App for EditorApp {
         self.cli_window(&ctx);
         self.poll_self_update(&ctx);
         update::changes_window(&ctx, &mut self.changes_window);
+        if self.report.open {
+            let repo = theme::update_repo();
+            let board = self.doc.as_ref().map(|d| {
+                let b = &d.project.config.board;
+                (crate::boardcfg::board_name(b), b.fqbn.clone())
+            });
+            let facts = crate::report::Context {
+                repo: &repo,
+                version: update::CURRENT,
+                board: board.as_ref().map(|(n, f)| (*n, f.as_str())),
+                log: self.log.iter().map(|l| l.text.clone()).collect(),
+            };
+            if let Some(url) = self.report.show(&ctx, &facts) {
+                ctx.open_url(egui::OpenUrl::new_tab(url));
+            }
+        }
         if let Some(release) = &self.new_release {
             let install = match &self.self_update {
                 SelfUpdate::Idle(e) => update::Install::Idle(e.as_deref()),
