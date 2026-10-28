@@ -1,0 +1,55 @@
+# Время приходит по NTP; пока оно не получено (valid = false), светодиод не горит.
+
+[[block]]
+id = "wifi"
+type = "wifi"
+ssid = "MyNetwork"
+
+[[block]]
+id = "clock"
+type = "ntp"
+zone = 3.0
+
+[[block]]
+id = "after8"
+type = "greater"
+b = 7.5
+
+[[block]]
+id = "before20"
+type = "less"
+b = 20.0
+
+[[block]]
+id = "work"
+type = "and"
+count = 3
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[link]]
+from = "clock.hour"
+to   = "after8.a"
+
+[[link]]
+from = "clock.hour"
+to   = "before20.a"
+
+[[link]]
+from = "after8.out"
+to   = "work.a"
+
+[[link]]
+from = "before20.out"
+to   = "work.b"
+
+[[link]]
+from = "clock.valid"
+to   = "work.c"
+
+[[link]]
+from = "work.out"
+to   = "led.in"

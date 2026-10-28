@@ -1,0 +1,105 @@
+[block]
+type = "ntp"
+name = "Время по NTP"
+symbol = "NTP"
+group = "Сеть"
+description = "Точное время и дата из интернета (SNTP) через Wi-Fi: часы, минуты, день недели и т. д. Нужен блок «Wi-Fi клиент»."
+memory = true
+single = true
+includes = ["esp_sntp.h"]
+
+[[output]]
+name = "valid"
+type = "bool"
+description = "true, когда время получено с сервера (до первого ответа остальные выходы не меняются)"
+
+[[output]]
+name = "age"
+type = "int"
+label = "Возраст"
+description = "Секунд с последней успешной синхронизации с сервером; -1, пока синхронизации не было"
+
+[[output]]
+name = "hour"
+type = "int"
+label = "Часы"
+description = "Часы, 0–23"
+
+[[output]]
+name = "minute"
+type = "int"
+label = "Минуты"
+description = "Минуты, 0–59"
+
+[[output]]
+name = "second"
+type = "int"
+label = "Секунды"
+description = "Секунды, 0–59"
+
+[[output]]
+name = "day"
+type = "int"
+label = "День"
+description = "День месяца, 1–31"
+
+[[output]]
+name = "month"
+type = "int"
+label = "Месяц"
+description = "Месяц, 1–12"
+
+[[output]]
+name = "year"
+type = "int"
+label = "Год"
+description = "Год, например 2026"
+
+[[output]]
+name = "weekday"
+type = "int"
+label = "День недели"
+description = "День недели: 1 понедельник … 7 воскресенье"
+
+[[output]]
+name = "unix"
+type = "int"
+label = "Unix-время"
+description = "Секунды с 1 января 1970 (UTC)"
+
+[[output]]
+name = "text"
+type = "string"
+label = "Текст"
+description = "Время в виде «ЧЧ:ММ:СС»"
+
+[[param]]
+name = "server"
+type = "string"
+label = "Сервер"
+default = "pool.ntp.org"
+description = "Адрес NTP-сервера"
+
+[[param]]
+name = "zone"
+type = "float"
+label = "Часовой пояс"
+default = 3.0
+min = -12.0
+max = 14.0
+description = "Смещение от UTC в часах (Москва +3, дробные — например 5.5)"
+
+[[param]]
+name = "dst"
+type = "bool"
+label = "Летнее время"
+default = false
+description = "Прибавлять час (летнее время)"
+
+[[param]]
+name = "period"
+type = "duration"
+label = "Период синхронизации"
+default = "1h"
+min = 15000
+description = "Как часто запрашивать время у сервера (не меньше 15 с); между запросами часы идут сами"

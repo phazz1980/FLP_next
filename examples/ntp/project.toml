@@ -1,0 +1,6 @@
+[project]
+name = "ntp"
+description = "Светодиод горит с 8 до 20 часов по времени из интернета (NTP через Wi-Fi)"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

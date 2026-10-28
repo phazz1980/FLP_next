@@ -254,7 +254,7 @@ var = "setpoint"
 | Побитовые операции | `bit_and`, `bit_or`, `bit_xor`, `bit_not` |
 | Прочее | `pid`, `flash_store` |
 | UART | `uart_config`, `uart_send`, `uart_read` |
-| Сеть | Modbus RTU и TCP, Wi-Fi, Ethernet |
+| Сеть | Modbus RTU и TCP, Wi-Fi, Ethernet, `ntp` |
 | Веб-интерфейс | страница управления на ESP32: блок «Веб-интерфейс» и виджеты (кнопка, переключатель, ползунок, ввод, индикатор, значение, шкала, текст, заголовок) |
 
 Каждый блок встречается хотя бы в одном примере из `examples/`; это проверяет

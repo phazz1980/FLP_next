@@ -1,0 +1,42 @@
+// @global
+bool {{ id }}_started = false;
+uint32_t {{ id }}_tick = 0;
+// Set by the SNTP task (another core) after each successful synchronization.
+volatile bool {{ id }}_synced = false;
+volatile uint32_t {{ id }}_sync_at = 0;
+// @functions
+void {{ id }}_on_sync(struct timeval *tv) {
+  {{ id }}_sync_at = millis();
+  {{ id }}_synced = true;
+}
+// @loop
+// SNTP starts once the Wi-Fi client is connected.
+if (!{{ id }}_started && flpWifi.clientIsReady()) {
+  {{ id }}_started = true;
+  sntp_set_time_sync_notification_cb({{ id }}_on_sync);
+  sntp_set_sync_interval({{ param.period }});
+  configTime((long)({{ param.zone }} * 3600), {{ 3600 if value.dst else 0 }}, {{ param.server }});
+}
+// The time is read once per second.
+if ({{ id }}_started && (uint32_t)(millis() - {{ id }}_tick) >= 1000) {
+  {{ id }}_tick = millis();
+  time_t now = time(nullptr);
+  // A time before 2023 means no answer from the server yet.
+  {{ output.valid }} = now > 1700000000;
+  {{ output.age }} = {{ id }}_synced ? (int32_t)((uint32_t)(millis() - {{ id }}_sync_at) / 1000) : -1;
+  if ({{ output.valid }}) {
+    struct tm lt;
+    localtime_r(&now, &lt);
+    {{ output.hour }} = lt.tm_hour;
+    {{ output.minute }} = lt.tm_min;
+    {{ output.second }} = lt.tm_sec;
+    {{ output.day }} = lt.tm_mday;
+    {{ output.month }} = lt.tm_mon + 1;
+    {{ output.year }} = lt.tm_year + 1900;
+    {{ output.weekday }} = lt.tm_wday == 0 ? 7 : lt.tm_wday;
+    {{ output.unix }} = (int32_t)now;
+    char buf[9];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d", lt.tm_hour, lt.tm_min, lt.tm_sec);
+    {{ output.text }} = buf;
+  }
+}
