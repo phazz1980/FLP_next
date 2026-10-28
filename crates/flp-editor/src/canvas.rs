@@ -564,6 +564,26 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         );
         painter.rect_filled(header, 2.0, pal.sheet_header);
         let info = project.layout.sheet(band.sheet);
+        let background = info.is_some_and(|i| i.background);
+        if background {
+            // Violet tint and a frame: a background sheet is visible at a glance.
+            let tint = Color32::from_rgb(150, 90, 220);
+            painter.rect_filled(sheet_rect, 2.0, tint.gamma_multiply(0.10));
+            painter.rect_filled(header, 2.0, tint.gamma_multiply(0.30));
+            painter.rect_stroke(
+                sheet_rect,
+                2.0,
+                Stroke::new(2.0, tint),
+                StrokeKind::Inside,
+            );
+            painter.text(
+                header.right_top() + Vec2::new(-10.0, 4.0 * z),
+                Align2::RIGHT_TOP,
+                "ФОНОВАЯ ЗАДАЧА · ядро 0",
+                font(10.0),
+                tint,
+            );
+        }
         let lines = [
             (format!("Плата: {}", band.sheet), pal.accent),
             (
