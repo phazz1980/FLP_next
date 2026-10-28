@@ -454,6 +454,9 @@ fn parse_signal(ty: SignalType, text: &str) -> Result<Option<ParamValue>, String
         SignalType::Float => parse_float(t).map(ParamValue::Float),
         SignalType::String => Some(ParamValue::Text(t.to_owned())),
         SignalType::Any => Some(SignalType::guess_value(t)),
+        SignalType::Number => {
+            Some(SignalType::guess_value(t)).filter(|v| SignalType::of_value(v).is_numeric())
+        }
     };
     value
         .map(Some)
@@ -880,7 +883,10 @@ fn type_combo(ui: &mut Ui, id: (&str, usize), ty: &mut SignalType) {
         .width(70.0)
         .show_ui(ui, |ui| {
             // `any` fits inputs only; the block check says so for an output.
-            for t in SignalType::ALL.into_iter().chain([SignalType::Any]) {
+            for t in SignalType::ALL
+                .into_iter()
+                .chain([SignalType::Any, SignalType::Number])
+            {
                 ui.selectable_value(ty, t, type_name(t));
             }
         });

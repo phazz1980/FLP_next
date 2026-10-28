@@ -200,6 +200,7 @@ fn type_label(ty: SignalType) -> &'static str {
         SignalType::Float => "дробный",
         SignalType::String => "строка",
         SignalType::Any => "любой",
+        SignalType::Number => "число",
     }
 }
 
@@ -685,7 +686,7 @@ fn var_type(ty: SignalType) -> VarType {
         SignalType::Bool => VarType::Bool,
         SignalType::Float => VarType::Float,
         SignalType::String => VarType::String,
-        SignalType::Int | SignalType::Any => VarType::Int,
+        SignalType::Int | SignalType::Any | SignalType::Number => VarType::Int,
     }
 }
 

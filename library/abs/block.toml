@@ -7,8 +7,8 @@ description = "Абсолютное значение: out = |in|."
 
 [[input]]
 name = "in"
-type = "float"
+type = "number"
 
 [[output]]
 name = "out"
-type = "float"
+type = "number"

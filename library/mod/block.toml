@@ -7,12 +7,12 @@ description = "Остаток от деления a на b (fmod); при b = 0 
 
 [[input]]
 name = "a"
-type = "float"
+type = "number"
 
 [[input]]
 name = "b"
-type = "float"
+type = "number"
 
 [[output]]
 name = "out"
-type = "float"
+type = "number"

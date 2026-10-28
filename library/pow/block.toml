@@ -7,11 +7,11 @@ description = "out = a в степени b."
 
 [[input]]
 name = "a"
-type = "float"
+type = "number"
 
 [[input]]
 name = "b"
-type = "float"
+type = "number"
 
 [[output]]
 name = "out"

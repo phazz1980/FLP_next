@@ -835,7 +835,7 @@ fn var_body(ui: &mut Ui, d: &mut VarDialog) {
                 SignalType::Bool => "false",
                 SignalType::Int => "0",
                 SignalType::Float => "0.0",
-                SignalType::String | SignalType::Any => "текст",
+                SignalType::String | SignalType::Any | SignalType::Number => "текст",
             };
             let valid = parse_init(d.ty, &d.init).is_ok();
             let mut edit = egui::TextEdit::singleline(&mut d.init).hint_text(hint);
@@ -1042,7 +1042,9 @@ fn parse_init(ty: VarType, text: &str) -> Result<Option<ParamValue>, String> {
         SignalType::Int => ParamValue::Int(t.parse().map_err(|_| bad())?),
         SignalType::Float => ParamValue::Float(t.replace(',', ".").parse().map_err(|_| bad())?),
         // Text keeps its spaces.
-        SignalType::String | SignalType::Any => ParamValue::Text(text.to_owned()),
+        SignalType::String | SignalType::Any | SignalType::Number => {
+            ParamValue::Text(text.to_owned())
+        }
     };
     if !ty.accepts(&value) {
         return Err(bad());

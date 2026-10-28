@@ -1,2 +1,6 @@
 // @loop
+{% if input_type.a == "int" and input_type.b == "int" %}
+{{ output.out }} = {{ input.b }} != 0 ? {{ input.a }} % {{ input.b }} : 0;
+{% else %}
 {{ output.out }} = {{ input.b }} != 0.0f ? fmodf({{ input.a }}, {{ input.b }}) : 0.0f;
+{% endif %}

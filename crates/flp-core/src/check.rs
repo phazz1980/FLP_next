@@ -100,7 +100,118 @@ pub fn check(logic: &Logic, lib: &Library, layout: Option<&Layout>) -> Report {
     }
     check_pin_conflicts(&pin_uses(logic, lib), &mut report);
     order_blocks(logic, &defs, &edges, &mut report);
+    if !report.has_errors() {
+        check_number_flow(logic, &defs, &mut report);
+    }
     report
+}
+
+/// Real type of every output once `number` outputs follow their inputs, by
+/// (block index, port name). Blocks go in execution order; an input whose source
+/// is not known yet (a feedback loop) counts as `float`.
+pub fn resolved_outputs<'a>(
+    logic: &'a Logic,
+    defs: &[Option<&'a BlockDef>],
+    order: &[usize],
+) -> HashMap<(usize, &'a str), SignalType> {
+    let mut types: HashMap<(usize, &str), SignalType> = HashMap::new();
+    for &bi in order {
+        let (block, Some(def)) = (&logic.blocks[bi], defs[bi]) else {
+            continue;
+        };
+        let numbers: Vec<SignalType> = def
+            .active_inputs(&block.params)
+            .filter(|p| p.ty == SignalType::Number)
+            .map(|p| input_type(logic, defs, &types, block, p))
+            .collect();
+        for out in def.active_outputs(&block.params) {
+            let ty = if out.ty == SignalType::Number {
+                SignalType::widest(numbers.iter().copied())
+            } else {
+                out.ty
+            };
+            types.insert((bi, out.name.as_str()), ty);
+        }
+    }
+    types
+}
+
+/// Real type of the signal on an input port: of its link, variable or constant.
+fn input_type(
+    logic: &Logic,
+    defs: &[Option<&BlockDef>],
+    types: &HashMap<(usize, &str), SignalType>,
+    block: &crate::Block,
+    port: &crate::PortDef,
+) -> SignalType {
+    let from_value = |v: &crate::ParamValue| SignalType::of_value(v);
+    if let Some(var) = block.bound.get(&port.name).and_then(|v| logic.var(v)) {
+        return var.ty.signal();
+    }
+    if let Some(link) = logic
+        .links
+        .iter()
+        .find(|l| l.to.block == block.id && l.to.port == port.name)
+    {
+        let src = logic.blocks.iter().position(|b| b.id == link.from.block);
+        return src
+            .and_then(|i| {
+                types
+                    .get(&(i, link.from.port.as_str()))
+                    .copied()
+                    .or_else(|| {
+                        defs[i]?
+                            .output(&link.from.port)
+                            .map(|o| o.ty)
+                            .filter(|t| *t != SignalType::Number)
+                    })
+            })
+            .unwrap_or(SignalType::Float);
+    }
+    block
+        .consts
+        .get(&port.name)
+        .or(port.default.as_ref())
+        .map_or(SignalType::Float, from_value)
+}
+
+/// A `number` output that turned out `float` cannot go to an `int` input: the
+/// narrowing needs an explicit block.
+fn check_number_flow(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) {
+    let types = resolved_outputs(logic, defs, &report.order.clone());
+    for (li, link) in logic.links.iter().enumerate() {
+        let (Some(fi), Some(ti)) = (
+            logic.blocks.iter().position(|b| b.id == link.from.block),
+            logic.blocks.iter().position(|b| b.id == link.to.block),
+        ) else {
+            continue;
+        };
+        let (Some(fd), Some(td)) = (defs[fi], defs[ti]) else {
+            continue;
+        };
+        let (Some(out), Some(inp)) = (fd.output(&link.from.port), td.input(&link.to.port)) else {
+            continue;
+        };
+        if out.ty != SignalType::Number {
+            continue;
+        }
+        let real = types
+            .get(&(fi, link.from.port.as_str()))
+            .copied()
+            .unwrap_or(SignalType::Float);
+        if !real.can_feed(inp.ty) {
+            report.link_error(
+                li,
+                format!(
+                    "связь {} → {}: выход получился {}, а вход ждёт {}; нужен блок преобразования",
+                    link.from,
+                    link.to,
+                    type_name(real),
+                    type_name(inp.ty)
+                ),
+            );
+        }
+    }
 }
 
 /// [`check`] with the layout plus what depends on the board: pins the chip lacks
@@ -663,14 +774,20 @@ fn check_bindings(logic: &Logic, block: &crate::Block, def: &BlockDef, report: &
                 id,
                 format!("блок «{id}»: «{name}» нельзя связать с переменной"),
             ),
-            Some(ty) if ty != SignalType::Any && ty != v.ty.signal() => report.block_error(
-                id,
-                format!(
-                    "блок «{id}»: «{name}» — {}, а переменная «{var}» — {}",
-                    type_name(ty),
-                    v.ty.name()
-                ),
-            ),
+            Some(ty)
+                if ty != SignalType::Any
+                    && ty != v.ty.signal()
+                    && !(ty == SignalType::Number && v.ty.signal().is_numeric()) =>
+            {
+                report.block_error(
+                    id,
+                    format!(
+                        "блок «{id}»: «{name}» — {}, а переменная «{var}» — {}",
+                        type_name(ty),
+                        v.ty.name()
+                    ),
+                )
+            }
             Some(_) => {}
         }
     }
@@ -699,6 +816,7 @@ fn type_name(ty: SignalType) -> &'static str {
         SignalType::Float => "float (дробный)",
         SignalType::String => "string (строка)",
         SignalType::Any => "any (любой)",
+        SignalType::Number => "число (int или float)",
     }
 }
 

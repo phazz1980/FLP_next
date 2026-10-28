@@ -73,7 +73,7 @@ fn type_code(e: &Entry) -> u8 {
             SignalType::Bool => 0,
             SignalType::Int => 1,
             SignalType::Float => 2,
-            SignalType::String | SignalType::Any => {
+            SignalType::String | SignalType::Any | SignalType::Number => {
                 unreachable!("strings are not in the debug table")
             }
         },

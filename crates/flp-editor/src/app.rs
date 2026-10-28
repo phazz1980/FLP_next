@@ -1140,6 +1140,19 @@ impl EditorApp {
         self.info(LogLevel::Info, format!("Скопировано блоков: {n}"));
     }
 
+    /// Copies the selected blocks to the clipboard and removes them.
+    pub fn cut_selection(&mut self, ctx: &egui::Context) {
+        if self
+            .selection
+            .as_ref()
+            .is_none_or(|s| s.blocks().is_empty())
+        {
+            return;
+        }
+        self.copy_selection(ctx);
+        self.delete_selection();
+    }
+
     /// Inserts blocks from clipboard text at `at` (or a free spot on the active sheet).
     pub fn paste(&mut self, text: &str, at: Option<BlockPos>) {
         let Some(frag) = Fragment::from_clipboard(text) else {
@@ -1498,19 +1511,23 @@ impl EditorApp {
             self.delete_selection();
         }
         if self.dialog.is_none() && !ctx.egui_wants_keyboard_input() {
-            let (copy, paste) = ctx.input(|i| {
+            let (copy, cut, paste) = ctx.input(|i| {
                 let mut copy = false;
+                let mut cut = false;
                 let mut paste = None;
                 for e in &i.events {
                     match e {
                         egui::Event::Copy => copy = true,
+                        egui::Event::Cut => cut = true,
                         egui::Event::Paste(t) => paste = Some(t.clone()),
                         _ => {}
                     }
                 }
-                (copy, paste)
+                (copy, cut, paste)
             });
-            if copy {
+            if cut {
+                self.cut_selection(ctx);
+            } else if copy {
                 self.copy_selection(ctx);
             }
             if let Some(text) = paste {
@@ -1640,6 +1657,15 @@ impl EditorApp {
                     .selection
                     .as_ref()
                     .is_some_and(|s| !s.blocks().is_empty());
+                if ui
+                    .add_enabled(
+                        has_blocks,
+                        egui::Button::new("Вырезать").shortcut_text("Ctrl+X"),
+                    )
+                    .clicked()
+                {
+                    self.cut_selection(ui.ctx());
+                }
                 if ui
                     .add_enabled(
                         has_blocks,

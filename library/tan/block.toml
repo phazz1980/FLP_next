@@ -7,7 +7,7 @@ description = "Тригонометрия: out = tan(in); угол в граду
 
 [[input]]
 name = "in"
-type = "float"
+type = "number"
 
 [[output]]
 name = "out"

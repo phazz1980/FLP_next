@@ -117,6 +117,12 @@ impl<'a> Program<'a> {
                 .expect("type checked by flp_core::check")
         };
 
+        let defs: Vec<_> = logic
+            .blocks
+            .iter()
+            .map(|b| Some(&lib_block(b).def))
+            .collect();
+        let resolved = flp_core::check::resolved_outputs(logic, &defs, &report.order);
         let mut signals = Vec::new();
         let mut by_port: HashMap<(&str, &str), usize> = HashMap::new();
         let mut names: HashMap<String, PortRef> = HashMap::new();
@@ -130,7 +136,11 @@ impl<'a> Program<'a> {
                     return Err(GenError::NameClash { name, a, b: port });
                 }
                 by_port.insert((&block.id, &out.name), signals.len());
-                signals.push(Signal { name, ty: out.ty });
+                let ty = resolved
+                    .get(&(bi, out.name.as_str()))
+                    .copied()
+                    .unwrap_or(out.ty);
+                signals.push(Signal { name, ty });
             }
         }
 
@@ -159,11 +169,15 @@ impl<'a> Program<'a> {
                     (None, None, None) => unreachable!("unconnected inputs checked"),
                 };
                 let ty = match (&source, port.ty) {
-                    (Source::Var(name), SignalType::Any) => {
+                    (Source::Var(name), SignalType::Any | SignalType::Number) => {
                         logic.var(name).map_or(SignalType::Any, |v| v.ty.signal())
                     }
-                    (Source::Signal { index, .. }, SignalType::Any) => signals[*index].ty,
-                    (Source::Default(value), SignalType::Any) => SignalType::of_value(value),
+                    (Source::Signal { index, .. }, SignalType::Any | SignalType::Number) => {
+                        signals[*index].ty
+                    }
+                    (Source::Default(value), SignalType::Any | SignalType::Number) => {
+                        SignalType::of_value(value)
+                    }
                     (_, ty) => ty,
                 };
                 inputs.insert(port.name.as_str(), Input { source, ty });

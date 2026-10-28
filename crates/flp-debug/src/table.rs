@@ -50,6 +50,7 @@ impl DebugTable {
                 SignalType::Float => 'f',
                 SignalType::String => 's',
                 SignalType::Any => 'a',
+                SignalType::Number => 'n',
             };
             for b in format!("{}:{tag};", e.storage).bytes() {
                 hash ^= u32::from(b);
@@ -105,7 +106,7 @@ impl Value {
             SignalType::Bool => Value::Bool(raw != 0),
             SignalType::Int => Value::Int(raw as i32),
             SignalType::Float => Value::Float(f32::from_bits(raw)),
-            SignalType::String | SignalType::Any => {
+            SignalType::String | SignalType::Any | SignalType::Number => {
                 unreachable!("strings are not in the debug table")
             }
         }
@@ -130,7 +131,7 @@ impl Value {
             SignalType::Bool => Value::Bool(f != 0.0),
             SignalType::Int => Value::Int(f.round() as i32),
             SignalType::Float => Value::Float(f as f32),
-            SignalType::String | SignalType::Any => {
+            SignalType::String | SignalType::Any | SignalType::Number => {
                 unreachable!("strings are not in the debug table")
             }
         }

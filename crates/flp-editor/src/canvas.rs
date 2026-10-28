@@ -85,6 +85,8 @@ pub struct CanvasState {
     band: Option<Pos2>,
     /// Canvas point under the mouse: where pasted blocks go.
     hover: Option<BlockPos>,
+    /// Canvas point of the last right click.
+    menu_at: Option<BlockPos>,
     /// Text of the constant being typed in the menu of an input.
     const_text: String,
     /// Sheets folded to their header.
@@ -92,8 +94,10 @@ pub struct CanvasState {
 }
 
 impl CanvasState {
-    pub fn paste_pos(&self) -> Option<BlockPos> {
-        self.hover
+    /// Where pasted blocks go: the spot of the last right click if «Вставить» was
+    /// chosen in a menu, else the point under the mouse.
+    pub fn paste_pos(&mut self) -> Option<BlockPos> {
+        self.menu_at.take().or(self.hover)
     }
 }
 
@@ -384,7 +388,7 @@ fn signal_color(p: &Palette, ty: SignalType) -> Color32 {
         SignalType::Int => p.int_signal,
         SignalType::Float => p.float_signal,
         SignalType::String => p.string_signal,
-        SignalType::Any => p.text,
+        SignalType::Any | SignalType::Number => p.text,
     }
 }
 
@@ -1257,6 +1261,11 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         })
     };
     app.canvas.hover = pointer.filter(|p| rect.contains(*p)).and_then(drop_at);
+    if ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Secondary))
+        && app.canvas.hover.is_some()
+    {
+        app.canvas.menu_at = app.canvas.hover;
+    }
 
     // Selection frame: left drag on empty space.
     let mut framed = None;
@@ -1476,6 +1485,45 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     for (port, output, ty, resp) in port_menus {
         port_context_menu(app, &port, output, ty, &resp);
     }
+    bg.context_menu(|ui| {
+        clipboard_items(app, ui);
+    });
+}
+
+/// Cut / Copy / Paste entries of the board context menus (they act on the selection).
+fn clipboard_items(app: &mut EditorApp, ui: &mut Ui) {
+    let has_blocks = app
+        .selection
+        .as_ref()
+        .is_some_and(|s| !s.blocks().is_empty());
+    if ui
+        .add_enabled(
+            has_blocks,
+            egui::Button::new("Вырезать").shortcut_text("Ctrl+X"),
+        )
+        .clicked()
+    {
+        app.cut_selection(ui.ctx());
+        ui.close();
+    }
+    if ui
+        .add_enabled(
+            has_blocks,
+            egui::Button::new("Копировать").shortcut_text("Ctrl+C"),
+        )
+        .clicked()
+    {
+        app.copy_selection(ui.ctx());
+        ui.close();
+    }
+    if ui
+        .add(egui::Button::new("Вставить").shortcut_text("Ctrl+V"))
+        .clicked()
+    {
+        ui.ctx()
+            .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+        ui.close();
+    }
 }
 
 fn inverted_output(logic: &Logic, port: &PortRef) -> bool {
@@ -1505,6 +1553,9 @@ fn parse_const(ty: SignalType, text: &str) -> Option<ParamValue> {
         SignalType::Float => t.replace(',', ".").parse().ok().map(ParamValue::Float),
         SignalType::String => Some(ParamValue::Text(text.to_owned())),
         SignalType::Any => Some(SignalType::guess_value(text)),
+        SignalType::Number => {
+            Some(SignalType::guess_value(text)).filter(|v| SignalType::of_value(v).is_numeric())
+        }
     }
 }
 
@@ -1662,6 +1713,8 @@ fn block_context_menu(app: &mut EditorApp, id: &str, resp: &egui::Response) {
             ui.menu_button("Отладка", |ui| debugview::value_menu(ui, d, index));
             ui.separator();
         }
+        clipboard_items(app, ui);
+        ui.separator();
         if ui.button("Свойства...").clicked() {
             props = true;
         }

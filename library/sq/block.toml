@@ -7,9 +7,9 @@ description = "out = in × in."
 
 [[input]]
 name = "in"
-type = "float"
+type = "number"
 
 [[output]]
 name = "out"
-type = "float"
+type = "number"
 

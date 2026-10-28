@@ -7,7 +7,7 @@ description = "out = √in; для отрицательного входа вы�
 
 [[input]]
 name = "in"
-type = "float"
+type = "number"
 
 [[output]]
 name = "out"

@@ -38,6 +38,11 @@ pub enum SignalType {
     /// Inputs only: takes a signal of any type; the template sees the real one
     /// in `{{ input_type.<port> }}`. Not in [`SignalType::ALL`].
     Any,
+    /// Math ports: an input takes `int` or `float` (never bool or string), the template
+    /// sees the real type in `{{ input_type.<port> }}`. An output of this type is as wide
+    /// as the widest `number` input (`int` only when all of them are `int`).
+    /// Not in [`SignalType::ALL`].
+    Number,
 }
 
 impl SignalType {
@@ -50,10 +55,40 @@ impl SignalType {
 
     /// Whether an output of type `self` may feed an input of type `to`.
     /// Only `int` → `float` widening is implicit; an `any` input takes everything.
+    /// A `number` input takes `int` and `float`; a `number` output is checked once its
+    /// real type is known (see [`SignalType::widest`]), here it may go to any numeric port.
     pub fn can_feed(self, to: SignalType) -> bool {
-        (self == to && self != SignalType::Any)
-            || (self == SignalType::Int && to == SignalType::Float)
-            || (to == SignalType::Any && self != SignalType::Any)
+        use SignalType::*;
+        match (self, to) {
+            (Any, _) => false,
+            (_, Any) => true,
+            (Int | Float | Number, Number) => true,
+            (Number, Int | Float) => true,
+            (Int, Float) => true,
+            (a, b) => a == b,
+        }
+    }
+
+    /// Whether the type is `int` or `float`.
+    pub fn is_numeric(self) -> bool {
+        matches!(self, SignalType::Int | SignalType::Float)
+    }
+
+    /// Type of a `number` output fed by inputs of these types: `float` if any is `float`.
+    pub fn widest(types: impl IntoIterator<Item = SignalType>) -> SignalType {
+        let mut out = SignalType::Int;
+        let mut any = false;
+        for t in types {
+            any = true;
+            if t != SignalType::Int {
+                out = SignalType::Float;
+            }
+        }
+        if any {
+            out
+        } else {
+            SignalType::Float
+        }
     }
 
     /// Constant typed for an `any` input: `true`/`false`, a whole number, a number
@@ -92,6 +127,10 @@ impl SignalType {
                 | (SignalType::Int, ParamValue::Int(_))
                 | (SignalType::Float, ParamValue::Float(_) | ParamValue::Int(_))
                 | (SignalType::String, ParamValue::Text(_))
+                | (
+                    SignalType::Number,
+                    ParamValue::Int(_) | ParamValue::Float(_)
+                )
                 | (SignalType::Any, _)
         )
     }
@@ -104,6 +143,7 @@ impl SignalType {
             SignalType::Float => "float",
             SignalType::String => "string",
             SignalType::Any => "any",
+            SignalType::Number => "number",
         }
     }
 }
@@ -524,6 +564,17 @@ impl BlockDef {
                 ));
             }
         }
+        if let Some(p) = self
+            .outputs
+            .iter()
+            .find(|p| p.ty == SignalType::Number)
+            .filter(|_| !self.inputs.iter().any(|i| i.ty == SignalType::Number))
+        {
+            return Err(format!(
+                "выход «{}» типа number следует типу входов, а у блока нет входов number",
+                p.name
+            ));
+        }
         if let Some(p) = self.outputs.iter().find(|p| p.ty == SignalType::Any) {
             return Err(format!(
                 "тип any бывает только у входа, а «{}» — выход",
@@ -935,6 +986,15 @@ mod tests {
     }
 
     const HEADER: &str = "[block]\ntype = \"x\"\nname = \"X\"\ngroup = \"Тест\"\n";
+
+    #[test]
+    fn number_ports_take_only_numbers() {
+        use SignalType::*;
+        assert!(Int.can_feed(Number) && Float.can_feed(Number));
+        assert!(!Bool.can_feed(Number) && !String.can_feed(Number));
+        assert_eq!(SignalType::widest([Int, Int]), Int);
+        assert_eq!(SignalType::widest([Int, Float]), Float);
+    }
 
     #[test]
     fn type_widening() {

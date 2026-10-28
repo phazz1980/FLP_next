@@ -7,12 +7,12 @@ description = "Выход out = a − b."
 
 [[input]]
 name = "a"
-type = "float"
+type = "number"
 
 [[input]]
 name = "b"
-type = "float"
+type = "number"
 
 [[output]]
 name = "out"
-type = "float"
+type = "number"
