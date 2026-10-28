@@ -217,7 +217,13 @@ fn check_number_flow(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Rep
 /// [`check`] with the layout plus what depends on the board: pins the chip lacks
 /// or that do not fit the block, and the UART settings.
 pub fn check_project(project: &Project, lib: &Library) -> Report {
+    let links = project.enabled_links();
+    let project = &project.without_disabled();
     let mut report = check(&project.logic, lib, Some(&project.layout));
+    // Link indices refer to the project's own list, not to the trimmed one.
+    for d in &mut report.diagnostics {
+        d.link = d.link.and_then(|i| links.get(i).copied());
+    }
     let chip = Chip::of_board(&project.config.board);
     let pins = pin_uses(&project.logic, lib);
     let uarts = crate::uart::check_project_part(project, lib, &pins, chip, &mut report);

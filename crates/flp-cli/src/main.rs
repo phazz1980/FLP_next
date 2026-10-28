@@ -405,6 +405,7 @@ fn run_monitor(project_dir: &Path, library: Option<&Path>, port: Option<String>)
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
+    let project = project.without_disabled();
     let program = match Program::build(&project, &lib) {
         Ok(p) => p,
         Err(GenError::Schema(d)) => {

@@ -242,14 +242,14 @@ impl BoardDialog {
                     let mut picked = None;
                     ui.menu_button("▾", |ui| {
                         for (fqbn, name) in BOARDS {
-                            if ui.button(format!("{name}  ({fqbn})")).clicked() {
+                            if ui.button(*name).on_hover_text(*fqbn).clicked() {
                                 picked = Some((*fqbn, None));
                                 ui.close();
                             }
                         }
                         ui.separator();
                         for m in BOARD_MODELS {
-                            if ui.button(format!("{}  ({})", m.name, m.fqbn)).clicked() {
+                            if ui.button(m.name).on_hover_text(m.fqbn).clicked() {
                                 picked = Some((m.fqbn, Some(m)));
                                 ui.close();
                             }

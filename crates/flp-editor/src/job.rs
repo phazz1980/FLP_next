@@ -136,7 +136,10 @@ fn run(
             &format!("Установлены библиотеки: {}", installed.join(", ")),
         );
     }
-    out(LogLevel::Info, &format!("Сборка для {}...", board.fqbn));
+    out(
+        LogLevel::Info,
+        &format!("Сборка для {}...", crate::boardcfg::board_name(board)),
+    );
     let opts = CompileOptions {
         mode: if debug {
             BuildMode::Debug
@@ -270,8 +273,9 @@ fn warn_if_other_board(
         out(
             LogLevel::Warning,
             &format!(
-                "Возможно, выбрана неверная плата: на {port} опознано «{}», а в проекте — {fqbn}",
-                found.description
+                "Возможно, выбрана неверная плата: на {port} опознано «{}», а в проекте — {}",
+                found.description,
+                fqbn.rsplit(':').next().unwrap_or(fqbn)
             ),
         );
     }

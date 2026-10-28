@@ -38,7 +38,8 @@ pub fn generate(
     lib: &Library,
     backend: &dyn Backend,
 ) -> Result<String, GenError> {
-    let program = Program::build(project, lib)?;
+    let project = project.without_disabled();
+    let program = Program::build(&project, lib)?;
     backend.generate(&program)
 }
 

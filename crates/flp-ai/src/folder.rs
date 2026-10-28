@@ -84,7 +84,8 @@ impl Context for FolderContext {
             .port
             .clone()
             .ok_or("порт платы не задан в файле проекта ([board] port = \"COM3\")")?;
-        let program = Program::build(&self.project, &self.lib).map_err(|e| e.to_string())?;
+        let project = self.project.without_disabled();
+        let program = Program::build(&project, &self.lib).map_err(|e| e.to_string())?;
         let table = flp_codegen::debug::debug_table(&program);
         let session =
             flp_debug::Session::start(table.clone(), flp_debug::transport::serial(&port), || {});

@@ -463,7 +463,8 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
     ScrollArea::vertical().auto_shrink([ui.is_sizing_pass(), false]).show(ui, |ui| {
         let title = format!(
             "Контроллер: {} ({})",
-            doc.project.config.project.name, doc.project.config.board.fqbn
+            doc.project.config.project.name,
+            crate::boardcfg::board_name(&doc.project.config.board)
         );
         group(ui, "controller", &title, Level::Top, |_| {}, |ui| {
             group(ui, "tags", "Теги", Level::Mid, |_| {}, |ui| {

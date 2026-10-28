@@ -579,7 +579,9 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let mut sheet_dialog = None;
     let mut active_sheet = None;
     let mut toggle_sheet = None;
-    for band in &bands {
+    let mut sheet_swap = None;
+    let mut sheet_delete = None;
+    for (bi, band) in bands.iter().enumerate() {
         let sheet_rect = xf.rect(Rect::from_min_size(
             Pos2::new(0.0, band.top),
             Vec2::new(width, band.height),
@@ -599,11 +601,23 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             painter.rect_filled(header, 2.0, tint.gamma_multiply(0.30));
             painter.rect_stroke(sheet_rect, 2.0, Stroke::new(2.0, tint), StrokeKind::Inside);
             painter.text(
-                header.right_top() + Vec2::new(-10.0, 4.0 * z),
+                header.right_top() + Vec2::new(-86.0 * z, 4.0 * z),
                 Align2::RIGHT_TOP,
                 "ФОНОВАЯ ЗАДАЧА · ядро 0",
                 font(10.0),
                 tint,
+            );
+        }
+        if info.is_some_and(|i| i.disabled) {
+            // Grey tint: the sheet is left out of the check and the build.
+            let grey = Color32::from_gray(140);
+            painter.rect_filled(sheet_rect, 2.0, grey.gamma_multiply(0.18));
+            painter.text(
+                header.right_top() + Vec2::new(-86.0 * z, 16.0 * z),
+                Align2::RIGHT_TOP,
+                "ПЛАТА ОТКЛЮЧЕНА",
+                font(10.0),
+                grey,
             );
         }
         let lines = [
@@ -638,6 +652,52 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             active_sheet = Some(band.sheet);
         }
         resp.on_hover_text("Двойной щелчок — название и комментарий платы");
+
+        // The sheet being worked on stands out.
+        if app.sheet == band.sheet {
+            painter.rect_filled(header, 2.0, pal.accent.gamma_multiply(0.25));
+            painter.rect_stroke(
+                sheet_rect,
+                2.0,
+                Stroke::new(2.0, pal.accent),
+                StrokeKind::Inside,
+            );
+        }
+
+        // Move up / move down / delete, at the right edge of the header.
+        let prev = bi.checked_sub(1).map(|i| bands[i].sheet);
+        let next = bands.get(bi + 1).map(|b| b.sheet);
+        let buttons = [
+            ("✕", "Удалить плату вместе с блоками (можно отменить)", None),
+            ("▼", "Опустить плату", next),
+            ("▲", "Поднять плату", prev),
+        ];
+        for (k, (label, hint, other)) in buttons.into_iter().enumerate() {
+            let center = header.right_top()
+                + Vec2::new(-(14.0 + 22.0 * k as f32) * z, SHEET_HEADER * 0.5 * z);
+            let area = Rect::from_center_size(center, Vec2::splat(20.0 * z));
+            let enabled = k == 0 || other.is_some();
+            let r = ui.interact(
+                area,
+                Id::unique(("sheet_btn", band.sheet, k)),
+                Sense::click(),
+            );
+            let color = if !enabled {
+                pal.weak.gamma_multiply(0.4)
+            } else if r.hovered() {
+                pal.accent
+            } else {
+                pal.text
+            };
+            painter.text(center, Align2::CENTER_CENTER, label, font(12.0), color);
+            if enabled && r.clicked() {
+                match other {
+                    Some(o) => sheet_swap = Some((band.sheet, o)),
+                    None => sheet_delete = Some(band.sheet),
+                }
+            }
+            r.on_hover_text(hint);
+        }
 
         // Fold/unfold arrow at the left edge of the header.
         let arrow = Rect::from_center_size(
@@ -1460,6 +1520,51 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     if let Some(sheet) = toggle_sheet {
         if !app.canvas.collapsed.remove(&sheet) {
             app.canvas.collapsed.insert(sheet);
+        }
+    }
+    if let Some((a, b)) = sheet_swap {
+        if let Some(doc) = &mut app.doc {
+            let _ = doc.edit(&lib, None, |p| {
+                p.swap_sheets(a, b);
+                Ok::<_, flp_core::EditError>(())
+            });
+        }
+        let (ea, eb) = (app.extra_sheets.remove(&a), app.extra_sheets.remove(&b));
+        if ea {
+            app.extra_sheets.insert(b);
+        }
+        if eb {
+            app.extra_sheets.insert(a);
+        }
+        let (ca, cb) = (
+            app.canvas.collapsed.remove(&a),
+            app.canvas.collapsed.remove(&b),
+        );
+        if ca {
+            app.canvas.collapsed.insert(b);
+        }
+        if cb {
+            app.canvas.collapsed.insert(a);
+        }
+        if app.sheet == a {
+            app.sheet = b;
+        }
+    }
+    if let Some(sheet) = sheet_delete {
+        let result = app.doc.as_mut().map(|doc| {
+            doc.edit(&lib, None, |p| {
+                p.delete_sheet(sheet)?;
+                p.release_unused_services(&lib)
+            })
+        });
+        match result {
+            Some(Err(e)) => app.info(LogLevel::Error, e.to_string()),
+            _ => {
+                app.extra_sheets.remove(&sheet);
+                app.canvas.collapsed.remove(&sheet);
+                app.selection = None;
+                app.sheet = app.sheets().first().copied().unwrap_or(1);
+            }
         }
     }
     if add_sheet {

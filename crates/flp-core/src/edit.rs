@@ -202,10 +202,46 @@ impl Project {
     pub fn set_sheet_info(&mut self, info: crate::SheetInfo) {
         let sheets = &mut self.layout.sheets;
         sheets.retain(|s| s.number != info.number);
-        if !info.name.is_empty() || !info.comment.is_empty() || info.background {
+        if !info.name.is_empty() || !info.comment.is_empty() || info.background || info.disabled {
             sheets.push(info);
             sheets.sort_by_key(|s| s.number);
         }
+    }
+
+    /// Swaps the places of two sheets: their blocks and their names/comments.
+    pub fn swap_sheets(&mut self, a: u32, b: u32) {
+        let swap = |n: &mut u32| {
+            if *n == a {
+                *n = b;
+            } else if *n == b {
+                *n = a;
+            }
+        };
+        self.layout
+            .blocks
+            .values_mut()
+            .for_each(|p| swap(&mut p.sheet));
+        self.layout
+            .sheets
+            .iter_mut()
+            .for_each(|s| swap(&mut s.number));
+        self.layout.sheets.sort_by_key(|s| s.number);
+    }
+
+    /// Deletes a sheet with all its blocks (and their links); other sheets keep their numbers.
+    pub fn delete_sheet(&mut self, sheet: u32) -> Result<(), EditError> {
+        let ids: Vec<String> = self
+            .layout
+            .blocks
+            .iter()
+            .filter(|(_, p)| p.sheet == sheet)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            self.remove_block(&id)?;
+        }
+        self.layout.sheets.retain(|s| s.number != sheet);
+        Ok(())
     }
 
     /// Removes a block with its links and position.

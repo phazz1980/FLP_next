@@ -65,6 +65,7 @@ pub struct SheetDialog {
     comment: String,
     background: bool,
     period: u32,
+    disabled: bool,
 }
 
 enum Outcome {
@@ -202,6 +203,7 @@ impl Dialog {
             name: info.name,
             comment: info.comment,
             background: info.background,
+            disabled: info.disabled,
             period: if info.period == 0 {
                 flp_core::layout::DEFAULT_BACKGROUND_PERIOD_MS
             } else {
@@ -875,6 +877,12 @@ fn sheet_body(ui: &mut Ui, d: &mut SheetDialog) {
             ui.label("Комментарии");
             ui.add(egui::TextEdit::multiline(&mut d.comment).desired_rows(3));
             ui.end_row();
+            ui.label("Отключение");
+            ui.checkbox(&mut d.disabled, "плата отключена")
+                .on_hover_text(
+                    "Блоки отключённой платы не входят в сборку, а ошибки в них не проверяются.                      Блоки других плат, которые брали от них значения, останутся без источника.",
+                );
+            ui.end_row();
             ui.label("Фоновая задача");
             ui.checkbox(&mut d.background, "блоки платы работают на втором ядре")
                 .on_hover_text(
@@ -1011,6 +1019,7 @@ fn apply(app: &mut EditorApp, dialog: &Dialog) -> Result<(), String> {
                 name: d.name.trim().to_owned(),
                 comment: d.comment.trim().to_owned(),
                 background: d.background,
+                disabled: d.disabled,
                 period: if d.period == flp_core::layout::DEFAULT_BACKGROUND_PERIOD_MS {
                     0
                 } else {

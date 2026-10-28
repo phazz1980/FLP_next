@@ -104,6 +104,49 @@ pub struct Project {
 }
 
 impl Project {
+    /// Ids of the blocks standing on switched-off sheets.
+    pub fn disabled_blocks(&self) -> std::collections::HashSet<&str> {
+        self.layout
+            .blocks
+            .iter()
+            .filter(|(_, p)| self.layout.is_disabled(p.sheet))
+            .map(|(id, _)| id.as_str())
+            .collect()
+    }
+
+    /// Indices (in [`Logic::links`]) of the links that survive [`Project::without_disabled`].
+    pub fn enabled_links(&self) -> Vec<usize> {
+        let off = self.disabled_blocks();
+        (0..self.logic.links.len())
+            .filter(|&i| {
+                let l = &self.logic.links[i];
+                !off.contains(l.from.block.as_str()) && !off.contains(l.to.block.as_str())
+            })
+            .collect()
+    }
+
+    /// A copy without the blocks of switched-off sheets and the links touching them:
+    /// what is checked and built.
+    pub fn without_disabled(&self) -> Project {
+        let mut out = self.clone();
+        let off: Vec<String> = self
+            .disabled_blocks()
+            .into_iter()
+            .map(String::from)
+            .collect();
+        if off.is_empty() {
+            return out;
+        }
+        out.logic.links = self
+            .enabled_links()
+            .into_iter()
+            .map(|i| self.logic.links[i].clone())
+            .collect();
+        out.logic.blocks.retain(|b| !off.contains(&b.id));
+        out.layout.blocks.retain(|id, _| !off.contains(id));
+        out
+    }
+
     /// Loads a project file, or a folder holding one. A folder in the old
     /// three-file format is read too; saving converts it to `<folder>/<folder>.flpn`.
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {

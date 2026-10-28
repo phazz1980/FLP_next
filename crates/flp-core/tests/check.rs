@@ -339,3 +339,44 @@ fn loop_through_variable_is_allowed() {
     let report = check_src(src);
     assert!(!report.has_errors(), "{:#?}", report.diagnostics);
 }
+
+#[test]
+fn sheets_swap_and_delete() {
+    let mut p = Project::load(repo_path("examples/pump")).unwrap();
+    let id = p.logic.blocks[0].id.clone();
+    let before = p.layout.blocks[&id].sheet;
+    p.swap_sheets(before, 7);
+    assert_eq!(p.layout.blocks[&id].sheet, 7);
+    p.delete_sheet(7).unwrap();
+    assert!(!p.layout.blocks.contains_key(&id));
+    assert!(p.logic.block(&id).is_none());
+    assert!(p
+        .logic
+        .links
+        .iter()
+        .all(|l| l.from.block != id && l.to.block != id));
+}
+
+#[test]
+fn disabled_sheet_is_left_out_of_the_check() {
+    let lib = library();
+    let mut project = Project::load(repo_path("examples/pump")).unwrap();
+    let id = project.logic.blocks[0].id.clone();
+    project.logic.blocks[0].kind = "no_such_block".into();
+    assert!(!flp_core::check_project(&project, &lib)
+        .diagnostics
+        .is_empty());
+    let sheet = project.layout.blocks[&id].sheet;
+    project.layout.sheets.push(flp_core::SheetInfo {
+        number: sheet,
+        disabled: true,
+        ..Default::default()
+    });
+    let rest = project.without_disabled();
+    assert!(!rest.logic.blocks.iter().any(|b| b.id == id));
+    assert!(rest
+        .logic
+        .links
+        .iter()
+        .all(|l| l.from.block != id && l.to.block != id));
+}

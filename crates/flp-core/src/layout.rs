@@ -30,6 +30,9 @@ pub struct SheetInfo {
     /// Period of a background sheet on a single-core chip, ms; 0 is the default.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub period: u32,
+    /// The sheet is switched off: its blocks are left out of the check and the build.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
 }
 
 fn is_zero(v: &u32) -> bool {
@@ -63,6 +66,11 @@ impl Layout {
 
     pub fn sheet(&self, number: u32) -> Option<&SheetInfo> {
         self.sheets.iter().find(|s| s.number == number)
+    }
+
+    /// The sheet is switched off.
+    pub fn is_disabled(&self, number: u32) -> bool {
+        self.sheet(number).is_some_and(|s| s.disabled)
     }
 
     /// The blocks of the sheet run in the background task.

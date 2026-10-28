@@ -45,6 +45,7 @@ impl DebugState {
         port: &str,
         ctx: &egui::Context,
     ) -> Result<Self, String> {
+        let project = &project.without_disabled();
         let program = Program::build(project, lib).map_err(|e| e.to_string())?;
         let table = flp_codegen::debug::debug_table(&program);
         let inputs = input_ports(project, lib, &table);

@@ -839,6 +839,31 @@ impl EditorApp {
         }
     }
 
+    /// Opens an example from a copy in the temp folder, so edits and saves never
+    /// touch the files in `examples/` (they live in git).
+    fn open_example(&mut self, name: &str, src: &Path) {
+        let dir = std::env::temp_dir().join("flp_examples");
+        let dest = dir.join(format!("{name}.flpn"));
+        let copied = std::fs::create_dir_all(&dir)
+            .map_err(|e| e.to_string())
+            .and_then(|()| {
+                if flp_core::project::is_project_file(src) {
+                    std::fs::copy(src, &dest)
+                        .map(|_| ())
+                        .map_err(|e| e.to_string())
+                } else {
+                    let mut project =
+                        flp_core::project::Project::load(src).map_err(|e| e.to_string())?;
+                    project.path = dest.clone();
+                    project.save().map_err(|e| e.to_string())
+                }
+            });
+        match copied {
+            Ok(()) => self.request_open(dest),
+            Err(e) => self.info(LogLevel::Error, format!("Пример не открыт: {e}")),
+        }
+    }
+
     /// Projects from `examples/` next to the library: `(name, path)`, a `.flpn` wins over a folder of the same name.
     fn example_projects(&self) -> Vec<(String, PathBuf)> {
         let Some(dir) = self
@@ -1612,8 +1637,8 @@ impl EditorApp {
                     .max_height(400.0)
                     .show(ui, |ui| {
                         for (name, path) in examples {
-                            if ui.button(name).clicked() {
-                                self.request_open(path);
+                            if ui.button(&name).clicked() {
+                                self.open_example(&name, &path);
                                 ui.close();
                             }
                         }

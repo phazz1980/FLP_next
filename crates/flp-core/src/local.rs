@@ -189,9 +189,9 @@ impl Project {
     /// A copy with the values of `local` parameters taken from `store`, for
     /// generating the sketch.
     pub fn with_local(&self, lib: &Library, store: &LocalValues) -> Project {
-        let mut out = self.clone();
+        let mut out = self.without_disabled();
         for i in 0..out.logic.blocks.len() {
-            let Some(lb) = lib.resolve(&self.logic, &self.logic.blocks[i]) else {
+            let Some(lb) = lib.resolve(&out.logic, &out.logic.blocks[i]) else {
                 continue;
             };
             store.fill_block(&lb.def, &mut out.logic.blocks[i]);
