@@ -19,9 +19,8 @@ pub const DEFAULT_REPO: &str = "phazz1980/FLP_next";
 
 /// Newest releases requested from GitHub: enough to tell what changed.
 const RELEASES_PER_PAGE: usize = 30;
-/// Releases listed in the notes, items per release and characters per item.
+/// Releases listed in the notes and characters per item.
 const MAX_RELEASES: usize = 10;
-const MAX_ITEMS: usize = 6;
 const MAX_LEN: usize = 110;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -199,17 +198,11 @@ fn summarize(notes: &str) -> Vec<String> {
         }
     }
     let chosen = if bullets.is_empty() { plain } else { bullets };
-    let mut items: Vec<String> = chosen
+    chosen
         .iter()
         .map(|l| clean(l))
         .filter(|l| !l.is_empty())
-        .collect();
-    if items.len() > MAX_ITEMS {
-        let more = items.len() - MAX_ITEMS;
-        items.truncate(MAX_ITEMS);
-        items.push(format!("…и ещё {more}"));
-    }
-    items
+        .collect()
 }
 
 fn strip_bullet(line: &str) -> Option<&str> {
@@ -473,11 +466,10 @@ mod tests {
     }
 
     #[test]
-    fn notes_are_short() {
+    fn notes_keep_every_item_but_shorten_long_ones() {
         let body: String = (1..=10).map(|i| format!("- пункт {i}\n")).collect();
         let items = summarize(&body);
-        assert_eq!(items.len(), MAX_ITEMS + 1);
-        assert_eq!(items.last().unwrap(), "…и ещё 4");
+        assert_eq!(items.len(), 10);
         let long = format!("- {}", "я".repeat(300));
         assert!(summarize(&long)[0].chars().count() <= MAX_LEN + 1);
         assert!(summarize("").is_empty());
