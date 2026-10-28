@@ -22,6 +22,7 @@ mod job;
 mod markdown;
 mod netpanel;
 mod panels;
+mod report;
 mod selfupdate;
 mod theme;
 mod themeedit;

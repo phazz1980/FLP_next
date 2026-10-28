@@ -1,0 +1,35 @@
+name: Ошибка
+description: Что-то работает не так
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Версия FLP_next
+      description: Меню «Справка» вверху
+    validations:
+      required: true
+  - type: input
+    id: board
+    attributes:
+      label: Плата и чип
+      placeholder: ESP32 DevKit
+  - type: textarea
+    id: what
+    attributes:
+      label: Что произошло
+      description: Шаги, после которых появилась ошибка
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Что ожидалось
+  - type: textarea
+    id: log
+    attributes:
+      label: Сообщения из нижней панели
+      render: text
+  - type: markdown
+    attributes:
+      value: Файл проекта `.flpn` можно приложить к issue перетаскиванием.
