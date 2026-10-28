@@ -2066,7 +2066,7 @@ impl eframe::App for EditorApp {
             debugview::values_window(d, &pal, &ctx);
             debugview::chart_window(d, &pal, &ctx);
             let layout = self.doc.as_ref().map(|doc| &doc.project.layout);
-            debugview::diagnostics_window(d, layout, &ctx);
+            debugview::diagnostics_window(d, &pal, layout, &ctx);
         }
         self.unsaved_dialog(&ctx);
     }

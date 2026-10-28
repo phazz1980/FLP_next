@@ -1,6 +1,8 @@
 //! Online debugging in the editor: live values on the sheets, forcing,
 //! setpoints, a window with inputs and variables and a simple chart window.
 
+use std::time::Instant;
+
 use eframe::egui::{self, Color32, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use flp_codegen::Program;
 use flp_core::{Layout, Library, ParamKind, PortRef, Project, SignalType};
@@ -22,7 +24,19 @@ pub struct DebugState {
     pub values: bool,
     /// Outputs of input tags (blocks with a pin that produce values), in schema order.
     pub inputs: Vec<(PortRef, usize)>,
+    /// Cycle time reports of the last two minutes, for the diagnostics charts.
+    stat_history: Vec<StatSample>,
+    started: Instant,
 }
+
+/// One cycle time report with the time it arrived (seconds since the session start).
+struct StatSample {
+    t: f64,
+    stats: flp_debug::Stats,
+}
+
+/// How long the diagnostics charts keep their samples, seconds.
+const STAT_HISTORY_SECS: f64 = 120.0;
 
 impl DebugState {
     pub fn start(
@@ -49,11 +63,35 @@ impl DebugState {
             diagnostics: false,
             values: false,
             inputs,
+            stat_history: Vec::new(),
+            started: Instant::now(),
         })
     }
 
     pub fn refresh(&mut self) {
         self.live = self.session.snapshot();
+        self.record_stats();
+    }
+
+    /// Keeps each new cycle time report for the diagnostics charts.
+    fn record_stats(&mut self) {
+        let Some(stats) = self.live.stats.clone().filter(|_| self.online()) else {
+            return;
+        };
+        if self.stat_history.last().is_some_and(|l| l.stats == stats) {
+            return;
+        }
+        let t = self.started.elapsed().as_secs_f64();
+        self.stat_history.push(StatSample { t, stats });
+        self.stat_history.retain(|s| s.t >= t - STAT_HISTORY_SECS);
+    }
+
+    /// Points of one figure of the stored reports.
+    fn series(&self, value: impl Fn(&flp_debug::Stats) -> Option<f64>) -> Vec<(f64, f64)> {
+        self.stat_history
+            .iter()
+            .filter_map(|s| value(&s.stats).map(|v| (s.t, v)))
+            .collect()
     }
 
     pub fn stop(self) {
@@ -508,7 +546,12 @@ pub fn chart_window(dbg: &mut DebugState, pal: &Palette, ctx: &egui::Context) {
 }
 
 /// Window with cycle time of the whole program and of each sheet.
-pub fn diagnostics_window(dbg: &mut DebugState, layout: Option<&Layout>, ctx: &egui::Context) {
+pub fn diagnostics_window(
+    dbg: &mut DebugState,
+    pal: &Palette,
+    layout: Option<&Layout>,
+    ctx: &egui::Context,
+) {
     if !dbg.diagnostics {
         return;
     }
@@ -581,6 +624,34 @@ pub fn diagnostics_window(dbg: &mut DebugState, layout: Option<&Layout>, ctx: &e
                             ui.end_row();
                         }
                     });
+            }
+            ui.separator();
+            let charts = [
+                (
+                    "Цикл, средний, мкс",
+                    dbg.series(|s| Some(f64::from(s.avg_us))),
+                ),
+                (
+                    "Цикл, максимальный, мкс",
+                    dbg.series(|s| Some(f64::from(s.max_us))),
+                ),
+                (
+                    "Ядро 0, проход, мкс",
+                    dbg.series(|s| s.background.as_ref().map(|b| f64::from(b.last_us))),
+                ),
+                (
+                    "Свободная память, КБ",
+                    dbg.series(|s| (s.free_heap > 0).then(|| f64::from(s.free_heap) / 1024.0)),
+                ),
+            ];
+            for (title, points) in charts.iter().filter(|(_, p)| !p.is_empty()) {
+                ui.horizontal(|ui| {
+                    ui.strong(*title);
+                    if let Some(&(_, v)) = points.last() {
+                        ui.monospace(format!("{v:.0}"));
+                    }
+                });
+                strip(ui, pal, points);
             }
             ui.separator();
             if ui
