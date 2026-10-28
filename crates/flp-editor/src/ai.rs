@@ -270,7 +270,7 @@ pub fn show(chat: &mut AiChat, pal: &Palette, ui: &mut Ui, has_project: bool) ->
         let ctrl_enter = resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.command);
         ui.horizontal(|ui| {
             if chat.busy() {
-                ui.spinner();
+                crate::panels::busy(ui);
                 ui.label("Claude работает...");
             } else if ui
                 .add_enabled(has_project, egui::Button::new("Отправить"))

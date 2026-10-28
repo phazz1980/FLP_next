@@ -168,6 +168,8 @@ pub struct EditorApp {
     pub local: LocalValues,
     /// Look for a newer release at startup.
     update_check: bool,
+    /// Download a found release in the background; installing stays the user's call.
+    auto_update: bool,
     /// Running release check; the flag tells whether the user asked for it.
     update_rx: Option<Receiver<(bool, Result<Check, String>)>>,
     /// Newer release found on GitHub.
@@ -188,7 +190,11 @@ enum SelfUpdate {
         done: Arc<AtomicU64>,
         total: Arc<AtomicU64>,
         rx: Receiver<Result<PathBuf, String>>,
+        /// Started by the program, not the button: stop after downloading.
+        auto: bool,
     },
+    /// Downloaded and unpacked, waiting for the user to restart.
+    Ready(PathBuf),
 }
 
 /// State of the "arduino-cli not found" offer.
@@ -245,6 +251,7 @@ impl EditorApp {
             seen_rev: None,
             local: LocalValues::default(),
             update_check: theme::update_check(),
+            auto_update: theme::auto_update(),
             update_rx: None,
             new_release: None,
             update_window: false,
@@ -395,7 +402,7 @@ impl EditorApp {
                     .resizable(false)
                     .show(ctx, |ui| {
                         ui.horizontal(|ui| {
-                            ui.spinner();
+                            panels::busy(ui);
                             ui.label("Идёт установка, это может занять минуту...");
                         });
                     });
@@ -417,30 +424,52 @@ impl EditorApp {
         }
     }
 
-    fn start_self_update(&mut self, url: String) {
+    fn start_self_update(&mut self, url: String, auto: bool) {
         let (done, total) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
         let (tx, rx) = mpsc::channel();
         let (d, t) = (done.clone(), total.clone());
         thread::spawn(move || {
             let _ = tx.send(selfupdate::download_and_stage(&url, &d, &t));
         });
-        self.self_update = SelfUpdate::Downloading { done, total, rx };
+        self.self_update = SelfUpdate::Downloading {
+            done,
+            total,
+            rx,
+            auto,
+        };
     }
 
     fn poll_self_update(&mut self, ctx: &egui::Context) {
-        let SelfUpdate::Downloading { rx, .. } = &self.self_update else {
+        let SelfUpdate::Downloading { rx, auto, .. } = &self.self_update else {
             return;
         };
+        let auto = *auto;
         ctx.request_repaint_after(Duration::from_millis(200));
         let Ok(result) = rx.try_recv() else { return };
         self.self_update = SelfUpdate::Idle(None);
         let staged = match result {
             Ok(staged) => staged,
             Err(e) => {
+                if auto {
+                    self.info(LogLevel::Warning, format!("Автоскачивание обновления: {e}"));
+                }
                 self.self_update = SelfUpdate::Idle(Some(e));
                 return;
             }
         };
+        if auto {
+            let version = self.new_release.as_ref().map_or("", |r| r.version.as_str());
+            let text =
+                format!("Обновление {version} скачано: Справка → «Перезапустить и обновить»");
+            self.info(LogLevel::Info, text);
+            self.self_update = SelfUpdate::Ready(staged);
+            return;
+        }
+        self.apply_update(ctx, &staged);
+    }
+
+    /// Hands the unpacked release to the helper and closes the editor.
+    fn apply_update(&mut self, ctx: &egui::Context, staged: &Path) {
         // The new version opens the project again from its file: save it first.
         if self.doc.as_ref().is_some_and(|d| d.dirty) && !self.save() {
             self.self_update =
@@ -448,7 +477,7 @@ impl EditorApp {
             return;
         }
         let project = self.doc.as_ref().map(|d| d.project.path.clone());
-        match selfupdate::launch_helper(&staged, project.as_deref()) {
+        match selfupdate::launch_helper(staged, project.as_deref()) {
             Ok(()) => {
                 self.allow_close = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -474,9 +503,16 @@ impl EditorApp {
                         release.url
                     ),
                 );
+                let url = release.url.clone();
                 self.new_release = Some(release);
                 // The window opens by itself only when the user asked for the check.
                 self.update_window = manual;
+                if self.auto_update
+                    && selfupdate::install_dir().is_some()
+                    && matches!(self.self_update, SelfUpdate::Idle(_))
+                {
+                    self.start_self_update(url, true);
+                }
             }
             Ok(Check::UpToDate) if manual => self.info(
                 LogLevel::Info,
@@ -1707,6 +1743,22 @@ impl EditorApp {
                 {
                     theme::save_update_check(self.update_check);
                 }
+                if ui
+                    .checkbox(&mut self.auto_update, "Скачивать обновления автоматически")
+                    .on_hover_text(
+                        "Найденная версия скачивается в фоне; устанавливается по вашей команде",
+                    )
+                    .changed()
+                {
+                    theme::save_auto_update(self.auto_update);
+                }
+                if let SelfUpdate::Ready(staged) = &self.self_update {
+                    let staged = staged.clone();
+                    if ui.button("Перезапустить и обновить").clicked() {
+                        self.apply_update(ui.ctx(), &staged);
+                        ui.close();
+                    }
+                }
                 if let Some(release) = &self.new_release {
                     ui.separator();
                     if ui
@@ -1799,7 +1851,7 @@ impl EditorApp {
                 }
                 if let Some(job) = &self.job {
                     ui.separator();
-                    ui.spinner();
+                    panels::busy(ui);
                     ui.label(job.title);
                     if ui.small_button("Отменить").clicked() {
                         *cancel = true;
@@ -1819,6 +1871,18 @@ impl EditorApp {
                     if let Some(s) = d.live.stats.as_ref().filter(|_| d.online()) {
                         ui.separator();
                         ui.label(format!("Цикл {} мкс, макс {} мкс", s.last_us, s.max_us));
+                        if let Some(bg) = &s.background {
+                            ui.label(format!(
+                                "Ядро 0: {} мкс, макс {} мкс",
+                                bg.last_us, bg.max_us
+                            ))
+                            .on_hover_text("Проход фоновой задачи на ядре 0: сеть и фоновые платы");
+                        }
+                    }
+                    if let Some(ip) = d.device_address(&p.logic.blocks) {
+                        ui.separator();
+                        ui.hyperlink_to(&ip, format!("http://{ip}"))
+                            .on_hover_text("Открыть страницу устройства в браузере");
                     }
                 }
             }
@@ -1892,7 +1956,13 @@ impl EditorApp {
             ),
             None => "FLP_next".to_owned(),
         };
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        // A viewport command always forces a repaint, so send it only on change;
+        // otherwise the window redraws non-stop (~30 fps) and loads the GPU at idle.
+        let id = egui::Id::unique("window_title");
+        if ctx.data(|d| d.get_temp::<String>(id)).as_deref() != Some(title.as_str()) {
+            ctx.data_mut(|d| d.insert_temp(id, title.clone()));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        }
     }
 }
 
@@ -1915,11 +1985,17 @@ impl eframe::App for EditorApp {
                     done.load(Ordering::Relaxed),
                     total.load(Ordering::Relaxed),
                 ),
+                SelfUpdate::Ready(_) => update::Install::Ready,
             };
             let can = selfupdate::install_dir().is_some();
             if update::window(&ctx, release, &mut self.update_window, install, can) {
-                let url = release.url.clone();
-                self.start_self_update(url);
+                if let SelfUpdate::Ready(staged) = &self.self_update {
+                    let staged = staged.clone();
+                    self.apply_update(&ctx, &staged);
+                } else {
+                    let url = release.url.clone();
+                    self.start_self_update(url, false);
+                }
             }
         }
         self.watch_library();

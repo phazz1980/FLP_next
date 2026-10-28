@@ -11,6 +11,16 @@ use crate::debugview::{self, DebugState};
 use crate::dialogs::{value_text, Dialog};
 use crate::job::JobKind;
 
+/// Busy indicator that repaints 5 times a second; `ui.spinner()` forces a repaint
+/// on every frame, which keeps the GPU loaded for as long as a job runs.
+pub fn busy(ui: &mut Ui) {
+    const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
+    let step = (ui.input(|i| i.time) * 5.0) as usize % FRAMES.len();
+    ui.monospace(FRAMES[step]);
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(200));
+}
+
 pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         let has_doc = app.doc.is_some();
@@ -106,7 +116,7 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
                 }
             });
         if app.scanning_ports() {
-            ui.spinner();
+            busy(ui);
         } else if ui
             .small_button("Обновить")
             .on_hover_text("Найти порты заново")

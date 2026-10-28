@@ -271,6 +271,8 @@ struct Settings {
     panels: Option<PanelSizes>,
     /// Look for a newer release at startup (on by default).
     update_check: Option<bool>,
+    /// Download a found release in the background (off by default).
+    auto_update: Option<bool>,
     /// GitHub repository "owner/name" the releases are taken from.
     update_repo: Option<String>,
 }
@@ -376,6 +378,14 @@ pub fn update_check() -> bool {
 
 pub fn save_update_check(on: bool) {
     update_settings(|s| s.update_check = Some(on));
+}
+
+pub fn auto_update() -> bool {
+    load_settings().auto_update.unwrap_or(false)
+}
+
+pub fn save_auto_update(on: bool) {
+    update_settings(|s| s.auto_update = Some(on));
 }
 
 pub fn update_repo() -> String {

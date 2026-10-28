@@ -91,6 +91,19 @@ impl DebugState {
         self.live.texts[i].as_deref()
     }
 
+    /// IP address the board reports on the `address` output of a Wi-Fi block, if any.
+    pub fn device_address(&self, blocks: &[flp_core::Block]) -> Option<String> {
+        self.table.texts.iter().enumerate().find_map(|(i, t)| {
+            let Source::Output(p) = &t.source else {
+                return None;
+            };
+            let is_wifi =
+                p.port == "address" && blocks.iter().any(|b| b.id == p.block && b.kind == "wifi");
+            let ip = self.live.texts.get(i)?.as_deref()?.trim();
+            (self.online() && is_wifi && !ip.is_empty()).then(|| ip.to_owned())
+        })
+    }
+
     pub fn text_var(&self, name: &str) -> Option<&str> {
         if !self.online() {
             return None;
@@ -522,6 +535,15 @@ pub fn diagnostics_window(dbg: &mut DebugState, layout: Option<&Layout>, ctx: &e
                     ui.label("Цикл, максимальный");
                     ui.strong(us(s.max_us));
                     ui.end_row();
+                    if let Some(bg) = &s.background {
+                        ui.label("Ядро 0, проход последний")
+                            .on_hover_text("Фоновая задача: сеть и платы с признаком «фоновая»");
+                        ui.monospace(us(bg.last_us));
+                        ui.end_row();
+                        ui.label("Ядро 0, проход максимальный");
+                        ui.strong(us(bg.max_us));
+                        ui.end_row();
+                    }
                     ui.label("Период loop(), макс")
                         .on_hover_text("Время между запусками loop(): схема, отладка и система");
                     ui.monospace(us(s.period_max_us));

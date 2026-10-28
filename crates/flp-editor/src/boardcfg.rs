@@ -296,7 +296,7 @@ impl BoardDialog {
         ui.label(RichText::new("Параметры прошивки").strong());
         if self.loading.is_some() {
             ui.horizontal(|ui| {
-                ui.spinner();
+                crate::panels::busy(ui);
                 ui.label("Читаю параметры платы из arduino-cli...");
             });
             return;

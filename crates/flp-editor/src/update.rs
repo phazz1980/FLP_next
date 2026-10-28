@@ -259,6 +259,8 @@ pub enum Install<'a> {
     Idle(Option<&'a str>),
     /// Downloading: bytes received and the archive size (0 when unknown).
     Busy(u64, u64),
+    /// Already downloaded: the button only restarts into the new version.
+    Ready,
 }
 
 /// Returns true when the user pressed "Обновить и перезапустить".
@@ -289,6 +291,13 @@ pub fn window(
                         egui::ProgressBar::new(fraction)
                             .text(format!("Скачивание: {:.1} из {:.1} МБ", mb(done), mb(total))),
                     );
+                }
+                Install::Ready => {
+                    ui.label("Обновление скачано.");
+                    start = ui
+                        .button("Перезапустить и обновить")
+                        .on_hover_text("Заменить файлы программы и открыть её заново; несохранённый проект будет сохранён")
+                        .clicked();
                 }
                 Install::Idle(error) => {
                     if can_install {
