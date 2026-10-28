@@ -98,6 +98,11 @@ impl Tasks {
         Ok(tasks)
     }
 
+    /// The chip has two cores, so a second task can run in parallel.
+    pub fn threaded(&self) -> bool {
+        self.threaded
+    }
+
     /// There is a background task.
     pub fn any(&self) -> bool {
         self.threaded && !self.background.is_empty()

@@ -708,6 +708,14 @@ fn assemble(
     } else {
         None
     };
+    // Without a background task the reporting gets a task of its own on core 0, so
+    // USB traffic never delays the cycle (same restrictions as for `bg_report`).
+    let report_task = report.filter(|_| {
+        !tasks.any()
+            && tasks.threaded()
+            && !text_in
+            && table.as_ref().is_none_or(|t| t.texts.is_empty())
+    });
     let lock = |lines: Vec<String>| -> Vec<String> {
         if lines.is_empty() {
             return lines;
@@ -772,6 +780,13 @@ flp_st_bg_end();
         out.push_str("  }\n}\n");
     }
 
+    if let Some(call) = report_task {
+        let _ = write!(
+            out,
+            "\n// Отчёт по USB: ядро 0, отдельно от основного цикла\nvoid flp_report_task(void *) {{\n  for (;;) {{\n    {call}\n    vTaskDelay(1);\n  }}\n}}\n"
+        );
+    }
+
     out.push_str("\nvoid setup() {\n");
     if tasks.any() {
         out.push_str("  flp_bg_lock = xSemaphoreCreateMutex();\n\n");
@@ -834,6 +849,11 @@ flp_st_bg_end();
             "\n  // Фоновая задача стартует после настройки всех блоков\n  xTaskCreatePinnedToCore(flp_bg_task, \"flp_bg\", 10240, nullptr, 1, nullptr, 0);\n",
         );
     }
+    if report_task.is_some() {
+        out.push_str(
+            "\n  // Отчёт стартует после настройки всех блоков\n  xTaskCreatePinnedToCore(flp_report_task, \"flp_report\", 8192, nullptr, 1, nullptr, 0);\n",
+        );
+    }
     out.push_str("}\n\nvoid loop() {\n");
     if stats {
         out.push_str("  flp_st_begin();\n\n");
@@ -876,7 +896,7 @@ flp_st_bg_end();
     if stats {
         out.push_str("\n  flp_st_end();\n");
     }
-    if !bg_report {
+    if !bg_report && report_task.is_none() {
         if let Some(call) = report {
             let _ = writeln!(out, "  {call}");
         }

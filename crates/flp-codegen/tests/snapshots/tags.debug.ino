@@ -294,11 +294,22 @@ void flp_dbg_loop() {
   }
 }
 
+// Отчёт по USB: ядро 0, отдельно от основного цикла
+void flp_report_task(void *) {
+  for (;;) {
+    flp_dbg_loop();
+    vTaskDelay(1);
+  }
+}
+
 void setup() {
   flp_dbg_setup();
 
   // heater: digital_out
   pinMode(26, OUTPUT);
+
+  // Отчёт стартует после настройки всех блоков
+  xTaskCreatePinnedToCore(flp_report_task, "flp_report", 8192, nullptr, 1, nullptr, 0);
 }
 
 void loop() {
@@ -350,5 +361,4 @@ void loop() {
   digitalWrite(26, (heating_r_out) ? HIGH : LOW);
 
   flp_st_end();
-  flp_dbg_loop();
 }
