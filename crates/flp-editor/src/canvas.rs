@@ -3,7 +3,7 @@
 //! `layout.toml` stores block positions relative to their sheet; here the sheets
 //! are laid out one under another and share one pan and zoom.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use eframe::egui::containers::menu::{MenuConfig, SubMenuButton};
 use eframe::egui::{
@@ -85,6 +85,8 @@ pub struct CanvasState {
     hover: Option<BlockPos>,
     /// Text of the constant being typed in the menu of an input.
     const_text: String,
+    /// Sheets folded to their header.
+    collapsed: HashSet<u32>,
 }
 
 impl CanvasState {
@@ -119,6 +121,7 @@ struct Band {
     sheet: u32,
     top: f32,
     height: f32,
+    collapsed: bool,
 }
 
 impl Band {
@@ -458,7 +461,8 @@ fn near_polyline(points: &[Pos2], p: Pos2, tolerance: f32) -> bool {
 /// Sheets stacked top to bottom; heights follow their content.
 fn bands(app: &EditorApp, sizes: &HashMap<&str, Vec2>) -> Vec<Band> {
     let doc = app.doc.as_ref().expect("canvas shown with a document");
-    let mut top = 0.0;
+    // The "add sheet" strip takes the top.
+    let mut top = ADD_SHEET_H + SHEET_GAP;
     app.sheets()
         .into_iter()
         .map(|sheet| {
@@ -470,10 +474,16 @@ fn bands(app: &EditorApp, sizes: &HashMap<&str, Vec2>) -> Vec<Band> {
                 .filter(|(id, p)| p.sheet == sheet && app.canvas.moving.as_deref() != Some(id))
                 .map(|(id, p)| p.y + sizes.get(id.as_str()).map_or(0.0, |s| s.y))
                 .fold(0.0, f32::max);
+            let collapsed = app.canvas.collapsed.contains(&sheet);
             let band = Band {
                 sheet,
                 top,
-                height: SHEET_HEADER + (bottom + SHEET_PAD).max(SHEET_MIN_BODY),
+                height: if collapsed {
+                    SHEET_HEADER
+                } else {
+                    SHEET_HEADER + (bottom + SHEET_PAD).max(SHEET_MIN_BODY)
+                },
+                collapsed,
             };
             top += band.height + SHEET_GAP;
             band
@@ -482,6 +492,12 @@ fn bands(app: &EditorApp, sizes: &HashMap<&str, Vec2>) -> Vec<Band> {
 }
 
 pub fn show(app: &mut EditorApp, ui: &mut Ui) {
+    // A block asked to be shown must not sit in a folded sheet.
+    if let (Some(id), Some(doc)) = (&app.canvas.focus, &app.doc) {
+        if let Some(pos) = doc.project.layout.blocks.get(id) {
+            app.canvas.collapsed.remove(&pos.sheet);
+        }
+    }
     let Some(doc) = &app.doc else {
         ui.centered_and_justified(|ui| {
             ui.label("Откройте проект: Файл → Открыть, или создайте новый.");
@@ -520,7 +536,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 return None;
             }
             let pos = project.layout.blocks.get(&b.id)?;
-            let band = band_of(pos.sheet)?;
+            let band = band_of(pos.sheet).filter(|b| !b.collapsed)?;
             let min = Pos2::new(pos.x, band.body_top() + pos.y);
             Some((
                 b.id.as_str(),
@@ -552,6 +568,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     painter.rect_filled(rect, 0.0, pal.canvas);
     let mut sheet_dialog = None;
     let mut active_sheet = None;
+    let mut toggle_sheet = None;
     for band in &bands {
         let sheet_rect = xf.rect(Rect::from_min_size(
             Pos2::new(0.0, band.top),
@@ -592,7 +609,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         ];
         for (i, (text, color)) in lines.into_iter().enumerate() {
             painter.text(
-                header.min + Vec2::new(10.0, (4.0 + 11.5 * i as f32) * z),
+                header.min + Vec2::new(28.0 * z, (4.0 + 11.5 * i as f32) * z),
                 Align2::LEFT_TOP,
                 text,
                 font(10.0),
@@ -611,6 +628,49 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             active_sheet = Some(band.sheet);
         }
         resp.on_hover_text("Двойной щелчок — название и комментарий платы");
+
+        // Fold/unfold arrow at the left edge of the header.
+        let arrow = Rect::from_center_size(
+            header.min + Vec2::new(14.0 * z, SHEET_HEADER * 0.5 * z),
+            Vec2::splat(20.0 * z),
+        );
+        let arrow_resp = ui.interact(
+            arrow,
+            Id::unique(("sheet_fold", band.sheet)),
+            Sense::click(),
+        );
+        let c = arrow.center();
+        let r = 5.0 * z;
+        let tri = if band.collapsed {
+            vec![
+                c + Vec2::new(-r * 0.6, -r),
+                c + Vec2::new(-r * 0.6, r),
+                c + Vec2::new(r, 0.0),
+            ]
+        } else {
+            vec![
+                c + Vec2::new(-r, -r * 0.6),
+                c + Vec2::new(r, -r * 0.6),
+                c + Vec2::new(0.0, r),
+            ]
+        };
+        let arrow_color = if arrow_resp.hovered() {
+            pal.accent
+        } else {
+            pal.text
+        };
+        painter.add(egui::Shape::convex_polygon(tri, arrow_color, Stroke::NONE));
+        if arrow_resp.clicked() {
+            toggle_sheet = Some(band.sheet);
+        }
+        arrow_resp.on_hover_text(if band.collapsed {
+            "Развернуть плату"
+        } else {
+            "Свернуть плату"
+        });
+        if band.collapsed {
+            continue;
+        }
 
         // Grid.
         if GRID * z > 8.0 {
@@ -634,10 +694,9 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             }
         }
     }
-    // "Add sheet" strip under the last sheet.
-    let last_bottom = bands.last().map_or(0.0, |b| b.top + b.height + SHEET_GAP);
+    // "Add sheet" strip above the first sheet.
     let add_rect = xf.rect(Rect::from_min_size(
-        Pos2::new(0.0, last_bottom),
+        Pos2::ZERO,
         Vec2::new(width, ADD_SHEET_H),
     ));
     let add_resp = ui.interact(add_rect, Id::unique("add_sheet"), Sense::click());
@@ -1162,10 +1221,10 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let dropped = bg.dnd_release_payload::<DragItem>();
     let drop_at = |p: Pos2| -> Option<BlockPos> {
         let w = xf.world(p);
-        let band = bands
-            .iter()
+        let open = || bands.iter().filter(|b| !b.collapsed);
+        let band = open()
             .find(|b| w.y >= b.top && w.y < b.top + b.height)
-            .or(bands.last())?;
+            .or(open().next_back())?;
         Some(BlockPos {
             sheet: band.sheet,
             x: (w.x / GRID).round().max(0.0) * GRID,
@@ -1203,13 +1262,13 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     // Where a moved block ends up: the sheet under its top-left corner.
     let landing = drag_end.as_ref().and_then(|id| {
         let r = world_rect.get(id.as_str())?;
-        let band = bands
-            .iter()
+        let open = || bands.iter().filter(|b| !b.collapsed);
+        let band = open()
             .find(|b| r.min.y >= b.top && r.min.y < b.top + b.height)
             .or(if r.min.y < 0.0 {
-                bands.first()
+                open().next()
             } else {
-                bands.last()
+                open().next_back()
             })?;
         Some(BlockPos {
             sheet: band.sheet,
@@ -1357,6 +1416,11 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     }
     if drag_end.is_some() {
         app.canvas.moving = None;
+    }
+    if let Some(sheet) = toggle_sheet {
+        if !app.canvas.collapsed.remove(&sheet) {
+            app.canvas.collapsed.insert(sheet);
+        }
     }
     if add_sheet {
         let next = app.sheets().last().copied().unwrap_or(1) + 1;
