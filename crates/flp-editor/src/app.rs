@@ -1759,6 +1759,26 @@ impl EditorApp {
                         ui.close();
                     }
                 }
+                ui.separator();
+                if ui
+                    .button("Сообщить об ошибке")
+                    .on_hover_text("Откроет страницу GitHub с подготовленным описанием")
+                    .clicked()
+                {
+                    let repo = theme::update_repo();
+                    let board = self.doc.as_ref().map(|d| {
+                        let b = &d.project.config.board;
+                        (crate::boardcfg::board_name(b), b.fqbn.clone())
+                    });
+                    let url = crate::report::issue_url(&crate::report::Context {
+                        repo: &repo,
+                        version: update::CURRENT,
+                        board: board.as_ref().map(|(n, f)| (*n, f.as_str())),
+                        log: self.log.iter().map(|l| l.text.clone()).collect(),
+                    });
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                    ui.close();
+                }
                 if let Some(release) = &self.new_release {
                     ui.separator();
                     if ui

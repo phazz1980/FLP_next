@@ -113,6 +113,18 @@ fn topics_section(app: &EditorApp, ui: &mut Ui, actions: &mut Vec<NetAction>) {
                 Some(ParamValue::Text(t)) if !t.is_empty() => t.as_str(),
                 _ => "без топика",
             };
+            let placed = doc.project.layout.blocks.contains_key(&b.id);
+            ui.dnd_drag_source(
+                Id::unique(("topic", &b.id)),
+                DragItem::Topic(b.id.clone()),
+                |ui| ui.label(if placed { "▣" } else { "▢" }),
+            )
+            .response
+            .on_hover_text(if placed {
+                "Блок уже на плате; перетащите, чтобы переставить"
+            } else {
+                "Перетащите на плату"
+            });
             egui::CollapsingHeader::new(format!("{topic} ({})", b.id))
                 .id_salt(("mqtt_topic", &b.id))
                 .default_open(false)
@@ -765,7 +777,13 @@ pub fn apply(app: &mut EditorApp, actions: Vec<NetAction>) {
             }
             NetAction::AddTopic(kind) => {
                 let Some(doc) = &mut app.doc else { return };
-                if let Err(e) = doc.edit(&lib, None, |p| p.add_block(&lib, kind, pos).map(drop)) {
+                // The topic stays in the panel until it is dragged onto a sheet.
+                let added = doc.edit(&lib, None, |p| {
+                    let id = p.add_block(&lib, kind, pos)?;
+                    p.layout.blocks.remove(&id);
+                    Ok::<_, flp_core::EditError>(())
+                });
+                if let Err(e) = added {
                     app.info(LogLevel::Error, e.to_string());
                 }
             }

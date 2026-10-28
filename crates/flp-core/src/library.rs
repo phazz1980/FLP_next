@@ -184,6 +184,10 @@ pub struct BlockInfo {
     /// not drawn on the sheets and not offered in the library.
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
+    /// A hidden block that can still be dragged from the side panel onto a sheet
+    /// (MQTT publication and subscription): it is drawn once it has a position.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub pullable: bool,
     /// The block works through a library object shared with other blocks of the same
     /// tag (`network`: Wi-Fi, MQTT, web page, Modbus); such blocks cannot run in
     /// different tasks.

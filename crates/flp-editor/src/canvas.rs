@@ -48,6 +48,8 @@ pub enum DragItem {
         ty: SignalType,
         feed: bool,
     },
+    /// MQTT topic block (id) from the side panel: it is drawn on the sheet at the drop point.
+    Topic(String),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -531,11 +533,15 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         .blocks
         .iter()
         .filter_map(|b| {
-            // Service blocks (Wi-Fi, web interface) live in the left panel only.
-            if defs[b.id.as_str()].is_some_and(|d| d.info.hidden) {
+            // Service blocks (Wi-Fi, web interface) live in the left panel only;
+            // a topic is drawn once it has been dragged onto a sheet.
+            let pos = project.layout.blocks.get(&b.id);
+            if defs[b.id.as_str()]
+                .is_some_and(|d| d.info.hidden && !(d.info.pullable && pos.is_some()))
+            {
                 return None;
             }
-            let pos = project.layout.blocks.get(&b.id)?;
+            let pos = pos?;
             let band = band_of(pos.sheet).filter(|b| !b.collapsed)?;
             let min = Pos2::new(pos.x, band.body_top() + pos.y);
             Some((
@@ -1427,6 +1433,10 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 }),
                 DragItem::Setting { id, name, ty, feed } => doc.edit(&lib, None, |p| {
                     crate::netpanel::pull_out(p, &lib, &id, &name, ty, feed, pos)
+                }),
+                DragItem::Topic(id) => doc.edit(&lib, None, |p| {
+                    p.layout.blocks.insert(id.clone(), pos);
+                    Ok::<_, flp_core::EditError>(id)
                 }),
             };
             match result {
