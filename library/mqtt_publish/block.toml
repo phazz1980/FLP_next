@@ -4,6 +4,7 @@ name = "MQTT публикация"
 symbol = "MQTT →"
 group = "Сеть"
 shared = "network"
+hidden = true
 description = "Публикует значение любого типа в топик MQTT: по фронту en, при изменении значения или периодически."
 
 [[input]]

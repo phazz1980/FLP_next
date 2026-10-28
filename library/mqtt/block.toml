@@ -6,6 +6,7 @@ group = "Сеть"
 shared = "network"
 description = "Подключение к MQTT-брокеру через Wi-Fi или Ethernet; блоки «MQTT публикация» и «MQTT подписка» работают через него."
 single = true
+hidden = true
 includes = ["flprogNetwork.h"]
 
 [[output]]
@@ -23,6 +24,14 @@ name = "net"
 type = "string"
 default = "wifi"
 description = "Сеть: wifi (блок «Wi-Fi клиент») или ethernet (блок «Ethernet W5500»)"
+
+[[param.choice]]
+value = "wifi"
+label = "Wi-Fi"
+
+[[param.choice]]
+value = "ethernet"
+label = "Ethernet"
 
 [[param]]
 name = "broker"

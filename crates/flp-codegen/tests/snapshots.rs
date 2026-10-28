@@ -695,7 +695,12 @@ fn background_sheet_rules() {
 
     // Even with no background sheet at all, the network goes to core 0, and a bool
     // crossing the boundary keeps a latch so a pulse is not lost.
-    let net = Project::load(repo_path("examples/mqtt")).unwrap();
+    let mut net = Project::load(repo_path("examples/mqtt")).unwrap();
+    // The publication is hidden in the editor, but a wire into it is still valid.
+    net.logic.links.push(flp_core::Link {
+        from: "button.out".parse().unwrap(),
+        to: "button_pub.en".parse().unwrap(),
+    });
     let code = generate(&net, &lib, &ArduinoCpp::RELEASE).unwrap();
     assert!(
         code.contains("xTaskCreatePinnedToCore(flp_bg_task"),

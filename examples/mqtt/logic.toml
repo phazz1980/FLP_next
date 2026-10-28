@@ -1,5 +1,19 @@
 # MQTT через Wi-Fi: flp/temp — температура (по изменению), flp/button — кнопка (по изменению),
 # flp/led (1/0, on/off) — включает светодиод.
+# Публикации и подписка заданы в панели слева (раздел MQTT); значения идут через переменные,
+# привязки лежат в [block.bind].
+
+[[var]]
+name = "Температура"
+type = "float"
+
+[[var]]
+name = "Кнопка"
+type = "bool"
+
+[[var]]
+name = "Светодиод"
+type = "bool"
 
 [[block]]
 id = "wifi"
@@ -25,6 +39,9 @@ trigger = 1
 deadband = 0.2
 decimals = 1
 
+[block.bind]
+value = "Температура"
+
 [[block]]
 id = "button"
 type = "digital_in"
@@ -39,25 +56,46 @@ topic = "flp/button"
 retain = true
 trigger = 1
 
+[block.bind]
+value = "Кнопка"
+
 [[block]]
 id = "led_sub"
 type = "mqtt_subscribe"
 topic = "flp/led"
 kind = "bool"
 
+[block.bind]
+out_b = "Светодиод"
+
 [[block]]
 id = "led"
 type = "digital_out"
 pin = 2
 
+[[block]]
+id = "temp_w"
+type = "var_set"
+var = "Температура"
+
+[[block]]
+id = "button_w"
+type = "var_set"
+var = "Кнопка"
+
+[[block]]
+id = "led_r"
+type = "var_get"
+var = "Светодиод"
+
 [[link]]
 from = "sensor.temp"
-to   = "temp_pub.value"
+to   = "temp_w.in"
 
 [[link]]
 from = "button.out"
-to   = "button_pub.value"
+to   = "button_w.in"
 
 [[link]]
-from = "led_sub.out_b"
+from = "led_r.out"
 to   = "led.in"

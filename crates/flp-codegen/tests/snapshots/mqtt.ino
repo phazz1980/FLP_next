@@ -1,5 +1,5 @@
 // Сгенерировано FLP_next из проекта «mqtt». Ручные правки будут перезаписаны.
-// Порядок выполнения: wifi → broker → sensor → temp_pub → button → button_pub → led_sub → led
+// Порядок выполнения: wifi → broker → sensor → temp_pub → button → button_pub → led_sub → temp_w → button_w → led_r → led
 
 #define FLPROG_MQTT_MAX_SUBSCRIPTIONS 4U
 
@@ -26,17 +26,15 @@ bool button_out = false;
 bool button_pub_sent = false;
 bool led_sub_out_b = false;
 bool led_sub_received = false;
+bool led_r_out = false;
 
 // Обмен сигналами между основной и фоновой задачами
 SemaphoreHandle_t flp_bg_lock;
-float sensor_temp_pub = 0.0f;
-float sensor_temp_in = 0.0f;
-bool button_out_pub = false;
-bool button_out_in = false;
-bool button_out_pend = false;
-bool led_sub_out_b_pub = false;
-bool led_sub_out_b_in = false;
-bool led_sub_out_b_pend = false;
+
+// Переменные
+float var_Temperatura_32c585 = 0.0f;
+bool var_Knopka_c26f61 = false;
+bool var_Svetodiod_84f54c = false;
 
 // wifi: wifi
 // Shared network interface: Modbus TCP and other network blocks use it.
@@ -251,12 +249,6 @@ void wifi_up_poll() {
 // Фоновая задача: ядро 0, блоки плат с признаком «фоновая задача»
 void flp_bg_task(void *) {
   for (;;) {
-    xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
-    sensor_temp_in = sensor_temp_pub;
-    button_out_in = button_out_pub || button_out_pend;
-    button_out_pend = false;
-    xSemaphoreGive(flp_bg_lock);
-
     // wifi: wifi
     {
       // Client and access point follow the inputs; switched only when they change.
@@ -338,17 +330,17 @@ void flp_bg_task(void *) {
 
     // temp_pub: mqtt_publish
     {
-      bool changed = !temp_pub_started || fabsf(sensor_temp_in - temp_pub_last) >= 0.2f;
+      bool changed = !temp_pub_started || fabsf(var_Temperatura_32c585 - temp_pub_last) >= 0.2f;
       if (true && changed) {
         temp_pub_pending = true;
       }
       temp_pub_sent = false;
       if (temp_pub_pending && flpMqtt.connected()) {
-        String text = String(sensor_temp_in, 1);
+        String text = String(var_Temperatura_32c585, 1);
         if (flpMqtt.publish("flp/temp", text.c_str(), false)) {
           temp_pub_sent = true;
           temp_pub_pending = false;
-          temp_pub_last = sensor_temp_in;
+          temp_pub_last = var_Temperatura_32c585;
           temp_pub_started = true;
         }
       }
@@ -356,17 +348,17 @@ void flp_bg_task(void *) {
 
     // button_pub: mqtt_publish
     {
-      bool changed = !button_pub_started || button_out_in != button_pub_last;
+      bool changed = !button_pub_started || var_Knopka_c26f61 != button_pub_last;
       if (true && changed) {
         button_pub_pending = true;
       }
       button_pub_sent = false;
       if (button_pub_pending && flpMqtt.connected()) {
-        String text = button_out_in ? "1" : "0";
+        String text = var_Knopka_c26f61 ? "1" : "0";
         if (flpMqtt.publish("flp/button", text.c_str(), true)) {
           button_pub_sent = true;
           button_pub_pending = false;
-          button_pub_last = button_out_in;
+          button_pub_last = var_Knopka_c26f61;
           button_pub_started = true;
         }
       }
@@ -392,11 +384,7 @@ void flp_bg_task(void *) {
         }
       }
     }
-
-    xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
-    led_sub_out_b_pub = led_sub_out_b;
-    led_sub_out_b_pend = led_sub_out_b_pend || led_sub_out_b;
-    xSemaphoreGive(flp_bg_lock);
+    var_Svetodiod_84f54c = led_sub_out_b;
 
     vTaskDelay(1);
   }
@@ -444,11 +432,6 @@ void setup() {
 }
 
 void loop() {
-  xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
-  led_sub_out_b_in = led_sub_out_b_pub || led_sub_out_b_pend;
-  led_sub_out_b_pend = false;
-  xSemaphoreGive(flp_bg_lock);
-
   // sensor: ds18b20
   if (millis() - sensor_requested >= 1000UL) {
     float t = sensor_bus.getTempCByIndex(0);
@@ -463,12 +446,15 @@ void loop() {
   // button: digital_in
   button_out = !digitalRead(13);
 
-  // led: digital_out
-  digitalWrite(2, (led_sub_out_b_in) ? HIGH : LOW);
+  // temp_w: var_set
+  var_Temperatura_32c585 = sensor_temp;
 
-  xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
-  sensor_temp_pub = sensor_temp;
-  button_out_pub = button_out;
-  button_out_pend = button_out_pend || button_out;
-  xSemaphoreGive(flp_bg_lock);
+  // button_w: var_set
+  var_Knopka_c26f61 = button_out;
+
+  // led_r: var_get
+  led_r_out = var_Svetodiod_84f54c;
+
+  // led: digital_out
+  digitalWrite(2, (led_r_out) ? HIGH : LOW);
 }
