@@ -1,42 +1,71 @@
 // @global
-bool {{ id }}_started = false;
+// The FLProg_Network SNTP service is the same on every board and network: it keeps
+// the time in UTC itself, the zone and daylight saving are added below.
+FLProgNetworkNtp {{ id }}_ntp;
+bool {{ id }}_bound = false;
 uint32_t {{ id }}_tick = 0;
-// Set by the SNTP task (another core) after each successful synchronization.
-volatile bool {{ id }}_synced = false;
-volatile uint32_t {{ id }}_sync_at = 0;
-// @functions
-void {{ id }}_on_sync(struct timeval *tv) {
-  {{ id }}_sync_at = millis();
-  {{ id }}_synced = true;
-}
+uint32_t {{ id }}_retry = 0;
 // @loop
-// SNTP starts once the Wi-Fi client is connected.
-if (!{{ id }}_started && flpWifi.clientIsReady()) {
-  {{ id }}_started = true;
-  sntp_set_time_sync_notification_cb({{ id }}_on_sync);
-  sntp_set_sync_interval({{ param.period }});
-  configTime((long)({{ param.zone }} * 3600), {{ 3600 if value.dst else 0 }}, {{ param.server }});
+if (!{{ id }}_bound) {
+  // Attach once; the service waits for the network and repeats requests by itself.
+  {{ id }}_bound = {{ id }}_ntp.begin({% if value.net == "ethernet" %}flpEth{% else %}flpWifi{% endif %});
+  if ({{ id }}_bound) {
+    {{ id }}_ntp.setServer({{ param.server }});
+    {{ id }}_ntp.setRequestPeriodMs({{ param.period }});
+  }
 }
+{% set parts = value.out_hour or value.out_minute or value.out_second or value.out_day or value.out_month or value.out_year or value.out_weekday or value.out_text %}
 // The time is read once per second.
-if ({{ id }}_started && (uint32_t)(millis() - {{ id }}_tick) >= 1000) {
+if ({{ id }}_bound && (uint32_t)(millis() - {{ id }}_tick) >= 1000) {
   {{ id }}_tick = millis();
-  time_t now = time(nullptr);
-  // A time before 2023 means no answer from the server yet.
-  {{ output.valid }} = now > 1700000000;
-  {{ output.age }} = {{ id }}_synced ? (int32_t)((uint32_t)(millis() - {{ id }}_sync_at) / 1000) : -1;
-  if ({{ output.valid }}) {
+  // After a failed request the service would wait for the whole period: ask again in 30 s.
+  if ({{ id }}_ntp.failed() && (uint32_t)(millis() - {{ id }}_retry) >= 30000) {
+    {{ id }}_retry = millis();
+    {{ id }}_ntp.syncNow();
+  }
+  // Stays true while the service asks the server again.
+  bool ok = {{ id }}_ntp.hasTime();
+{% if value.out_valid %}
+  {{ output.valid }} = ok;
+{% endif %}
+{% if value.out_age %}
+  {{ output.age }} = ok ? (int32_t)((uint32_t)(millis() - {{ id }}_ntp.lastSyncMillis()) / 1000) : -1;
+{% endif %}
+  if (ok) {
+    uint32_t utc = {{ id }}_ntp.unixTime();
+{% if value.out_unix %}
+    {{ output.unix }} = (int32_t)utc;
+{% endif %}
+{% if parts %}
+    time_t local = (time_t)((int64_t)utc + (long)({{ param.zone }} * 3600) + {{ 3600 if value.dst else 0 }});
     struct tm lt;
-    localtime_r(&now, &lt);
+    gmtime_r(&local, &lt);
+{% endif %}
+{% if value.out_hour %}
     {{ output.hour }} = lt.tm_hour;
+{% endif %}
+{% if value.out_minute %}
     {{ output.minute }} = lt.tm_min;
+{% endif %}
+{% if value.out_second %}
     {{ output.second }} = lt.tm_sec;
+{% endif %}
+{% if value.out_day %}
     {{ output.day }} = lt.tm_mday;
+{% endif %}
+{% if value.out_month %}
     {{ output.month }} = lt.tm_mon + 1;
+{% endif %}
+{% if value.out_year %}
     {{ output.year }} = lt.tm_year + 1900;
+{% endif %}
+{% if value.out_weekday %}
     {{ output.weekday }} = lt.tm_wday == 0 ? 7 : lt.tm_wday;
-    {{ output.unix }} = (int32_t)now;
+{% endif %}
+{% if value.out_text %}
     char buf[9];
     snprintf(buf, sizeof(buf), "%02d:%02d:%02d", lt.tm_hour, lt.tm_min, lt.tm_sec);
     {{ output.text }} = buf;
+{% endif %}
   }
 }

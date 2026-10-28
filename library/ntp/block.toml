@@ -3,75 +3,101 @@ type = "ntp"
 name = "Время по NTP"
 symbol = "NTP"
 group = "Сеть"
-description = "Точное время и дата из интернета (SNTP) через Wi-Fi: часы, минуты, день недели и т. д. Нужен блок «Wi-Fi клиент»."
+description = "Точное время и дата из интернета (SNTP) через Wi-Fi или Ethernet: часы, минуты, день недели и т. д. Нужен блок «Wi-Fi клиент» или «Ethernet W5500»."
 memory = true
 single = true
-includes = ["esp_sntp.h"]
+includes = ["flprogNetwork.h"]
 
 [[output]]
 name = "valid"
+when = "out_valid"
 type = "bool"
 description = "true, когда время получено с сервера (до первого ответа остальные выходы не меняются)"
 
 [[output]]
 name = "age"
+when = "out_age"
 type = "int"
 label = "Возраст"
 description = "Секунд с последней успешной синхронизации с сервером; -1, пока синхронизации не было"
 
 [[output]]
 name = "hour"
+when = "out_hour"
 type = "int"
 label = "Часы"
 description = "Часы, 0–23"
 
 [[output]]
 name = "minute"
+when = "out_minute"
 type = "int"
 label = "Минуты"
 description = "Минуты, 0–59"
 
 [[output]]
 name = "second"
+when = "out_second"
 type = "int"
 label = "Секунды"
 description = "Секунды, 0–59"
 
 [[output]]
 name = "day"
+when = "out_day"
 type = "int"
 label = "День"
 description = "День месяца, 1–31"
 
 [[output]]
 name = "month"
+when = "out_month"
 type = "int"
 label = "Месяц"
 description = "Месяц, 1–12"
 
 [[output]]
 name = "year"
+when = "out_year"
 type = "int"
 label = "Год"
 description = "Год, например 2026"
 
 [[output]]
 name = "weekday"
+when = "out_weekday"
 type = "int"
 label = "День недели"
 description = "День недели: 1 понедельник … 7 воскресенье"
 
 [[output]]
 name = "unix"
+when = "out_unix"
 type = "int"
 label = "Unix-время"
 description = "Секунды с 1 января 1970 (UTC)"
 
 [[output]]
 name = "text"
+when = "out_text"
 type = "string"
 label = "Текст"
 description = "Время в виде «ЧЧ:ММ:СС»"
+
+[[param]]
+name = "net"
+type = "string"
+label = "Сеть"
+default = "wifi"
+description = "Сеть: wifi (блок «Wi-Fi клиент») или ethernet (блок «Ethernet W5500»)"
+
+[[param.choice]]
+value = "wifi"
+label = "Wi-Fi"
+
+[[param.choice]]
+value = "ethernet"
+label = "Ethernet"
 
 [[param]]
 name = "server"
@@ -102,4 +128,92 @@ type = "duration"
 label = "Период синхронизации"
 default = "1h"
 min = 15000
-description = "Как часто запрашивать время у сервера (не меньше 15 с); между запросами часы идут сами"
+description = "Как часто запрашивать время у сервера (не меньше 15 с); между запросами часы идут сами. После неудачного запроса блок повторяет его через 30 с"
+
+[[param]]
+name = "out_valid"
+type = "bool"
+label = "Выход valid"
+default = true
+show = "hidden"
+description = "Показать выход «true, когда время получено»"
+
+[[param]]
+name = "out_age"
+type = "bool"
+label = "Выход age"
+default = false
+show = "hidden"
+description = "Показать выход «секунд с последней синхронизации»"
+
+[[param]]
+name = "out_hour"
+type = "bool"
+label = "Выход hour"
+default = true
+show = "hidden"
+description = "Показать выход «часы»"
+
+[[param]]
+name = "out_minute"
+type = "bool"
+label = "Выход minute"
+default = true
+show = "hidden"
+description = "Показать выход «минуты»"
+
+[[param]]
+name = "out_second"
+type = "bool"
+label = "Выход second"
+default = false
+show = "hidden"
+description = "Показать выход «секунды»"
+
+[[param]]
+name = "out_day"
+type = "bool"
+label = "Выход day"
+default = false
+show = "hidden"
+description = "Показать выход «день месяца»"
+
+[[param]]
+name = "out_month"
+type = "bool"
+label = "Выход month"
+default = false
+show = "hidden"
+description = "Показать выход «месяц»"
+
+[[param]]
+name = "out_year"
+type = "bool"
+label = "Выход year"
+default = false
+show = "hidden"
+description = "Показать выход «год»"
+
+[[param]]
+name = "out_weekday"
+type = "bool"
+label = "Выход weekday"
+default = false
+show = "hidden"
+description = "Показать выход «день недели»"
+
+[[param]]
+name = "out_unix"
+type = "bool"
+label = "Выход unix"
+default = false
+show = "hidden"
+description = "Показать выход «Unix-время»"
+
+[[param]]
+name = "out_text"
+type = "bool"
+label = "Выход text"
+default = false
+show = "hidden"
+description = "Показать выход «время текстом»"

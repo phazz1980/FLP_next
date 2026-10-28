@@ -6,7 +6,6 @@
 #include <flprogWebServer.h>
 #include <service/flprogNetworkOta.h>
 #include <Update.h>
-#include <esp_sntp.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
@@ -15,16 +14,8 @@
 bool wifi_ready = false;
 String wifi_address = String();
 bool clock_valid = false;
-int32_t clock_age = 0;
 int32_t clock_hour = 0;
 int32_t clock_minute = 0;
-int32_t clock_second = 0;
-int32_t clock_day = 0;
-int32_t clock_month = 0;
-int32_t clock_year = 0;
-int32_t clock_weekday = 0;
-int32_t clock_unix = 0;
-String clock_text = String();
 bool after8_out = false;
 bool before20_out = false;
 bool work_out = false;
@@ -61,11 +52,12 @@ uint32_t wifi_up_len = 0, wifi_up_got = 0, wifi_up_t = 0, wifi_up_try = 0;
 bool wifi_up_auth = false;
 
 // clock: ntp
-bool clock_started = false;
+// The FLProg_Network SNTP service is the same on every board and network: it keeps
+// the time in UTC itself, the zone and daylight saving are added below.
+FLProgNetworkNtp clock_ntp;
+bool clock_bound = false;
 uint32_t clock_tick = 0;
-// Set by the SNTP task (another core) after each successful synchronization.
-volatile bool clock_synced = false;
-volatile uint32_t clock_sync_at = 0;
+uint32_t clock_retry = 0;
 
 // wifi: wifi
 void wifi_up_reply(const char *status, const char *text) {
@@ -188,12 +180,6 @@ void wifi_up_poll() {
   }
 }
 
-// clock: ntp
-void clock_on_sync(struct timeval *tv) {
-  clock_sync_at = millis();
-  clock_synced = true;
-}
-
 // Фоновая задача: ядро 0, блоки плат с признаком «фоновая задача»
 void flp_bg_task(void *) {
   for (;;) {
@@ -265,7 +251,6 @@ void setup() {
 
   // Память под строки заранее: меньше дробления кучи.
   wifi_address.reserve(32);
-  clock_text.reserve(32);
 
   // wifi: wifi
   flpWifi.setClientSsid("MyNetwork");
@@ -294,34 +279,32 @@ void setup() {
 
 void loop() {
   // clock: ntp
-  // SNTP starts once the Wi-Fi client is connected.
-  if (!clock_started && flpWifi.clientIsReady()) {
-    clock_started = true;
-    sntp_set_time_sync_notification_cb(clock_on_sync);
-    sntp_set_sync_interval(3600000);
-    configTime((long)(3.0f * 3600), 0, "pool.ntp.org");
+  if (!clock_bound) {
+    // Attach once; the service waits for the network and repeats requests by itself.
+    clock_bound = clock_ntp.begin(flpWifi);
+    if (clock_bound) {
+      clock_ntp.setServer("pool.ntp.org");
+      clock_ntp.setRequestPeriodMs(3600000);
+    }
   }
   // The time is read once per second.
-  if (clock_started && (uint32_t)(millis() - clock_tick) >= 1000) {
+  if (clock_bound && (uint32_t)(millis() - clock_tick) >= 1000) {
     clock_tick = millis();
-    time_t now = time(nullptr);
-    // A time before 2023 means no answer from the server yet.
-    clock_valid = now > 1700000000;
-    clock_age = clock_synced ? (int32_t)((uint32_t)(millis() - clock_sync_at) / 1000) : -1;
-    if (clock_valid) {
+    // After a failed request the service would wait for the whole period: ask again in 30 s.
+    if (clock_ntp.failed() && (uint32_t)(millis() - clock_retry) >= 30000) {
+      clock_retry = millis();
+      clock_ntp.syncNow();
+    }
+    // Stays true while the service asks the server again.
+    bool ok = clock_ntp.hasTime();
+    clock_valid = ok;
+    if (ok) {
+      uint32_t utc = clock_ntp.unixTime();
+      time_t local = (time_t)((int64_t)utc + (long)(3.0f * 3600) + 0);
       struct tm lt;
-      localtime_r(&now, &lt);
+      gmtime_r(&local, &lt);
       clock_hour = lt.tm_hour;
       clock_minute = lt.tm_min;
-      clock_second = lt.tm_sec;
-      clock_day = lt.tm_mday;
-      clock_month = lt.tm_mon + 1;
-      clock_year = lt.tm_year + 1900;
-      clock_weekday = lt.tm_wday == 0 ? 7 : lt.tm_wday;
-      clock_unix = (int32_t)now;
-      char buf[9];
-      snprintf(buf, sizeof(buf), "%02d:%02d:%02d", lt.tm_hour, lt.tm_min, lt.tm_sec);
-      clock_text = buf;
     }
   }
 
