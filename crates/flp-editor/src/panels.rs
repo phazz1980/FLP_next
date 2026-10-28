@@ -164,21 +164,50 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
 }
 
 /// Bottom panel: editor messages and the port monitor / debug console.
-pub fn bottom(app: &mut EditorApp, ui: &mut Ui) {
+pub fn bottom(app: &mut EditorApp, ui: &mut Ui, open: &mut bool) {
     ui.horizontal(|ui| {
+        let (arrow, hint) = if *open {
+            ("▾", "Свернуть панель")
+        } else {
+            ("▴", "Развернуть панель")
+        };
+        if ui.small_button(arrow).on_hover_text(hint).clicked() {
+            *open = !*open;
+        }
+        let tab = app.bottom_tab;
         ui.selectable_value(&mut app.bottom_tab, BottomTab::Log, "Сообщения");
         let title = match app.console.unread {
             0 => app.console.title().to_owned(),
             n => format!("{} ({n})", app.console.title()),
         };
         ui.selectable_value(&mut app.bottom_tab, BottomTab::Console, title);
+        if app.bottom_tab != tab {
+            // Picking a tab of the folded panel opens it.
+            *open = true;
+        }
         if app.bottom_tab == BottomTab::Log {
             ui.separator();
-            if ui.small_button("Очистить").clicked() {
-                app.log.clear();
+            if *open {
+                if ui.small_button("Очистить").clicked() {
+                    app.log.clear();
+                }
+            } else if let Some(line) = app.log.last() {
+                // The folded panel keeps the latest message in view.
+                let pal = app.theme.palette;
+                let color = match line.level {
+                    LogLevel::Info => pal.text,
+                    LogLevel::Ok => pal.ok,
+                    LogLevel::Warning => pal.warning,
+                    LogLevel::Error => pal.error,
+                };
+                let text = line.text.lines().next().unwrap_or("");
+                ui.add(egui::Label::new(RichText::new(text).color(color).monospace()).truncate());
             }
         }
     });
+    if !*open {
+        return;
+    }
     ui.separator();
     match app.bottom_tab {
         BottomTab::Log => log(app, ui),
@@ -236,33 +265,9 @@ pub fn fit_width<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
     result
 }
 
-/// Runs panel contents invisibly with unwrapped text and returns their natural width
-/// (at most `max_width`).
-fn measure_width(ui: &mut Ui, max_width: f32, add_contents: impl FnOnce(&mut Ui)) -> f32 {
-    let rect = ui.available_rect_before_wrap();
-    let wide = egui::Rect::from_min_size(rect.min, egui::vec2(max_width, rect.height()));
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(wide)
-            .sizing_pass()
-            .invisible(),
-    );
-    child.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-    add_contents(&mut child);
-    ui.expand_to_include_rect(rect);
-    child.min_rect().width().min(max_width)
-}
-
-/// Expanding a side panel happens in two frames: measure the contents, then apply the width.
-#[derive(Clone, Copy)]
-enum Fit {
-    Measure,
-    Apply(f32),
-}
-
 /// Resizable side panel with a button that collapses it to a narrow strip and back.
-/// On expanding, the panel takes the width of its contents. `width` is the starting
-/// width and receives the current one.
+/// On expanding, the panel returns to the width it had before folding. `width` is the
+/// starting width and receives the current one.
 pub fn side_panel(
     ui: &mut Ui,
     id: &str,
@@ -282,8 +287,8 @@ pub fn side_panel(
     let (hide, show) = if left { ("«", "»") } else { ("»", "«") };
     let fit_id = Id::unique(id).with("fit");
     let fit = ui.data_mut(|d| {
-        let fit = d.get_temp::<Fit>(fit_id);
-        d.remove::<Fit>(fit_id);
+        let fit = d.get_temp::<f32>(fit_id);
+        d.remove::<f32>(fit_id);
         fit
     });
     if *open {
@@ -293,18 +298,12 @@ pub fn side_panel(
             // A saved width from a larger window must not swallow the canvas.
             .default_size(width.min(max_width))
             .size_range(80.0..=f32::INFINITY);
-        if let Some(Fit::Apply(width)) = fit {
+        if let Some(width) = fit {
             builder = builder.exact_size(width);
         }
-        let mut measured = None;
         let response = builder.show(ui, |ui| {
             let corner = ui.max_rect();
-            let inner = corner.width();
-            if matches!(fit, Some(Fit::Measure)) {
-                measured = Some((measure_width(ui, max_width, add_contents), inner));
-            } else {
-                fit_width(ui, add_contents);
-            }
+            fit_width(ui, add_contents);
             // A child ui, so the button never widens the panel.
             let mut child = ui.new_child(
                 egui::UiBuilder::new()
@@ -320,13 +319,6 @@ pub fn side_panel(
             }
         });
         *width = response.response.rect.width();
-        if let Some((content, inner)) = measured {
-            // Outer width = contents + frame margins + room for the collapse button.
-            let margins = response.response.rect.width() - inner;
-            let fitted = (content + margins + 24.0).max(80.0);
-            ui.data_mut(|d| d.insert_temp(fit_id, Fit::Apply(fitted)));
-            ui.ctx().request_repaint();
-        }
     } else {
         panel(format!("{id}_collapsed"))
             .resizable(false)
@@ -334,7 +326,9 @@ pub fn side_panel(
             .show(ui, |ui| {
                 if ui.button(show).on_hover_text("Развернуть панель").clicked() {
                     *open = true;
-                    ui.data_mut(|d| d.insert_temp(fit_id, Fit::Measure));
+                    // Back to the width it had before folding.
+                    let restored = *width;
+                    ui.data_mut(|d| d.insert_temp(fit_id, restored));
                     ui.ctx().request_repaint();
                 }
             });

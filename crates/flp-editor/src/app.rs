@@ -2019,13 +2019,20 @@ impl eframe::App for EditorApp {
         });
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
         let mut sizes = self.panels;
-        sizes.log_height = egui::Panel::bottom("log")
-            .resizable(true)
-            .default_size(sizes.log_height)
-            .show(ui, |ui| panels::bottom(self, ui))
-            .response
-            .rect
-            .height();
+        if sizes.log_open {
+            sizes.log_height = egui::Panel::bottom("log")
+                .resizable(true)
+                .default_size(sizes.log_height)
+                .show(ui, |ui| panels::bottom(self, ui, &mut sizes.log_open))
+                .response
+                .rect
+                .height();
+        } else {
+            // One row; a separate id keeps the open height in the panel memory.
+            egui::Panel::bottom("log_collapsed")
+                .resizable(false)
+                .show(ui, |ui| panels::bottom(self, ui, &mut sizes.log_open));
+        }
         panels::side_panel(
             ui,
             "tree",

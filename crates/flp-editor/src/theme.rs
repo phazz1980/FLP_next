@@ -284,6 +284,7 @@ pub struct PanelSizes {
     pub left_width: f32,
     pub right_width: f32,
     pub log_height: f32,
+    pub log_open: bool,
     pub left_open: bool,
     pub right_open: bool,
 }
@@ -294,6 +295,7 @@ impl Default for PanelSizes {
             left_width: 220.0,
             right_width: 280.0,
             log_height: 150.0,
+            log_open: true,
             left_open: true,
             right_open: true,
         }
