@@ -27,9 +27,19 @@ String var_Set_d8006b_saved;  // последнее сохранённое «С�
 // wifi: wifi
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgOnBoardWifiInterface flpWifi;
+// Network services (MQTT, web, OTA) are polled at most once per period.
+uint32_t wifi_net_t = 0;
+bool wifi_net_due = true;
 // Applied radio state: 0 off, 1 client, 2 access point, 3 both; 255 not yet.
 uint8_t wifi_state = 255;
-String wifi_cfg;
+// Settings signature (FNV-1a): compared every cycle without building a String.
+uint32_t wifi_cfg = 0;
+bool wifi_cfg_set = false;
+static void wifi_mix(uint32_t &h, const char *s) {
+  for (; *s; s++) h = (h ^ (uint8_t)*s) * 16777619u;
+  h = (h ^ '|') * 16777619u;
+}
+static void wifi_mix(uint32_t &h, const String &s) { wifi_mix(h, s.c_str()); }
 // Address shown on the address output; the text is rebuilt only when it changes.
 uint32_t wifi_ip_raw = 0;
 // Web server (port 80): the web_ui block adds its pages to it.
@@ -195,9 +205,18 @@ void loop() {
   // wifi: wifi
   {
     // Settings written while running are applied when they change.
-    String cfg = String(var_Set_d8006b.c_str()) + "|" + "" + "|" + ((true) ? "1" : "0") + "|" + "192.168.1.177" + "|" + "192.168.1.1" + "|" + "255.255.255.0" + "|" + "FLP_ESP32" + "|" + "";
-    if (cfg != wifi_cfg) {
-      bool first = wifi_cfg.length() == 0;
+    uint32_t cfg = 2166136261u;
+    wifi_mix(cfg, var_Set_d8006b.c_str());
+    wifi_mix(cfg, "");
+    wifi_mix(cfg, (true) ? "1" : "0");
+    wifi_mix(cfg, "192.168.1.177");
+    wifi_mix(cfg, "192.168.1.1");
+    wifi_mix(cfg, "255.255.255.0");
+    wifi_mix(cfg, "FLP_ESP32");
+    wifi_mix(cfg, "");
+    if (!wifi_cfg_set || cfg != wifi_cfg) {
+      bool first = !wifi_cfg_set;
+      wifi_cfg_set = true;
       wifi_cfg = cfg;
       flpWifi.setClientSsid(var_Set_d8006b.c_str());
       flpWifi.setClientPassword("");
@@ -239,7 +258,16 @@ void loop() {
       }
     }
   }
-  flpWifi.pool();
+  {
+    uint32_t now = millis();
+    wifi_net_due = (uint32_t)(now - wifi_net_t) >= 5;
+    if (wifi_net_due) {
+      wifi_net_t = now;
+    }
+  }
+  if (wifi_net_due) {
+    flpWifi.pool();
+  }
   wifi_ready = flpWifi.clientIsReady();
   {
     uint32_t ip = 0;
@@ -253,13 +281,13 @@ void loop() {
       wifi_address = ip ? IPAddress(ip).toString() : String();
     }
   }
-  if (true) {
+  if (wifi_net_due && true) {
     wifi_web.pool();
   }
-  if (true && true) {
+  if (wifi_net_due && true && true) {
     wifi_up_poll();
   }
-  if (true) {
+  if (wifi_net_due && true) {
     if (!wifi_ota_on) {
       wifi_ota_on = true;
       if (""[0] != 0) {

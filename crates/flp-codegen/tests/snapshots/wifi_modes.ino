@@ -22,6 +22,9 @@ int32_t var_Rezhim_Wi_Fi_fb481a = 2;
 // wifi: wifi
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgOnBoardWifiInterface flpWifi;
+// Network services (MQTT, web, OTA) are polled at most once per period.
+uint32_t wifi_net_t = 0;
+bool wifi_net_due = true;
 // Applied radio state: 0 off, 1 client, 2 access point, 3 both; 255 not yet.
 uint8_t wifi_state = 255;
 // Address shown on the address output; the text is rebuilt only when it changes.
@@ -225,7 +228,16 @@ void loop() {
       }
     }
   }
-  flpWifi.pool();
+  {
+    uint32_t now = millis();
+    wifi_net_due = (uint32_t)(now - wifi_net_t) >= 5;
+    if (wifi_net_due) {
+      wifi_net_t = now;
+    }
+  }
+  if (wifi_net_due) {
+    flpWifi.pool();
+  }
   wifi_ready = flpWifi.clientIsReady();
   wifi_ap_ready = flpWifi.apIsReady();
   wifi_status = flpWifi.getStatus();
@@ -242,13 +254,13 @@ void loop() {
       wifi_address = ip ? IPAddress(ip).toString() : String();
     }
   }
-  if (true) {
+  if (wifi_net_due && true) {
     wifi_web.pool();
   }
-  if (true && true) {
+  if (wifi_net_due && true && true) {
     wifi_up_poll();
   }
-  if (true) {
+  if (wifi_net_due && true) {
     if (!wifi_ota_on) {
       wifi_ota_on = true;
       if (""[0] != 0) {

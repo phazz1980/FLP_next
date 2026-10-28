@@ -32,10 +32,22 @@ flpWifi.setApPassword({{ param.ap_password }});
 // @global
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgOnBoardWifiInterface flpWifi;
+{% if (value.net_period or 0) > 0 %}
+// Network services (MQTT, web, OTA) are polled at most once per period.
+uint32_t {{ id }}_net_t = 0;
+bool {{ id }}_net_due = true;
+{% endif %}
 // Applied radio state: 0 off, 1 client, 2 access point, 3 both; 255 not yet.
 uint8_t {{ id }}_state = 255;
 {% if dyn %}
-String {{ id }}_cfg;
+// Settings signature (FNV-1a): compared every cycle without building a String.
+uint32_t {{ id }}_cfg = 0;
+bool {{ id }}_cfg_set = false;
+static void {{ id }}_mix(uint32_t &h, const char *s) {
+  for (; *s; s++) h = (h ^ (uint8_t)*s) * 16777619u;
+  h = (h ^ '|') * 16777619u;
+}
+static void {{ id }}_mix(uint32_t &h, const String &s) { {{ id }}_mix(h, s.c_str()); }
 {% endif %}
 {% if value.out_address %}
 // Address shown on the address output; the text is rebuilt only when it changes.
@@ -199,9 +211,18 @@ void {{ id }}_up_poll() {
 {% if dyn %}
 {
   // Settings written while running are applied when they change.
-  String cfg = String({{ param.ssid }}) + "|" + {{ param.password }} + "|" + (({{ flag.dhcp }}) ? "1" : "0") + "|" + {{ param.ip }} + "|" + {{ param.gateway }} + "|" + {{ param.subnet }} + "|" + {{ param.ap_ssid }} + "|" + {{ param.ap_password }};
-  if (cfg != {{ id }}_cfg) {
-    bool first = {{ id }}_cfg.length() == 0;
+  uint32_t cfg = 2166136261u;
+  {{ id }}_mix(cfg, {{ param.ssid }});
+  {{ id }}_mix(cfg, {{ param.password }});
+  {{ id }}_mix(cfg, ({{ flag.dhcp }}) ? "1" : "0");
+  {{ id }}_mix(cfg, {{ param.ip }});
+  {{ id }}_mix(cfg, {{ param.gateway }});
+  {{ id }}_mix(cfg, {{ param.subnet }});
+  {{ id }}_mix(cfg, {{ param.ap_ssid }});
+  {{ id }}_mix(cfg, {{ param.ap_password }});
+  if (!{{ id }}_cfg_set || cfg != {{ id }}_cfg) {
+    bool first = !{{ id }}_cfg_set;
+    {{ id }}_cfg_set = true;
     {{ id }}_cfg = cfg;
 {{ apply_cfg()|indent(4, true) }}
     if (!first) {
@@ -241,7 +262,20 @@ void {{ id }}_up_poll() {
     }
   }
 }
+{% if (value.net_period or 0) > 0 %}
+{
+  uint32_t now = millis();
+  {{ id }}_net_due = (uint32_t)(now - {{ id }}_net_t) >= {{ param.net_period }};
+  if ({{ id }}_net_due) {
+    {{ id }}_net_t = now;
+  }
+}
+if ({{ id }}_net_due) {
+  flpWifi.pool();
+}
+{% else %}
 flpWifi.pool();
+{% endif %}
 {% if value.out_ready is defined and value.out_ready and client and output.ready is defined %}
 {{ output.ready }} = flpWifi.clientIsReady();
 {% endif %}
@@ -268,18 +302,19 @@ flpWifi.pool();
   }
 }
 {% endif %}
+{% set due = (id ~ "_net_due && ") if (value.net_period or 0) > 0 else "" %}
 {% if w_on %}
-if ({{ flag.web }}) {
+if ({{ due }}{{ flag.web }}) {
   {{ id }}_web.pool();
 }
 {% endif %}
 {% if u_on %}
-if ({{ flag.web }} && {{ flag.web_update }}) {
+if ({{ due }}{{ flag.web }} && {{ flag.web_update }}) {
   {{ id }}_up_poll();
 }
 {% endif %}
 {% if o_on %}
-if ({{ flag.ota }}) {
+if ({{ due }}{{ flag.ota }}) {
   if (!{{ id }}_ota_on) {
     {{ id }}_ota_on = true;
     if ({{ param.ota_password }}[0] != 0) {

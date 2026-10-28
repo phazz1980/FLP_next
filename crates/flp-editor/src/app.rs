@@ -775,6 +775,33 @@ impl EditorApp {
         }
     }
 
+    /// Projects from `examples/` next to the library: `(name, path)`, a `.flpn` wins over a folder of the same name.
+    fn example_projects(&self) -> Vec<(String, PathBuf)> {
+        let Some(dir) = self
+            .lib_dir
+            .as_deref()
+            .and_then(Path::parent)
+            .map(|p| p.join("examples"))
+        else {
+            return Vec::new();
+        };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut found: std::collections::BTreeMap<String, PathBuf> = Default::default();
+        for path in entries.flatten().map(|e| e.path()) {
+            let Some(name) = path.file_stem().and_then(|s| s.to_str()).map(String::from) else {
+                continue;
+            };
+            if flp_core::project::is_project_file(&path) {
+                found.insert(name, path);
+            } else if path.join("project.toml").is_file() {
+                found.entry(name).or_insert(path);
+            }
+        }
+        found.into_iter().collect()
+    }
+
     fn new_project(&mut self) {
         let mut dialog = rfd::FileDialog::new()
             .set_title("Новый проект")
@@ -1495,6 +1522,20 @@ impl EditorApp {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             });
+            ui.menu_button("Примеры", |ui| {
+                let examples = self.example_projects();
+                if examples.is_empty() {
+                    ui.label("Папка examples не найдена");
+                }
+                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                    for (name, path) in examples {
+                        if ui.button(name).clicked() {
+                            self.request_open(path);
+                            ui.close();
+                        }
+                    }
+                });
+            });
             ui.menu_button("Вид", |ui| panels::theme_menu(self, ui));
             ui.menu_button("Правка", |ui| {
                 let (can_undo, can_redo) = self
@@ -1570,6 +1611,30 @@ impl EditorApp {
                     .clicked()
                 {
                     self.open_web_designer();
+                }
+                if let Some(doc) = self.doc.as_mut() {
+                    let mut diag = doc.project.config.diagnostics.clone();
+                    ui.checkbox(&mut diag.enabled, "Время цикла в порт")
+                        .on_hover_text(
+                            "Прошивка раз в несколько секунд печатает в последовательный порт \
+                             время цикла (всего и по листам). Режим отладки не нужен",
+                        );
+                    if diag.enabled {
+                        ui.horizontal(|ui| {
+                            ui.label("Период отчёта:");
+                            ui.add(
+                                egui::DragValue::new(&mut diag.interval_ms)
+                                    .range(500..=600_000)
+                                    .speed(100)
+                                    .suffix(" мс"),
+                            );
+                        });
+                    }
+                    if diag != doc.project.config.diagnostics {
+                        doc.project.config.diagnostics = diag;
+                        doc.dirty = true;
+                        doc.revision += 1;
+                    }
                 }
                 ui.separator();
                 if ui

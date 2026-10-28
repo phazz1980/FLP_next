@@ -17,6 +17,9 @@ bool relay_reg_out_b = false;
 // eth: ethernet
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgWiznetInterface flpEth(5);
+// Network services (MQTT, web, OTA) are polled at most once per period.
+uint32_t eth_net_t = 0;
+bool eth_net_due = true;
 // Web server (port 80): the web_ui block adds its pages to it.
 FLProgWebServer eth_web(&flpEth, 80);
 // Update over the network (ArduinoOTA through the shared interface).
@@ -191,15 +194,24 @@ void setup() {
 
 void loop() {
   // eth: ethernet
-  flpEth.pool();
+  {
+    uint32_t now = millis();
+    eth_net_due = (uint32_t)(now - eth_net_t) >= 5;
+    if (eth_net_due) {
+      eth_net_t = now;
+    }
+  }
+  if (eth_net_due) {
+    flpEth.pool();
+  }
   eth_ready = flpEth.ethernetIsReady();
-  if (true) {
+  if (eth_net_due && true) {
     eth_web.pool();
   }
-  if (true && true) {
+  if (eth_net_due && true && true) {
     eth_up_poll();
   }
-  if (true) {
+  if (eth_net_due && true) {
     if (!eth_ota_on) {
       eth_ota_on = true;
       if (""[0] != 0) {

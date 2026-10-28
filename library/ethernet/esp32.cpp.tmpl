@@ -20,10 +20,22 @@ if ({{ flag.dhcp }}) {
 {% endmacro %}
 // @global
 {% if dyn %}
-String {{ id }}_cfg;
+// Settings signature (FNV-1a): compared every cycle without building a String.
+uint32_t {{ id }}_cfg = 0;
+bool {{ id }}_cfg_set = false;
+static void {{ id }}_mix(uint32_t &h, const char *s) {
+  for (; *s; s++) h = (h ^ (uint8_t)*s) * 16777619u;
+  h = (h ^ '|') * 16777619u;
+}
+static void {{ id }}_mix(uint32_t &h, const String &s) { {{ id }}_mix(h, s.c_str()); }
 {% endif %}
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgWiznetInterface flpEth({{ param.cs }});
+{% if (value.net_period or 0) > 0 %}
+// Network services (MQTT, web, OTA) are polled at most once per period.
+uint32_t {{ id }}_net_t = 0;
+bool {{ id }}_net_due = true;
+{% endif %}
 {% if w_on %}
 // Web server (port 80): the web_ui block adds its pages to it.
 FLProgWebServer {{ id }}_web(&flpEth, 80);
@@ -180,27 +192,46 @@ flpEth.mac(0x78, 0xAC, 0xC0, 0x2C, 0x3E, {{ param.mac }});
 {% if dyn %}
 {
   // Settings written while running are applied when they change.
-  String cfg = String(({{ flag.dhcp }}) ? "1" : "0") + "|" + {{ param.ip }} + "|" + {{ param.gateway }} + "|" + {{ param.subnet }};
-  if (cfg != {{ id }}_cfg) {
+  uint32_t cfg = 2166136261u;
+  {{ id }}_mix(cfg, ({{ flag.dhcp }}) ? "1" : "0");
+  {{ id }}_mix(cfg, {{ param.ip }});
+  {{ id }}_mix(cfg, {{ param.gateway }});
+  {{ id }}_mix(cfg, {{ param.subnet }});
+  if (!{{ id }}_cfg_set || cfg != {{ id }}_cfg) {
+    {{ id }}_cfg_set = true;
     {{ id }}_cfg = cfg;
 {{ apply_net()|indent(4, true) }}
   }
 }
 {% endif %}
+{% if (value.net_period or 0) > 0 %}
+{
+  uint32_t now = millis();
+  {{ id }}_net_due = (uint32_t)(now - {{ id }}_net_t) >= {{ param.net_period }};
+  if ({{ id }}_net_due) {
+    {{ id }}_net_t = now;
+  }
+}
+if ({{ id }}_net_due) {
+  flpEth.pool();
+}
+{% else %}
 flpEth.pool();
+{% endif %}
 {{ output.ready }} = flpEth.ethernetIsReady();
+{% set due = (id ~ "_net_due && ") if (value.net_period or 0) > 0 else "" %}
 {% if w_on %}
-if ({{ flag.web }}) {
+if ({{ due }}{{ flag.web }}) {
   {{ id }}_web.pool();
 }
 {% endif %}
 {% if u_on %}
-if ({{ flag.web }} && {{ flag.web_update }}) {
+if ({{ due }}{{ flag.web }} && {{ flag.web_update }}) {
   {{ id }}_up_poll();
 }
 {% endif %}
 {% if o_on %}
-if ({{ flag.ota }}) {
+if ({{ due }}{{ flag.ota }}) {
   if (!{{ id }}_ota_on) {
     {{ id }}_ota_on = true;
     if ({{ param.ota_password }}[0] != 0) {
