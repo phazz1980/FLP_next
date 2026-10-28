@@ -637,9 +637,12 @@ fn assemble(
         .map(|(inst, _)| *inst);
     let sheets = crate::stats::measured_sheets(program, looped);
     if stats {
-        out.push_str(&crate::stats::runtime(&sheets));
+        out.push_str(&crate::stats::runtime(&sheets, tasks.any()));
         if !debug {
-            out.push_str(&crate::stats::text_report(diagnostics.interval_ms));
+            out.push_str(&crate::stats::text_report(
+                diagnostics.interval_ms,
+                tasks.any(),
+            ));
         }
     }
     let table = debug.then(|| crate::debug::debug_table(program));
@@ -648,7 +651,7 @@ fn assemble(
         |inst| matches!(uart_of(program, inst), Some((u, UartAccess::Read)) if u.number == flp_core::uart::USB),
     );
     if let Some(table) = &table {
-        out.push_str(&crate::debug::runtime(table, text_in));
+        out.push_str(&crate::debug::runtime(table, text_in, tasks.any()));
     }
     // Forcing: after each block, its forced outputs (and a written variable) win.
     let forces = |inst: &Instance| -> Vec<String> {
@@ -717,6 +720,13 @@ fn assemble(
     if tasks.any() {
         out.push_str("\n// Фоновая задача: ядро 0, блоки плат с признаком «фоновая задача»\nvoid flp_bg_task(void *) {\n  for (;;) {\n");
         let mut body = String::new();
+        if stats {
+            body.push_str(
+                "flp_st_bg_begin();
+
+",
+            );
+        }
         let take = lock(tasks.take(program, true));
         let started = !take.is_empty();
         push_indented(&mut body, take.into_iter());
@@ -738,6 +748,13 @@ fn assemble(
         if bg_save && !save.is_empty() {
             body.push('\n');
             push_indented(&mut body, save.iter().cloned());
+        }
+        if stats {
+            body.push_str(
+                "
+flp_st_bg_end();
+",
+            );
         }
         if bg_report {
             if let Some(call) = report {

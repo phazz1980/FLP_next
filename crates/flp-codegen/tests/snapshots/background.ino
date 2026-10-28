@@ -20,6 +20,7 @@ bool reached_out = false;
 SemaphoreHandle_t flp_bg_lock;
 bool press_out_pub = false;
 bool press_out_in = false;
+bool press_out_pend = false;
 
 // Переменные
 float var_Nazhatiy_vsego_cfcf80 = 0.0f;
@@ -55,6 +56,7 @@ void flp_bg_task(void *) {
 
     xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
     press_out_pub = press_out;
+    press_out_pend = press_out_pend || press_out;
     xSemaphoreGive(flp_bg_lock);
 
     // Сохранение переменных во флеш: только изменившиеся значения
@@ -98,7 +100,8 @@ void setup() {
 
 void loop() {
   xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
-  press_out_in = press_out_pub;
+  press_out_in = press_out_pub || press_out_pend;
+  press_out_pend = false;
   xSemaphoreGive(flp_bg_lock);
 
   // shown: var_get

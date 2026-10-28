@@ -7,12 +7,24 @@
 #include <service/flprogNetworkOta.h>
 #include <Update.h>
 #include <flprogModbusTCP.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
 
 // Выходы блоков
 bool eth_ready = false;
 int32_t slave_error = 0;
 bool button_out = false;
 bool relay_reg_out_b = false;
+
+// Обмен сигналами между основной и фоновой задачами
+SemaphoreHandle_t flp_bg_lock;
+bool button_out_pub = false;
+bool button_out_in = false;
+bool button_out_pend = false;
+bool relay_reg_out_b_pub = false;
+bool relay_reg_out_b_in = false;
+bool relay_reg_out_b_pend = false;
 
 // eth: ethernet
 // Shared network interface: Modbus TCP and other network blocks use it.
@@ -160,7 +172,71 @@ void eth_up_poll() {
   }
 }
 
+// Фоновая задача: ядро 0, блоки плат с признаком «фоновая задача»
+void flp_bg_task(void *) {
+  for (;;) {
+    xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
+    button_out_in = button_out_pub || button_out_pend;
+    button_out_pend = false;
+    xSemaphoreGive(flp_bg_lock);
+
+    // eth: ethernet
+    {
+      uint32_t now = millis();
+      eth_net_due = (uint32_t)(now - eth_net_t) >= 5;
+      if (eth_net_due) {
+        eth_net_t = now;
+      }
+    }
+    if (eth_net_due) {
+      flpEth.pool();
+    }
+    eth_ready = flpEth.ethernetIsReady();
+    if (eth_net_due && true) {
+      eth_web.pool();
+    }
+    if (eth_net_due && true && true) {
+      eth_up_poll();
+    }
+    if (eth_net_due && true) {
+      if (!eth_ota_on) {
+        eth_ota_on = true;
+        if (""[0] != 0) {
+          eth_ota.setPasswordValue("");
+        }
+        eth_ota.begin(flpEth);
+      }
+      eth_ota.pool();
+    }
+
+    // slave: modbus_tcp_slave
+    flpModbus.pool();
+    slave_error = flpModbus.getLastError();
+
+    // button_reg: modbus_write
+    flpModbus.saveBool(button_out_in, FLPROG_DISCRETE_INPUT, 0);
+
+    // online_reg: modbus_write
+    flpModbus.saveBool(eth_ready, FLPROG_DISCRETE_INPUT, 1);
+
+    // error_reg: modbus_write
+    flpModbus.saveInteger((uint16_t)(slave_error), FLPROG_INPUT_REGISTR, 0);
+
+    // relay_reg: modbus_read
+    relay_reg_out_b = flpModbus.readBool(FLPROG_COIL, 0);
+
+    xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
+    relay_reg_out_b_pub = relay_reg_out_b;
+    relay_reg_out_b_pend = relay_reg_out_b_pend || relay_reg_out_b;
+    xSemaphoreGive(flp_bg_lock);
+
+    vTaskDelay(1);
+  }
+}
+
 void setup() {
+  flp_bg_lock = xSemaphoreCreateMutex();
+
   // eth: ethernet
   flpEth.mac(0x78, 0xAC, 0xC0, 0x2C, 0x3E, 40);
   if (false) {
@@ -190,57 +266,25 @@ void setup() {
 
   // relay: digital_out
   pinMode(26, OUTPUT);
+
+  // Фоновая задача стартует после настройки всех блоков
+  xTaskCreatePinnedToCore(flp_bg_task, "flp_bg", 10240, nullptr, 1, nullptr, 0);
 }
 
 void loop() {
-  // eth: ethernet
-  {
-    uint32_t now = millis();
-    eth_net_due = (uint32_t)(now - eth_net_t) >= 5;
-    if (eth_net_due) {
-      eth_net_t = now;
-    }
-  }
-  if (eth_net_due) {
-    flpEth.pool();
-  }
-  eth_ready = flpEth.ethernetIsReady();
-  if (eth_net_due && true) {
-    eth_web.pool();
-  }
-  if (eth_net_due && true && true) {
-    eth_up_poll();
-  }
-  if (eth_net_due && true) {
-    if (!eth_ota_on) {
-      eth_ota_on = true;
-      if (""[0] != 0) {
-        eth_ota.setPasswordValue("");
-      }
-      eth_ota.begin(flpEth);
-    }
-    eth_ota.pool();
-  }
-
-  // slave: modbus_tcp_slave
-  flpModbus.pool();
-  slave_error = flpModbus.getLastError();
+  xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
+  relay_reg_out_b_in = relay_reg_out_b_pub || relay_reg_out_b_pend;
+  relay_reg_out_b_pend = false;
+  xSemaphoreGive(flp_bg_lock);
 
   // button: digital_in
   button_out = !digitalRead(13);
 
-  // button_reg: modbus_write
-  flpModbus.saveBool(button_out, FLPROG_DISCRETE_INPUT, 0);
-
-  // online_reg: modbus_write
-  flpModbus.saveBool(eth_ready, FLPROG_DISCRETE_INPUT, 1);
-
-  // error_reg: modbus_write
-  flpModbus.saveInteger((uint16_t)(slave_error), FLPROG_INPUT_REGISTR, 0);
-
-  // relay_reg: modbus_read
-  relay_reg_out_b = flpModbus.readBool(FLPROG_COIL, 0);
-
   // relay: digital_out
-  digitalWrite(26, (relay_reg_out_b) ? HIGH : LOW);
+  digitalWrite(26, (relay_reg_out_b_in) ? HIGH : LOW);
+
+  xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
+  button_out_pub = button_out;
+  button_out_pend = button_out_pend || button_out;
+  xSemaphoreGive(flp_bg_lock);
 }

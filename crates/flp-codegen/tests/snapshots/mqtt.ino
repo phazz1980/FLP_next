@@ -10,6 +10,9 @@
 #include <Update.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
 
 // Выходы блоков
 bool wifi_ready = false;
@@ -23,6 +26,17 @@ bool button_out = false;
 bool button_pub_sent = false;
 bool led_sub_out_b = false;
 bool led_sub_received = false;
+
+// Обмен сигналами между основной и фоновой задачами
+SemaphoreHandle_t flp_bg_lock;
+float sensor_temp_pub = 0.0f;
+float sensor_temp_in = 0.0f;
+bool button_out_pub = false;
+bool button_out_in = false;
+bool button_out_pend = false;
+bool led_sub_out_b_pub = false;
+bool led_sub_out_b_in = false;
+bool led_sub_out_b_pend = false;
 
 // wifi: wifi
 // Shared network interface: Modbus TCP and other network blocks use it.
@@ -234,7 +248,163 @@ void wifi_up_poll() {
   }
 }
 
+// Фоновая задача: ядро 0, блоки плат с признаком «фоновая задача»
+void flp_bg_task(void *) {
+  for (;;) {
+    xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
+    sensor_temp_in = sensor_temp_pub;
+    button_out_in = button_out_pub || button_out_pend;
+    button_out_pend = false;
+    xSemaphoreGive(flp_bg_lock);
+
+    // wifi: wifi
+    {
+      // Client and access point follow the inputs; switched only when they change.
+      int32_t mode = 0;
+      uint8_t state = (uint8_t)(mode + 1);
+      if (state != wifi_state) {
+        wifi_state = state;
+        if (state & 1) {
+          flpWifi.clientOn();
+        } else {
+          flpWifi.clientOff();
+        }
+        if (state & 2) {
+          flpWifi.apOn();
+        } else {
+          flpWifi.apOff();
+        }
+      }
+    }
+    {
+      uint32_t now = millis();
+      wifi_net_due = (uint32_t)(now - wifi_net_t) >= 5;
+      if (wifi_net_due) {
+        wifi_net_t = now;
+      }
+    }
+    if (wifi_net_due) {
+      flpWifi.pool();
+    }
+    wifi_ready = flpWifi.clientIsReady();
+    {
+      uint32_t ip = 0;
+      if (flpWifi.clientIsReady()) {
+        ip = (uint32_t)flpWifi.localIP();
+      } else if (flpWifi.apIsReady()) {
+        ip = (uint32_t)flpWifi.accessPointIP();
+      }
+      if (ip != wifi_ip_raw) {
+        wifi_ip_raw = ip;
+        wifi_address = ip ? IPAddress(ip).toString() : String();
+      }
+    }
+    if (wifi_net_due && true) {
+      wifi_web.pool();
+    }
+    if (wifi_net_due && true && true) {
+      wifi_up_poll();
+    }
+    if (wifi_net_due && true) {
+      if (!wifi_ota_on) {
+        wifi_ota_on = true;
+        if (""[0] != 0) {
+          wifi_ota.setPasswordValue("");
+        }
+        wifi_ota.begin(flpWifi);
+      }
+      wifi_ota.pool();
+    }
+
+    // broker: mqtt
+    if (!broker_bound) {
+      // Attach once; the client reconnects by itself after that.
+      broker_bound = flpMqtt.begin(flpWifi);
+      if (broker_bound) {
+        flpMqtt.setBroker("broker.hivemq.com");
+        flpMqtt.setPort(1883);
+        char cid[24];
+        snprintf(cid, sizeof(cid), "flp-%08lx", (unsigned long)ESP.getEfuseMac());
+        flpMqtt.setClientId(cid);
+        flpMqtt.setCredentials("device", "");
+        flpMqtt.setKeepAlive(60);
+        flpMqtt.setMessageCallback(flp_mqtt_receive);
+        flpMqtt.setAutoReconnect(true);
+        flpMqtt.connect();
+      }
+    }
+    broker_connected = flpMqtt.connected();
+    broker_error = flpMqtt.error();
+
+    // temp_pub: mqtt_publish
+    {
+      bool changed = !temp_pub_started || fabsf(sensor_temp_in - temp_pub_last) >= 0.2f;
+      if (true && changed) {
+        temp_pub_pending = true;
+      }
+      temp_pub_sent = false;
+      if (temp_pub_pending && flpMqtt.connected()) {
+        String text = String(sensor_temp_in, 1);
+        if (flpMqtt.publish("flp/temp", text.c_str(), false)) {
+          temp_pub_sent = true;
+          temp_pub_pending = false;
+          temp_pub_last = sensor_temp_in;
+          temp_pub_started = true;
+        }
+      }
+    }
+
+    // button_pub: mqtt_publish
+    {
+      bool changed = !button_pub_started || button_out_in != button_pub_last;
+      if (true && changed) {
+        button_pub_pending = true;
+      }
+      button_pub_sent = false;
+      if (button_pub_pending && flpMqtt.connected()) {
+        String text = button_out_in ? "1" : "0";
+        if (flpMqtt.publish("flp/button", text.c_str(), true)) {
+          button_pub_sent = true;
+          button_pub_pending = false;
+          button_pub_last = button_out_in;
+          button_pub_started = true;
+        }
+      }
+    }
+
+    // led_sub: mqtt_subscribe
+    {
+      // The client keeps the subscription across reconnects; ask again only until it is accepted.
+      if (!led_sub_subscribed && flpMqtt.connected()) {
+        led_sub_subscribed = flpMqtt.subscribe("flp/led");
+      }
+      led_sub_received = false;
+      if (led_sub_seq != flpMqttSeq) {
+        led_sub_seq = flpMqttSeq;
+        if (flp_mqtt_match("flp/led", flpMqttTopic.c_str())) {
+          led_sub_received = true;
+          {
+            String p = flpMqttPayload;
+            p.trim();
+            p.toLowerCase();
+            led_sub_out_b = p == "1" || p == "true" || p == "on";
+          }
+        }
+      }
+    }
+
+    xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
+    led_sub_out_b_pub = led_sub_out_b;
+    led_sub_out_b_pend = led_sub_out_b_pend || led_sub_out_b;
+    xSemaphoreGive(flp_bg_lock);
+
+    vTaskDelay(1);
+  }
+}
+
 void setup() {
+  flp_bg_lock = xSemaphoreCreateMutex();
+
   // Память под строки заранее: меньше дробления кучи.
   wifi_address.reserve(32);
 
@@ -268,87 +438,16 @@ void setup() {
 
   // led: digital_out
   pinMode(2, OUTPUT);
+
+  // Фоновая задача стартует после настройки всех блоков
+  xTaskCreatePinnedToCore(flp_bg_task, "flp_bg", 10240, nullptr, 1, nullptr, 0);
 }
 
 void loop() {
-  // wifi: wifi
-  {
-    // Client and access point follow the inputs; switched only when they change.
-    int32_t mode = 0;
-    uint8_t state = (uint8_t)(mode + 1);
-    if (state != wifi_state) {
-      wifi_state = state;
-      if (state & 1) {
-        flpWifi.clientOn();
-      } else {
-        flpWifi.clientOff();
-      }
-      if (state & 2) {
-        flpWifi.apOn();
-      } else {
-        flpWifi.apOff();
-      }
-    }
-  }
-  {
-    uint32_t now = millis();
-    wifi_net_due = (uint32_t)(now - wifi_net_t) >= 5;
-    if (wifi_net_due) {
-      wifi_net_t = now;
-    }
-  }
-  if (wifi_net_due) {
-    flpWifi.pool();
-  }
-  wifi_ready = flpWifi.clientIsReady();
-  {
-    uint32_t ip = 0;
-    if (flpWifi.clientIsReady()) {
-      ip = (uint32_t)flpWifi.localIP();
-    } else if (flpWifi.apIsReady()) {
-      ip = (uint32_t)flpWifi.accessPointIP();
-    }
-    if (ip != wifi_ip_raw) {
-      wifi_ip_raw = ip;
-      wifi_address = ip ? IPAddress(ip).toString() : String();
-    }
-  }
-  if (wifi_net_due && true) {
-    wifi_web.pool();
-  }
-  if (wifi_net_due && true && true) {
-    wifi_up_poll();
-  }
-  if (wifi_net_due && true) {
-    if (!wifi_ota_on) {
-      wifi_ota_on = true;
-      if (""[0] != 0) {
-        wifi_ota.setPasswordValue("");
-      }
-      wifi_ota.begin(flpWifi);
-    }
-    wifi_ota.pool();
-  }
-
-  // broker: mqtt
-  if (!broker_bound) {
-    // Attach once; the client reconnects by itself after that.
-    broker_bound = flpMqtt.begin(flpWifi);
-    if (broker_bound) {
-      flpMqtt.setBroker("broker.hivemq.com");
-      flpMqtt.setPort(1883);
-      char cid[24];
-      snprintf(cid, sizeof(cid), "flp-%08lx", (unsigned long)ESP.getEfuseMac());
-      flpMqtt.setClientId(cid);
-      flpMqtt.setCredentials("device", "");
-      flpMqtt.setKeepAlive(60);
-      flpMqtt.setMessageCallback(flp_mqtt_receive);
-      flpMqtt.setAutoReconnect(true);
-      flpMqtt.connect();
-    }
-  }
-  broker_connected = flpMqtt.connected();
-  broker_error = flpMqtt.error();
+  xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
+  led_sub_out_b_in = led_sub_out_b_pub || led_sub_out_b_pend;
+  led_sub_out_b_pend = false;
+  xSemaphoreGive(flp_bg_lock);
 
   // sensor: ds18b20
   if (millis() - sensor_requested >= 1000UL) {
@@ -361,66 +460,15 @@ void loop() {
     sensor_requested = millis();
   }
 
-  // temp_pub: mqtt_publish
-  {
-    bool changed = !temp_pub_started || fabsf(sensor_temp - temp_pub_last) >= 0.2f;
-    if (true && changed) {
-      temp_pub_pending = true;
-    }
-    temp_pub_sent = false;
-    if (temp_pub_pending && flpMqtt.connected()) {
-      String text = String(sensor_temp, 1);
-      if (flpMqtt.publish("flp/temp", text.c_str(), false)) {
-        temp_pub_sent = true;
-        temp_pub_pending = false;
-        temp_pub_last = sensor_temp;
-        temp_pub_started = true;
-      }
-    }
-  }
-
   // button: digital_in
   button_out = !digitalRead(13);
 
-  // button_pub: mqtt_publish
-  {
-    bool changed = !button_pub_started || button_out != button_pub_last;
-    if (true && changed) {
-      button_pub_pending = true;
-    }
-    button_pub_sent = false;
-    if (button_pub_pending && flpMqtt.connected()) {
-      String text = button_out ? "1" : "0";
-      if (flpMqtt.publish("flp/button", text.c_str(), true)) {
-        button_pub_sent = true;
-        button_pub_pending = false;
-        button_pub_last = button_out;
-        button_pub_started = true;
-      }
-    }
-  }
-
-  // led_sub: mqtt_subscribe
-  {
-    // The client keeps the subscription across reconnects; ask again only until it is accepted.
-    if (!led_sub_subscribed && flpMqtt.connected()) {
-      led_sub_subscribed = flpMqtt.subscribe("flp/led");
-    }
-    led_sub_received = false;
-    if (led_sub_seq != flpMqttSeq) {
-      led_sub_seq = flpMqttSeq;
-      if (flp_mqtt_match("flp/led", flpMqttTopic.c_str())) {
-        led_sub_received = true;
-        {
-          String p = flpMqttPayload;
-          p.trim();
-          p.toLowerCase();
-          led_sub_out_b = p == "1" || p == "true" || p == "on";
-        }
-      }
-    }
-  }
-
   // led: digital_out
-  digitalWrite(2, (led_sub_out_b) ? HIGH : LOW);
+  digitalWrite(2, (led_sub_out_b_in) ? HIGH : LOW);
+
+  xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
+  sensor_temp_pub = sensor_temp;
+  button_out_pub = button_out;
+  button_out_pend = button_out_pend || button_out;
+  xSemaphoreGive(flp_bg_lock);
 }

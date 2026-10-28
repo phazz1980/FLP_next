@@ -7,11 +7,17 @@
 #include <service/flprogNetworkOta.h>
 #include <Update.h>
 #include <Preferences.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
 
 // Выходы блоков
 bool wifi_ready = false;
 String wifi_address = String();
 bool ready_out = false;
+
+// Обмен сигналами между основной и фоновой задачами
+SemaphoreHandle_t flp_bg_lock;
 
 // Переменные
 String var_Set_d8006b = String("MyNetwork");
@@ -181,7 +187,114 @@ void wifi_up_poll() {
   }
 }
 
+// Фоновая задача: ядро 0, блоки плат с признаком «фоновая задача»
+void flp_bg_task(void *) {
+  for (;;) {
+    // wifi: wifi
+    {
+      // Settings written while running are applied when they change.
+      uint32_t cfg = 2166136261u;
+      wifi_mix(cfg, var_Set_d8006b.c_str());
+      wifi_mix(cfg, "");
+      wifi_mix(cfg, (true) ? "1" : "0");
+      wifi_mix(cfg, "192.168.1.177");
+      wifi_mix(cfg, "192.168.1.1");
+      wifi_mix(cfg, "255.255.255.0");
+      wifi_mix(cfg, "FLP_ESP32");
+      wifi_mix(cfg, "");
+      if (!wifi_cfg_set || cfg != wifi_cfg) {
+        bool first = !wifi_cfg_set;
+        wifi_cfg_set = true;
+        wifi_cfg = cfg;
+        flpWifi.setClientSsid(var_Set_d8006b.c_str());
+        flpWifi.setClientPassword("");
+        if (true) {
+          flpWifi.setDhcp();
+        } else {
+          IPAddress addr;
+          addr.fromString("192.168.1.177");
+          flpWifi.localIP(addr);
+          addr.fromString("192.168.1.1");
+          flpWifi.gateway(addr);
+          flpWifi.dns(addr);
+          addr.fromString("255.255.255.0");
+          flpWifi.subnet(addr);
+          flpWifi.resetDhcp();
+        }
+        if (!first) {
+          flpWifi.clientOff();
+          flpWifi.apOff();
+          wifi_state = 255;
+        }
+      }
+    }
+    {
+      // Client and access point follow the inputs; switched only when they change.
+      int32_t mode = 0;
+      uint8_t state = var_Wi_Fi_vklyuchen_4f8fe0 ? (uint8_t)(mode + 1) : 0;
+      if (state != wifi_state) {
+        wifi_state = state;
+        if (state & 1) {
+          flpWifi.clientOn();
+        } else {
+          flpWifi.clientOff();
+        }
+        if (state & 2) {
+          flpWifi.apOn();
+        } else {
+          flpWifi.apOff();
+        }
+      }
+    }
+    {
+      uint32_t now = millis();
+      wifi_net_due = (uint32_t)(now - wifi_net_t) >= 5;
+      if (wifi_net_due) {
+        wifi_net_t = now;
+      }
+    }
+    if (wifi_net_due) {
+      flpWifi.pool();
+    }
+    wifi_ready = flpWifi.clientIsReady();
+    {
+      uint32_t ip = 0;
+      if (flpWifi.clientIsReady()) {
+        ip = (uint32_t)flpWifi.localIP();
+      } else if (flpWifi.apIsReady()) {
+        ip = (uint32_t)flpWifi.accessPointIP();
+      }
+      if (ip != wifi_ip_raw) {
+        wifi_ip_raw = ip;
+        wifi_address = ip ? IPAddress(ip).toString() : String();
+      }
+    }
+    if (wifi_net_due && true) {
+      wifi_web.pool();
+    }
+    if (wifi_net_due && true && true) {
+      wifi_up_poll();
+    }
+    if (wifi_net_due && true) {
+      if (!wifi_ota_on) {
+        wifi_ota_on = true;
+        if (""[0] != 0) {
+          wifi_ota.setPasswordValue("");
+        }
+        wifi_ota.begin(flpWifi);
+      }
+      wifi_ota.pool();
+    }
+    var_IP_adres_1ea70f = wifi_address;
+    var_Wi_Fi_gotov_6c4b6b = wifi_ready;
+
+    vTaskDelay(1);
+  }
+}
+
 void setup() {
+  flp_bg_lock = xSemaphoreCreateMutex();
+
   // Память под строки заранее: меньше дробления кучи.
   wifi_address.reserve(32);
   var_Set_d8006b.reserve(32);
@@ -199,107 +312,12 @@ void setup() {
 
   // led: digital_out
   pinMode(2, OUTPUT);
+
+  // Фоновая задача стартует после настройки всех блоков
+  xTaskCreatePinnedToCore(flp_bg_task, "flp_bg", 10240, nullptr, 1, nullptr, 0);
 }
 
 void loop() {
-  // wifi: wifi
-  {
-    // Settings written while running are applied when they change.
-    uint32_t cfg = 2166136261u;
-    wifi_mix(cfg, var_Set_d8006b.c_str());
-    wifi_mix(cfg, "");
-    wifi_mix(cfg, (true) ? "1" : "0");
-    wifi_mix(cfg, "192.168.1.177");
-    wifi_mix(cfg, "192.168.1.1");
-    wifi_mix(cfg, "255.255.255.0");
-    wifi_mix(cfg, "FLP_ESP32");
-    wifi_mix(cfg, "");
-    if (!wifi_cfg_set || cfg != wifi_cfg) {
-      bool first = !wifi_cfg_set;
-      wifi_cfg_set = true;
-      wifi_cfg = cfg;
-      flpWifi.setClientSsid(var_Set_d8006b.c_str());
-      flpWifi.setClientPassword("");
-      if (true) {
-        flpWifi.setDhcp();
-      } else {
-        IPAddress addr;
-        addr.fromString("192.168.1.177");
-        flpWifi.localIP(addr);
-        addr.fromString("192.168.1.1");
-        flpWifi.gateway(addr);
-        flpWifi.dns(addr);
-        addr.fromString("255.255.255.0");
-        flpWifi.subnet(addr);
-        flpWifi.resetDhcp();
-      }
-      if (!first) {
-        flpWifi.clientOff();
-        flpWifi.apOff();
-        wifi_state = 255;
-      }
-    }
-  }
-  {
-    // Client and access point follow the inputs; switched only when they change.
-    int32_t mode = 0;
-    uint8_t state = var_Wi_Fi_vklyuchen_4f8fe0 ? (uint8_t)(mode + 1) : 0;
-    if (state != wifi_state) {
-      wifi_state = state;
-      if (state & 1) {
-        flpWifi.clientOn();
-      } else {
-        flpWifi.clientOff();
-      }
-      if (state & 2) {
-        flpWifi.apOn();
-      } else {
-        flpWifi.apOff();
-      }
-    }
-  }
-  {
-    uint32_t now = millis();
-    wifi_net_due = (uint32_t)(now - wifi_net_t) >= 5;
-    if (wifi_net_due) {
-      wifi_net_t = now;
-    }
-  }
-  if (wifi_net_due) {
-    flpWifi.pool();
-  }
-  wifi_ready = flpWifi.clientIsReady();
-  {
-    uint32_t ip = 0;
-    if (flpWifi.clientIsReady()) {
-      ip = (uint32_t)flpWifi.localIP();
-    } else if (flpWifi.apIsReady()) {
-      ip = (uint32_t)flpWifi.accessPointIP();
-    }
-    if (ip != wifi_ip_raw) {
-      wifi_ip_raw = ip;
-      wifi_address = ip ? IPAddress(ip).toString() : String();
-    }
-  }
-  if (wifi_net_due && true) {
-    wifi_web.pool();
-  }
-  if (wifi_net_due && true && true) {
-    wifi_up_poll();
-  }
-  if (wifi_net_due && true) {
-    if (!wifi_ota_on) {
-      wifi_ota_on = true;
-      if (""[0] != 0) {
-        wifi_ota.setPasswordValue("");
-      }
-      wifi_ota.begin(flpWifi);
-    }
-    wifi_ota.pool();
-  }
-  var_IP_adres_1ea70f = wifi_address;
-  var_Wi_Fi_gotov_6c4b6b = wifi_ready;
-
   // ready: var_get
   ready_out = var_Wi_Fi_gotov_6c4b6b;
 

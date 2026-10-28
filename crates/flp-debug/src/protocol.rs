@@ -21,7 +21,8 @@ pub const HELLO: u8 = 0x01;
 /// Board → host: `seq u16, start u16, n u8, n × value u32` (one scan, in chunks).
 pub const VALUES: u8 = 0x02;
 /// Board → host, every 500 ms: `cycles u32, last u32, max u32, avg u32,
-/// period_max u32, free_heap u32, n u8, n × (sheet u16, last u32, max u32)`.
+/// period_max u32, free_heap u32, n u8, n × (sheet u16, last u32, max u32)`,
+/// then optionally `bg_last u32, bg_max u32` — a pass of the background task on core 0.
 /// Times in microseconds; `cycles` counts scans since the last report.
 pub const STATS: u8 = 0x03;
 /// Board → host, when a string changes (and all of them after `HELLO_REQ`):
@@ -29,8 +30,9 @@ pub const STATS: u8 = 0x03;
 pub const TEXT: u8 = 0x04;
 /// Longest string sent in `TEXT`; longer ones are cut at a character boundary.
 pub const TEXT_MAX: usize = 64;
-/// Sheets measured separately; `STATS` with this many still fits in 255 bytes.
-pub const MAX_STAT_SHEETS: usize = 23;
+/// Sheets measured separately; `STATS` with this many and the background trailer
+/// still fits in 255 bytes.
+pub const MAX_STAT_SHEETS: usize = 22;
 /// Host → board: ask for `HELLO`.
 pub const HELLO_REQ: u8 = 0x10;
 /// Host → board: `index u16, on u8, value u32` — force (or release) a value.
@@ -63,6 +65,14 @@ pub struct Stats {
     pub period_max_us: u32,
     pub free_heap: u32,
     pub sheets: Vec<SheetStats>,
+    /// Last and longest pass of the background task (core 0), µs; none without one.
+    pub background: Option<BackgroundStats>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BackgroundStats {
+    pub last_us: u32,
+    pub max_us: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -90,6 +100,10 @@ impl Stats {
                 })
             })
             .collect::<Option<Vec<_>>>()?;
+        let tail = 25 + 10 * n;
+        let background = u32_at(tail)
+            .zip(u32_at(tail + 4))
+            .map(|(last_us, max_us)| BackgroundStats { last_us, max_us });
         Some(Self {
             cycles: u32_at(0)?,
             last_us: u32_at(4)?,
@@ -98,6 +112,7 @@ impl Stats {
             period_max_us: u32_at(16)?,
             free_heap: u32_at(20)?,
             sheets,
+            background,
         })
     }
 }
@@ -246,6 +261,18 @@ mod tests {
             }]
         );
         assert_eq!(Stats::decode(&p[..30]), None);
+        assert_eq!(s.background, None);
+
+        p.extend(700u32.to_le_bytes());
+        p.extend(5000u32.to_le_bytes());
+        let s = Stats::decode(&p).unwrap();
+        assert_eq!(
+            s.background,
+            Some(BackgroundStats {
+                last_us: 700,
+                max_us: 5000
+            })
+        );
     }
 
     #[test]

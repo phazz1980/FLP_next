@@ -643,7 +643,10 @@ fn background_sheet_rules() {
         code.contains("xTaskCreatePinnedToCore(flp_bg_task"),
         "{code}"
     );
-    assert!(code.contains("press_out_in = press_out_pub;"), "{code}");
+    assert!(
+        code.contains("press_out_in = press_out_pub || press_out_pend;"),
+        "{code}"
+    );
 
     let mut plain = Project::load(repo_path("examples/background")).unwrap();
     plain.layout.sheets.clear();
@@ -671,7 +674,8 @@ fn background_sheet_rules() {
     assert!(code.contains("if (flp_bg2_run) {"), "{code}");
     assert!(code.contains("!flp_bg_one"), "{code}");
 
-    // The broker alone on a background sheet, its publishers in the main task.
+    // The broker alone on a background sheet: the whole network family follows it into
+    // the background task, so the publishers on the main sheet are not an error.
     let mut split = Project::load(repo_path("examples/mqtt")).unwrap();
     split.layout.sheets.push(flp_core::SheetInfo {
         number: 2,
@@ -686,8 +690,33 @@ fn background_sheet_rules() {
             y: 0.0,
         },
     );
-    match generate(&split, &lib, &ArduinoCpp::RELEASE) {
-        Err(GenError::Task(m)) => assert!(m.contains("broker"), "{m}"),
-        other => panic!("expected a task error, got {other:?}"),
-    }
+    let code = generate(&split, &lib, &ArduinoCpp::RELEASE).unwrap();
+    assert!(code.contains("flp_bg_task"), "{code}");
+
+    // Even with no background sheet at all, the network goes to core 0, and a bool
+    // crossing the boundary keeps a latch so a pulse is not lost.
+    let net = Project::load(repo_path("examples/mqtt")).unwrap();
+    let code = generate(&net, &lib, &ArduinoCpp::RELEASE).unwrap();
+    assert!(
+        code.contains("xTaskCreatePinnedToCore(flp_bg_task"),
+        "{code}"
+    );
+    assert!(code.contains("button_out_pend = false;"), "{code}");
+
+    // Debug build: the pass time of core 0 is measured and sent after the sheets.
+    let code = generate(&net, &lib, &ArduinoCpp::DEBUG).unwrap();
+    assert!(code.contains("flp_st_bg_begin();"), "{code}");
+    assert!(code.contains("flp_st_bg_end();"), "{code}");
+    assert!(code.contains("&flp_st_bg_max, 4"), "{code}");
+    let plain = Project::load(repo_path("examples/background")).unwrap();
+    let mut plain = plain;
+    plain.layout.sheets.clear();
+    let code = generate(&plain, &lib, &ArduinoCpp::DEBUG).unwrap();
+    assert!(!code.contains("flp_st_bg"), "{code}");
+
+    // Single-core chip: the network stays in loop().
+    let mut c3 = Project::load(repo_path("examples/mqtt")).unwrap();
+    c3.config.board.fqbn = "esp32:esp32:esp32c3".into();
+    let code = generate(&c3, &lib, &ArduinoCpp::RELEASE).unwrap();
+    assert!(!code.contains("flp_bg_task"), "{code}");
 }

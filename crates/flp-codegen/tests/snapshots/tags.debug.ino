@@ -203,7 +203,7 @@ void flp_dbg_values() {
 }
 
 void flp_dbg_stats() {
-  uint8_t p[25 + 10 * FLP_ST_SHEETS];
+  uint8_t p[25 + 10 * FLP_ST_SHEETS + 8];
   uint32_t head[6] = {flp_st_cycles, flp_st_last, flp_st_max, 0, flp_st_period_max, flp_st_free_heap()};
   head[3] = flp_st_take_avg();
   memcpy(p, head, 24);

@@ -9,6 +9,9 @@
 #include <flprogModbusTCP.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
 
 // Выходы блоков
 bool wifi_ready = false;
@@ -18,6 +21,17 @@ float sensor_temp = 0.0f;
 bool sensor_ok = false;
 bool button_out = false;
 bool led_reg_out_b = false;
+
+// Обмен сигналами между основной и фоновой задачами
+SemaphoreHandle_t flp_bg_lock;
+float sensor_temp_pub = 0.0f;
+float sensor_temp_in = 0.0f;
+bool button_out_pub = false;
+bool button_out_in = false;
+bool button_out_pend = false;
+bool led_reg_out_b_pub = false;
+bool led_reg_out_b_in = false;
+bool led_reg_out_b_pend = false;
 
 // wifi: wifi
 // Shared network interface: Modbus TCP and other network blocks use it.
@@ -177,7 +191,102 @@ void wifi_up_poll() {
   }
 }
 
+// Фоновая задача: ядро 0, блоки плат с признаком «фоновая задача»
+void flp_bg_task(void *) {
+  for (;;) {
+    xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
+    sensor_temp_in = sensor_temp_pub;
+    button_out_in = button_out_pub || button_out_pend;
+    button_out_pend = false;
+    xSemaphoreGive(flp_bg_lock);
+
+    // wifi: wifi
+    {
+      // Client and access point follow the inputs; switched only when they change.
+      int32_t mode = 0;
+      uint8_t state = (uint8_t)(mode + 1);
+      if (state != wifi_state) {
+        wifi_state = state;
+        if (state & 1) {
+          flpWifi.clientOn();
+        } else {
+          flpWifi.clientOff();
+        }
+        if (state & 2) {
+          flpWifi.apOn();
+        } else {
+          flpWifi.apOff();
+        }
+      }
+    }
+    {
+      uint32_t now = millis();
+      wifi_net_due = (uint32_t)(now - wifi_net_t) >= 5;
+      if (wifi_net_due) {
+        wifi_net_t = now;
+      }
+    }
+    if (wifi_net_due) {
+      flpWifi.pool();
+    }
+    wifi_ready = flpWifi.clientIsReady();
+    {
+      uint32_t ip = 0;
+      if (flpWifi.clientIsReady()) {
+        ip = (uint32_t)flpWifi.localIP();
+      } else if (flpWifi.apIsReady()) {
+        ip = (uint32_t)flpWifi.accessPointIP();
+      }
+      if (ip != wifi_ip_raw) {
+        wifi_ip_raw = ip;
+        wifi_address = ip ? IPAddress(ip).toString() : String();
+      }
+    }
+    if (wifi_net_due && true) {
+      wifi_web.pool();
+    }
+    if (wifi_net_due && true && true) {
+      wifi_up_poll();
+    }
+    if (wifi_net_due && true) {
+      if (!wifi_ota_on) {
+        wifi_ota_on = true;
+        if (""[0] != 0) {
+          wifi_ota.setPasswordValue("");
+        }
+        wifi_ota.begin(flpWifi);
+      }
+      wifi_ota.pool();
+    }
+
+    // slave: modbus_tcp_slave
+    flpModbus.pool();
+    slave_error = flpModbus.getLastError();
+
+    // temp_reg: modbus_write
+    flpModbus.saveFloat(sensor_temp_in, FLPROG_INPUT_REGISTR, 0);
+
+    // button_reg: modbus_write
+    flpModbus.saveBool(button_out_in, FLPROG_DISCRETE_INPUT, 0);
+
+    // online_reg: modbus_write
+    flpModbus.saveBool(wifi_ready, FLPROG_DISCRETE_INPUT, 1);
+
+    // led_reg: modbus_read
+    led_reg_out_b = flpModbus.readBool(FLPROG_COIL, 0);
+
+    xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
+    led_reg_out_b_pub = led_reg_out_b;
+    led_reg_out_b_pend = led_reg_out_b_pend || led_reg_out_b;
+    xSemaphoreGive(flp_bg_lock);
+
+    vTaskDelay(1);
+  }
+}
+
 void setup() {
+  flp_bg_lock = xSemaphoreCreateMutex();
+
   // Память под строки заранее: меньше дробления кучи.
   wifi_address.reserve(32);
 
@@ -219,71 +328,16 @@ void setup() {
 
   // led: digital_out
   pinMode(2, OUTPUT);
+
+  // Фоновая задача стартует после настройки всех блоков
+  xTaskCreatePinnedToCore(flp_bg_task, "flp_bg", 10240, nullptr, 1, nullptr, 0);
 }
 
 void loop() {
-  // wifi: wifi
-  {
-    // Client and access point follow the inputs; switched only when they change.
-    int32_t mode = 0;
-    uint8_t state = (uint8_t)(mode + 1);
-    if (state != wifi_state) {
-      wifi_state = state;
-      if (state & 1) {
-        flpWifi.clientOn();
-      } else {
-        flpWifi.clientOff();
-      }
-      if (state & 2) {
-        flpWifi.apOn();
-      } else {
-        flpWifi.apOff();
-      }
-    }
-  }
-  {
-    uint32_t now = millis();
-    wifi_net_due = (uint32_t)(now - wifi_net_t) >= 5;
-    if (wifi_net_due) {
-      wifi_net_t = now;
-    }
-  }
-  if (wifi_net_due) {
-    flpWifi.pool();
-  }
-  wifi_ready = flpWifi.clientIsReady();
-  {
-    uint32_t ip = 0;
-    if (flpWifi.clientIsReady()) {
-      ip = (uint32_t)flpWifi.localIP();
-    } else if (flpWifi.apIsReady()) {
-      ip = (uint32_t)flpWifi.accessPointIP();
-    }
-    if (ip != wifi_ip_raw) {
-      wifi_ip_raw = ip;
-      wifi_address = ip ? IPAddress(ip).toString() : String();
-    }
-  }
-  if (wifi_net_due && true) {
-    wifi_web.pool();
-  }
-  if (wifi_net_due && true && true) {
-    wifi_up_poll();
-  }
-  if (wifi_net_due && true) {
-    if (!wifi_ota_on) {
-      wifi_ota_on = true;
-      if (""[0] != 0) {
-        wifi_ota.setPasswordValue("");
-      }
-      wifi_ota.begin(flpWifi);
-    }
-    wifi_ota.pool();
-  }
-
-  // slave: modbus_tcp_slave
-  flpModbus.pool();
-  slave_error = flpModbus.getLastError();
+  xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
+  led_reg_out_b_in = led_reg_out_b_pub || led_reg_out_b_pend;
+  led_reg_out_b_pend = false;
+  xSemaphoreGive(flp_bg_lock);
 
   // sensor: ds18b20
   if (millis() - sensor_requested >= 1000UL) {
@@ -296,21 +350,15 @@ void loop() {
     sensor_requested = millis();
   }
 
-  // temp_reg: modbus_write
-  flpModbus.saveFloat(sensor_temp, FLPROG_INPUT_REGISTR, 0);
-
   // button: digital_in
   button_out = !digitalRead(13);
 
-  // button_reg: modbus_write
-  flpModbus.saveBool(button_out, FLPROG_DISCRETE_INPUT, 0);
-
-  // online_reg: modbus_write
-  flpModbus.saveBool(wifi_ready, FLPROG_DISCRETE_INPUT, 1);
-
-  // led_reg: modbus_read
-  led_reg_out_b = flpModbus.readBool(FLPROG_COIL, 0);
-
   // led: digital_out
-  digitalWrite(2, (led_reg_out_b) ? HIGH : LOW);
+  digitalWrite(2, (led_reg_out_b_in) ? HIGH : LOW);
+
+  xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
+  sensor_temp_pub = sensor_temp;
+  button_out_pub = button_out;
+  button_out_pend = button_out_pend || button_out;
+  xSemaphoreGive(flp_bg_lock);
 }

@@ -3,6 +3,10 @@
 //! snapshots: the producer publishes its outputs at the end of a pass, the consumer
 //! takes them at the start of its own, both under one mutex.
 //!
+//! On two cores the network blocks (`shared = "network"`) always run in the background
+//! task, wherever their sheet is. A bool that crosses the boundary also keeps a "was true
+//! since the last take" flag, so a one-pass pulse is seen by the other task exactly once.
+//!
 //! A single-core chip gains nothing from a second task, so there the blocks of a
 //! background sheet stay in `loop()` but run on a period of their own, at most one
 //! sheet per pass and with the sheets' phases spread over the period.
@@ -26,6 +30,9 @@ pub struct Tasks {
     gates: Vec<(u32, u32)>,
 }
 
+/// `shared` tag of the blocks that use the network libraries.
+const NETWORK: &str = "network";
+
 /// Chips with one core (ESP32-S2, C2, C3, C6, H2).
 fn single_core(fqbn: &str) -> bool {
     let chip = fqbn.rsplit(':').next().unwrap_or("");
@@ -37,16 +44,22 @@ fn single_core(fqbn: &str) -> bool {
 impl Tasks {
     pub fn new(program: &Program) -> Result<Self, GenError> {
         let layout = &program.project.layout;
+        let threaded = !single_core(&program.project.config.board.fqbn);
+        // The network libraries are not thread-safe and block on connects, so with two
+        // cores the whole network family lives in the background task, whatever the sheet.
         let background: HashSet<String> = program
             .blocks
             .iter()
-            .filter(|i| layout.is_background(crate::stats::sheet_of(program, i)))
+            .filter(|i| {
+                layout.is_background(crate::stats::sheet_of(program, i))
+                    || (threaded && i.lib.def.info.shared == NETWORK)
+            })
             .map(|i| i.block.id.clone())
             .collect();
         let mut tasks = Self {
             background,
             crossing: BTreeMap::new(),
-            threaded: !single_core(&program.project.config.board.fqbn),
+            threaded,
             gates: Vec::new(),
         };
         if tasks.background.is_empty() {
@@ -155,27 +168,41 @@ impl Tasks {
     }
 
     /// Lines publishing the signals the given task produces for the other one.
+    /// A bool also sets a "seen true" flag, so a pulse shorter than a pass of the
+    /// other task is not lost.
     pub fn publish(&self, program: &Program, background: bool) -> Vec<String> {
-        self.crossing
-            .iter()
-            .filter(|(_, &from)| from == background)
-            .map(|(&s, _)| {
-                let name = &program.signals[s].name;
-                format!("{} = {name};", pub_name(name))
-            })
-            .collect()
+        let mut out = Vec::new();
+        for (&s, _) in self.crossing.iter().filter(|(_, &from)| from == background) {
+            let signal = &program.signals[s];
+            let name = &signal.name;
+            out.push(format!("{} = {name};", pub_name(name)));
+            if signal.ty == SignalType::Bool {
+                out.push(format!("{0} = {0} || {name};", pend_name(name)));
+            }
+        }
+        out
     }
 
-    /// Lines taking the signals the other task has published for the given one.
+    /// Lines taking the signals the other task has published for the given one;
+    /// a bool is true when it is true now or was true since the last take.
     pub fn take(&self, program: &Program, background: bool) -> Vec<String> {
-        self.crossing
-            .iter()
-            .filter(|(_, &from)| from != background)
-            .map(|(&s, _)| {
-                let name = &program.signals[s].name;
-                format!("{} = {};", in_name(name), pub_name(name))
-            })
-            .collect()
+        let mut out = Vec::new();
+        for (&s, _) in self.crossing.iter().filter(|(_, &from)| from != background) {
+            let signal = &program.signals[s];
+            let name = &signal.name;
+            if signal.ty == SignalType::Bool {
+                out.push(format!(
+                    "{} = {} || {};",
+                    in_name(name),
+                    pub_name(name),
+                    pend_name(name)
+                ));
+                out.push(format!("{} = false;", pend_name(name)));
+            } else {
+                out.push(format!("{} = {};", in_name(name), pub_name(name)));
+            }
+        }
+        out
     }
 
     /// Declarations of the transfer variables.
@@ -189,6 +216,9 @@ impl Tasks {
             );
             out.push(format!("{ty} {} = {zero};", pub_name(&signal.name)));
             out.push(format!("{ty} {} = {zero};", in_name(&signal.name)));
+            if signal.ty == SignalType::Bool {
+                out.push(format!("bool {} = false;", pend_name(&signal.name)));
+            }
         }
         out
     }
@@ -287,4 +317,8 @@ fn pub_name(name: &str) -> String {
 
 fn in_name(name: &str) -> String {
     format!("{name}_in")
+}
+
+fn pend_name(name: &str) -> String {
+    format!("{name}_pend")
 }

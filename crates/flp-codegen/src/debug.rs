@@ -84,7 +84,8 @@ fn type_code(e: &Entry) -> u8 {
 /// and after the cycle time module of [`crate::stats`].
 /// `text_in`: a block reads USB, so the module keeps the console input
 /// (`TEXT_IN` frames) for it in `flp_dbg_input`.
-pub fn runtime(table: &DebugTable, text_in: bool) -> String {
+/// `background`: a task on core 0 exists; its pass time goes into `STATS` as a trailer.
+pub fn runtime(table: &DebugTable, text_in: bool, background: bool) -> String {
     let n = table.entries.len();
     let ptrs: Vec<String> = table
         .entries
@@ -207,7 +208,7 @@ void flp_dbg_values() {{
 }}
 
 {texts}{text_in}void flp_dbg_stats() {{
-  uint8_t p[25 + 10 * FLP_ST_SHEETS];
+  uint8_t p[25 + 10 * FLP_ST_SHEETS + 8];
   uint32_t head[6] = {{flp_st_cycles, flp_st_last, flp_st_max, 0, flp_st_period_max, flp_st_free_heap()}};
   head[3] = flp_st_take_avg();
   memcpy(p, head, 24);
@@ -219,7 +220,7 @@ void flp_dbg_values() {{
     memcpy(q + 2, &flp_st_sheet_last[k], 4);
     memcpy(q + 6, &flp_st_sheet_max[k], 4);
   }}
-  flp_dbg_frame(0x{stats:02X}, p, 25 + 10 * FLP_ST_SHEETS);
+{bg_tail}  flp_dbg_frame(0x{stats:02X}, p, 25 + 10 * FLP_ST_SHEETS{bg_len});
 }}
 
 void flp_dbg_command(uint8_t type, const uint8_t* p, uint8_t len) {{
@@ -315,6 +316,14 @@ void flp_dbg_loop() {{
         per_frame = protocol::VALUES_PER_FRAME,
         baud = BAUD,
         texts = texts_module(table),
+        bg_tail = if background {
+            "  memcpy(p + 25 + 10 * FLP_ST_SHEETS, &flp_st_bg_last, 4);
+  memcpy(p + 29 + 10 * FLP_ST_SHEETS, &flp_st_bg_max, 4);
+"
+        } else {
+            ""
+        },
+        bg_len = if background { " + 8" } else { "" },
         text_in = if text_in { TEXT_IN_MODULE } else { "" },
         text_in_command = if text_in {
             format!(

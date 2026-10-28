@@ -34,8 +34,26 @@ pub fn measured_sheets<'a>(
     sheets
 }
 
+/// Pass time of the background task (core 0): from taking the inputs to publishing
+/// the outputs, without the pause between passes.
+const BG_MODULE: &str = r#"uint32_t flp_st_bg_last = 0;
+uint32_t flp_st_bg_max = 0;
+uint32_t flp_st_bg_start = 0;
+
+void flp_st_bg_begin() {
+  flp_st_bg_start = micros();
+}
+
+void flp_st_bg_end() {
+  flp_st_bg_last = micros() - flp_st_bg_start;
+  if (flp_st_bg_last > flp_st_bg_max) {
+    flp_st_bg_max = flp_st_bg_last;
+  }
+}
+"#;
+
 /// Measurement code, placed after all globals of the sketch.
-pub fn runtime(sheets: &[u32]) -> String {
+pub fn runtime(sheets: &[u32], background: bool) -> String {
     let numbers: Vec<String> = sheets
         .iter()
         .map(u32::to_string)
@@ -59,7 +77,7 @@ uint32_t flp_st_sum = 0;
 uint32_t flp_st_last = 0;
 uint32_t flp_st_max = 0;
 uint32_t flp_st_period_max = 0;
-
+{bg_globals}
 void flp_st_begin() {{
   uint32_t now = micros();
   if (flp_st_started && now - flp_st_prev_start > flp_st_period_max) {{
@@ -100,7 +118,7 @@ void flp_st_end() {{
   }}
 }}
 
-void flp_st_reset() {{
+void flp_st_reset() {{{bg_reset}
   flp_st_max = 0;
   flp_st_period_max = 0;
   for (uint8_t k = 0; k < FLP_ST_SHEETS; k++) {{
@@ -126,11 +144,27 @@ uint32_t flp_st_free_heap() {{
 "#,
         n = sheets.len(),
         numbers = numbers.join(", "),
+        bg_globals = if background { BG_MODULE } else { "" },
+        bg_reset = if background {
+            "
+  flp_st_bg_max = 0;"
+        } else {
+            ""
+        },
     )
 }
 
 /// Text report of normal firmware, printed every `interval_ms`.
-pub fn text_report(interval_ms: u32) -> String {
+pub fn text_report(interval_ms: u32, background: bool) -> String {
+    let bg_report = if background {
+        "
+  Serial.print(\"[FLP]   ядро 0 (фоновая задача): последний проход \");
+  Serial.print(flp_st_bg_last);
+  Serial.print(\", макс \");
+  Serial.println(flp_st_bg_max);"
+    } else {
+        ""
+    };
     let mut out = String::new();
     let _ = write!(
         out,
@@ -155,7 +189,7 @@ void flp_st_report() {{
   Serial.print("; циклов ");
   Serial.print(cycles);
   Serial.print("; своб. память ");
-  Serial.println(flp_st_free_heap());
+  Serial.println(flp_st_free_heap());{bg_report}
   for (uint8_t k = 0; k < FLP_ST_SHEETS; k++) {{
     Serial.print("[FLP]   лист ");
     Serial.print(flp_st_sheet_no[k]);

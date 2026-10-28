@@ -10,7 +10,7 @@ pub mod table;
 pub mod transport;
 
 pub use monitor::Monitor;
-pub use protocol::{SheetStats, Stats};
+pub use protocol::{BackgroundStats, SheetStats, Stats};
 pub use session::{Command, Live, Session};
 pub use table::{DebugTable, Entry, Source, TextEntry, Value};
 pub use transport::{Connector, Transport};
