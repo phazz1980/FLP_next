@@ -892,8 +892,18 @@ fn parse_board_list(json: &str) -> Result<Vec<SerialPort>, BuildError> {
         fqbn: String,
     }
 
-    let list: BoardList =
-        serde_json::from_str(json).map_err(|e| BuildError::BadOutput(e.to_string()))?;
+    // Newer arduino-cli wraps the list in `detected_ports`, older ones print the array itself.
+    let list: BoardList = match serde_json::from_str::<serde_json::Value>(json) {
+        Ok(serde_json::Value::Array(items)) => {
+            serde_json::from_value(serde_json::json!({ "detected_ports": items }))
+        }
+        Ok(value) => serde_json::from_value(value),
+        Err(e) => Err(e),
+    }
+    .map_err(|e| {
+        let head: String = json.chars().take(200).collect();
+        BuildError::BadOutput(format!("{e}; вывод: {head}"))
+    })?;
     let mut ports: Vec<SerialPort> = list
         .detected_ports
         .into_iter()
@@ -1118,6 +1128,8 @@ mod tests {
         assert!(matches!(auto_port(&[]), Err(BuildError::NoPort)));
         assert_eq!(parse_board_list("{}").unwrap(), []);
         assert!(parse_board_list("not json").is_err());
+        let old = r#"[{"port": {"address": "COM7", "protocol": "serial", "label": "COM7"}}]"#;
+        assert_eq!(parse_board_list(old).unwrap()[0].address, "COM7");
     }
 
     #[test]
