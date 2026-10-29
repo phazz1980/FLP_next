@@ -178,6 +178,8 @@ pub struct EditorApp {
     update_check: bool,
     /// Download a found release in the background; installing stays the user's call.
     auto_update: bool,
+    /// Offer beta versions (GitHub pre-releases) as updates.
+    update_beta: bool,
     /// Running release check; the flag tells whether the user asked for it.
     update_rx: Option<Receiver<(bool, Result<Check, String>)>>,
     /// When the last update check was started (periodic re-check while the editor stays open).
@@ -266,6 +268,7 @@ impl EditorApp {
             seen_rev: None,
             local: LocalValues::default(),
             update_check: theme::update_check(),
+            update_beta: theme::update_beta(),
             auto_update: theme::auto_update(),
             update_rx: None,
             update_checked: Instant::now(),
@@ -379,8 +382,9 @@ impl EditorApp {
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
         let repo = theme::update_repo();
+        let beta = self.update_beta;
         thread::spawn(move || {
-            let _ = tx.send((manual, update::check(&repo)));
+            let _ = tx.send((manual, update::check(&repo, beta)));
             ctx.request_repaint();
         });
         self.update_rx = Some(rx);
@@ -1649,11 +1653,34 @@ impl EditorApp {
         };
         ui.horizontal(|ui| {
             ui.add(egui::Image::new(&icon).fit_to_exact_size(egui::vec2(18.0, 18.0)));
-            egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("☰", |ui| self.menus(ui))
-                    .response
-                    .on_hover_text("Меню");
-            });
+            // No `MenuBar` here: it takes the full row width and pushes the rest off screen.
+            // The burger is drawn with lines, so it does not depend on font glyphs.
+            let burger = ui
+                .allocate_response(egui::vec2(28.0, 22.0), egui::Sense::click())
+                .on_hover_text("Меню");
+            let color = if burger.hovered() || burger.is_pointer_button_down_on() {
+                ui.visuals().strong_text_color()
+            } else {
+                ui.visuals().text_color()
+            };
+            if burger.hovered() {
+                ui.painter().rect_filled(
+                    burger.rect,
+                    3.0,
+                    ui.visuals().widgets.hovered.weak_bg_fill,
+                );
+            }
+            for dy in [-5.0, 0.0, 5.0] {
+                let y = burger.rect.center().y + dy;
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(burger.rect.center().x - 7.0, y),
+                        egui::pos2(burger.rect.center().x + 7.0, y),
+                    ],
+                    egui::Stroke::new(1.5, color),
+                );
+            }
+            egui::Popup::menu(&burger).show(|ui| self.menus(ui));
             panels::toolbar(self, ui);
             // The rest of the row drags the window; double click maximizes.
             let width = (ui.available_width() - 3.0 * 34.0).max(0.0);
@@ -1999,6 +2026,15 @@ impl EditorApp {
                 .changed()
             {
                 theme::save_update_check(self.update_check);
+            }
+            if ui
+                .checkbox(&mut self.update_beta, "Получать бета-версии")
+                .on_hover_text(
+                    "Предлагать и пробные версии (пререлизы на GitHub); они могут быть нестабильны",
+                )
+                .changed()
+            {
+                theme::save_update_beta(self.update_beta);
             }
             if ui
                 .checkbox(&mut self.auto_update, "Скачивать обновления автоматически")

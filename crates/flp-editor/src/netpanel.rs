@@ -223,7 +223,24 @@ fn settings(
         .filter(|p| !(kind == WEB_UI && p.name == "pages"))
     {
         let label = p.label.as_deref().unwrap_or(&p.name);
-        let current = b.params.get(&p.name).or(p.default.as_ref());
+        // Values kept by the program (Wi-Fi password) are not in the project file.
+        let stored = p.local.as_ref().and_then(|key_param| {
+            let key = match b
+                .params
+                .get(key_param)
+                .or(def.param(key_param)?.default.as_ref())
+            {
+                Some(ParamValue::Text(s)) => s.as_str(),
+                _ => "",
+            };
+            app.local
+                .get(&b.kind, &p.name, key)
+                .map(|v| ParamValue::Text(v.to_owned()))
+        });
+        let current = stored
+            .as_ref()
+            .or(b.params.get(&p.name))
+            .or(p.default.as_ref());
         ui.horizontal(|ui| {
             if !p.choices.is_empty() {
                 let selected = current.map_or_else(|| "не задан".to_owned(), |v| p.value_label(v));

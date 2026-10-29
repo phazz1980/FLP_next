@@ -87,8 +87,8 @@ impl ApiRelease {
 }
 
 /// Asks GitHub for the published releases of `repo` ("owner/name") and compares
-/// them with the running version.
-pub fn check(repo: &str) -> Result<Check, String> {
+/// them with the running version. `beta` also takes pre-releases into account.
+pub fn check(repo: &str, beta: bool) -> Result<Check, String> {
     if !valid_repo(repo) {
         return Err(format!(
             "некорректный адрес репозитория «{repo}», нужен вид владелец/имя"
@@ -136,14 +136,15 @@ pub fn check(repo: &str) -> Result<Check, String> {
         Err(Failure::Status(code)) => return Err(format!("ошибка GitHub {code}")),
         Err(Failure::Network(e)) => return Err(format!("нет связи с GitHub: {e}")),
     };
-    Ok(pick(releases, CURRENT))
+    Ok(pick(releases, CURRENT, beta))
 }
 
-/// Finds the published releases newer than `current` and collects their notes.
-fn pick(releases: Vec<ApiRelease>, current: &str) -> Check {
+/// Finds the published releases newer than `current` and collects their notes;
+/// pre-releases count only when `beta` is set.
+fn pick(releases: Vec<ApiRelease>, current: &str, beta: bool) -> Check {
     let mut published: Vec<(String, ApiRelease)> = releases
         .into_iter()
-        .filter(|r| !r.draft && !r.prerelease)
+        .filter(|r| !r.draft && (beta || !r.prerelease))
         .map(|r| (r.tag_name.trim_start_matches(['v', 'V']).to_owned(), r))
         .collect();
     if published.is_empty() {
@@ -462,7 +463,7 @@ mod tests {
             release("v0.2.0", "Просто текст\n\nFull Changelog: https://x"),
             release("v0.1.0", "- старое"),
         ];
-        let Check::Newer(r) = pick(releases, "0.1.0") else {
+        let Check::Newer(r) = pick(releases, "0.1.0", false) else {
             panic!("expected a newer release");
         };
         assert_eq!(r.version, "0.3.0");
@@ -479,8 +480,24 @@ mod tests {
         draft.draft = true;
         let mut pre = release("v8.0.0", "- x");
         pre.prerelease = true;
-        assert_eq!(pick(vec![draft, pre], "0.1.0"), Check::NoReleases);
-        assert_eq!(pick(vec![release("v0.1.0", "")], "0.1.0"), Check::UpToDate);
+        assert_eq!(pick(vec![draft, pre], "0.1.0", false), Check::NoReleases);
+        assert_eq!(
+            pick(vec![release("v0.1.0", "")], "0.1.0", false),
+            Check::UpToDate
+        );
+    }
+
+    #[test]
+    fn beta_takes_prereleases_but_not_drafts() {
+        let mut draft = release("v9.0.0", "- x");
+        draft.draft = true;
+        let mut pre = release("v8.0.0", "- бета");
+        pre.prerelease = true;
+        let Check::Newer(r) = pick(vec![draft, pre, release("v0.2.0", "- x")], "0.1.0", true)
+        else {
+            panic!("a pre-release is newer");
+        };
+        assert_eq!(r.version, "8.0.0");
     }
 
     #[test]

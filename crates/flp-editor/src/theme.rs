@@ -273,6 +273,8 @@ struct Settings {
     update_check: Option<bool>,
     /// Download a found release in the background (off by default).
     auto_update: Option<bool>,
+    /// Offer pre-releases (beta versions) too (off by default).
+    update_beta: Option<bool>,
     /// GitHub repository "owner/name" the releases are taken from.
     update_repo: Option<String>,
     /// Name and contacts entered as the author of a block pack; offered for new packs.
@@ -399,6 +401,14 @@ pub fn update_check() -> bool {
 
 pub fn save_update_check(on: bool) {
     update_settings(|s| s.update_check = Some(on));
+}
+
+pub fn update_beta() -> bool {
+    load_settings().update_beta.unwrap_or(false)
+}
+
+pub fn save_update_beta(on: bool) {
+    update_settings(|s| s.update_beta = Some(on));
 }
 
 pub fn auto_update() -> bool {
