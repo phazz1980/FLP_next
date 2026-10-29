@@ -21,7 +21,6 @@ pub const DEFAULT_REPO: &str = "phazz1980/FLP_next";
 const RELEASES_PER_PAGE: usize = 30;
 /// Releases listed in the notes and characters per item.
 const MAX_RELEASES: usize = 10;
-const MAX_LEN: usize = 110;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Release {
@@ -234,16 +233,11 @@ fn strip_links(text: &str) -> String {
     out
 }
 
-/// Drops markdown emphasis, code marks and link addresses, and shortens a long line.
+/// Drops markdown emphasis, code marks and link addresses; a long line stays whole
+/// (the window wraps it).
 fn clean(line: &str) -> String {
     let plain = strip_links(line).replace("**", "").replace('`', "");
-    let plain = plain.trim();
-    if plain.chars().count() > MAX_LEN {
-        let cut: String = plain.chars().take(MAX_LEN).collect();
-        format!("{}…", cut.trim_end())
-    } else {
-        plain.to_owned()
-    }
+    plain.trim().to_owned()
 }
 
 /// Window with what changed since the running version and the download link.
@@ -501,12 +495,12 @@ mod tests {
     }
 
     #[test]
-    fn notes_keep_every_item_but_shorten_long_ones() {
+    fn notes_keep_every_item_whole() {
         let body: String = (1..=10).map(|i| format!("- пункт {i}\n")).collect();
         let items = summarize(&body);
         assert_eq!(items.len(), 10);
         let long = format!("- {}", "я".repeat(300));
-        assert!(summarize(&long)[0].chars().count() <= MAX_LEN + 1);
+        assert_eq!(summarize(&long)[0].chars().count(), 300);
         assert!(summarize("").is_empty());
     }
 

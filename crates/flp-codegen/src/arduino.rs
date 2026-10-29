@@ -67,6 +67,9 @@ struct Sections {
     once_global: String,
     once_setup: String,
     once_functions: String,
+    /// `#include` lines written by hand in the global and function sections: they are
+    /// moved up to the other includes, before any declaration.
+    includes: Vec<String>,
 }
 
 const SECTION_LIST: &str = "// @defines, // @global, // @setup, // @loop, // @functions";
@@ -525,6 +528,22 @@ fn split_sections(text: &str) -> Result<Sections, String> {
         }
     }
     for s in [
+        &mut sections.global,
+        &mut sections.functions,
+        &mut sections.once_global,
+        &mut sections.once_functions,
+    ] {
+        let (includes, rest): (Vec<&str>, Vec<&str>) = s
+            .lines()
+            .partition(|l| l.trim_start().starts_with("#include"));
+        if !includes.is_empty() {
+            sections
+                .includes
+                .extend(includes.iter().map(|l| l.trim().to_owned()));
+            *s = rest.join("\n");
+        }
+    }
+    for s in [
         &mut sections.defines,
         &mut sections.global,
         &mut sections.setup,
@@ -566,8 +585,20 @@ fn assemble(
         }
     }
     out.push_str("\n#include <Arduino.h>\n");
+    let mut included = vec!["#include <Arduino.h>".to_owned()];
     for header in program.includes() {
-        let _ = writeln!(out, "#include <{header}>");
+        let line = format!("#include <{header}>");
+        let _ = writeln!(out, "{line}");
+        included.push(line);
+    }
+    // Includes typed by hand in a block template go here, ahead of all declarations.
+    for (_, sec) in rendered {
+        for line in &sec.includes {
+            if !included.contains(line) {
+                let _ = writeln!(out, "{line}");
+                included.push(line.clone());
+            }
+        }
     }
     if tasks.any() {
         out.push_str("#include <freertos/FreeRTOS.h>\n#include <freertos/semphr.h>\n#include <freertos/task.h>\n");
@@ -1021,6 +1052,21 @@ mod tests {
         assert_eq!(s.once_functions, "void g() {}");
         assert!(split_sections("// @loop once\nx++;\n").is_err());
         assert!(split_sections("// @global twice\n").is_err());
+    }
+
+    #[test]
+    fn hand_written_includes_move_out_of_sections() {
+        let s = split_sections(
+            "// @global\n#include <Adafruit_ADS1X16.h>\nint x;\n// @functions once\n\
+             #include <Wire.h>\nvoid g() {}\n// @loop\ny();\n",
+        )
+        .unwrap();
+        assert_eq!(s.global, "int x;");
+        assert_eq!(s.once_functions, "void g() {}");
+        assert_eq!(
+            s.includes,
+            ["#include <Adafruit_ADS1X16.h>", "#include <Wire.h>"]
+        );
     }
 
     #[test]

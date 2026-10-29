@@ -23,8 +23,12 @@ pub fn busy(ui: &mut Ui) {
 
 /// Paints an icon glyph in the middle of a button.
 /// The glyph is drawn by hand: the emoji font sits a little high inside a regular button.
-fn paint_glyph(ui: &Ui, resp: &egui::Response, glyph: &str) {
-    let color = ui.style().interact(resp).text_color();
+fn paint_glyph(ui: &Ui, resp: &egui::Response, glyph: &str, selected: bool) {
+    let color = if selected && resp.enabled() {
+        ui.visuals().selection.stroke.color
+    } else {
+        ui.style().interact(resp).text_color()
+    };
     let galley =
         ui.painter()
             .layout_no_wrap(glyph.to_owned(), egui::FontId::proportional(15.0), color);
@@ -42,7 +46,7 @@ fn icon(ui: &mut Ui, enabled: bool, glyph: &str, tip: &str) -> bool {
                 .frame_when_inactive(false),
         )
         .on_hover_text(tip);
-    paint_glyph(ui, &resp, glyph);
+    paint_glyph(ui, &resp, glyph, false);
     resp.clicked()
 }
 
@@ -52,10 +56,11 @@ fn icon_toggle(ui: &mut Ui, value: &mut bool, glyph: &str, tip: &str) {
         .add(
             egui::Button::selectable(*value, "")
                 .min_size(egui::vec2(30.0, 26.0))
-                .frame_when_inactive(false),
+                // A pressed toggle keeps its highlight.
+                .frame_when_inactive(*value),
         )
         .on_hover_text(tip);
-    paint_glyph(ui, &resp, glyph);
+    paint_glyph(ui, &resp, glyph, *value);
     if resp.clicked() {
         *value = !*value;
     }
@@ -179,11 +184,32 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
     } else {
         app.port.clone()
     };
-    let row_height = ui.spacing().interact_size.y;
-    ui.spacing_mut().interact_size.y = 34.0;
+    // The plug stays large; the port name beside it is smaller.
+    let color = ui.visuals().widgets.inactive.fg_stroke.color;
+    let mut shown = egui::text::LayoutJob::default();
+    let font = |size: f32| egui::TextFormat {
+        font_id: egui::FontId::proportional(size),
+        color,
+        valign: egui::Align::Center,
+        ..Default::default()
+    };
+    shown.append("🔌 ", 0.0, font(17.0));
+    shown.append(&selected, 0.0, font(13.0));
+    // Outline instead of a filled background.
+    let saved = ui.visuals().widgets.clone();
+    let outline = egui::Stroke::new(
+        1.0,
+        saved.noninteractive.fg_stroke.color.gamma_multiply(0.6),
+    );
+    let widgets = &mut ui.visuals_mut().widgets;
+    for state in [&mut widgets.inactive, &mut widgets.open] {
+        state.weak_bg_fill = egui::Color32::TRANSPARENT;
+        state.bg_fill = egui::Color32::TRANSPARENT;
+        state.bg_stroke = outline;
+    }
     egui::ComboBox::from_id_salt("port")
-        .selected_text(RichText::new(format!("🔌 {selected}")).size(17.0))
-        .width(170.0)
+        .selected_text(shown)
+        .width(120.0)
         .show_ui(ui, |ui| {
             ui.selectable_value(&mut app.port, String::new(), "авто")
                 .on_hover_text("Порт из настроек проекта или единственный найденный");
@@ -201,7 +227,7 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
         })
         .response
         .on_hover_text("Порт платы");
-    ui.spacing_mut().interact_size.y = row_height;
+    ui.visuals_mut().widgets = saved;
     if app.scanning_ports() {
         busy(ui);
     } else if icon(ui, true, "↻", "Найти порты заново") {

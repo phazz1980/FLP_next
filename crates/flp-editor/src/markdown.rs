@@ -41,6 +41,18 @@ pub fn dir_images(dir: &std::path::Path) -> impl Fn(&str) -> Option<std::path::P
     }
 }
 
+/// `file://` URI of a local file, in the form the egui file loader reads on every system:
+/// a Windows path `D:/a.png` needs three slashes (`file:///D:/a.png`), otherwise the
+/// loader takes the drive for a network host.
+fn file_uri(path: &std::path::Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    if path.starts_with('/') {
+        format!("file://{path}")
+    } else {
+        format!("file:///{path}")
+    }
+}
+
 /// Image targets that `text` refers to.
 pub fn image_targets(text: &str) -> Vec<String> {
     parse(text)
@@ -169,7 +181,7 @@ fn show_inner(
                     .filter(|p| p.is_file())
                 {
                     Some(path) => {
-                        let uri = format!("file://{}", path.to_string_lossy().replace('\\', "/"));
+                        let uri = file_uri(&path);
                         ui.add(
                             egui::Image::new(uri)
                                 .fit_to_original_size(1.0)
@@ -546,6 +558,18 @@ mod tests {
                 Span::Link("c", "http://d"),
                 Span::Text(" ", plain),
             ]
+        );
+    }
+
+    #[test]
+    fn file_uris_have_an_empty_host() {
+        assert_eq!(
+            file_uri(std::path::Path::new(r"D:\FLP\images\a b.png")),
+            "file:///D:/FLP/images/a b.png"
+        );
+        assert_eq!(
+            file_uri(std::path::Path::new("/home/u/a.png")),
+            "file:///home/u/a.png"
         );
     }
 

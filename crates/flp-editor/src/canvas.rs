@@ -211,8 +211,16 @@ fn size(block: &Block, def: Option<&BlockDef>) -> Vec2 {
     }
 }
 
+/// Parameter line of a block that is cut to the block width but hovered: the caller
+/// paints it in full over everything else.
+struct FullNote {
+    pos: Pos2,
+    text: String,
+}
+
 /// Draws a block box: header with the label, id above, ports with their names,
-/// defaults of unconnected inputs and parameter values below.
+/// defaults of unconnected inputs and parameter values below. The parameter line is
+/// cut to the block width; under the pointer it is returned to be shown in full.
 #[allow(clippy::too_many_arguments)]
 fn paint_box(
     painter: &egui::Painter,
@@ -222,8 +230,10 @@ fn paint_box(
     def: Option<&BlockDef>,
     pal: &Palette,
     border: Stroke,
+    pointer: Option<Pos2>,
     fed: impl Fn(&str) -> bool,
-) {
+) -> Option<FullNote> {
+    let mut full_note = None;
     let kind = Kind::Box;
     let font = |size: f32| FontId::proportional(size * z.clamp(0.5, 2.0));
     painter.rect(
@@ -306,13 +316,31 @@ fn paint_box(
             .filter_map(|p| block.params.get(&p.name).and_then(|v| p.caption(v)))
             .collect();
         if !summary.is_empty() {
-            painter.text(
-                r.left_bottom() + Vec2::new(0.0, 2.0),
-                Align2::LEFT_TOP,
-                summary.join(" "),
-                font(9.0),
-                pal.weak,
-            );
+            let full = summary.join(" ");
+            let pos = r.left_bottom() + Vec2::new(0.0, 2.0);
+            let width = |text: &str| {
+                painter
+                    .layout_no_wrap(text.to_owned(), font(9.0), pal.weak)
+                    .size()
+                    .x
+            };
+            let mut shown = full.clone();
+            if width(&full) > r.width() {
+                let mut chars: Vec<char> = full.chars().collect();
+                while !chars.is_empty()
+                    && width(&format!("{}…", chars.iter().collect::<String>())) > r.width()
+                {
+                    chars.pop();
+                }
+                shown = format!("{}…", chars.iter().collect::<String>());
+            }
+            let galley = painter.layout_no_wrap(shown.clone(), font(9.0), pal.weak);
+            let line = Rect::from_min_size(pos, Vec2::new(r.width(), galley.size().y));
+            if shown != full && pointer.is_some_and(|p| line.contains(p)) {
+                full_note = Some(FullNote { pos, text: full });
+            } else {
+                painter.galley(pos, galley, pal.weak);
+            }
         }
     } else {
         painter.text(
@@ -323,6 +351,7 @@ fn paint_box(
             pal.error,
         );
     }
+    full_note
 }
 
 /// Block as it will look on a sheet, for the block editor: an instance with default
@@ -346,7 +375,17 @@ pub fn block_preview(ui: &mut Ui, def: &BlockDef, pal: &Palette) {
     painter.rect_filled(rect, 2.0, pal.sheet);
     let r = Rect::from_min_size(rect.min + margin, body);
     let border = Stroke::new(1.0, pal.block_border);
-    paint_box(&painter, r, 1.0, &block, Some(def), pal, border, |_| false);
+    paint_box(
+        &painter,
+        r,
+        1.0,
+        &block,
+        Some(def),
+        pal,
+        border,
+        None,
+        |_| false,
+    );
 }
 
 /// Whether a variable block already has a link on either side. A block of a variable
@@ -1016,6 +1055,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let mut drag_end = None;
     let mut open_dialog = None;
     let mut responses: Vec<(String, egui::Response)> = Vec::new();
+    let mut full_notes: Vec<FullNote> = Vec::new();
     for block in &logic.blocks {
         let id = block.id.as_str();
         let Some(r) = screen_rect(id) else { continue };
@@ -1135,10 +1175,31 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                         b
                     });
                 let block = filled.as_ref().unwrap_or(block);
-                paint_box(&painter, r, z, block, def, &pal, border, fed);
+                if let Some(note) =
+                    paint_box(&painter, r, z, block, def, &pal, border, pointer, fed)
+                {
+                    full_notes.push(note);
+                }
             }
         }
         responses.push((id.to_owned(), resp));
+    }
+    // Cut parameter lines open in full, with a background, over everything else.
+    for note in full_notes {
+        let overlay = ui.ctx().layer_painter(egui::LayerId::new(
+            egui::Order::Tooltip,
+            egui::Id::unique("block_note"),
+        ));
+        let galley = overlay.layout_no_wrap(note.text, font(9.0), pal.text);
+        let bg = Rect::from_min_size(note.pos, galley.size()).expand2(Vec2::new(4.0, 1.0));
+        overlay.rect(
+            bg,
+            CornerRadius::same(2),
+            pal.block_fill,
+            Stroke::new(1.0, pal.block_border),
+            StrokeKind::Inside,
+        );
+        overlay.galley(note.pos, galley, pal.text);
     }
 
     // Ports: drag a wire from any port.
@@ -1898,7 +1959,7 @@ fn block_context_menu(app: &mut EditorApp, id: &str, resp: &egui::Response) {
         }
         if let Some(block) = &library_kind {
             let text = if app.lib.is_user(&block.def.info.kind) {
-                "Изменить тип блока..."
+                "Редактировать блок..."
             } else {
                 "Посмотреть тип блока..."
             };

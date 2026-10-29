@@ -1664,6 +1664,10 @@ impl EditorApp {
             }
         };
         ui.add_space(6.0);
+        // The row is as tall as the port selector from the start, so every item is
+        // centred on the same line (a taller item would only lower those after it).
+        let row_height = ui.spacing().interact_size.y;
+        ui.spacing_mut().interact_size.y = 34.0;
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             ui.add(egui::Image::new(&icon).fit_to_exact_size(egui::vec2(24.0, 24.0)));
@@ -1748,6 +1752,7 @@ impl EditorApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
+        ui.spacing_mut().interact_size.y = row_height;
     }
 
     fn toggle_fullscreen(&mut self, ctx: &egui::Context) {
@@ -2180,8 +2185,6 @@ impl EditorApp {
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         let mut cancel = false;
-        // Left edge of the "new version" notice: the download bar sits right under it.
-        let mut notice_x = None;
         let mut install = None;
         ui.horizontal(|ui| {
             self.status_items(ui, &mut cancel);
@@ -2190,7 +2193,6 @@ impl EditorApp {
                 let link = ui
                     .link(format!("Доступна версия {}", release.version))
                     .on_hover_text("Показать, что изменилось");
-                notice_x = Some(link.rect.left());
                 if link.clicked() {
                     self.update_window = true;
                 }
@@ -2204,38 +2206,30 @@ impl EditorApp {
                         install = Some(staged.clone());
                     }
                 }
+                if let SelfUpdate::Downloading { done, total, .. } = &self.self_update {
+                    let (done, total) =
+                        (done.load(Ordering::Relaxed), total.load(Ordering::Relaxed));
+                    let mb = |b: u64| format!("{:.1}", b as f64 / 1_048_576.0).replace('.', ",");
+                    let (fraction, text) = if total > 0 {
+                        (
+                            done as f32 / total as f32,
+                            format!("{} из {} Мб", mb(done), mb(total)),
+                        )
+                    } else {
+                        (0.0, format!("{} Мб", mb(done)))
+                    };
+                    ui.add(
+                        egui::ProgressBar::new(fraction)
+                            .desired_width(110.0)
+                            .desired_height(12.0)
+                            .text(egui::RichText::new(text).small()),
+                    );
+                }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.weak(format!("v{}", update::CURRENT));
             });
         });
-        if let SelfUpdate::Downloading { done, total, .. } = &self.self_update {
-            let (done, total) = (done.load(Ordering::Relaxed), total.load(Ordering::Relaxed));
-            let mb = |b: u64| b as f64 / 1_048_576.0;
-            let (fraction, text) = if total > 0 {
-                (
-                    done as f32 / total as f32,
-                    format!(
-                        "Скачивание обновления: {:.1} из {:.1} МБ",
-                        mb(done),
-                        mb(total)
-                    ),
-                )
-            } else {
-                (0.0, format!("Скачивание обновления: {:.1} МБ", mb(done)))
-            };
-            ui.horizontal(|ui| {
-                if let Some(x) = notice_x {
-                    ui.add_space((x - ui.min_rect().left()).max(0.0));
-                }
-                ui.add(
-                    egui::ProgressBar::new(fraction)
-                        .desired_width(260.0)
-                        .desired_height(12.0)
-                        .text(egui::RichText::new(text).small()),
-                );
-            });
-        }
         if let Some(staged) = install {
             self.apply_update(&ui.ctx().clone(), &staged);
         }
