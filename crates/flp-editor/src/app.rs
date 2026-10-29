@@ -2519,6 +2519,7 @@ impl eframe::App for EditorApp {
             debugview::diagnostics_window(d, &pal, layout, &ctx);
         }
         self.unsaved_dialog(&ctx);
+        crate::textmenu::show(&ctx);
     }
 }
 

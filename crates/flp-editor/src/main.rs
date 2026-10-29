@@ -27,6 +27,7 @@ mod netpanel;
 mod panels;
 mod report;
 mod selfupdate;
+mod textmenu;
 mod theme;
 mod themeedit;
 mod update;
