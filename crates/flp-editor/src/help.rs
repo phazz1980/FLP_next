@@ -47,6 +47,8 @@ pub fn error_anchor(kind: DiagKind) -> &'static str {
     }
 }
 
+/// Page about the block editor.
+pub const BLOCK_EDITOR: &str = "blockeditor";
 /// List of all blocks.
 pub const BLOCKS: &str = "blocks";
 
@@ -56,6 +58,10 @@ const FILES: &[(&str, &str)] = &[
     ("editor", include_str!("../../../help/02-editor.md")),
     ("schema", include_str!("../../../help/03-schema.md")),
     ("library", include_str!("../../../help/04-library.md")),
+    (
+        "blockeditor",
+        include_str!("../../../help/10-block-editor.md"),
+    ),
     ("build", include_str!("../../../help/05-build.md")),
     ("debug", include_str!("../../../help/06-debug.md")),
     ("ai", include_str!("../../../help/07-ai.md")),
@@ -67,6 +73,8 @@ pub struct Page {
     pub id: String,
     pub title: String,
     pub text: String,
+    /// Block folder with the pictures of the page.
+    pub dir: Option<std::path::PathBuf>,
 }
 
 /// Page for a section source: the title is its first heading.
@@ -81,6 +89,7 @@ fn section(id: &str, text: &str) -> Page {
         id: id.to_owned(),
         title,
         text: text.to_owned(),
+        dir: None,
     }
 }
 
@@ -154,6 +163,7 @@ fn block_page(block: &LibraryBlock) -> Page {
         id: format!("{BLOCKS}/{}", info.kind),
         title: info.name.clone(),
         text,
+        dir: Some(block.dir.clone()),
     }
 }
 
@@ -188,6 +198,7 @@ fn block_pages(lib: &Library) -> (Vec<Page>, Vec<Group>) {
             id: BLOCKS.to_owned(),
             title: "Справочник блоков".to_owned(),
             text: index,
+            dir: None,
         },
     );
     (pages, tree)
@@ -342,7 +353,11 @@ impl HelpWindow {
         }
         let anchor = self.anchor.take();
         match self.page(&self.current) {
-            Some(page) => markdown::show_linked(ui, &page.text, anchor.as_deref()),
+            Some(page) => {
+                let images = page.dir.as_deref().map(markdown::dir_images);
+                let find = images.as_ref().map(|f| f as markdown::ImageResolver);
+                markdown::show_with_images(ui, &page.text, anchor.as_deref(), find)
+            }
             None => {
                 ui.label("Такой страницы нет.");
                 ui.link("К содержанию").clicked().then(|| START.to_owned())
@@ -425,6 +440,7 @@ mod tests {
             id: id.into(),
             title: title.into(),
             text: text.into(),
+            dir: None,
         }
     }
 

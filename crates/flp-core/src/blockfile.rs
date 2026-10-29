@@ -17,6 +17,8 @@ pub const EXTENSION: &str = "flpblock";
 pub const EXAMPLE_FILE: &str = "example.flpn";
 /// Folder with the Arduino libraries of the block; every subfolder is one library.
 pub const LIB_DIR: &str = "lib";
+/// Folder with the pictures of `docs.md`; the docs refer to them as `images/<name>`.
+pub const IMAGES_DIR: &str = "images";
 /// Upper bound of the unpacked size, against archives that blow up.
 const MAX_BYTES: u64 = 128 * 1024 * 1024;
 

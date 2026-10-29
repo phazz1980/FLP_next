@@ -16,6 +16,7 @@ mod boardcfg;
 mod canvas;
 mod codeview;
 mod console;
+mod cpphl;
 mod debugview;
 mod dialogs;
 mod doc;

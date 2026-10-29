@@ -427,7 +427,10 @@ fn block_body(app: &EditorApp, ui: &mut Ui, d: &mut BlockDialog) {
                 .id_salt("block_docs")
                 .max_height(ui.ctx().content_rect().height() * 0.7)
                 .auto_shrink([false, true])
-                .show(ui, |ui| crate::markdown::show(ui, &docs));
+                .show(ui, |ui| {
+                    let images = crate::markdown::dir_images(&lib_block.dir);
+                    crate::markdown::show_with_images(ui, &docs, None, Some(&images));
+                });
         });
     });
 }

@@ -23,6 +23,8 @@ flp-debug = { path = "../flp-debug", features = ["serial"] }
 rfd = "0.17"
 ureq = { version = "2", features = ["json"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+egui_extras = { version = "0.37", default-features = false, features = ["image", "file"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

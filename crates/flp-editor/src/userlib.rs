@@ -541,37 +541,42 @@ fn pack_form(app: &EditorApp, ctx: &egui::Context, f: &mut PackForm) -> Option<b
     let valid = editing || is_valid_folder_name(f.name.trim());
     let error = app.theme.palette.error;
     let mut answer = None;
+    // The dialog takes a quarter of the screen: half the width and half the height.
+    let screen = ctx.content_rect().size();
+    let field_width = (screen.x / 2.0 - 140.0).max(200.0);
     egui::Modal::new(Id::unique("userlib_pack_modal")).show(ctx, |ui| {
         let title = if editing {
             "Свойства набора"
         } else {
             "Новый набор блоков"
         };
+        ui.set_width(screen.x / 2.0 - 24.0);
+        ui.set_min_height(screen.y / 2.0 - 24.0);
         ui.label(RichText::new(title).strong());
         egui::Grid::new("pack_form").num_columns(2).show(ui, |ui| {
             ui.label("Название");
             if editing {
                 ui.label(format!("{} · версия {}", f.name, f.version));
             } else {
-                ui.add(egui::TextEdit::singleline(&mut f.name).desired_width(280.0));
+                ui.add(egui::TextEdit::singleline(&mut f.name).desired_width(field_width));
             }
             ui.end_row();
             ui.label("Описание");
-            ui.add(egui::TextEdit::singleline(&mut f.description).desired_width(280.0));
+            ui.add(egui::TextEdit::singleline(&mut f.description).desired_width(field_width));
             ui.end_row();
             ui.label("Автор");
-            ui.add(egui::TextEdit::singleline(&mut f.authors).desired_width(280.0));
+            ui.add(egui::TextEdit::singleline(&mut f.authors).desired_width(field_width));
             ui.end_row();
             ui.label("Контакты");
             ui.add(
                 egui::TextEdit::multiline(&mut f.contacts)
-                    .desired_rows(3)
-                    .desired_width(280.0)
+                    .desired_rows(5)
+                    .desired_width(field_width)
                     .hint_text("почта, ссылка или соцсеть — по одной в строке"),
             );
             ui.end_row();
             ui.label("Лицензия");
-            ui.add(egui::TextEdit::singleline(&mut f.license).desired_width(280.0));
+            ui.add(egui::TextEdit::singleline(&mut f.license).desired_width(field_width));
             ui.end_row();
         });
         if !valid && !f.name.trim().is_empty() {

@@ -216,6 +216,10 @@ struct Form {
 struct Attach {
     libs: Vec<AttachedLib>,
     example: Example,
+    /// Pictures of the docs not in the block folder yet: name in `images/` → file to copy.
+    images: Vec<(String, PathBuf)>,
+    /// The block folder, where the saved pictures are.
+    home: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -223,6 +227,8 @@ struct AttachedLib {
     name: String,
     /// Folder to copy in on save; `None` - already in the block folder.
     src: Option<PathBuf>,
+    /// Header put into the block's includes when the library was attached.
+    header: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -245,6 +251,7 @@ impl Attach {
             .map(|e| AttachedLib {
                 name: e.file_name().to_string_lossy().into_owned(),
                 src: None,
+                header: None,
             })
             .collect();
         libs.sort_by(|a, b| a.name.cmp(&b.name));
@@ -253,7 +260,12 @@ impl Attach {
         } else {
             Example::None
         };
-        Self { libs, example }
+        Self {
+            libs,
+            example,
+            images: Vec::new(),
+            home: Some(dir.to_owned()),
+        }
     }
 
     /// The same attachments for a copy of the block: everything is copied from `dir`.
@@ -265,11 +277,67 @@ impl Attach {
         if a.example == Example::Saved {
             a.example = Example::New(dir.join(flp_core::blockfile::EXAMPLE_FILE));
         }
+        let pictures = fs::read_dir(dir.join(flp_core::blockfile::IMAGES_DIR));
+        for e in pictures.into_iter().flatten().flatten() {
+            if e.path().is_file() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                a.images.push((name, e.path()));
+            }
+        }
+        a.home = None;
         a
     }
 
-    /// Makes the block folder `dir` hold exactly these attachments.
-    fn apply(&mut self, dir: &Path) -> Result<(), String> {
+    /// File of a docs picture `images/<name>`: waiting to be saved or already in the folder.
+    fn image_path(&self, target: &str) -> Option<PathBuf> {
+        let name = target.strip_prefix("images/")?;
+        if name.contains('/') || !crate::markdown::is_local_image(target) {
+            return None;
+        }
+        if let Some((_, src)) = self.images.iter().find(|(n, _)| n == name) {
+            return Some(src.clone());
+        }
+        let home = self.home.as_ref()?;
+        Some(home.join(flp_core::blockfile::IMAGES_DIR).join(name))
+    }
+
+    /// Takes a picture file into the docs; returns its target `images/<name>`.
+    fn add_image(&mut self, src: PathBuf) -> String {
+        // A plain ASCII name: the target stays easy to type and safe in the docs and the archive.
+        let mut stem = String::new();
+        for c in src
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .chars()
+        {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                stem.push(c);
+            } else if !stem.ends_with('_') {
+                stem.push('_');
+            }
+        }
+        let stem = stem.trim_matches('_');
+        let stem = if stem.is_empty() { "image" } else { stem };
+        let ext = src
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_else(|| "png".into());
+        let mut name = format!("{stem}.{ext}");
+        let mut n = 1;
+        while self
+            .image_path(&format!("images/{name}"))
+            .is_some_and(|p| p.is_file() || self.images.iter().any(|(i, _)| *i == name))
+        {
+            n += 1;
+            name = format!("{stem}_{n}.{ext}");
+        }
+        self.images.push((name.clone(), src));
+        format!("images/{name}")
+    }
+
+    /// Makes the block folder `dir` hold exactly these attachments and the pictures `docs` uses.
+    fn apply(&mut self, dir: &Path, docs: &str) -> Result<(), String> {
         let lib_root = dir.join(flp_core::blockfile::LIB_DIR);
         let err = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
         if let Ok(entries) = fs::read_dir(&lib_root) {
@@ -299,6 +367,32 @@ impl Attach {
                 self.example = Example::Saved;
             }
         }
+        self.apply_images(dir, docs)?;
+        self.home = Some(dir.to_owned());
+        Ok(())
+    }
+
+    /// Copies the pictures the docs use into `images/` and drops the others.
+    fn apply_images(&mut self, dir: &Path, docs: &str) -> Result<(), String> {
+        let root = dir.join(flp_core::blockfile::IMAGES_DIR);
+        let used: Vec<String> = crate::markdown::image_targets(docs)
+            .iter()
+            .filter_map(|t| t.strip_prefix("images/").map(str::to_owned))
+            .collect();
+        for (name, src) in std::mem::take(&mut self.images) {
+            if !used.contains(&name) || src == root.join(&name) {
+                continue;
+            }
+            let err = |e: std::io::Error| format!("{}: {e}", src.display());
+            fs::create_dir_all(&root).map_err(err)?;
+            fs::copy(&src, root.join(&name)).map_err(err)?;
+        }
+        for e in fs::read_dir(&root).into_iter().flatten().flatten() {
+            if !used.contains(&e.file_name().to_string_lossy().into_owned()) {
+                let _ = fs::remove_file(e.path());
+            }
+        }
+        let _ = fs::remove_dir(&root);
         Ok(())
     }
 }
@@ -370,6 +464,23 @@ impl Form {
         }
     }
 
+    /// Group (`input`, `output`, `param`) and trimmed name of every row, in table order.
+    fn row_names(&self) -> Vec<(&'static str, String)> {
+        let rows = |group, names: Vec<&String>| {
+            names
+                .into_iter()
+                .map(|n| (group, n.trim().to_owned()))
+                .collect::<Vec<_>>()
+        };
+        let mut all = rows("input", self.inputs.iter().map(|p| &p.name).collect());
+        all.extend(rows(
+            "output",
+            self.outputs.iter().map(|p| &p.name).collect(),
+        ));
+        all.extend(rows("param", self.params.iter().map(|p| &p.name).collect()));
+        all
+    }
+
     /// Block definition from the form, checked the same way the library checks it.
     fn to_def(&self) -> Result<BlockDef, String> {
         let kind = self.kind.trim().to_owned();
@@ -428,6 +539,46 @@ fn list(text: &str) -> Vec<String> {
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+/// Main header of an Arduino library folder: `<name>.h` in `src/` (or the folder
+/// itself for old layouts), else the only header there.
+fn library_header(dir: &Path, name: &str) -> Option<String> {
+    [dir.join("src"), dir.to_path_buf()]
+        .into_iter()
+        .find_map(|d| {
+            let mut headers: Vec<String> = fs::read_dir(d)
+                .ok()?
+                .flatten()
+                .filter(|e| e.path().is_file())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|f| f.to_lowercase().ends_with(".h"))
+                .collect();
+            headers.sort();
+            let named = headers
+                .iter()
+                .find(|h| h[..h.len() - 2].eq_ignore_ascii_case(name));
+            match (named, headers.len()) {
+                (Some(h), _) => Some(h.clone()),
+                (None, 1) => headers.pop(),
+                _ => None,
+            }
+        })
+}
+
+/// `includes` (comma-separated) with `header` added once.
+fn with_include(includes: &str, header: &str) -> String {
+    let mut all = list(includes);
+    if !all.iter().any(|h| h == header) {
+        all.push(header.to_owned());
+    }
+    all.join(", ")
+}
+
+/// `includes` (comma-separated) without `header`.
+fn without_include(includes: &str, header: &str) -> String {
+    let all: Vec<String> = list(includes).into_iter().filter(|h| h != header).collect();
+    all.join(", ")
 }
 
 fn parse_bool(t: &str) -> Option<bool> {
@@ -522,6 +673,8 @@ pub struct BlockEditor {
     read_only: bool,
     /// Sections, packs and folders a new block may be put into.
     folders: Vec<String>,
+    /// Names of inputs, outputs and parameters as of the last frame, to follow renames.
+    names: Vec<(&'static str, String)>,
 }
 
 impl BlockEditor {
@@ -571,6 +724,25 @@ impl BlockEditor {
             confirm_close: false,
             read_only: false,
             folders: Vec::new(),
+            names: Vec::new(),
+        }
+    }
+
+    /// When a port or parameter is renamed, its references in the template follow,
+    /// so the code tab does not fail on the old name while the new one is typed.
+    fn follow_renames(&mut self) {
+        let now = self.form.row_names();
+        if self.names.len() != now.len() {
+            self.names = now;
+            return;
+        }
+        for (old, new) in self.names.iter_mut().zip(now) {
+            // A field cleared on the way to a new name keeps the old name until it is typed.
+            if new.1.is_empty() || old.0 != new.0 || old.1 == new.1 {
+                continue;
+            }
+            self.form.template = rename_in_template(&self.form.template, old.0, &old.1, &new.1);
+            old.1 = new.1;
         }
     }
 
@@ -699,6 +871,9 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
         ed.clean.kind.clone_from(&kind);
         ed.form.kind = kind;
     }
+    if !ed.read_only {
+        ed.follow_renames();
+    }
     let def = ed.form.to_def();
     if let Ok(def) = &def {
         ed.update_generated(def);
@@ -706,6 +881,7 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
 
     // Panels inside the window: the footer stays visible and the tab gets the rest.
     let mut close = false;
+    let mut help = None;
     egui::Panel::bottom("block_editor_footer").show(ui, |ui| {
         status(ui, ed, &def, &pal);
         close = footer(app, ui, ed, &def);
@@ -738,6 +914,23 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
             for (tab, text) in tabs {
                 ui.selectable_value(&mut ed.tab, tab, text);
             }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .button("? Справка")
+                    .on_hover_text("Справка по редактору блока: открывается на текущей вкладке")
+                    .clicked()
+                {
+                    let anchor = match ed.tab {
+                        Tab::Ports => "входы-и-выходы",
+                        Tab::Params => "параметры",
+                        Tab::Code => "код-esp32",
+                        Tab::Docs => "описание",
+                        Tab::Files => "библиотека-и-пример",
+                        Tab::Sketch => "пробная-генерация",
+                    };
+                    help = Some(format!("{}#{anchor}", crate::help::BLOCK_EDITOR));
+                }
+            });
         });
     });
     let editable = !ed.read_only;
@@ -753,29 +946,16 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
                     ui.add_enabled_ui(editable, |ui| params_tab(ui, &mut ed.form));
                 }
                 Tab::Code => code_tab(ui, &mut ed.form, editable),
-                Tab::Docs => {
-                    ui.weak("docs.md: пояснение и пример. По нему ИИ-помощник подбирает блоки.");
-                    ui.weak(
-                        "Разметка Markdown: # заголовок, **жирный**, *курсив*, `код`, \
-                         - список, 1. список, > цитата, ``` блок кода ```, | таблица |.",
-                    );
-                    ui.columns(2, |cols| {
-                        cols[0].add(
-                            TextEdit::multiline(&mut ed.form.docs)
-                                .interactive(editable)
-                                .desired_width(f32::INFINITY)
-                                .desired_rows(20),
-                        );
-                        cols[1].label(RichText::new("Предпросмотр").weak());
-                        crate::markdown::show(&mut cols[1], &ed.form.docs);
-                    });
-                }
+                Tab::Docs => docs_tab(ui, &mut ed.form, editable),
                 Tab::Files => {
-                    ui.add_enabled_ui(editable, |ui| files_tab(ui, &mut ed.form.attach));
+                    ui.add_enabled_ui(editable, |ui| files_tab(ui, &mut ed.form));
                 }
                 Tab::Sketch => sketch_tab(ui, ed, &pal),
             });
     });
+    if let Some(target) = help {
+        app.open_help(&target);
+    }
     close
 }
 
@@ -851,12 +1031,6 @@ fn header(ui: &mut Ui, ed: &mut BlockEditor) {
             });
             ui.end_row();
 
-            ui.label("Заголовки");
-            ui.add_sized(
-                [160.0, 20.0],
-                TextEdit::singleline(&mut f.includes).hint_text("DHT.h, Wire.h"),
-            )
-            .on_hover_text("Файлы для #include через запятую");
             ui.label("Библиотеки");
             ui.add_sized(
                 [220.0, 20.0],
@@ -923,6 +1097,33 @@ fn type_combo(ui: &mut Ui, id: (&str, usize), ty: &mut SignalType) {
         });
 }
 
+/// Choice of the value of an unconnected `bool` input: `true`, `false` or required (empty).
+fn bool_default_combo(ui: &mut Ui, id: (&str, usize), default: &mut String) {
+    // Text left from another type or typed by hand shows as the nearest choice.
+    *default = match parse_bool(default.trim()) {
+        Some(true) => "true",
+        Some(false) => "false",
+        None => "",
+    }
+    .to_owned();
+    let shown = if default.is_empty() {
+        "обязателен"
+    } else {
+        default.as_str()
+    };
+    egui::ComboBox::from_id_salt(("bool_default", id))
+        .selected_text(shown)
+        .width(90.0)
+        .show_ui(ui, |ui| {
+            for (value, text) in [("", "обязателен"), ("true", "true"), ("false", "false")]
+            {
+                ui.selectable_value(default, value.to_owned(), text);
+            }
+        })
+        .response
+        .on_hover_text("Значение неподключённого входа; «обязателен» — вход надо подключить");
+}
+
 /// A name not used by any port or parameter of the form.
 fn free_name(f: &Form, base: &str) -> String {
     let taken = |n: &str| {
@@ -947,12 +1148,11 @@ fn ports_table(ui: &mut Ui, id: &str, rows: &mut Vec<PortRow>, inputs: bool) {
     let mut op = None;
     let len = rows.len();
     egui::Grid::new(id)
-        .num_columns(7)
+        .num_columns(6)
         .striped(true)
         .spacing([8.0, 4.0])
         .show(ui, |ui| {
             ui.label(RichText::new("Имя").strong());
-            ui.label(RichText::new("Подпись").strong());
             ui.label(RichText::new("Тип").strong());
             ui.label(
                 RichText::new(if inputs {
@@ -968,9 +1168,10 @@ fn ports_table(ui: &mut Ui, id: &str, rows: &mut Vec<PortRow>, inputs: bool) {
             ui.end_row();
             for (i, row) in rows.iter_mut().enumerate() {
                 ui.add_sized([90.0, 20.0], TextEdit::singleline(&mut row.name));
-                label_edit(ui, &mut row.label, &row.name);
                 type_combo(ui, (id, i), &mut row.ty);
-                if inputs {
+                if inputs && row.ty == SignalType::Bool {
+                    bool_default_combo(ui, (id, i), &mut row.default);
+                } else if inputs {
                     ui.add_sized(
                         [90.0, 20.0],
                         TextEdit::singleline(&mut row.default).hint_text("обязателен"),
@@ -995,14 +1196,6 @@ fn ports_table(ui: &mut Ui, id: &str, rows: &mut Vec<PortRow>, inputs: bool) {
     apply_op(rows, op);
 }
 
-/// Caption field of a port or parameter; the name shows through while it is empty.
-fn label_edit(ui: &mut Ui, label: &mut String, name: &str) {
-    ui.add_sized([120.0, 20.0], TextEdit::singleline(label).hint_text(name))
-        .on_hover_text(
-            "Как вход, выход или параметр называется на блоке и в свойствах;              можно по-русски. Пусто — показывается имя.",
-        );
-}
-
 fn ports_tab(ui: &mut Ui, f: &mut Form) {
     ui.horizontal(|ui| {
         ui.label(RichText::new("Входы").strong());
@@ -1024,7 +1217,7 @@ fn ports_tab(ui: &mut Ui, f: &mut Form) {
     ui.add_space(8.0);
     ui.weak(
         "Имена — буквы (можно русские), цифры и «_», без пробелов: по ним блок связан в схеме \
-         и в коде; название с пробелами пишите в «Подпись». Входы, выходы и параметры не могут называться \
+         и в коде; Входы, выходы и параметры не могут называться \
          одинаково, имена id и type заняты. Неявно приводится только int → float.",
     );
 }
@@ -1041,13 +1234,12 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
     let mut op = None;
     let len = f.params.len();
     egui::Grid::new("block_params")
-        .num_columns(10)
+        .num_columns(9)
         .striped(true)
         .spacing([8.0, 4.0])
         .show(ui, |ui| {
             for h in [
                 "Имя",
-                "Подпись",
                 "Вид",
                 "По умолчанию",
                 "Мин.",
@@ -1062,7 +1254,6 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
             ui.end_row();
             for (i, row) in f.params.iter_mut().enumerate() {
                 ui.add_sized([90.0, 20.0], TextEdit::singleline(&mut row.name));
-                label_edit(ui, &mut row.label, &row.name);
                 ui.horizontal(|ui| {
                     egui::ComboBox::from_id_salt(("param_kind", i))
                         .selected_text(kind_label(row.kind))
@@ -1165,6 +1356,40 @@ fn row_title(name: &str, label: &str) -> String {
     }
 }
 
+/// Replaces `group.old` and `group["old"]` in a template by the new name.
+fn rename_in_template(template: &str, group: &str, old: &str, new: &str) -> String {
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    let dotted = format!("{group}.{old}");
+    while let Some(at) = rest.find(group) {
+        let (head, tail) = rest.split_at(at);
+        out.push_str(head);
+        let before_ok = !head.chars().next_back().is_some_and(is_word);
+        if before_ok && tail.starts_with(&dotted) && !tail[dotted.len()..].starts_with(is_word) {
+            out.push_str(&format!("{group}.{new}"));
+            rest = &tail[dotted.len()..];
+            continue;
+        }
+        let mut done = false;
+        for q in ['"', '\''] {
+            let quoted = format!("{group}[{q}{old}{q}]");
+            if before_ok && tail.starts_with(&quoted) {
+                out.push_str(&format!("{group}[{q}{new}{q}]"));
+                rest = &tail[quoted.len()..];
+                done = true;
+                break;
+            }
+        }
+        if !done {
+            out.push_str(group);
+            rest = &tail[group.len()..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Port substitutions: `{{ input.x }}` or `{{ output.x }}`.
 fn port_snippets(rows: &[PortRow], kind: &str) -> Vec<Snippet> {
     rows.iter()
@@ -1226,7 +1451,253 @@ fn insert_at_cursor(ctx: &egui::Context, id: Id, template: &mut String, text: &s
     ctx.memory_mut(|m| m.request_focus(id));
 }
 
+/// A Markdown template of the docs toolbar.
+#[derive(Debug, Clone, PartialEq)]
+enum Fmt {
+    Bold,
+    Italic,
+    Code,
+    Heading(usize),
+    Bullets,
+    Numbered,
+    Quote,
+    CodeBlock,
+    Table,
+    Link,
+    /// Picture `![описание](target)` on a line of its own.
+    Image(String),
+}
+
+/// Applies `fmt` to the chars `start..end` of `text`; returns the new text and the new selection.
+fn format_selection(text: &str, start: usize, end: usize, fmt: &Fmt) -> (String, usize, usize) {
+    let chars: Vec<char> = text.chars().collect();
+    let (start, end) = (
+        start.min(end).min(chars.len()),
+        start.max(end).min(chars.len()),
+    );
+    let sel: String = chars[start..end].iter().collect();
+    let before: String = chars[..start].iter().collect();
+    let after: String = chars[end..].iter().collect();
+    let len = |s: &str| s.chars().count();
+    // Text put in place of the selection, and the selection inside it.
+    let (insert, from, to) = match fmt {
+        Fmt::Bold | Fmt::Italic | Fmt::Code => {
+            let mark = match fmt {
+                Fmt::Bold => "**",
+                Fmt::Italic => "*",
+                _ => "`",
+            };
+            let inner = if sel.is_empty() { "текст" } else { &sel };
+            let m = len(mark);
+            (format!("{mark}{inner}{mark}"), m, m + len(inner))
+        }
+        Fmt::Link => {
+            let url = "https://";
+            if sel.is_empty() {
+                (format!("[текст]({url})"), 1, 1 + len("текст"))
+            } else {
+                let at = len(&sel) + 3;
+                (format!("[{sel}]({url})"), at, at + len(url))
+            }
+        }
+        Fmt::Heading(_) | Fmt::Bullets | Fmt::Numbered | Fmt::Quote => {
+            return prefix_lines(&chars, start, end, fmt);
+        }
+        Fmt::CodeBlock | Fmt::Table | Fmt::Image(_) => {
+            // A block stands on lines of its own.
+            let lead = if before.is_empty() || before.ends_with('\n') {
+                ""
+            } else {
+                "\n"
+            };
+            let tail = if after.starts_with('\n') { "" } else { "\n" };
+            let inner = if sel.is_empty() { "код" } else { &sel };
+            let (body, from, to) = match fmt {
+                Fmt::CodeBlock => (format!("```\n{inner}\n```"), 4, 4 + len(inner)),
+                Fmt::Image(target) => (format!("![описание]({target})"), 2, 2 + len("описание")),
+                _ => {
+                    let table = "| Колонка 1 | Колонка 2 |\n|---|---|\n| значение | значение |";
+                    (table.to_owned(), len(table), len(table))
+                }
+            };
+            let lead_len = len(lead);
+            (
+                format!("{lead}{body}{tail}"),
+                lead_len + from,
+                lead_len + to,
+            )
+        }
+    };
+    (format!("{before}{insert}{after}"), start + from, start + to)
+}
+
+/// Adds a line prefix to the lines the selection touches, or removes it when every line has it.
+fn prefix_lines(chars: &[char], start: usize, end: usize, fmt: &Fmt) -> (String, usize, usize) {
+    let line_start = chars[..start]
+        .iter()
+        .rposition(|&c| c == '\n')
+        .map_or(0, |i| i + 1);
+    // A selection ending right after a line break does not touch the next line.
+    let last = if end > start && chars[end - 1] == '\n' {
+        end - 1
+    } else {
+        end
+    };
+    let line_end = chars[last..]
+        .iter()
+        .position(|&c| c == '\n')
+        .map_or(chars.len(), |i| last + i);
+    let block: String = chars[line_start..line_end].iter().collect();
+    let lines: Vec<&str> = block.split('\n').collect();
+
+    let prefix = |n: usize| match fmt {
+        Fmt::Heading(level) => format!("{} ", "#".repeat(*level)),
+        Fmt::Bullets => "- ".to_owned(),
+        Fmt::Numbered => format!("{}. ", n + 1),
+        _ => "> ".to_owned(),
+    };
+    // Bytes of the prefix of this kind that the line already has.
+    let existing = |line: &str| -> usize {
+        match fmt {
+            Fmt::Heading(_) => {
+                let hashes = line.bytes().take_while(|&b| b == b'#').count();
+                if hashes > 0 && line[hashes..].starts_with(' ') {
+                    hashes + 1
+                } else {
+                    0
+                }
+            }
+            Fmt::Bullets if line.starts_with("- ") => 2,
+            Fmt::Quote if line.starts_with("> ") => 2,
+            Fmt::Numbered => {
+                let digits = line.bytes().take_while(u8::is_ascii_digit).count();
+                if digits > 0 && line[digits..].starts_with(". ") {
+                    digits + 2
+                } else {
+                    0
+                }
+            }
+            _ => 0,
+        }
+    };
+    let remove = match fmt {
+        // The same heading level again removes it; another level replaces it.
+        Fmt::Heading(level) => lines.iter().all(|l| existing(l) == level + 1),
+        _ => lines.iter().all(|l| existing(l) > 0),
+    };
+    let out: Vec<String> = lines
+        .iter()
+        .enumerate()
+        .map(|(n, line)| {
+            let rest = &line[existing(line)..];
+            if remove {
+                rest.to_owned()
+            } else {
+                format!("{}{rest}", prefix(n))
+            }
+        })
+        .collect();
+    let out = out.join("\n");
+    let before: String = chars[..line_start].iter().collect();
+    let after: String = chars[line_end..].iter().collect();
+    let to = line_start + out.chars().count();
+    (format!("{before}{out}{after}"), line_start, to)
+}
+
+/// Applies `fmt` to the selection of the text field `id` and keeps the result selected.
+fn format_at_cursor(ctx: &egui::Context, id: Id, text: &mut String, fmt: &Fmt) {
+    use egui::text::{CCursor, CCursorRange};
+    let mut state = egui::text_edit::TextEditState::load(ctx, id).unwrap_or_default();
+    let chars = text.chars().count();
+    let (start, end) = state
+        .cursor
+        .char_range()
+        .map_or((chars, chars), |r| (r.primary.index.0, r.secondary.index.0));
+    let (new, from, to) = format_selection(text, start, end, fmt);
+    *text = new;
+    let range = CCursorRange::two(CCursor::new(from), CCursor::new(to));
+    state.cursor.set_char_range(Some(range));
+    state.store(ctx, id);
+    ctx.memory_mut(|m| m.request_focus(id));
+}
+
+/// Tab «Описание»: formatting buttons, the Markdown text and a live preview.
+fn docs_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
+    let id = Id::unique("block_docs_text");
+    ui.weak("docs.md: пояснение и пример. По нему ИИ-помощник подбирает блоки.");
+    if editable {
+        let mut apply = None;
+        ui.horizontal_wrapped(|ui| {
+            let buttons = [
+                ("Ж", "Жирный: **текст**", Fmt::Bold),
+                ("К", "Курсив: *текст*", Fmt::Italic),
+                ("`код`", "Код в строке", Fmt::Code),
+                ("H1", "Заголовок первого уровня", Fmt::Heading(1)),
+                ("H2", "Заголовок второго уровня", Fmt::Heading(2)),
+                ("H3", "Заголовок третьего уровня", Fmt::Heading(3)),
+                (
+                    "• Список",
+                    "Маркированный список; повторное нажатие снимает",
+                    Fmt::Bullets,
+                ),
+                (
+                    "1. Список",
+                    "Нумерованный список; повторное нажатие снимает",
+                    Fmt::Numbered,
+                ),
+                ("Цитата", "Цитата: > текст", Fmt::Quote),
+                ("Блок кода", "Блок кода в ```", Fmt::CodeBlock),
+                ("Таблица", "Таблица 2×2", Fmt::Table),
+                ("Ссылка", "[текст](адрес)", Fmt::Link),
+            ];
+            for (text, hint, fmt) in buttons {
+                if ui.button(text).on_hover_text(hint).clicked() {
+                    apply = Some(fmt);
+                }
+            }
+            let hint = "Вставить картинку из файла (png, jpg, gif, bmp). \
+                        При сохранении она копируется в папку блока";
+            if ui.button("Картинка...").on_hover_text(hint).clicked() {
+                let file = rfd::FileDialog::new()
+                    .set_title("Картинка для описания")
+                    .add_filter("Изображения", &["png", "jpg", "jpeg", "gif", "bmp"])
+                    .pick_file();
+                if let Some(file) = file {
+                    apply = Some(Fmt::Image(f.attach.add_image(file)));
+                }
+            }
+        });
+        if let Some(fmt) = apply {
+            format_at_cursor(ui.ctx(), id, &mut f.docs, &fmt);
+        }
+    }
+    ui.add_space(4.0);
+    ui.columns(2, |cols| {
+        cols[0].add(
+            TextEdit::multiline(&mut f.docs)
+                .id(id)
+                .interactive(editable)
+                .desired_width(f32::INFINITY)
+                .desired_rows(20),
+        );
+        cols[1].label(RichText::new("Предпросмотр").weak());
+        let attach = &f.attach;
+        let find = |target: &str| attach.image_path(target);
+        crate::markdown::show_with_images(&mut cols[1], &f.docs, None, Some(&find));
+    });
+}
+
 fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
+    ui.horizontal(|ui| {
+        ui.label("Заголовки");
+        ui.add_enabled(
+            editable,
+            TextEdit::singleline(&mut f.includes)
+                .hint_text("DHT.h, Wire.h")
+                .desired_width(260.0),
+        )
+        .on_hover_text("Файлы для #include через запятую");
+    });
     ui.weak(SECTIONS_HINT);
     let inputs = port_snippets(&f.inputs, "input");
     let outputs = port_snippets(&f.outputs, "output");
@@ -1299,9 +1770,11 @@ fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
 
     if !editable {
         let mut text = f.template.as_str();
+        let mut layouter = crate::cpphl::layouter(true);
         ui.add(
             TextEdit::multiline(&mut text)
                 .code_editor()
+                .layouter(&mut layouter)
                 .desired_width(f32::INFINITY)
                 .desired_rows(24),
         );
@@ -1322,9 +1795,11 @@ fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
         }
     });
     ui.weak("Правая кнопка в поле кода — меню подстановок; вставка идёт в место курсора.");
+    let mut layouter = crate::cpphl::layouter(true);
     let output = TextEdit::multiline(&mut f.template)
         .id(id)
         .code_editor()
+        .layouter(&mut layouter)
         .desired_width(f32::INFINITY)
         .desired_rows(24)
         .show(ui);
@@ -1350,10 +1825,13 @@ fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
     }
 }
 
-fn files_tab(ui: &mut Ui, attach: &mut Attach) {
+fn files_tab(ui: &mut Ui, f: &mut Form) {
+    let attach = &mut f.attach;
     ui.weak(
         "Библиотека Arduino и пример лежат в папке блока и едут вместе с ним \
-         в файле .flpblock и в проекте. Сборка подхватывает библиотеки сама.",
+         в файле .flpblock и в проекте. Сборка подхватывает библиотеки сама, \
+         а главный заголовок прикреплённой библиотеки попадает в поле «Заголовки» \
+         на вкладке «Код ESP32».",
     );
     ui.add_space(6.0);
     ui.label(RichText::new("Библиотеки").strong());
@@ -1370,7 +1848,10 @@ fn files_tab(ui: &mut Ui, attach: &mut Attach) {
         });
     }
     if let Some(i) = remove {
-        attach.libs.remove(i);
+        let lib = attach.libs.remove(i);
+        if let Some(header) = lib.header {
+            f.includes = without_include(&f.includes, &header);
+        }
     }
     if attach.libs.is_empty() {
         ui.weak("Нет прикреплённых библиотек");
@@ -1389,9 +1870,14 @@ fn files_tab(ui: &mut Ui, attach: &mut Attach) {
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
             if !name.is_empty() && !attach.libs.iter().any(|l| l.name == name) {
+                let header = library_header(&dir, &name);
+                if let Some(header) = &header {
+                    f.includes = with_include(&f.includes, header);
+                }
                 attach.libs.push(AttachedLib {
                     name,
                     src: Some(dir),
+                    header,
                 });
             }
         }
@@ -1441,9 +1927,11 @@ fn sketch_tab(ui: &mut Ui, ed: &BlockEditor, pal: &Palette) {
                     flp_codegen::preview_id(&g.def)
                 ));
                 let mut text = code.as_str();
+                let mut layouter = crate::cpphl::layouter(false);
                 ui.add(
                     TextEdit::multiline(&mut text)
                         .code_editor()
+                        .layouter(&mut layouter)
                         .desired_width(f32::INFINITY),
                 );
             }
@@ -1571,7 +2059,7 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
                 LogLevel::Ok,
                 format!("Блок «{}» сохранён в {}", def.info.name, dir.display()),
             );
-            if let Err(e) = ed.form.attach.apply(&dir) {
+            if let Err(e) = ed.form.attach.apply(&dir, &ed.form.docs) {
                 app.info(
                     LogLevel::Error,
                     format!("Библиотека или пример не сохранены: {e}"),
@@ -1748,6 +2236,153 @@ min = 0
         // The cursor moved after the inserted text.
         insert_at_cursor(&ctx, id, &mut text, "Y");
         assert_eq!(text, "аXYв");
+    }
+
+    #[test]
+    fn docs_formatting_wraps_selection() {
+        // "абв" with "б" selected.
+        let (text, from, to) = format_selection("абв", 1, 2, &Fmt::Bold);
+        assert_eq!((text.as_str(), from, to), ("а**б**в", 3, 4));
+        // No selection: a placeholder is inserted and selected.
+        let (text, from, to) = format_selection("", 0, 0, &Fmt::Code);
+        assert_eq!((text.as_str(), from, to), ("`текст`", 1, 6));
+        let (text, from, to) = format_selection("см. ", 4, 4, &Fmt::Link);
+        assert_eq!(text, "см. [текст](https://)");
+        assert_eq!((from, to), (5, 10));
+        let (text, from, to) = format_selection("сайт", 0, 4, &Fmt::Link);
+        assert_eq!(text, "[сайт](https://)");
+        assert_eq!((from, to), (7, 15));
+    }
+
+    #[test]
+    fn docs_formatting_prefixes_lines() {
+        let (text, ..) = format_selection(
+            "один
+два
+три",
+            2,
+            7,
+            &Fmt::Bullets,
+        );
+        assert_eq!(
+            text,
+            "- один
+- два
+три"
+        );
+        // Again: the prefix goes away.
+        let (text, ..) = format_selection(&text, 0, 10, &Fmt::Bullets);
+        assert_eq!(
+            text,
+            "один
+два
+три"
+        );
+        let (text, ..) = format_selection(
+            "а
+б",
+            0,
+            3,
+            &Fmt::Numbered,
+        );
+        assert_eq!(
+            text,
+            "1. а
+2. б"
+        );
+        // A heading level replaces another one and toggles off on the same.
+        let (text, ..) = format_selection("# Тема", 0, 0, &Fmt::Heading(2));
+        assert_eq!(text, "## Тема");
+        let (text, ..) = format_selection(&text, 0, 0, &Fmt::Heading(2));
+        assert_eq!(text, "Тема");
+    }
+
+    #[test]
+    fn docs_blocks_stand_on_own_lines() {
+        let (text, ..) = format_selection("текст", 5, 5, &Fmt::Image("images/a.png".into()));
+        assert_eq!(
+            text,
+            "текст
+![описание](images/a.png)
+"
+        );
+        let (text, from, to) = format_selection("", 0, 0, &Fmt::CodeBlock);
+        assert_eq!(
+            (text.as_str(), from, to),
+            (
+                "```
+код
+```
+",
+                4,
+                7
+            )
+        );
+    }
+
+    #[test]
+    fn docs_pictures_are_copied_and_pruned() {
+        let dir = std::env::temp_dir().join(format!("flp_docs_img_{}", std::process::id()));
+        let block = dir.join("block");
+        fs::create_dir_all(&block).unwrap();
+        let pic = dir.join("Схема 1.png");
+        fs::write(&pic, "png").unwrap();
+        fs::write(dir.join("old.png"), "png").unwrap();
+
+        let mut attach = Attach::default();
+        let target = attach.add_image(pic.clone());
+        assert_eq!(target, "images/1.png");
+        assert_eq!(attach.image_path(&target), Some(pic.clone()));
+        // The same file again gets another name.
+        assert_eq!(attach.add_image(pic), "images/1_2.png");
+
+        let docs = format!(
+            "![схема]({target})
+"
+        );
+        attach.apply(&block, &docs).unwrap();
+        let root = block.join(flp_core::blockfile::IMAGES_DIR);
+        assert!(root.join("1.png").is_file());
+        assert!(!root.join("1_2.png").exists());
+        assert_eq!(attach.image_path(&target), Some(root.join("1.png")));
+
+        // A picture the docs no longer use is removed with the folder.
+        attach.apply(&block, "без картинок").unwrap();
+        assert!(!root.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn attached_library_adds_its_header() {
+        let dir = std::env::temp_dir().join(format!("flp_lib_header_{}", std::process::id()));
+        let lib = dir.join("DHT sensor library");
+        fs::create_dir_all(lib.join("src")).unwrap();
+        fs::write(lib.join("src/DHT.h"), "").unwrap();
+        fs::write(lib.join("src/DHT_U.h"), "").unwrap();
+        assert_eq!(
+            library_header(&lib, "dht"),
+            Some("DHT.h".to_owned()),
+            "header named like the library wins"
+        );
+        assert_eq!(library_header(&lib, "other"), None);
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(with_include("Wire.h", "DHT.h"), "Wire.h, DHT.h");
+        assert_eq!(with_include("DHT.h", "DHT.h"), "DHT.h");
+        assert_eq!(without_include("Wire.h, DHT.h", "DHT.h"), "Wire.h");
+    }
+
+    #[test]
+    fn rename_follows_in_template() {
+        let t = "{{ output.out }} = {{ input.in }} + {{ input.in2 }}; {{ input[\"in\"] }} {{ param.in }}";
+        assert_eq!(
+            rename_in_template(t, "input", "in", "вход"),
+            "{{ output.out }} = {{ input.вход }} + {{ input.in2 }}; {{ input[\"вход\"] }} {{ param.in }}"
+        );
+        let mut form = Form::new_block("demo".into(), String::new());
+        form.inputs[0].name = "вход".into();
+        form.template = rename_in_template(&form.template, "input", "in", "вход");
+        let def = form.to_def().unwrap();
+        assert!(flp_codegen::preview_block(&def, &form.template).is_ok());
     }
 
     #[test]

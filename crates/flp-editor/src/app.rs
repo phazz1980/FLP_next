@@ -304,6 +304,7 @@ impl EditorApp {
         {
             app.theme = t;
         }
+        egui_extras::install_image_loaders(&cc.egui_ctx);
         theme::apply(&cc.egui_ctx, &app.theme);
         app.scan_ports(&cc.egui_ctx);
         if let Some(text) = selfupdate::take_last_result() {

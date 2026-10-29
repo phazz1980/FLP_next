@@ -76,9 +76,11 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         let mut text = code.as_str();
+                        let mut layouter = crate::cpphl::layouter(false);
                         ui.add(
                             TextEdit::multiline(&mut text)
                                 .code_editor()
+                                .layouter(&mut layouter)
                                 .desired_width(f32::INFINITY),
                         );
                     });

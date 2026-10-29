@@ -2,7 +2,8 @@
 //!
 //! Covers what the docs use: headings, paragraphs, bullet and numbered lists,
 //! quotes, fenced code, tables, and inline `code`, **bold**, *italic* and
-//! [links](url). Anything else is shown as plain text.
+//! [links](url), and images on a line of their own (`![alt](images/a.png)`).
+//! Anything else is shown as plain text.
 
 use eframe::egui::{self, text::LayoutJob, Color32, FontId, Stroke, TextFormat, TextStyle, Ui};
 
@@ -15,7 +16,40 @@ enum Block<'a> {
     Quote(String),
     Code(Vec<&'a str>),
     Table(Vec<Vec<String>>),
+    /// Alt text and target of a line `![alt](target)`.
+    Image(String, String),
     Gap,
+}
+
+/// Finds the file behind an image target; `None` hides the image.
+pub type ImageResolver<'a> = &'a dyn Fn(&str) -> Option<std::path::PathBuf>;
+
+/// Whether `target` is a plain relative path (no drive, no `..`) that a
+/// block's docs may refer to.
+pub fn is_local_image(target: &str) -> bool {
+    !target.is_empty()
+        && !target.starts_with(['/', '\\'])
+        && !target.contains(':')
+        && !target.split(['/', '\\']).any(|part| part == "..")
+}
+
+/// Resolver for the pictures in the folder of a block.
+pub fn dir_images(dir: &std::path::Path) -> impl Fn(&str) -> Option<std::path::PathBuf> + '_ {
+    move |target| {
+        let local = is_local_image(target) && target.starts_with("images/");
+        local.then(|| dir.join(target))
+    }
+}
+
+/// Image targets that `text` refers to.
+pub fn image_targets(text: &str) -> Vec<String> {
+    parse(text)
+        .into_iter()
+        .filter_map(|block| match block {
+            Block::Image(_, target) => Some(target),
+            _ => None,
+        })
+        .collect()
 }
 
 #[derive(Debug, PartialEq)]
@@ -39,10 +73,15 @@ pub fn slug(title: &str) -> String {
     out.trim_end_matches('-').to_owned()
 }
 
-/// Draws `text` as Markdown. A click on a `help:` link returns its target
-/// (`page#anchor`); other links open in the browser.
-pub fn show_linked(ui: &mut Ui, text: &str, anchor: Option<&str>) -> Option<String> {
-    let url = show_inner(ui, text, anchor)?;
+/// Draws `text` as Markdown. A click on a `help:` link returns its target (`page#anchor`);
+/// other links open in the browser. `images` finds the files of `![..](..)` lines.
+pub fn show_with_images(
+    ui: &mut Ui,
+    text: &str,
+    anchor: Option<&str>,
+    images: Option<ImageResolver>,
+) -> Option<String> {
+    let url = show_inner(ui, text, anchor, images)?;
     match url.strip_prefix("help:") {
         Some(target) => Some(target.to_owned()),
         None => {
@@ -58,12 +97,12 @@ struct Emphasis {
     italic: bool,
 }
 
-/// Draws `text` as formatted Markdown, wrapping at the available width.
-pub fn show(ui: &mut Ui, text: &str) {
-    show_linked(ui, text, None);
-}
-
-fn show_inner(ui: &mut Ui, text: &str, anchor: Option<&str>) -> Option<String> {
+fn show_inner(
+    ui: &mut Ui,
+    text: &str,
+    anchor: Option<&str>,
+    images: Option<ImageResolver>,
+) -> Option<String> {
     let mut clicked = None;
     for block in parse(text) {
         match block {
@@ -124,6 +163,25 @@ fn show_inner(ui: &mut Ui, text: &str, anchor: Option<&str>) -> Option<String> {
                     });
             }
             Block::Table(rows) => clicked = table(ui, &rows).or(clicked),
+            Block::Image(alt, target) => {
+                match images
+                    .and_then(|find| find(&target))
+                    .filter(|p| p.is_file())
+                {
+                    Some(path) => {
+                        let uri = format!("file://{}", path.to_string_lossy().replace('\\', "/"));
+                        ui.add(
+                            egui::Image::new(uri)
+                                .fit_to_original_size(1.0)
+                                .max_width(ui.available_width())
+                                .alt_text(alt),
+                        );
+                    }
+                    None => {
+                        ui.weak(format!("[изображение не найдено: {target}]"));
+                    }
+                }
+            }
             Block::Gap => ui.add_space(6.0),
         }
     }
@@ -284,6 +342,9 @@ fn parse(text: &str) -> Vec<Block<'_>> {
         } else if let Some((level, title)) = heading(trimmed) {
             blocks.push(Block::Heading(level, title.to_owned()));
             i += 1;
+        } else if let Some((alt, target)) = image_line(trimmed) {
+            blocks.push(Block::Image(alt.to_owned(), target.to_owned()));
+            i += 1;
         } else if trimmed.starts_with('|') {
             let mut rows = Vec::new();
             while i < lines.len() && lines[i].trim().starts_with('|') {
@@ -342,6 +403,15 @@ fn starts_block(line: &str) -> bool {
         || t.starts_with('>')
         || heading(t).is_some()
         || list_item(t).is_some()
+        || image_line(t).is_some()
+}
+
+/// `![alt](target)` taking the whole line.
+fn image_line(line: &str) -> Option<(&str, &str)> {
+    let rest = line.strip_prefix("![")?;
+    let (alt, rest) = rest.split_once("](")?;
+    let target = rest.strip_suffix(')')?;
+    (!target.is_empty() && !target.contains([')', ' '])).then_some((alt, target))
 }
 
 fn heading(line: &str) -> Option<(usize, &str)> {
@@ -477,6 +547,26 @@ mod tests {
                 Span::Text(" ", plain),
             ]
         );
+    }
+
+    #[test]
+    fn parses_image_lines() {
+        let md = "Текст
+![схема](images/a.png)
+ещё";
+        assert_eq!(
+            parse(md),
+            vec![
+                Block::Paragraph("Текст".into()),
+                Block::Image("схема".into(), "images/a.png".into()),
+                Block::Paragraph("ещё".into()),
+            ]
+        );
+        assert_eq!(image_targets(md), vec!["images/a.png".to_owned()]);
+        assert!(is_local_image("images/a.png"));
+        assert!(!is_local_image("../a.png"));
+        assert!(!is_local_image("C:/a.png"));
+        assert!(!is_local_image("/etc/a.png"));
     }
 
     #[test]
