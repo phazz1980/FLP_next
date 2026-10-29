@@ -7,7 +7,7 @@
 
 | Папка | Откуда | Зачем |
 |---|---|---|
-| `FLProg_Network` | https://github.com/Anderand/FLProg_Network (r14, `Библиотека/FLProg_Network`) | Wi-Fi, Ethernet, веб-сервер, OTA |
+| `FLProg_Network` | https://github.com/Anderand/FLProg_Network (r16, `Библиотека/FLProg_Network`) | Wi-Fi, Ethernet, веб-сервер, OTA |
 | `Flprog_Modbus` | там же (`Библиотека/Flprog_Modbus`) | Modbus RTU/TCP |
 | `Flprog_Utilites` | стандартный набор FLProg (https://github.com/Totuin/Flprog_Utilites) | общие утилиты и UART; нужна двум предыдущим |
 | `RT_HW_BASE` | https://github.com/Totuin/RT_HW_00_BASE (v7.1.1) | базовый слой железа; нужна `Flprog_Utilites` |

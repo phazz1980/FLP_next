@@ -1,8 +1,9 @@
 #pragma once
 #include <flprogNetwork.h>
 #include <string.h>
+#include <device/flprogNetworkDeviceRegistry.h>
 
-// RU: Один клиент на проект, сеть обслуживается существующим flpNetwork.pool().
+// RU: Один клиент на проект; сеть и network.pool() задаёт проект FLProg.
 // EN: One client per project; the existing network block owns network.pool().
 class FLProgMqttUserBlocks;
 inline FLProgMqttUserBlocks &flpMqttBlocks();
@@ -14,25 +15,38 @@ public:
     uint32_t sequence = 0;
     bool retained = false;
 
+    // v0.1 source compatibility.
     void control(FLProgNetworkInterface &network, bool en, bool con, bool dis,
                  const String &broker, long port, const String &id,
                  const String &user, const String &password) {
-        bool start = en && (!prevEn || (con && !prevCon));
-        bool stop = (!en && prevEn) || (dis && !prevDis);
+        control(&network, en, con, dis, broker, port, id, user, password, 0);
+    }
+    uint8_t error() const { return configError ? configError : mqtt.error(); }
+    // 19: selected interface not found; 20: invalid SUB_LIMIT/port/POLL_MS.
+    void control(FLProgNetworkInterface *network, bool en, bool con, bool dis,
+                 const String &broker, long port, const String &id,
+                 const String &user, const String &password, long limit, long pollMs = 0) {
+        const bool start = en && (!prevEn || (con && !prevCon));
+        const bool stop = (!en && prevEn) || (dis && !prevDis);
         prevEn = en; prevCon = con; prevDis = dis;
         if (stop) { mqtt.disconnect(); return; }
         if (!start) return;
-        // Configuration changes require a fresh service session.
+        // A rejected configuration must not continue an older broker session.
         if (bound) { mqtt.end(); bound = false; }
+        configError = 0;
+        if (!network) { configError = 19; return; }
+        if (limit < 0 || port < 1 || port > 65535 || pollMs < 0 || pollMs > 1000) { configError = 20; return; }
+        if (!mqtt.setSubscriptionLimit((size_t)limit)) return;
+        mqtt.setPollInterval((uint16_t)(pollMs == 0 ? FLPROG_MQTT_POLL_INTERVAL_MS : pollMs));
         mqtt.setBroker(broker.c_str());
-        mqtt.setPort(port > 0 && port <= 65535 ? (uint16_t)port : 1883);
+        mqtt.setPort((uint16_t)port);
         if (!mqtt.setClientId(id.c_str())) return;
         if (user.length()) {
             if (!mqtt.setCredentials(user.c_str(), password.c_str())) return;
         } else mqtt.clearCredentials();
         mqtt.setMessageCallback(receive);
         mqtt.setAutoReconnect(true);
-        bound = mqtt.begin(network);
+        bound = mqtt.begin(*network);
         if (bound) mqtt.connect();
     }
 
@@ -53,11 +67,12 @@ public:
         }
     }
 private:
+    uint8_t configError=0;
     bool bound=false, prevEn=false, prevCon=false, prevDis=false;
     static void receive(const char *t, const uint8_t *p, size_t n, bool r) {
         FLProgMqttUserBlocks &b=flpMqttBlocks();
         b.topic=t; b.message="";
-        for (size_t i=0;i<n;++i) b.message+=(char)p[i];
+        b.message.concat(reinterpret_cast<const char *>(p), (unsigned int)n);
         b.retained=r; ++b.sequence;
     }
 };

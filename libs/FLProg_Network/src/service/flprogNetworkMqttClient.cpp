@@ -21,12 +21,14 @@
 #include "../flprogNetwork.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 #define FLPROG_MQTT_BODY_OFFSET 5U
 
 FLProgNetworkMqttClient::~FLProgNetworkMqttClient()
 {
     end();
+    free(_subscriptions);
 }
 
 bool FLProgNetworkMqttClient::ipIsZero(IPAddress value)
@@ -155,6 +157,9 @@ void FLProgNetworkMqttClient::end()
         _tcpAttached = false;
     }
     detach();
+    _pollStarted = false;
+    _pollRequested = false;
+    _rxBacklog = false;
     _state = FLPROG_MQTT_STATE_IDLE;
     _error = FLPROG_MQTT_ERROR_NONE;
     resetTransaction();
@@ -287,6 +292,9 @@ bool FLProgNetworkMqttClient::connect()
         _error = FLPROG_MQTT_ERROR_NO_CLIENT_ID;
         return false;
     }
+    if (!_wantConnected || _state == FLPROG_MQTT_STATE_IDLE ||
+        _state == FLPROG_MQTT_STATE_ERROR || _state == FLPROG_MQTT_STATE_BACKOFF)
+        _pollRequested = true;
     _wantConnected = true;
     _disconnectRequested = false;
     _cancelRequested = false;
@@ -302,12 +310,14 @@ void FLProgNetworkMqttClient::disconnect()
 {
     _wantConnected = false;
     _disconnectRequested = true;
+    _pollRequested = true;
 }
 
 void FLProgNetworkMqttClient::cancel()
 {
     _wantConnected = false;
     _cancelRequested = true;
+    _pollRequested = true;
 }
 
 bool FLProgNetworkMqttClient::writeUtf(size_t &offset, const char *value, size_t maxLength)
@@ -463,7 +473,9 @@ bool FLProgNetworkMqttClient::publish(
         return false;
     }
     _error = FLPROG_MQTT_ERROR_NONE;
-    return buildPublishPacket(topic, payload, length, retained);
+    const bool accepted = buildPublishPacket(topic, payload, length, retained);
+    if (accepted) _pollRequested = true;
+    return accepted;
 }
 
 bool FLProgNetworkMqttClient::subscribe(const char *topicFilter)
@@ -483,26 +495,25 @@ bool FLProgNetworkMqttClient::subscribe(const char *topicFilter)
         _error = FLPROG_MQTT_ERROR_BAD_TOPIC;
         return false;
     }
-    bool exists = false;
-    for (uint8_t i = 0; i < _subscriptionCount; ++i)
+    if (!hasSubscription(topicFilter))
     {
-        if (strcmp(_subscriptions[i], topicFilter) == 0)
+        if (_subscriptionLimit != 0 && _subscriptionCount >= _subscriptionLimit)
         {
-            exists = true;
-            break;
+            _error = FLPROG_MQTT_ERROR_SUBSCRIPTION_LIMIT;
+            return false;
         }
-    }
-    if (!exists && _subscriptionCount >= FLPROG_MQTT_MAX_SUBSCRIPTIONS)
-    {
-        _error = FLPROG_MQTT_ERROR_PACKET_TOO_LARGE;
-        return false;
+        // Reserve before transmission: a successful SUBACK must always fit.
+        if (!reserveSubscriptions(_subscriptionCount + 1)) return false;
     }
     _error = FLPROG_MQTT_ERROR_NONE;
-    return buildSubscribePacket(topicFilter, FLPROG_MQTT_TX_SUBSCRIBE);
+    const bool accepted = buildSubscribePacket(topicFilter, FLPROG_MQTT_TX_SUBSCRIBE);
+    if (accepted) _pollRequested = true;
+    return accepted;
 }
 
 void FLProgNetworkMqttClient::resetRxParser()
 {
+    _rxBacklog = false;
     _rxHeader = 0;
     _rxStage = 0;
     _rxLengthBytes = 0;
@@ -656,16 +667,17 @@ void FLProgNetworkMqttClient::serviceSend()
         fail(FLPROG_MQTT_ERROR_TCP);
         return;
     }
-    size_t budget = FLPROG_MQTT_WRITE_BUDGET;
-    while (_txOffset < _txLength && budget != 0)
+    if (_txOffset < _txLength && FLPROG_MQTT_WRITE_BUDGET != 0)
     {
         size_t count = _txLength - _txOffset;
-        if (count > budget) count = budget;
+        if (count > FLPROG_MQTT_WRITE_BUDGET) count = FLPROG_MQTT_WRITE_BUDGET;
+        if (count > FLPROG_MQTT_IO_CHUNK_SIZE) count = FLPROG_MQTT_IO_CHUNK_SIZE;
         const size_t written = _tcp.write(_txBuffer + _txOffset, count);
-        if (written == 0) break;
-        _txOffset += written;
-        budget -= written;
-        _lastProgressAt = millis();
+        if (written != 0)
+        {
+            _txOffset += written;
+            _lastProgressAt = millis();
+        }
     }
     if (_txOffset < _txLength)
     {
@@ -797,16 +809,67 @@ bool FLProgNetworkMqttClient::handleConnack(const uint8_t *body, size_t length)
     return true;
 }
 
+bool FLProgNetworkMqttClient::hasSubscription(const char *topicFilter) const
+{
+    for (size_t i = 0; i < _subscriptionCount; ++i)
+        if (strcmp(_subscriptions[i], topicFilter) == 0) return true;
+    return false;
+}
+
+bool FLProgNetworkMqttClient::reserveSubscriptions(size_t count)
+{
+    if (count <= _subscriptionCapacity) return true;
+    if (count > ((size_t)-1) / sizeof(*_subscriptions))
+    {
+        _error = FLPROG_MQTT_ERROR_NO_MEMORY;
+        return false;
+    }
+    void *storage = realloc(_subscriptions, count * sizeof(*_subscriptions));
+    if (storage == nullptr)
+    {
+        _error = FLPROG_MQTT_ERROR_NO_MEMORY;
+        return false;
+    }
+    _subscriptions = static_cast<char (*)[FLPROG_MQTT_MAX_TOPIC_LENGTH + 1]>(storage);
+    _subscriptionCapacity = count;
+    return true;
+}
+
+bool FLProgNetworkMqttClient::setSubscriptionLimit(size_t value)
+{
+    const size_t pending = _pendingSubscribe[0] != 0 &&
+        !_pendingSubscribeIsResubscribe && !hasSubscription(_pendingSubscribe) ? 1 : 0;
+    if (value != 0 && value < _subscriptionCount + pending)
+    {
+        _error = FLPROG_MQTT_ERROR_SUBSCRIPTION_LIMIT;
+        return false;
+    }
+    _subscriptionLimit = value;
+    _error = FLPROG_MQTT_ERROR_NONE;
+    return true;
+}
+
+bool FLProgNetworkMqttClient::clearSubscriptions()
+{
+    if (_wantConnected || _sessionConnected || _state != FLPROG_MQTT_STATE_IDLE)
+    {
+        _error = FLPROG_MQTT_ERROR_BUSY;
+        return false;
+    }
+    free(_subscriptions);
+    _subscriptions = nullptr;
+    _subscriptionCount = _subscriptionCapacity = _resubscribeIndex = 0;
+    _resubscribeActive = false;
+    _error = FLPROG_MQTT_ERROR_NONE;
+    return true;
+}
+
 void FLProgNetworkMqttClient::addOrKeepSubscription(const char *topicFilter)
 {
-    for (uint8_t i = 0; i < _subscriptionCount; ++i)
-    {
-        if (strcmp(_subscriptions[i], topicFilter) == 0) return;
-    }
-    if (_subscriptionCount >= FLPROG_MQTT_MAX_SUBSCRIPTIONS) return;
-    const size_t length = strlen(topicFilter);
-    memcpy(_subscriptions[_subscriptionCount], topicFilter, length + 1);
-    _subscriptionCount++;
+    if (hasSubscription(topicFilter)) return;
+    // subscribe() has already reserved this slot before sending the packet.
+    if (_subscriptionCount >= _subscriptionCapacity) return;
+    strcpy(_subscriptions[_subscriptionCount++], topicFilter);
 }
 
 void FLProgNetworkMqttClient::completeSubscribe()
@@ -930,29 +993,35 @@ bool FLProgNetworkMqttClient::handlePacket(uint8_t header, const uint8_t *body, 
 
 void FLProgNetworkMqttClient::serviceReceive()
 {
-    if (!_tcp.connected()) return;
-    size_t budget = FLPROG_MQTT_READ_BUDGET;
-    while (budget != 0)
+    _rxBacklog = false;
+    if (!_tcp.connected() || FLPROG_MQTT_READ_BUDGET == 0) return;
+    const int available = _tcp.available();
+    if (available <= 0) return;
+    uint8_t bytes[FLPROG_MQTT_IO_CHUNK_SIZE];
+    size_t count = (size_t)available;
+    if (count > sizeof(bytes)) count = sizeof(bytes);
+    if (count > FLPROG_MQTT_READ_BUDGET) count = FLPROG_MQTT_READ_BUDGET;
+    const int received = _tcp.read(bytes, count);
+    if (received <= 0)
     {
-        const int available = _tcp.available();
-        if (available <= 0) break;
-        int value = _tcp.read();
-        if (value < 0) break;
-        budget--;
-        if (!feedRxByte((uint8_t)value))
+        // W5500 may still be completing the previous RECV command.
+        _rxBacklog = true;
+        return;
+    }
+    for (int i = 0; i < received; ++i)
+    {
+        if (!feedRxByte(bytes[i]))
         {
-            if (_error == FLPROG_MQTT_ERROR_PACKET_TOO_LARGE)
-            {
-                fail(FLPROG_MQTT_ERROR_PACKET_TOO_LARGE);
-            }
-            else
-            {
-                fail(FLPROG_MQTT_ERROR_PROTOCOL);
-            }
+            fail(_error == FLPROG_MQTT_ERROR_PACKET_TOO_LARGE
+                     ? FLPROG_MQTT_ERROR_PACKET_TOO_LARGE : FLPROG_MQTT_ERROR_PROTOCOL);
             return;
         }
-        if (_state == FLPROG_MQTT_STATE_BACKOFF || _state == FLPROG_MQTT_STATE_ERROR) return;
+        if (!isAttached() || _cancelRequested ||
+            _state == FLPROG_MQTT_STATE_IDLE ||
+            _state == FLPROG_MQTT_STATE_BACKOFF || _state == FLPROG_MQTT_STATE_ERROR) return;
     }
+    // resetRxParser() may have run at a packet boundary inside this chunk.
+    _rxBacklog = available > received;
 }
 
 void FLProgNetworkMqttClient::serviceConnectedIdle()
@@ -1022,9 +1091,28 @@ void FLProgNetworkMqttClient::processCancelRequest()
     _events |= FLPROG_MQTT_EVENT_CANCELED;
 }
 
+bool FLProgNetworkMqttClient::pollDue(uint32_t now) const
+{
+    if (!_pollStarted || _pollRequested || _pollIntervalMs == 0) return true;
+    // Protocol deadlines must not be extended by a slow idle poll setting.
+    if (_state == FLPROG_MQTT_STATE_BACKOFF && _wantConnected &&
+        timeReached(now, _reconnectAt)) return true;
+    if (_state == FLPROG_MQTT_STATE_CONNECTED && _keepAliveSeconds != 0 &&
+        (uint32_t)(now - _lastTxAt) >= (uint32_t)_keepAliveSeconds * 1000UL) return true;
+    const bool active = busy() || _rxStage != 0 || _rxBacklog ||
+                        _resubscribeActive || _disconnectRequested;
+    const uint16_t interval = active ? 1U : _pollIntervalMs;
+    return (uint32_t)(now - _lastPollAt) >= interval;
+}
+
 void FLProgNetworkMqttClient::pool()
 {
     if (!isAttached() || !_tcpAttached) return;
+    const uint32_t now = millis();
+    if (!pollDue(now)) return;
+    _lastPollAt = now;
+    _pollStarted = true;
+    _pollRequested = false;
 
     if (_cancelRequested)
     {
@@ -1032,6 +1120,7 @@ void FLProgNetworkMqttClient::pool()
         return;
     }
 
+    _tcp.service();
     processDisconnectRequest();
 
     if (_sessionConnected && !_tcp.connected() &&
