@@ -21,146 +21,140 @@ pub fn busy(ui: &mut Ui) {
         .request_repaint_after(std::time::Duration::from_millis(200));
 }
 
+/// Icon button with a tooltip; the icon alone is the label.
+fn icon(ui: &mut Ui, enabled: bool, glyph: &str, tip: &str) -> bool {
+    ui.add_enabled(
+        enabled,
+        egui::Button::new(glyph).min_size(egui::vec2(28.0, 0.0)),
+    )
+    .on_hover_text(tip)
+    .clicked()
+}
+
+/// Toolbar row; lives in the title bar next to the burger button.
 pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
-    ui.horizontal(|ui| {
-        let has_doc = app.doc.is_some();
-        let idle = !app.job_running();
-        if ui
-            .add_enabled(has_doc, egui::Button::new("Сохранить"))
-            .on_hover_text("Ctrl+S")
-            .clicked()
-        {
-            app.save();
-        }
-        let (can_undo, can_redo) = app
-            .doc
-            .as_ref()
-            .map_or((false, false), |d| (d.can_undo(), d.can_redo()));
-        if ui
-            .add_enabled(can_undo, egui::Button::new("↶"))
-            .on_hover_text("Отменить (Ctrl+Z)")
-            .clicked()
-        {
-            app.undo();
-        }
-        if ui
-            .add_enabled(can_redo, egui::Button::new("↷"))
-            .on_hover_text("Повторить (Ctrl+Y)")
-            .clicked()
-        {
-            app.redo();
-        }
-        ui.separator();
-        if ui
-            .add_enabled(has_doc, egui::Button::new("Проверить"))
-            .on_hover_text("F7: проверить схему")
-            .clicked()
-        {
-            app.run_check();
-        }
-        if ui
-            .add_enabled(has_doc, egui::Button::new("Код C++"))
-            .on_hover_text("Показать скетч Arduino C++, сгенерированный из схемы")
-            .clicked()
-        {
-            app.code_view = Some(crate::codeview::CodeView::new());
-        }
-        if ui
-            .add_enabled(has_doc && idle, egui::Button::new("Собрать"))
-            .on_hover_text("F5: сгенерировать скетч и собрать прошивку")
-            .clicked()
-        {
-            app.start_job(JobKind::Build, ui.ctx());
-        }
-        if ui
-            .add_enabled(has_doc && idle, egui::Button::new("Залить"))
-            .on_hover_text("Собрать и залить на плату через выбранный порт")
-            .clicked()
-        {
-            let port = app.port_choice();
-            app.start_job(JobKind::Upload { port }, ui.ctx());
-        }
-        if ui
-            .add_enabled(app.has_job(), egui::Button::new("Стоп"))
-            .on_hover_text("Отменить сборку или заливку")
-            .clicked()
-        {
-            app.cancel_job();
-        }
-        ui.checkbox(&mut app.debug_firmware, "С отладкой").on_hover_text(
-            "Собирать прошивку с модулем онлайн-отладки (и фоновую сборку тоже);              после заливки редактор подключится к плате",
-        );
-        ui.separator();
-        ui.label("Порт:");
-        let selected = if app.port.is_empty() {
-            "авто".to_owned()
-        } else {
-            app.port.clone()
-        };
-        egui::ComboBox::from_id_salt("port")
-            .selected_text(selected)
-            .width(110.0)
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut app.port, String::new(), "авто")
-                    .on_hover_text("Порт из настроек проекта или единственный найденный");
-                for p in &app.ports {
-                    let text = if p.description.is_empty() || p.description == p.address {
-                        p.address.clone()
-                    } else {
-                        format!("{} — {}", p.address, p.description)
-                    };
-                    ui.selectable_value(&mut app.port, p.address.clone(), text);
-                }
-                if app.ports.is_empty() {
-                    ui.weak("портов не найдено");
-                }
-            });
-        if app.scanning_ports() {
-            busy(ui);
-        } else if ui
-            .small_button("Обновить")
-            .on_hover_text("Найти порты заново")
-            .clicked()
-        {
-            app.scan_ports(ui.ctx());
-        }
-        ui.separator();
-        if app.debug.is_none() {
-            if ui
-                .add_enabled(has_doc && idle, egui::Button::new("Отладка"))
-                .on_hover_text("Залить прошивку с модулем отладки и подключиться")
-                .clicked()
-            {
-                app.start_debug(ui.ctx());
+    let has_doc = app.doc.is_some();
+    let idle = !app.job_running();
+    if icon(ui, has_doc, "💾", "Сохранить (Ctrl+S)") {
+        app.save();
+    }
+    let (can_undo, can_redo) = app
+        .doc
+        .as_ref()
+        .map_or((false, false), |d| (d.can_undo(), d.can_redo()));
+    if icon(ui, can_undo, "↶", "Отменить (Ctrl+Z)") {
+        app.undo();
+    }
+    if icon(ui, can_redo, "↷", "Повторить (Ctrl+Y)") {
+        app.redo();
+    }
+    ui.separator();
+    if icon(ui, has_doc, "✔", "Проверить схему (F7)") {
+        app.run_check();
+    }
+    if icon(
+        ui,
+        has_doc,
+        "</>",
+        "Код C++: скетч Arduino, сгенерированный из схемы",
+    ) {
+        app.code_view = Some(crate::codeview::CodeView::new());
+    }
+    if icon(
+        ui,
+        has_doc && idle,
+        "🔨",
+        "Собрать (F5): сгенерировать скетч и собрать прошивку",
+    ) {
+        app.start_job(JobKind::Build, ui.ctx());
+    }
+    if icon(
+        ui,
+        has_doc && idle,
+        "⬆",
+        "Залить: собрать и залить на плату через выбранный порт",
+    ) {
+        let port = app.port_choice();
+        app.start_job(JobKind::Upload { port }, ui.ctx());
+    }
+    if icon(ui, app.has_job(), "⏹", "Стоп: отменить сборку или заливку")
+    {
+        app.cancel_job();
+    }
+    ui.toggle_value(&mut app.debug_firmware, "🛠").on_hover_text(
+        "С отладкой: собирать прошивку с модулем онлайн-отладки (и фоновую сборку тоже); после заливки редактор подключится к плате",
+    );
+    ui.separator();
+    let selected = if app.port.is_empty() {
+        "авто".to_owned()
+    } else {
+        app.port.clone()
+    };
+    egui::ComboBox::from_id_salt("port")
+        .selected_text(format!("🔌 {selected}"))
+        .width(110.0)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(&mut app.port, String::new(), "авто")
+                .on_hover_text("Порт из настроек проекта или единственный найденный");
+            for p in &app.ports {
+                let text = if p.description.is_empty() || p.description == p.address {
+                    p.address.clone()
+                } else {
+                    format!("{} — {}", p.address, p.description)
+                };
+                ui.selectable_value(&mut app.port, p.address.clone(), text);
             }
-            if ui
-                .add_enabled(has_doc && idle, egui::Button::new("Подключиться"))
-                .on_hover_text("Плата уже прошита отладочной прошивкой этой схемы")
-                .clicked()
-            {
-                app.connect_debug(None, ui.ctx());
+            if app.ports.is_empty() {
+                ui.weak("портов не найдено");
             }
-        } else {
-            if ui.button("Стоп отладки").clicked() {
-                app.stop_debug();
-            }
-            if ui
-                .button("Снять форсировки")
-                .on_hover_text("Вернуть все форсированные значения схеме")
-                .clicked()
-            {
-                if let Some(d) = &app.debug {
-                    d.send(flp_debug::Command::ReleaseAll);
-                }
-            }
-            if let Some(d) = &mut app.debug {
-                ui.toggle_value(&mut d.values, "Значения")
-                    .on_hover_text("Входы и переменные: смотреть, записывать и форсировать");
-                ui.toggle_value(&mut d.diagnostics, "Диагностика")
-                    .on_hover_text("Время цикла программы и листов, максимум с начала работы");
+        })
+        .response
+        .on_hover_text("Порт платы");
+    if app.scanning_ports() {
+        busy(ui);
+    } else if icon(ui, true, "↻", "Найти порты заново") {
+        app.scan_ports(ui.ctx());
+    }
+    ui.separator();
+    if app.debug.is_none() {
+        if icon(
+            ui,
+            has_doc && idle,
+            "🐛",
+            "Отладка: залить прошивку с модулем отладки и подключиться",
+        ) {
+            app.start_debug(ui.ctx());
+        }
+        if icon(
+            ui,
+            has_doc && idle,
+            "🔗",
+            "Подключиться: плата уже прошита отладочной прошивкой этой схемы",
+        ) {
+            app.connect_debug(None, ui.ctx());
+        }
+    } else {
+        if icon(ui, true, "⏹", "Стоп отладки") {
+            app.stop_debug();
+        }
+        if icon(
+            ui,
+            true,
+            "🔓",
+            "Снять форсировки: вернуть форсированные значения схеме",
+        ) {
+            if let Some(d) = &app.debug {
+                d.send(flp_debug::Command::ReleaseAll);
             }
         }
-    });
+        if let Some(d) = &mut app.debug {
+            ui.toggle_value(&mut d.values, "📊")
+                .on_hover_text("Значения: входы и переменные, смотреть, записывать и форсировать");
+            ui.toggle_value(&mut d.diagnostics, "⏱").on_hover_text(
+                "Диагностика: время цикла программы и листов, максимум с начала работы",
+            );
+        }
+    }
 }
 
 /// Bottom panel: editor messages and the port monitor / debug console.

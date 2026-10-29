@@ -1647,19 +1647,24 @@ impl EditorApp {
                     .response
                     .on_hover_text("Меню");
             });
+            panels::toolbar(self, ui);
             // The rest of the row drags the window; double click maximizes.
             let width = (ui.available_width() - 3.0 * 34.0).max(0.0);
             let (rect, drag) = ui.allocate_exact_size(
                 egui::vec2(width, ui.spacing().interact_size.y),
                 egui::Sense::click_and_drag(),
             );
-            ui.painter().text(
-                rect.left_center() + egui::vec2(6.0, 0.0),
-                egui::Align2::LEFT_CENTER,
-                &title,
-                egui::TextStyle::Body.resolve(ui.style()),
-                ui.visuals().weak_text_color(),
-            );
+            let font = egui::TextStyle::Body.resolve(ui.style());
+            let galley =
+                ui.painter()
+                    .layout_no_wrap(title.clone(), font, ui.visuals().weak_text_color());
+            if galley.size().x + 12.0 <= rect.width() {
+                ui.painter().galley(
+                    egui::pos2(rect.left() + 6.0, rect.center().y - galley.size().y / 2.0),
+                    galley,
+                    ui.visuals().weak_text_color(),
+                );
+            }
             if drag.drag_started_by(egui::PointerButton::Primary) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
             }
@@ -1676,17 +1681,17 @@ impl EditorApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                 }
                 let (glyph, tip) = if maximized {
-                    ("❐", "Восстановить")
+                    ("🗗", "Восстановить")
                 } else {
                     ("☐", "Развернуть")
                 };
                 if button(ui, glyph, tip) {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
                 }
-            } else if button(ui, "🗗", "Выйти из полного экрана (F11)") {
+            } else if button(ui, "⛶", "Выйти из полного экрана (F11)") {
                 self.toggle_fullscreen(&ctx);
             }
-            if button(ui, "✕", "Закрыть") {
+            if button(ui, "✖", "Закрыть") {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
@@ -2347,7 +2352,6 @@ impl eframe::App for EditorApp {
 
         egui::Panel::top("menu").show(ui, |ui| {
             self.title_bar(ui);
-            panels::toolbar(self, ui);
         });
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
         let mut sizes = self.panels;
