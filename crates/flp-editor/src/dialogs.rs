@@ -1,4 +1,4 @@
-//! Pop-up windows with ✓ (apply) and ✗ (cancel): block properties, variable, sheet.
+//! Pop-up windows with apply and cancel buttons: block properties, variable, sheet.
 //!
 //! Changes are buffered in the dialog and applied as one undo step on ✓.
 
@@ -294,7 +294,7 @@ fn buttons(ui: &mut Ui, deletable: bool) -> Outcome {
             outcome = Outcome::Apply;
         }
         let cancel =
-            egui::Button::new(RichText::new("✖ Отмена").color(Color32::from_rgb(186, 74, 66)));
+            egui::Button::new(RichText::new("× Отмена").color(Color32::from_rgb(186, 74, 66)));
         if ui.add(cancel).clicked() {
             outcome = Outcome::Cancel;
         }

@@ -25,10 +25,89 @@ pub fn busy(ui: &mut Ui) {
 fn icon(ui: &mut Ui, enabled: bool, glyph: &str, tip: &str) -> bool {
     ui.add_enabled(
         enabled,
-        egui::Button::new(glyph).min_size(egui::vec2(28.0, 0.0)),
+        egui::Button::new(RichText::new(glyph).size(19.0)).min_size(egui::vec2(36.0, 30.0)),
     )
     .on_hover_text(tip)
     .clicked()
+}
+
+/// Shape of a window button; drawn with lines, so it does not depend on font glyphs.
+#[derive(Clone, Copy)]
+pub enum WinIcon {
+    Minimize,
+    Maximize,
+    Restore,
+    ExitFullscreen,
+    Close,
+}
+
+/// Window button of the custom title bar; returns whether it was clicked.
+pub fn window_button(ui: &mut Ui, icon: WinIcon, tip: &str) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(44.0, 30.0), egui::Sense::click());
+    let resp = resp.on_hover_text(tip);
+    let close = matches!(icon, WinIcon::Close);
+    if resp.hovered() {
+        let bg = if close {
+            egui::Color32::from_rgb(196, 43, 28)
+        } else {
+            ui.visuals().widgets.hovered.weak_bg_fill
+        };
+        ui.painter().rect_filled(rect, 3.0, bg);
+    }
+    let color = if close && resp.hovered() {
+        egui::Color32::WHITE
+    } else {
+        ui.visuals().text_color()
+    };
+    let stroke = egui::Stroke::new(1.5, color);
+    let c = rect.center();
+    let square = |center: egui::Pos2, side: f32| {
+        egui::Rect::from_center_size(center, egui::vec2(side, side))
+    };
+    let p = ui.painter();
+    match icon {
+        WinIcon::Minimize => {
+            p.line_segment(
+                [
+                    egui::pos2(c.x - 6.0, c.y + 3.0),
+                    egui::pos2(c.x + 6.0, c.y + 3.0),
+                ],
+                stroke,
+            );
+        }
+        WinIcon::Maximize => {
+            p.rect_stroke(square(c, 12.0), 1.0, stroke, egui::StrokeKind::Inside);
+        }
+        WinIcon::Restore => {
+            p.rect_stroke(
+                square(c + egui::vec2(-1.5, 1.5), 9.0),
+                1.0,
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+            p.rect_stroke(
+                square(c + egui::vec2(1.5, -1.5), 9.0),
+                1.0,
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+        }
+        WinIcon::ExitFullscreen => {
+            p.rect_stroke(square(c, 14.0), 1.0, stroke, egui::StrokeKind::Inside);
+            p.rect_stroke(square(c, 6.0), 1.0, stroke, egui::StrokeKind::Inside);
+        }
+        WinIcon::Close => {
+            p.line_segment(
+                [c + egui::vec2(-5.5, -5.5), c + egui::vec2(5.5, 5.5)],
+                stroke,
+            );
+            p.line_segment(
+                [c + egui::vec2(-5.5, 5.5), c + egui::vec2(5.5, -5.5)],
+                stroke,
+            );
+        }
+    }
+    resp.clicked()
 }
 
 /// Toolbar row; lives in the title bar next to the burger button.
@@ -47,6 +126,51 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
     }
     if icon(ui, can_redo, "↷", "Повторить (Ctrl+Y)") {
         app.redo();
+    }
+    ui.separator();
+    let board = app.doc.as_ref().map_or("МК", |d| {
+        crate::boardcfg::board_name(&d.project.config.board)
+    });
+    if ui
+        .add_enabled(
+            has_doc,
+            egui::Button::new(RichText::new(board).size(15.0)).min_size(egui::vec2(36.0, 30.0)),
+        )
+        .on_hover_text("Настройки МК: плата, режим подключения, порты")
+        .clicked()
+    {
+        app.open_board_settings(ui.ctx());
+    }
+    ui.separator();
+    let selected = if app.port.is_empty() {
+        "авто".to_owned()
+    } else {
+        app.port.clone()
+    };
+    egui::ComboBox::from_id_salt("port")
+        .selected_text(format!("🔌 {selected}"))
+        .width(110.0)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(&mut app.port, String::new(), "авто")
+                .on_hover_text("Порт из настроек проекта или единственный найденный");
+            for p in &app.ports {
+                let text = if p.description.is_empty() || p.description == p.address {
+                    p.address.clone()
+                } else {
+                    format!("{} — {}", p.address, p.description)
+                };
+                ui.selectable_value(&mut app.port, p.address.clone(), text);
+            }
+            if app.ports.is_empty() {
+                ui.weak("портов не найдено");
+            }
+        })
+        .response
+        .on_hover_text("Порт платы");
+    if app.scanning_ports() {
+        busy(ui);
+    } else if icon(ui, true, "↻", "Найти порты заново") {
+        app.scan_ports(ui.ctx());
     }
     ui.separator();
     if icon(ui, has_doc, "✔", "Проверить схему (F7)") {
@@ -81,50 +205,11 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
     {
         app.cancel_job();
     }
-    ui.toggle_value(&mut app.debug_firmware, "🛠").on_hover_text(
+    ui.toggle_value(&mut app.debug_firmware, RichText::new("🛠").size(19.0)).on_hover_text(
         "С отладкой: собирать прошивку с модулем онлайн-отладки (и фоновую сборку тоже); после заливки редактор подключится к плате",
     );
     ui.separator();
-    let selected = if app.port.is_empty() {
-        "авто".to_owned()
-    } else {
-        app.port.clone()
-    };
-    egui::ComboBox::from_id_salt("port")
-        .selected_text(format!("🔌 {selected}"))
-        .width(110.0)
-        .show_ui(ui, |ui| {
-            ui.selectable_value(&mut app.port, String::new(), "авто")
-                .on_hover_text("Порт из настроек проекта или единственный найденный");
-            for p in &app.ports {
-                let text = if p.description.is_empty() || p.description == p.address {
-                    p.address.clone()
-                } else {
-                    format!("{} — {}", p.address, p.description)
-                };
-                ui.selectable_value(&mut app.port, p.address.clone(), text);
-            }
-            if app.ports.is_empty() {
-                ui.weak("портов не найдено");
-            }
-        })
-        .response
-        .on_hover_text("Порт платы");
-    if app.scanning_ports() {
-        busy(ui);
-    } else if icon(ui, true, "↻", "Найти порты заново") {
-        app.scan_ports(ui.ctx());
-    }
-    ui.separator();
     if app.debug.is_none() {
-        if icon(
-            ui,
-            has_doc && idle,
-            "🐛",
-            "Отладка: залить прошивку с модулем отладки и подключиться",
-        ) {
-            app.start_debug(ui.ctx());
-        }
         if icon(
             ui,
             has_doc && idle,
@@ -148,11 +233,12 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
             }
         }
         if let Some(d) = &mut app.debug {
-            ui.toggle_value(&mut d.values, "📊")
+            ui.toggle_value(&mut d.values, RichText::new("📊").size(19.0))
                 .on_hover_text("Значения: входы и переменные, смотреть, записывать и форсировать");
-            ui.toggle_value(&mut d.diagnostics, "⏱").on_hover_text(
-                "Диагностика: время цикла программы и листов, максимум с начала работы",
-            );
+            ui.toggle_value(&mut d.diagnostics, RichText::new("⏱").size(19.0))
+                .on_hover_text(
+                    "Диагностика: время цикла программы и листов, максимум с начала работы",
+                );
         }
     }
 }

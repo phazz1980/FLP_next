@@ -677,7 +677,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         let next = bands.get(bi + 1).map(|b| b.sheet);
         let buttons = [
             (
-                "✕",
+                "×",
                 "Удалить плату вместе с блоками (спросит подтверждение)",
                 None,
             ),

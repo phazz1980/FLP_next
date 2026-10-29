@@ -145,6 +145,10 @@ pub struct EditorApp {
     pub block_delete: Option<String>,
     /// Sheet waiting for the delete confirmation.
     pub sheet_delete: Option<u32>,
+    /// Full screen was requested while maximized: wait until the window is restored.
+    fs_pending: bool,
+    /// Attempts to resize a full-screen window that does not cover the monitor.
+    fs_fixes: u8,
     /// Selected upload port; empty means automatic.
     pub port: String,
     pub ports: Vec<SerialPort>,
@@ -250,6 +254,8 @@ impl EditorApp {
             help: None,
             block_delete: None,
             sheet_delete: None,
+            fs_pending: false,
+            fs_fixes: 0,
             port: String::new(),
             ports: Vec::new(),
             port_scan: None,
@@ -1629,11 +1635,16 @@ impl EditorApp {
     /// window buttons (the OS decorations are off).
     fn title_bar(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        let (maximized, fullscreen) = ctx.input(|i| {
+        let (maximized, fullscreen, inner, monitor) = ctx.input(|i| {
             let v = i.viewport();
-            (v.maximized.unwrap_or(false), v.fullscreen.unwrap_or(false))
+            (
+                v.maximized.unwrap_or(false),
+                v.fullscreen.unwrap_or(false),
+                v.inner_rect.map(|r| r.size()),
+                v.monitor_size,
+            )
         });
-        let title = self.window_title();
+        self.fix_fullscreen(&ctx, maximized, fullscreen, inner, monitor);
         // Loaded outside `data_mut`: `load_texture` takes the context lock too.
         let icon_id = egui::Id::unique("app_icon");
         let icon = match ctx.data(|d| d.get_temp::<egui::TextureHandle>(icon_id)) {
@@ -1651,12 +1662,14 @@ impl EditorApp {
                 icon
             }
         };
+        ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.add(egui::Image::new(&icon).fit_to_exact_size(egui::vec2(18.0, 18.0)));
+            ui.add_space(4.0);
+            ui.add(egui::Image::new(&icon).fit_to_exact_size(egui::vec2(24.0, 24.0)));
             // No `MenuBar` here: it takes the full row width and pushes the rest off screen.
             // The burger is drawn with lines, so it does not depend on font glyphs.
             let burger = ui
-                .allocate_response(egui::vec2(28.0, 22.0), egui::Sense::click())
+                .allocate_response(egui::vec2(36.0, 30.0), egui::Sense::click())
                 .on_hover_text("Меню");
             let color = if burger.hovered() || burger.is_pointer_button_down_on() {
                 ui.visuals().strong_text_color()
@@ -1670,31 +1683,37 @@ impl EditorApp {
                     ui.visuals().widgets.hovered.weak_bg_fill,
                 );
             }
-            for dy in [-5.0, 0.0, 5.0] {
+            for dy in [-6.0, 0.0, 6.0] {
                 let y = burger.rect.center().y + dy;
                 ui.painter().line_segment(
                     [
-                        egui::pos2(burger.rect.center().x - 7.0, y),
-                        egui::pos2(burger.rect.center().x + 7.0, y),
+                        egui::pos2(burger.rect.center().x - 9.0, y),
+                        egui::pos2(burger.rect.center().x + 9.0, y),
                     ],
-                    egui::Stroke::new(1.5, color),
+                    egui::Stroke::new(2.0, color),
                 );
             }
             egui::Popup::menu(&burger).show(|ui| self.menus(ui));
             panels::toolbar(self, ui);
             // The rest of the row drags the window; double click maximizes.
-            let width = (ui.available_width() - 3.0 * 34.0).max(0.0);
+            // The program name sits at its right end, next to the window buttons.
+            let width = (ui.available_width() - 3.0 * 44.0).max(0.0);
             let (rect, drag) = ui.allocate_exact_size(
-                egui::vec2(width, ui.spacing().interact_size.y),
+                egui::vec2(width, ui.spacing().interact_size.y.max(30.0)),
                 egui::Sense::click_and_drag(),
             );
             let font = egui::TextStyle::Body.resolve(ui.style());
-            let galley =
-                ui.painter()
-                    .layout_no_wrap(title.clone(), font, ui.visuals().weak_text_color());
+            let galley = ui.painter().layout_no_wrap(
+                "FLP_next".to_owned(),
+                font,
+                ui.visuals().weak_text_color(),
+            );
             if galley.size().x + 12.0 <= rect.width() {
                 ui.painter().galley(
-                    egui::pos2(rect.left() + 6.0, rect.center().y - galley.size().y / 2.0),
+                    egui::pos2(
+                        rect.right() - 8.0 - galley.size().x,
+                        rect.center().y - galley.size().y / 2.0,
+                    ),
                     galley,
                     ui.visuals().weak_text_color(),
                 );
@@ -1705,35 +1724,75 @@ impl EditorApp {
             if drag.double_clicked() && !fullscreen {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
             }
-            let button = |ui: &mut egui::Ui, text: &str, tip: &str| {
-                ui.add_sized([30.0, 20.0], egui::Button::new(text).frame(false))
-                    .on_hover_text(tip)
-                    .clicked()
-            };
             if !fullscreen {
-                if button(ui, "—", "Свернуть") {
+                if panels::window_button(ui, panels::WinIcon::Minimize, "Свернуть") {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                 }
-                let (glyph, tip) = if maximized {
-                    ("🗗", "Восстановить")
+                let (icon, tip) = if maximized {
+                    (panels::WinIcon::Restore, "Восстановить")
                 } else {
-                    ("☐", "Развернуть")
+                    (panels::WinIcon::Maximize, "Развернуть")
                 };
-                if button(ui, glyph, tip) {
+                if panels::window_button(ui, icon, tip) {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
                 }
-            } else if button(ui, "⛶", "Выйти из полного экрана (F11)") {
+            } else if panels::window_button(
+                ui,
+                panels::WinIcon::ExitFullscreen,
+                "Выйти из полного экрана (F11)",
+            ) {
                 self.toggle_fullscreen(&ctx);
             }
-            if button(ui, "✖", "Закрыть") {
+            if panels::window_button(ui, panels::WinIcon::Close, "Закрыть") {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
+        ui.add_space(4.0);
     }
 
-    fn toggle_fullscreen(&self, ctx: &egui::Context) {
-        let on = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!on));
+    fn toggle_fullscreen(&mut self, ctx: &egui::Context) {
+        let (on, maximized) = ctx.input(|i| {
+            let v = i.viewport();
+            (v.fullscreen.unwrap_or(false), v.maximized.unwrap_or(false))
+        });
+        if on {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+        } else if maximized {
+            // A maximized undecorated window keeps the work area (the taskbar stays
+            // visible) when made full screen: leave the maximized state first.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+            self.fs_pending = true;
+            ctx.request_repaint();
+        } else {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+        }
+    }
+
+    /// Finishes entering full screen after the window left the maximized state; if the
+    /// window still does not cover the monitor, resizes it to the monitor.
+    fn fix_fullscreen(
+        &mut self,
+        ctx: &egui::Context,
+        maximized: bool,
+        fullscreen: bool,
+        inner: Option<egui::Vec2>,
+        monitor: Option<egui::Vec2>,
+    ) {
+        if self.fs_pending && !maximized {
+            self.fs_pending = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+        }
+        if !fullscreen {
+            self.fs_fixes = 0;
+            return;
+        }
+        if let (Some(inner), Some(monitor)) = (inner, monitor) {
+            let gap = (inner.x - monitor.x).abs() > 2.0 || (inner.y - monitor.y).abs() > 2.0;
+            if gap && self.fs_fixes < 2 {
+                self.fs_fixes += 1;
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(monitor));
+            }
+        }
     }
 
     /// The editor menus; shown inside the burger button of the title bar.
@@ -1980,6 +2039,16 @@ impl EditorApp {
             {
                 let port = self.port_choice();
                 self.start_job(JobKind::Upload { port }, ui.ctx());
+            }
+            if ui
+                .add_enabled(
+                    has_doc && idle,
+                    egui::Button::new("Отладка: залить и подключиться"),
+                )
+                .on_hover_text("Залить прошивку с модулем отладки и подключиться к плате")
+                .clicked()
+            {
+                self.start_debug(ui.ctx());
             }
         });
         ui.menu_button("Библиотека", |ui| {

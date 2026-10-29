@@ -383,7 +383,7 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
                         .hint_text("Поиск по справке")
                         .desired_width(240.0),
                 );
-                if !help.query.is_empty() && ui.button("✕").clicked() {
+                if !help.query.is_empty() && ui.button("×").clicked() {
                     help.query.clear();
                 }
             });
