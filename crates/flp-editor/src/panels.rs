@@ -21,14 +21,44 @@ pub fn busy(ui: &mut Ui) {
         .request_repaint_after(std::time::Duration::from_millis(200));
 }
 
+/// Paints an icon glyph in the middle of a button.
+/// The glyph is drawn by hand: the emoji font sits a little high inside a regular button.
+fn paint_glyph(ui: &Ui, resp: &egui::Response, glyph: &str) {
+    let color = ui.style().interact(resp).text_color();
+    let galley =
+        ui.painter()
+            .layout_no_wrap(glyph.to_owned(), egui::FontId::proportional(15.0), color);
+    let pos = resp.rect.center() - galley.size() / 2.0 + egui::vec2(0.0, 1.5);
+    ui.painter().galley(pos, galley, color);
+}
+
 /// Icon button with a tooltip; the icon alone is the label.
 fn icon(ui: &mut Ui, enabled: bool, glyph: &str, tip: &str) -> bool {
-    ui.add_enabled(
-        enabled,
-        egui::Button::new(RichText::new(glyph).size(19.0)).min_size(egui::vec2(36.0, 30.0)),
-    )
-    .on_hover_text(tip)
-    .clicked()
+    let resp = ui
+        .add_enabled(
+            enabled,
+            egui::Button::new("")
+                .min_size(egui::vec2(30.0, 26.0))
+                .frame_when_inactive(false),
+        )
+        .on_hover_text(tip);
+    paint_glyph(ui, &resp, glyph);
+    resp.clicked()
+}
+
+/// Icon toggle button with a tooltip.
+fn icon_toggle(ui: &mut Ui, value: &mut bool, glyph: &str, tip: &str) {
+    let resp = ui
+        .add(
+            egui::Button::selectable(*value, "")
+                .min_size(egui::vec2(30.0, 26.0))
+                .frame_when_inactive(false),
+        )
+        .on_hover_text(tip);
+    paint_glyph(ui, &resp, glyph);
+    if resp.clicked() {
+        *value = !*value;
+    }
 }
 
 /// Shape of a window button; drawn with lines, so it does not depend on font glyphs.
@@ -134,7 +164,9 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
     if ui
         .add_enabled(
             has_doc,
-            egui::Button::new(RichText::new(board).size(15.0)).min_size(egui::vec2(36.0, 30.0)),
+            egui::Button::new(RichText::new(board).size(13.0))
+                .min_size(egui::vec2(30.0, 26.0))
+                .frame_when_inactive(false),
         )
         .on_hover_text("Настройки МК: плата, режим подключения, порты")
         .clicked()
@@ -147,9 +179,11 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
     } else {
         app.port.clone()
     };
+    let row_height = ui.spacing().interact_size.y;
+    ui.spacing_mut().interact_size.y = 34.0;
     egui::ComboBox::from_id_salt("port")
-        .selected_text(format!("🔌 {selected}"))
-        .width(110.0)
+        .selected_text(RichText::new(format!("🔌 {selected}")).size(17.0))
+        .width(170.0)
         .show_ui(ui, |ui| {
             ui.selectable_value(&mut app.port, String::new(), "авто")
                 .on_hover_text("Порт из настроек проекта или единственный найденный");
@@ -167,6 +201,7 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
         })
         .response
         .on_hover_text("Порт платы");
+    ui.spacing_mut().interact_size.y = row_height;
     if app.scanning_ports() {
         busy(ui);
     } else if icon(ui, true, "↻", "Найти порты заново") {
@@ -205,7 +240,10 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
     {
         app.cancel_job();
     }
-    ui.toggle_value(&mut app.debug_firmware, RichText::new("🛠").size(19.0)).on_hover_text(
+    icon_toggle(
+        ui,
+        &mut app.debug_firmware,
+        "🛠",
         "С отладкой: собирать прошивку с модулем онлайн-отладки (и фоновую сборку тоже); после заливки редактор подключится к плате",
     );
     ui.separator();
@@ -233,12 +271,18 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
             }
         }
         if let Some(d) = &mut app.debug {
-            ui.toggle_value(&mut d.values, RichText::new("📊").size(19.0))
-                .on_hover_text("Значения: входы и переменные, смотреть, записывать и форсировать");
-            ui.toggle_value(&mut d.diagnostics, RichText::new("⏱").size(19.0))
-                .on_hover_text(
-                    "Диагностика: время цикла программы и листов, максимум с начала работы",
-                );
+            icon_toggle(
+                ui,
+                &mut d.values,
+                "📊",
+                "Значения: входы и переменные, смотреть, записывать и форсировать",
+            );
+            icon_toggle(
+                ui,
+                &mut d.diagnostics,
+                "⏱",
+                "Диагностика: время цикла программы и листов, максимум с начала работы",
+            );
         }
     }
 }

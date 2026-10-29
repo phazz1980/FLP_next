@@ -891,7 +891,7 @@ fn row_ops(ui: &mut Ui, i: usize, len: usize, op: &mut Option<RowOp>) {
         {
             *op = Some(RowOp::Down(i));
         }
-        if ui.small_button("×").on_hover_text("Удалить").clicked() {
+        if ui.small_button("✕").on_hover_text("Удалить").clicked() {
             *op = Some(RowOp::Remove(i));
         }
     });

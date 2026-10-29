@@ -305,7 +305,7 @@ pub fn show(chat: &mut AiChat, pal: &Palette, ui: &mut Ui, has_project: bool) ->
                         let (mark, color) = match ok {
                             None => ("…", pal.weak),
                             Some(true) => ("✔", pal.ok),
-                            Some(false) => ("×", pal.error),
+                            Some(false) => ("✕", pal.error),
                         };
                         egui::CollapsingHeader::new(RichText::new(format!("{mark} {name}")).color(color).small())
                             .id_salt(("ai_tool", i))

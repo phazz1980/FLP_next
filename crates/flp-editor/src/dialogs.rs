@@ -294,7 +294,7 @@ fn buttons(ui: &mut Ui, deletable: bool) -> Outcome {
             outcome = Outcome::Apply;
         }
         let cancel =
-            egui::Button::new(RichText::new("× Отмена").color(Color32::from_rgb(186, 74, 66)));
+            egui::Button::new(RichText::new("✕ Отмена").color(Color32::from_rgb(186, 74, 66)));
         if ui.add(cancel).clicked() {
             outcome = Outcome::Cancel;
         }

@@ -22,6 +22,8 @@
 #include <Arduino.h>
 #include <IPAddress.h>
 #include <stdint.h>
+#include "flprogNtpTimeZone.h"
+#define FLPROG_NTP_TIMEZONE_API 1
 #include "flprogNetworkService.h"
 #include "../protocol/flprogNetworkUdp.h"
 #include "../protocol/flprogNetworkDns.h"
@@ -218,6 +220,21 @@ public:
     void setCallback(FLProgNetworkNtpCallback value) { _callback = value; }
     void setCallBack(FLProgNetworkNtpCallback value) { setCallback(value); }
 
+    // Existing unixTime/dateTime/hour methods remain UTC for source compatibility.
+    // mode0=fixed UTC offset, mode1=EU, mode2=US. Invalid settings leave the old zone.
+    bool setTimeZone(int minutes, uint8_t mode=0) {
+        if(mode==0)return _timeZone.setFixed(minutes);
+        if(mode==1)return _timeZone.setEuropean(minutes);
+        if(mode==2)return _timeZone.setUS(minutes);
+        return false;
+    }
+    bool setDaylightRules(int standardMinutes,int summerMinutes,const FLProgNtpDstRule &start,const FLProgNtpDstRule &end) {
+        return _timeZone.setRules(standardMinutes,summerMinutes,start,end);
+    }
+    FLProgNtpLocalDateTime localDateTime() const {return _timeZone.local(unixTime());}
+    int16_t utcOffsetMinutes() const {return _timeZone.offsetMinutes(unixTime());}
+    bool isDaylightSaving() const {return _timeZone.isDaylight(unixTime());}
+
     uint32_t unixTime() const { return _dateTime.unixTime; }
     uint32_t getUnixTime() const { return unixTime(); }
     uint8_t second() const { return _dateTime.seconds; }
@@ -325,6 +342,7 @@ private:
     uint8_t _packet[FLPROG_NTP_PACKET_SIZE] = {0};
     uint8_t _requestToken[8] = {0};
 
+    FLProgNtpTimeZone _timeZone;
     FLProgNtpDateTime _dateTime;
     FLProgNetworkNtpCallback _callback = nullptr;
 

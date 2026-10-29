@@ -514,7 +514,7 @@ fn pages_section(
             }
             if names.len() > 1
                 && ui
-                    .small_button("×")
+                    .small_button("✕")
                     .on_hover_text("Удалить страницу: её виджеты перейдут на предыдущую")
                     .clicked()
             {

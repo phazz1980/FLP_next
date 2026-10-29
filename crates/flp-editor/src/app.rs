@@ -1697,7 +1697,7 @@ impl EditorApp {
             panels::toolbar(self, ui);
             // The rest of the row drags the window; double click maximizes.
             // The program name sits at its right end, next to the window buttons.
-            let width = (ui.available_width() - 3.0 * 44.0).max(0.0);
+            let width = (ui.available_width() - 3.0 * 44.0 - 14.0).max(0.0);
             let (rect, drag) = ui.allocate_exact_size(
                 egui::vec2(width, ui.spacing().interact_size.y.max(30.0)),
                 egui::Sense::click_and_drag(),
@@ -1747,7 +1747,6 @@ impl EditorApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
-        ui.add_space(4.0);
     }
 
     fn toggle_fullscreen(&mut self, ctx: &egui::Context) {
