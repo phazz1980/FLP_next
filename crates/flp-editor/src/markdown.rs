@@ -123,7 +123,7 @@ fn show_inner(ui: &mut Ui, text: &str, anchor: Option<&str>) -> Option<String> {
                         ui.add(egui::Label::new(egui::RichText::new(text).monospace()).wrap());
                     });
             }
-            Block::Table(rows) => table(ui, &rows),
+            Block::Table(rows) => clicked = table(ui, &rows).or(clicked),
             Block::Gap => ui.add_space(6.0),
         }
     }
@@ -208,7 +208,7 @@ fn layout(ui: &Ui, text: &str, font: FontId, color: Color32) -> LayoutJob {
                     ..Default::default()
                 },
             ),
-            // Not clickable here (headings, table cells): only the label.
+            // Not clickable here (headings): only the label.
             Span::Link(label, _) => job.append(
                 label,
                 0.0,
@@ -223,7 +223,8 @@ fn layout(ui: &Ui, text: &str, font: FontId, color: Color32) -> LayoutJob {
     job
 }
 
-fn table(ui: &mut Ui, rows: &[Vec<String>]) {
+/// Draws a table; returns the target of a link clicked in a cell.
+fn table(ui: &mut Ui, rows: &[Vec<String>]) -> Option<String> {
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
     let id = ui.next_auto_id();
     egui::ScrollArea::horizontal()
@@ -235,6 +236,7 @@ fn table(ui: &mut Ui, rows: &[Vec<String>]) {
                 .striped(true)
                 .spacing([12.0, 4.0])
                 .show(ui, |ui| {
+                    let mut clicked = None;
                     for (i, row) in rows.iter().enumerate() {
                         for cell in row {
                             let font = TextStyle::Body.resolve(ui.style());
@@ -243,13 +245,19 @@ fn table(ui: &mut Ui, rows: &[Vec<String>]) {
                             } else {
                                 ui.visuals().text_color()
                             };
-                            let job = layout(ui, cell, font, color);
-                            ui.label(job);
+                            if inline(cell).iter().any(|s| matches!(s, Span::Link(..))) {
+                                clicked = body(ui, cell).or(clicked);
+                            } else {
+                                ui.label(layout(ui, cell, font, color));
+                            }
                         }
                         ui.end_row();
                     }
-                });
-        });
+                    clicked
+                })
+                .inner
+        })
+        .inner
 }
 
 fn parse(text: &str) -> Vec<Block<'_>> {
