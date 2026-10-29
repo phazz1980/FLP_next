@@ -81,6 +81,9 @@ pub struct CanvasState {
     moving: Option<String>,
     /// Block to scroll into view on the next frame.
     pub focus: Option<String>,
+    /// A moved sheet and the screen offset (from the canvas top) its header had: the
+    /// canvas scrolls on the next frame so the sheet stays where the user clicked.
+    follow_sheet: Option<(u32, f32)>,
     /// Screen corner where a selection frame (left drag) started.
     band: Option<Pos2>,
     /// Canvas point under the mouse: where pasted blocks go.
@@ -565,6 +568,11 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             view.pan = rect.size() * 0.5 - r.center().to_vec2() * view.zoom;
         }
     }
+    if let Some((sheet, offset)) = app.canvas.follow_sheet.take() {
+        if let Some(band) = bands.iter().find(|b| b.sheet == sheet) {
+            view.pan.y = offset - band.top * view.zoom;
+        }
+    }
     let xf = Xf {
         origin: rect.min,
         view,
@@ -668,7 +676,11 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         let prev = bi.checked_sub(1).map(|i| bands[i].sheet);
         let next = bands.get(bi + 1).map(|b| b.sheet);
         let buttons = [
-            ("✕", "Удалить плату вместе с блоками (можно отменить)", None),
+            (
+                "✕",
+                "Удалить плату вместе с блоками (спросит подтверждение)",
+                None,
+            ),
             ("▼", "Опустить плату", next),
             ("▲", "Поднять плату", prev),
         ];
@@ -1546,26 +1558,16 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         if cb {
             app.canvas.collapsed.insert(a);
         }
-        if app.sheet == a {
-            app.sheet = b;
+        // The focus and the view follow the moved sheet.
+        app.sheet = b;
+        if let Some(band) = bands.iter().find(|x| x.sheet == a) {
+            let offset = xf.pos(Pos2::new(0.0, band.top)).y - rect.min.y;
+            app.canvas.follow_sheet = Some((b, offset));
+            ui.ctx().request_repaint();
         }
     }
     if let Some(sheet) = sheet_delete {
-        let result = app.doc.as_mut().map(|doc| {
-            doc.edit(&lib, None, |p| {
-                p.delete_sheet(sheet)?;
-                p.release_unused_services(&lib)
-            })
-        });
-        match result {
-            Some(Err(e)) => app.info(LogLevel::Error, e.to_string()),
-            _ => {
-                app.extra_sheets.remove(&sheet);
-                app.canvas.collapsed.remove(&sheet);
-                app.selection = None;
-                app.sheet = app.sheets().first().copied().unwrap_or(1);
-            }
-        }
+        app.sheet_delete = Some(sheet);
     }
     if add_sheet {
         let next = app.sheets().last().copied().unwrap_or(1) + 1;
@@ -1593,6 +1595,74 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     bg.context_menu(|ui| {
         clipboard_items(app, ui);
     });
+}
+
+/// Asks before deleting a sheet (`app.sheet_delete`) and deletes it with its blocks.
+pub fn sheet_delete_dialog(app: &mut EditorApp, ctx: &egui::Context) {
+    let Some(sheet) = app.sheet_delete else {
+        return;
+    };
+    let Some(doc) = &app.doc else {
+        app.sheet_delete = None;
+        return;
+    };
+    let name = doc
+        .project
+        .layout
+        .sheet(sheet)
+        .map(|s| s.name.clone())
+        .unwrap_or_default();
+    let blocks = doc
+        .project
+        .layout
+        .blocks
+        .values()
+        .filter(|p| p.sheet == sheet)
+        .count();
+    let title = if name.is_empty() {
+        format!("Плата {sheet}")
+    } else {
+        format!("Плата {sheet} «{name}»")
+    };
+    let mut answer = None;
+    egui::Modal::new(Id::unique("sheet_delete")).show(ctx, |ui| {
+        ui.label(egui::RichText::new("Удалить плату").strong());
+        ui.label(format!(
+            "Удалить «{title}» вместе с блоками на ней ({blocks})? Это можно отменить (Ctrl+Z)."
+        ));
+        ui.horizontal(|ui| {
+            if ui.button("Удалить").clicked() {
+                answer = Some(true);
+            }
+            if ui.button("Отмена").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape))
+            {
+                answer = Some(false);
+            }
+        });
+    });
+    let Some(delete) = answer else {
+        return;
+    };
+    app.sheet_delete = None;
+    if !delete {
+        return;
+    }
+    let lib = app.lib.clone();
+    let result = app.doc.as_mut().map(|doc| {
+        doc.edit(&lib, None, |p| {
+            p.delete_sheet(sheet)?;
+            p.release_unused_services(&lib)
+        })
+    });
+    match result {
+        Some(Err(e)) => app.info(LogLevel::Error, e.to_string()),
+        _ => {
+            app.extra_sheets.remove(&sheet);
+            app.canvas.collapsed.remove(&sheet);
+            app.selection = None;
+            app.sheet = app.sheets().first().copied().unwrap_or(1);
+        }
+    }
 }
 
 /// Cut / Copy / Paste entries of the board context menus (they act on the selection).

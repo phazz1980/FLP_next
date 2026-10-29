@@ -143,6 +143,8 @@ pub struct EditorApp {
     pub help: Option<crate::help::HelpWindow>,
     /// User block waiting for the delete confirmation.
     pub block_delete: Option<String>,
+    /// Sheet waiting for the delete confirmation.
+    pub sheet_delete: Option<u32>,
     /// Selected upload port; empty means automatic.
     pub port: String,
     pub ports: Vec<SerialPort>,
@@ -245,6 +247,7 @@ impl EditorApp {
             code_view: None,
             help: None,
             block_delete: None,
+            sheet_delete: None,
             port: String::new(),
             ports: Vec::new(),
             port_scan: None,
@@ -1627,19 +1630,23 @@ impl EditorApp {
             (v.maximized.unwrap_or(false), v.fullscreen.unwrap_or(false))
         });
         let title = self.window_title();
-        let icon = ctx.data_mut(|d| {
-            d.get_temp_mut_or_insert_with(egui::Id::unique("app_icon"), || {
-                ctx.load_texture(
+        // Loaded outside `data_mut`: `load_texture` takes the context lock too.
+        let icon_id = egui::Id::unique("app_icon");
+        let icon = match ctx.data(|d| d.get_temp::<egui::TextureHandle>(icon_id)) {
+            Some(icon) => icon,
+            None => {
+                let icon = ctx.load_texture(
                     "app_icon",
                     egui::ColorImage::from_rgba_unmultiplied(
                         [64, 64],
                         include_bytes!("../assets/icon64.rgba"),
                     ),
                     egui::TextureOptions::LINEAR,
-                )
-            })
-            .clone()
-        });
+                );
+                ctx.data_mut(|d| d.insert_temp(icon_id, icon.clone()));
+                icon
+            }
+        };
         ui.horizontal(|ui| {
             ui.add(egui::Image::new(&icon).fit_to_exact_size(egui::vec2(18.0, 18.0)));
             egui::MenuBar::new().ui(ui, |ui| {
@@ -2398,6 +2405,7 @@ impl eframe::App for EditorApp {
         crate::codeview::show(self, &ctx);
         crate::help::show(self, &ctx);
         crate::blockedit::delete_dialog(self, &ctx);
+        crate::canvas::sheet_delete_dialog(self, &ctx);
         let pal = self.theme.palette;
         if let Some(d) = &mut self.debug {
             debugview::values_window(d, &pal, &ctx);
