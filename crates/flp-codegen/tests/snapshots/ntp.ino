@@ -22,6 +22,11 @@ bool work_out = false;
 
 // Обмен сигналами между основной и фоновой задачами
 SemaphoreHandle_t flp_bg_lock;
+bool clock_valid_pub = false;
+bool clock_valid_in = false;
+bool clock_valid_pend = false;
+int32_t clock_hour_pub = 0;
+int32_t clock_hour_in = 0;
 
 // wifi: wifi
 // Shared network interface: Modbus TCP and other network blocks use it.
@@ -242,6 +247,42 @@ void flp_bg_task(void *) {
       wifi_ota.pool();
     }
 
+    // clock: ntp
+    if (!clock_bound) {
+      // Attach once; the service waits for the network and repeats requests by itself.
+      clock_bound = clock_ntp.begin(flpWifi);
+      if (clock_bound) {
+        clock_ntp.setServer("pool.ntp.org");
+        clock_ntp.setRequestPeriodMs(3600000);
+      }
+    }
+    // The time is read once per second.
+    if (clock_bound && (uint32_t)(millis() - clock_tick) >= 1000) {
+      clock_tick = millis();
+      // After a failed request the service would wait for the whole period: ask again in 30 s.
+      if (clock_ntp.failed() && (uint32_t)(millis() - clock_retry) >= 30000) {
+        clock_retry = millis();
+        clock_ntp.syncNow();
+      }
+      // Stays true while the service asks the server again.
+      bool ok = clock_ntp.hasTime();
+      clock_valid = ok;
+      if (ok) {
+        uint32_t utc = clock_ntp.unixTime();
+        time_t local = (time_t)((int64_t)utc + (long)(3.0f * 3600) + 0);
+        struct tm lt;
+        gmtime_r(&local, &lt);
+        clock_hour = lt.tm_hour;
+        clock_minute = lt.tm_min;
+      }
+    }
+
+    xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
+    clock_valid_pub = clock_valid;
+    clock_valid_pend = clock_valid_pend || clock_valid;
+    clock_hour_pub = clock_hour;
+    xSemaphoreGive(flp_bg_lock);
+
     vTaskDelay(1);
   }
 }
@@ -278,44 +319,20 @@ void setup() {
 }
 
 void loop() {
-  // clock: ntp
-  if (!clock_bound) {
-    // Attach once; the service waits for the network and repeats requests by itself.
-    clock_bound = clock_ntp.begin(flpWifi);
-    if (clock_bound) {
-      clock_ntp.setServer("pool.ntp.org");
-      clock_ntp.setRequestPeriodMs(3600000);
-    }
-  }
-  // The time is read once per second.
-  if (clock_bound && (uint32_t)(millis() - clock_tick) >= 1000) {
-    clock_tick = millis();
-    // After a failed request the service would wait for the whole period: ask again in 30 s.
-    if (clock_ntp.failed() && (uint32_t)(millis() - clock_retry) >= 30000) {
-      clock_retry = millis();
-      clock_ntp.syncNow();
-    }
-    // Stays true while the service asks the server again.
-    bool ok = clock_ntp.hasTime();
-    clock_valid = ok;
-    if (ok) {
-      uint32_t utc = clock_ntp.unixTime();
-      time_t local = (time_t)((int64_t)utc + (long)(3.0f * 3600) + 0);
-      struct tm lt;
-      gmtime_r(&local, &lt);
-      clock_hour = lt.tm_hour;
-      clock_minute = lt.tm_min;
-    }
-  }
+  xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
+  clock_valid_in = clock_valid_pub || clock_valid_pend;
+  clock_valid_pend = false;
+  clock_hour_in = clock_hour_pub;
+  xSemaphoreGive(flp_bg_lock);
 
   // after8: greater
-  after8_out = (float)clock_hour > 7.5f;
+  after8_out = (float)clock_hour_in > 7.5f;
 
   // before20: less
-  before20_out = (float)clock_hour < 20.0f;
+  before20_out = (float)clock_hour_in < 20.0f;
 
   // work: and
-  work_out = after8_out && before20_out && clock_valid;
+  work_out = after8_out && before20_out && clock_valid_in;
 
   // led: digital_out
   digitalWrite(2, (work_out) ? HIGH : LOW);

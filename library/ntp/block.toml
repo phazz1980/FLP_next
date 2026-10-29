@@ -6,6 +6,7 @@ group = "Сеть"
 description = "Точное время и дата из интернета (SNTP) через Wi-Fi или Ethernet: часы, минуты, день недели и т. д. Нужен блок «Wi-Fi клиент» или «Ethernet W5500»."
 memory = true
 single = true
+shared = "network"
 includes = ["flprogNetwork.h"]
 
 [[output]]
