@@ -98,6 +98,7 @@ fn builds_a_schema_step_by_step() {
     assert_eq!(r["id"], "delay");
     // The new timer's input is not connected yet: the check says so.
     assert!(r["check"]["errors"].to_string().contains("delay"));
+    assert_eq!(r["check"]["errors"][0]["kind"], "input-empty");
 
     run(
         &mut c,

@@ -564,7 +564,8 @@ fn pins(project: &Project, lib: &Library) -> Value {
     json!({"chip": chip.name(), "used": used, "free": free})
 }
 
-/// Check result in a compact form for the model.
+/// Check result in a compact form for the model: `errors` and `warnings` are
+/// lists of `{kind, message}`, `kind` being the stable id of the problem class.
 pub fn report(project: &Project, lib: &Library) -> Value {
     // Secrets kept outside the project take part in the check, as in generation.
     let project = &match LocalValues::open_default() {
@@ -572,11 +573,11 @@ pub fn report(project: &Project, lib: &Library) -> Value {
         Err(_) => project.clone(),
     };
     let r = check_project(project, lib);
-    let list = |sev: Severity| -> Vec<String> {
+    let list = |sev: Severity| -> Vec<Value> {
         r.diagnostics
             .iter()
             .filter(|d| d.severity == sev)
-            .map(|d| d.message.clone())
+            .map(|d| json!({"kind": d.kind.id(), "message": d.message}))
             .collect()
     };
     let order: Vec<&str> = if r.has_errors() {

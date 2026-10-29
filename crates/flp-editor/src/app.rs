@@ -92,6 +92,8 @@ pub struct LogLine {
     pub text: String,
     /// Block to select when the line is clicked.
     pub block: Option<String>,
+    /// Help target (`page#anchor`) that explains the problem, for the "Что это?" link.
+    pub help: Option<String>,
 }
 
 /// Modal question asked before discarding unsaved changes.
@@ -591,6 +593,7 @@ impl EditorApp {
             level,
             text: text.into(),
             block: None,
+            help: None,
         });
     }
 
@@ -1227,6 +1230,11 @@ impl EditorApp {
                 level,
                 text: d.to_string(),
                 block,
+                help: Some(format!(
+                    "{}#{}",
+                    crate::help::ERRORS,
+                    crate::help::error_anchor(d.kind)
+                )),
             });
         }
         let errors = doc.report.errors().count();

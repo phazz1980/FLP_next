@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use eframe::egui::{self, RichText, TextEdit};
-use flp_core::{Library, LibraryBlock, ParamKind};
+use flp_core::{DiagKind, Library, LibraryBlock, ParamKind};
 
 use crate::app::EditorApp;
 use crate::markdown;
@@ -16,6 +16,37 @@ use crate::markdown;
 pub const START: &str = "quickstart";
 /// Page with the explanations of check and build errors.
 pub const ERRORS: &str = "errors";
+/// Anchor on the errors page that explains a check problem of this kind.
+pub fn error_anchor(kind: DiagKind) -> &'static str {
+    match kind {
+        DiagKind::BadId => "недопустимый-id-блока",
+        DiagKind::DuplicateId => "одинаковые-id",
+        DiagKind::UnknownType => "неизвестный-тип-блока",
+        DiagKind::UnknownParam => "нет-такого-параметра",
+        DiagKind::MissingParam => "не-задан-параметр",
+        DiagKind::ParamValue => "недопустимое-значение-параметра",
+        DiagKind::Singleton => "блок-допускается-один-раз",
+        DiagKind::Condition => "условие-блока-не-вычисляется",
+        DiagKind::ConstantType => "константа-не-подходит-к-входу",
+        DiagKind::InvertType => "инверсия-не-подходит-к-порту",
+        DiagKind::LinkEnds => "в-связи-нет-блока-или-порта",
+        DiagKind::LinkType => "типы-порта-и-входа-не-совпадают",
+        DiagKind::InputBusy => "на-вход-уже-подан-другой-источник",
+        DiagKind::InputEmpty => "вход-без-источника",
+        DiagKind::PinBusy => "вывод-gpio-уже-занят",
+        DiagKind::PinUnavailable => "вывод-gpio-недоступен",
+        DiagKind::PinWarning => "предупреждение-о-выводе-gpio",
+        DiagKind::VariableName => "имя-переменной",
+        DiagKind::VariableType => "тип-переменной",
+        DiagKind::VariableLink => "связь-с-переменной",
+        DiagKind::VariableWriters => "несколько-записывающих-блоков",
+        DiagKind::VariableUnused => "переменная-не-используется",
+        DiagKind::LayoutOrphan => "лишние-координаты-в-разметке",
+        DiagKind::Loop => "цикл-без-памяти",
+        DiagKind::Uart => "последовательный-порт",
+    }
+}
+
 /// List of all blocks.
 pub const BLOCKS: &str = "blocks";
 
@@ -415,6 +446,35 @@ mod tests {
         for (id, text) in FILES {
             let page = section(id, text);
             assert_ne!(page.title, *id, "в разделе {id} нет заголовка «# …»");
+        }
+    }
+
+    /// Every kind of check problem has its own subsection on the errors page, and
+    /// the subsections hold nothing but those kinds.
+    #[test]
+    fn every_diag_kind_has_an_errors_subsection() {
+        let text = FILES.iter().find(|(id, _)| *id == ERRORS).unwrap().1;
+        let headings: Vec<String> = text
+            .lines()
+            .filter_map(|l| l.strip_prefix("### "))
+            .map(markdown::slug)
+            .collect();
+        for &kind in DiagKind::ALL {
+            let anchor = error_anchor(kind);
+            assert!(
+                headings.iter().any(|h| h == anchor),
+                "нет подраздела «{anchor}» для вида {}",
+                kind.id()
+            );
+            assert!(
+                text.contains(&format!("*Вид `{}`.*", kind.id())),
+                "в подразделе «{anchor}» не указан вид {}",
+                kind.id()
+            );
+        }
+        let anchors: Vec<_> = DiagKind::ALL.iter().map(|&k| error_anchor(k)).collect();
+        for h in &headings {
+            assert!(anchors.contains(&h.as_str()), "подраздел «{h}» без вида");
         }
     }
 

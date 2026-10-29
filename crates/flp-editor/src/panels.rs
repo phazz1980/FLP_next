@@ -221,6 +221,7 @@ pub fn bottom(app: &mut EditorApp, ui: &mut Ui, open: &mut bool) {
 fn log(app: &mut EditorApp, ui: &mut Ui) {
     let pal = app.theme.palette;
     let mut focus = None;
+    let mut help = None;
     ScrollArea::vertical()
         .auto_shrink(false)
         .stick_to_bottom(true)
@@ -233,21 +234,31 @@ fn log(app: &mut EditorApp, ui: &mut Ui) {
                     LogLevel::Error => pal.error,
                 };
                 let text = RichText::new(&line.text).color(color).monospace();
-                match &line.block {
-                    Some(block) => {
-                        let resp = ui.add(egui::Label::new(text).sense(egui::Sense::click()));
-                        if resp.on_hover_text("Показать блок").clicked() {
-                            focus = Some(block.clone());
+                ui.horizontal_wrapped(|ui| {
+                    match &line.block {
+                        Some(block) => {
+                            let resp = ui.add(egui::Label::new(text).sense(egui::Sense::click()));
+                            if resp.on_hover_text("Показать блок").clicked() {
+                                focus = Some(block.clone());
+                            }
+                        }
+                        None => {
+                            ui.label(text);
                         }
                     }
-                    None => {
-                        ui.label(text);
+                    if let Some(target) = &line.help {
+                        if ui.link("Что это?").clicked() {
+                            help = Some(target.clone());
+                        }
                     }
-                }
+                });
             }
         });
     if let Some(id) = focus {
         app.focus_block(&id);
+    }
+    if let Some(target) = help {
+        app.open_help(&target);
     }
 }
 

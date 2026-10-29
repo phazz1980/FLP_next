@@ -19,9 +19,102 @@ pub enum Severity {
     Warning,
 }
 
+/// Coarse, stable class of a [`Diagnostic`]. The id is what the help page
+/// "Частые ошибки" and the AI refer to; messages may change, ids must not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DiagKind {
+    BadId,
+    DuplicateId,
+    UnknownType,
+    UnknownParam,
+    MissingParam,
+    ParamValue,
+    Singleton,
+    Condition,
+    ConstantType,
+    InvertType,
+    LinkEnds,
+    LinkType,
+    InputBusy,
+    InputEmpty,
+    PinBusy,
+    PinUnavailable,
+    PinWarning,
+    VariableName,
+    VariableType,
+    VariableLink,
+    VariableWriters,
+    VariableUnused,
+    LayoutOrphan,
+    Loop,
+    Uart,
+}
+
+impl DiagKind {
+    pub const ALL: &'static [DiagKind] = &[
+        DiagKind::BadId,
+        DiagKind::DuplicateId,
+        DiagKind::UnknownType,
+        DiagKind::UnknownParam,
+        DiagKind::MissingParam,
+        DiagKind::ParamValue,
+        DiagKind::Singleton,
+        DiagKind::Condition,
+        DiagKind::ConstantType,
+        DiagKind::InvertType,
+        DiagKind::LinkEnds,
+        DiagKind::LinkType,
+        DiagKind::InputBusy,
+        DiagKind::InputEmpty,
+        DiagKind::PinBusy,
+        DiagKind::PinUnavailable,
+        DiagKind::PinWarning,
+        DiagKind::VariableName,
+        DiagKind::VariableType,
+        DiagKind::VariableLink,
+        DiagKind::VariableWriters,
+        DiagKind::VariableUnused,
+        DiagKind::LayoutOrphan,
+        DiagKind::Loop,
+        DiagKind::Uart,
+    ];
+
+    /// Stable machine-readable id, kebab-case.
+    pub fn id(self) -> &'static str {
+        match self {
+            DiagKind::BadId => "bad-id",
+            DiagKind::DuplicateId => "duplicate-id",
+            DiagKind::UnknownType => "unknown-type",
+            DiagKind::UnknownParam => "unknown-param",
+            DiagKind::MissingParam => "missing-param",
+            DiagKind::ParamValue => "param-value",
+            DiagKind::Singleton => "singleton",
+            DiagKind::Condition => "condition",
+            DiagKind::ConstantType => "constant-type",
+            DiagKind::InvertType => "invert-type",
+            DiagKind::LinkEnds => "link-ends",
+            DiagKind::LinkType => "link-type",
+            DiagKind::InputBusy => "input-busy",
+            DiagKind::InputEmpty => "input-empty",
+            DiagKind::PinBusy => "pin-busy",
+            DiagKind::PinUnavailable => "pin-unavailable",
+            DiagKind::PinWarning => "pin-warning",
+            DiagKind::VariableName => "variable-name",
+            DiagKind::VariableType => "variable-type",
+            DiagKind::VariableLink => "variable-link",
+            DiagKind::VariableWriters => "variable-writers",
+            DiagKind::VariableUnused => "variable-unused",
+            DiagKind::LayoutOrphan => "layout-orphan",
+            DiagKind::Loop => "loop",
+            DiagKind::Uart => "uart",
+        }
+    }
+}
+
 /// One problem found in the schema. Messages are user-facing, in Russian.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
+    pub kind: DiagKind,
     pub severity: Severity,
     /// Block the problem belongs to, for highlighting in the editor.
     pub block: Option<String>,
@@ -64,22 +157,24 @@ impl Report {
             .filter(|d| d.severity == Severity::Error)
     }
 
-    fn block_error(&mut self, block: &str, message: String) {
-        self.push(Severity::Error, Some(block), None, message);
+    fn block_error(&mut self, kind: DiagKind, block: &str, message: String) {
+        self.push(kind, Severity::Error, Some(block), None, message);
     }
 
-    fn link_error(&mut self, link: usize, message: String) {
-        self.push(Severity::Error, None, Some(link), message);
+    fn link_error(&mut self, kind: DiagKind, link: usize, message: String) {
+        self.push(kind, Severity::Error, None, Some(link), message);
     }
 
     pub(crate) fn push(
         &mut self,
+        kind: DiagKind,
         severity: Severity,
         block: Option<&str>,
         link: Option<usize>,
         message: String,
     ) {
         self.diagnostics.push(Diagnostic {
+            kind,
             severity,
             block: block.map(str::to_owned),
             link,
@@ -201,6 +296,7 @@ fn check_number_flow(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Rep
             .unwrap_or(SignalType::Float);
         if !real.can_feed(inp.ty) {
             report.link_error(
+                DiagKind::LinkType,
                 li,
                 format!(
                     "связь {} → {}: выход получился {}, а вход ждёт {}; нужен блок преобразования",
@@ -256,7 +352,7 @@ fn check_pin_conflicts(uses: &[PinUse], report: &mut Report) {
                 u.block, u.gpio, first.block
             )
         };
-        report.block_error(&u.block, message);
+        report.block_error(DiagKind::PinBusy, &u.block, message);
     }
 }
 
@@ -265,6 +361,7 @@ fn check_board_pins(chip: Chip, uses: &[PinUse], report: &mut Report) {
         let (id, gpio) = (u.block.as_str(), u.gpio);
         let Some(pin) = chip.pin(gpio) else {
             report.block_error(
+                DiagKind::PinUnavailable,
                 id,
                 format!("блок «{id}»: у {} нет вывода GPIO{gpio}", chip.name()),
             );
@@ -282,11 +379,13 @@ fn check_board_pins(chip: Chip, uses: &[PinUse], report: &mut Report) {
         };
         if let Some(problem) = problem {
             report.block_error(
+                DiagKind::PinUnavailable,
                 id,
                 format!("блок «{id}»: вывод GPIO{gpio} {problem} у {}", chip.name()),
             );
         } else if let Some(warning) = pin.warning {
             report.push(
+                DiagKind::PinWarning,
                 Severity::Warning,
                 Some(id),
                 None,
@@ -309,7 +408,7 @@ fn check_blocks<'a>(
     for (i, block) in logic.blocks.iter().enumerate() {
         let id = block.id.as_str();
         if !is_valid_ident(id) {
-            report.block_error(
+            report.block_error(DiagKind::BadId,
                 id,
                 format!(
                     "недопустимый id блока «{id}»: только буквы (можно русские), цифры, «_» и «-» (имя может состоять и из одних цифр), без пробелов и точек"
@@ -317,12 +416,20 @@ fn check_blocks<'a>(
             );
         }
         if seen.insert(id, i).is_some() {
-            report.block_error(id, format!("id «{id}» встречается дважды"));
+            report.block_error(
+                DiagKind::DuplicateId,
+                id,
+                format!("id «{id}» встречается дважды"),
+            );
             defs.push(None);
             continue;
         }
         let Some(lib_block) = lib.resolve(logic, block) else {
-            report.block_error(id, format!("блок «{id}»: неизвестный тип «{}»", block.kind));
+            report.block_error(
+                DiagKind::UnknownType,
+                id,
+                format!("блок «{id}»: неизвестный тип «{}»", block.kind),
+            );
             defs.push(None);
             continue;
         };
@@ -336,6 +443,7 @@ fn check_blocks<'a>(
                     }
                 }
                 None => report.block_error(
+                    DiagKind::UnknownParam,
                     id,
                     format!(
                         "блок «{id}»: у типа «{}» нет параметра «{name}»",
@@ -348,6 +456,7 @@ fn check_blocks<'a>(
         for (port, value) in &block.consts {
             match def.input(port) {
                 Some(p) if !p.ty.accepts(value) => report.block_error(
+                    DiagKind::ConstantType,
                     id,
                     format!(
                         "блок «{id}»: константа на входе «{port}» не подходит к типу {}",
@@ -356,6 +465,7 @@ fn check_blocks<'a>(
                 ),
                 Some(_) => {}
                 None => report.block_error(
+                    DiagKind::ConstantType,
                     id,
                     format!("блок «{id}»: константа на несуществующем входе «{port}»"),
                 ),
@@ -364,6 +474,7 @@ fn check_blocks<'a>(
         for port in &block.inverted {
             match def.output(port) {
                 Some(p) if p.ty != SignalType::Bool => report.block_error(
+                    DiagKind::InvertType,
                     id,
                     format!(
                         "блок «{id}»: инвертировать можно только логический выход, «{port}» — нет"
@@ -371,6 +482,7 @@ fn check_blocks<'a>(
                 ),
                 Some(_) => {}
                 None => report.block_error(
+                    DiagKind::InvertType,
                     id,
                     format!("блок «{id}»: инверсия несуществующего выхода «{port}»"),
                 ),
@@ -379,6 +491,7 @@ fn check_blocks<'a>(
         for port in &block.inverted_inputs {
             match def.input(port) {
                 Some(p) if p.ty != SignalType::Bool => report.block_error(
+                    DiagKind::InvertType,
                     id,
                     format!(
                         "блок «{id}»: инвертировать можно только логический вход, «{port}» — нет"
@@ -386,6 +499,7 @@ fn check_blocks<'a>(
                 ),
                 Some(_) => {}
                 None => report.block_error(
+                    DiagKind::InvertType,
                     id,
                     format!("блок «{id}»: инверсия несуществующего входа «{port}»"),
                 ),
@@ -395,7 +509,7 @@ fn check_blocks<'a>(
         let conditions = def.inputs.iter().chain(&def.outputs).map(|p| &p.when);
         for when in conditions.chain(def.params.iter().map(|p| &p.when)) {
             if let Err(e) = def.enabled(when.as_deref(), &block.params) {
-                report.block_error(id, format!("блок «{id}»: {e}"));
+                report.block_error(DiagKind::Condition, id, format!("блок «{id}»: {e}"));
             }
         }
         for p in &def.params {
@@ -406,13 +520,18 @@ fn check_blocks<'a>(
                     .enabled(p.when.as_deref(), &block.params)
                     .unwrap_or(true)
             {
-                report.block_error(id, format!("блок «{id}»: не задан параметр «{}»", p.name));
+                report.block_error(
+                    DiagKind::MissingParam,
+                    id,
+                    format!("блок «{id}»: не задан параметр «{}»", p.name),
+                );
             }
         }
         if def.info.single {
             if let Some(first) = singles.insert(&block.kind, id) {
                 singles.insert(&block.kind, first);
                 report.block_error(
+                    DiagKind::Singleton,
                     id,
                     format!(
                         "блок «{id}»: «{}» может быть в проекте только один, уже есть «{first}»",
@@ -464,7 +583,11 @@ pub fn wifi_text_error(name: &str, text: &str) -> Option<String> {
 fn check_wifi_text(id: &str, name: &str, value: &ParamValue, report: &mut Report) {
     if let ParamValue::Text(s) = value {
         if let Some(e) = wifi_text_error(name, s) {
-            report.block_error(id, format!("блок «{id}»: параметр «{name}» — {e}"));
+            report.block_error(
+                DiagKind::ParamValue,
+                id,
+                format!("блок «{id}»: параметр «{name}» — {e}"),
+            );
         }
     }
 }
@@ -480,6 +603,7 @@ fn check_param(id: &str, p: &ParamDef, value: &ParamValue, report: &mut Report) 
             ParamKind::Pin => "номер вывода",
         };
         report.block_error(
+            DiagKind::ParamValue,
             id,
             format!("блок «{id}»: параметр «{}» — ожидается {expected}", p.name),
         );
@@ -492,6 +616,7 @@ fn check_param(id: &str, p: &ParamDef, value: &ParamValue, report: &mut Report) 
             .map(|c| format!("{} ({})", c.value, c.label))
             .collect();
         report.block_error(
+            DiagKind::ParamValue,
             id,
             format!(
                 "блок «{id}»: параметр «{}» — допустимо только {}",
@@ -513,6 +638,7 @@ fn check_param(id: &str, p: &ParamDef, value: &ParamValue, report: &mut Report) 
     // A pin parameter allowed below zero (`min = -1`) uses it for "not used".
     if p.kind == ParamKind::Pin && number < 0.0 && p.min.is_none_or(|min| min >= 0.0) {
         report.block_error(
+            DiagKind::ParamValue,
             id,
             format!(
                 "блок «{id}»: номер вывода «{}» не может быть отрицательным",
@@ -522,6 +648,7 @@ fn check_param(id: &str, p: &ParamDef, value: &ParamValue, report: &mut Report) 
     }
     if let Some(min) = p.min.filter(|&min| number < min) {
         report.block_error(
+            DiagKind::ParamValue,
             id,
             format!(
                 "блок «{id}»: параметр «{}» меньше допустимого {min}",
@@ -531,6 +658,7 @@ fn check_param(id: &str, p: &ParamDef, value: &ParamValue, report: &mut Report) 
     }
     if let Some(max) = p.max.filter(|&max| number > max) {
         report.block_error(
+            DiagKind::ParamValue,
             id,
             format!(
                 "блок «{id}»: параметр «{}» больше допустимого {max}",
@@ -571,7 +699,11 @@ impl<'a> Resolver<'a, '_> {
         let Some(&bi) = self.index.get(r.block.as_str()) else {
             // A known id with an unknown type was already reported with the block.
             if self.logic.block(&r.block).is_none() {
-                report.link_error(link, format!("{what}: нет блока «{}»", r.block));
+                report.link_error(
+                    DiagKind::LinkEnds,
+                    link,
+                    format!("{what}: нет блока «{}»", r.block),
+                );
             }
             return None;
         };
@@ -599,7 +731,7 @@ impl<'a> Resolver<'a, '_> {
                 r.block, def.info.kind, r.port
             ),
         };
-        report.link_error(link, msg);
+        report.link_error(DiagKind::LinkEnds, link, msg);
         None
     }
 }
@@ -627,6 +759,7 @@ fn check_links(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) -
         };
         if !fp.ty.can_feed(tp.ty) {
             report.link_error(
+                DiagKind::LinkType,
                 li,
                 format!(
                     "{what}: тип выхода {} не подходит ко входу {}",
@@ -639,6 +772,7 @@ fn check_links(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) -
         if let Some(prev) = sources.insert((ti, to.port.as_str()), li) {
             let prev_from = &logic.links[prev].from;
             report.link_error(
+                DiagKind::InputBusy,
                 li,
                 format!("{what}: на вход «{to}» уже подан «{prev_from}»"),
             );
@@ -662,6 +796,7 @@ fn check_vars(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) ->
         let name = var.name.as_str();
         if !crate::vars::is_valid_var_name(name) {
             report.push(
+                DiagKind::VariableName,
                 Severity::Error,
                 None,
                 None,
@@ -670,6 +805,7 @@ fn check_vars(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) ->
         }
         if names.insert(name, ()).is_some() {
             report.push(
+                DiagKind::VariableName,
                 Severity::Error,
                 None,
                 None,
@@ -681,7 +817,7 @@ fn check_vars(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) ->
             .insert(storage.clone(), name)
             .filter(|&o| o != name)
         {
-            report.push(
+            report.push(DiagKind::VariableName,
                 Severity::Error,
                 None,
                 None,
@@ -690,6 +826,7 @@ fn check_vars(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) ->
         }
         if var.init.as_ref().is_some_and(|v| !var.ty.accepts(v)) {
             report.push(
+                DiagKind::VariableType,
                 Severity::Error,
                 None,
                 None,
@@ -712,6 +849,7 @@ fn check_vars(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) ->
         };
         if logic.var(name).is_none() {
             report.block_error(
+                DiagKind::VariableLink,
                 &block.id,
                 format!("блок «{}»: нет переменной «{name}»", block.id),
             );
@@ -720,6 +858,7 @@ fn check_vars(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) ->
         if block.kind == crate::vars::VAR_SET {
             if let Some(&prev) = writers.get(name) {
                 report.block_error(
+                    DiagKind::VariableWriters,
                     &block.id,
                     format!(
                         "переменная «{name}» уже записывается блоком «{}»",
@@ -739,6 +878,7 @@ fn check_vars(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) ->
         });
         if !used {
             report.push(
+                DiagKind::VariableUnused,
                 Severity::Warning,
                 None,
                 None,
@@ -764,6 +904,7 @@ fn check_bindings(logic: &Logic, block: &crate::Block, def: &BlockDef, report: &
     for (name, var) in &block.bound {
         let Some(v) = logic.var(var) else {
             report.block_error(
+                DiagKind::VariableLink,
                 id,
                 format!("блок «{id}»: «{name}» связан с несуществующей переменной «{var}»"),
             );
@@ -777,6 +918,7 @@ fn check_bindings(logic: &Logic, block: &crate::Block, def: &BlockDef, report: &
         };
         match want {
             None => report.block_error(
+                DiagKind::VariableLink,
                 id,
                 format!("блок «{id}»: «{name}» нельзя связать с переменной"),
             ),
@@ -786,6 +928,7 @@ fn check_bindings(logic: &Logic, block: &crate::Block, def: &BlockDef, report: &
                     && !(ty == SignalType::Number && v.ty.signal().is_numeric()) =>
             {
                 report.block_error(
+                    DiagKind::VariableType,
                     id,
                     format!(
                         "блок «{id}»: «{name}» — {}, а переменная «{var}» — {}",
@@ -843,6 +986,7 @@ fn check_unconnected_inputs(logic: &Logic, defs: &[Option<&BlockDef>], report: &
                 && !block.bound.contains_key(&input.name)
             {
                 report.block_error(
+                    DiagKind::InputEmpty,
                     &block.id,
                     format!(
                         "блок «{}»: на вход «{}» ничего не подано",
@@ -858,6 +1002,7 @@ fn check_layout(logic: &Logic, layout: &Layout, report: &mut Report) {
     for id in layout.blocks.keys() {
         if logic.block(id).is_none() {
             report.push(
+                DiagKind::LayoutOrphan,
                 Severity::Warning,
                 None,
                 None,
@@ -914,6 +1059,7 @@ fn order_blocks(logic: &Logic, defs: &[Option<&BlockDef>], edges: &[Edge], repor
         for group in stuck.chunk_by(|&a, &b| scc[a] == scc[b]) {
             let ids: Vec<&str> = group.iter().map(|&i| logic.blocks[i].id.as_str()).collect();
             report.block_error(
+                DiagKind::Loop,
                 ids[0],
                 format!(
                     "цикл без блока с памятью: {} — разорвите его триггером или таймером",
@@ -987,6 +1133,19 @@ fn strongly_connected(succ: &[Vec<usize>]) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn diag_kind_ids_are_unique_kebab_case() {
+        let mut seen = std::collections::HashSet::new();
+        for k in DiagKind::ALL {
+            let id = k.id();
+            assert!(
+                id.chars().all(|c| c.is_ascii_lowercase() || c == '-'),
+                "{id}"
+            );
+            assert!(seen.insert(id), "duplicate kind id {id}");
+        }
+    }
+
     use super::*;
     use crate::{BlockDef, LibraryBlock};
 

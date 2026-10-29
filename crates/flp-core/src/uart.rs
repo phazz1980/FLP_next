@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::check::{Report, Severity};
+use crate::check::{DiagKind, Report, Severity};
 use crate::library::PinMode;
 use crate::pins::{Chip, PinUse};
 use crate::{Library, Logic, ParamValue};
@@ -281,7 +281,7 @@ fn merged_uarts(
     if let Some(report) = report {
         for (id, text) in problems {
             let message = format!("блок «{id}»: {text}");
-            report.push(Severity::Error, Some(&id), None, message);
+            report.push(DiagKind::Uart, Severity::Error, Some(&id), None, message);
         }
     }
     uarts.sort_by_key(|u| u.number);
@@ -348,7 +348,8 @@ pub(crate) fn check_uarts(
     let mut configured = BTreeMap::new();
     for u in uarts {
         let name = port_name(u.number);
-        let mut error = |text: String| report.push(Severity::Error, None, None, text);
+        let mut error =
+            |text: String| report.push(DiagKind::Uart, Severity::Error, None, None, text);
         if !available.contains(&u.number) {
             error(format!("{name}: {}", missing(u.number, chip, available)));
         }
@@ -380,6 +381,7 @@ pub(crate) fn check_uarts(
                     format!("блоком «{}»", other.block)
                 };
                 report.push(
+                    DiagKind::Uart,
                     Severity::Error,
                     None,
                     None,
@@ -401,6 +403,7 @@ pub(crate) fn check_uarts(
         // USB needs no settings; while debugging, readers get the console input.
         if b.number == USB && b.access == UartAccess::Exclusive {
             report.push(
+                DiagKind::Uart,
                 Severity::Error,
                 Some(id),
                 None,
@@ -413,6 +416,7 @@ pub(crate) fn check_uarts(
         if b.number != USB && !available.contains(&b.number) {
             let why = missing(b.number, chip, available);
             report.push(
+                DiagKind::Uart,
                 Severity::Error,
                 Some(id),
                 None,
@@ -422,6 +426,7 @@ pub(crate) fn check_uarts(
         }
         if b.number != USB && !configured.contains_key(&b.number) {
             report.push(
+                DiagKind::Uart,
                 Severity::Error,
                 Some(id),
                 None,
@@ -446,6 +451,7 @@ pub(crate) fn check_uarts(
                 "этот UART целиком занят"
             };
             report.push(
+                DiagKind::Uart,
                 Severity::Error,
                 Some(id),
                 None,
