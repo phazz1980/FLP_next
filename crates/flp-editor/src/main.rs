@@ -45,6 +45,7 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("FLP_next")
+            .with_decorations(false)
             .with_icon(eframe::egui::IconData {
                 rgba: include_bytes!("../assets/icon64.rgba").to_vec(),
                 width: 64,

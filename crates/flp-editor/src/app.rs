@@ -1575,6 +1575,9 @@ impl EditorApp {
             let target = self.help_target();
             self.open_help(&target);
         }
+        if pressed(shortcut(Modifiers::NONE, Key::F11)) {
+            self.toggle_fullscreen(ctx);
+        }
         if pressed(shortcut(Modifiers::NONE, Key::F7)) {
             self.run_check();
         }
@@ -1615,326 +1618,419 @@ impl EditorApp {
         }
     }
 
-    fn menu_bar(&mut self, ui: &mut egui::Ui) {
-        egui::MenuBar::new().ui(ui, |ui| {
-            ui.menu_button("Файл", |ui| {
-                if ui.button("Новый проект...").clicked() {
-                    self.new_project();
-                }
-                if ui.button("Открыть...").clicked() {
-                    self.pick_project();
-                }
-                let has_doc = self.doc.is_some();
-                if ui
-                    .add_enabled(
-                        has_doc,
-                        egui::Button::new("Сохранить").shortcut_text("Ctrl+S"),
-                    )
+    /// Custom window title bar: icon, burger with the editor menus, draggable title and
+    /// window buttons (the OS decorations are off).
+    fn title_bar(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let (maximized, fullscreen) = ctx.input(|i| {
+            let v = i.viewport();
+            (v.maximized.unwrap_or(false), v.fullscreen.unwrap_or(false))
+        });
+        let title = self.window_title();
+        let icon = ctx.data_mut(|d| {
+            d.get_temp_mut_or_insert_with(egui::Id::unique("app_icon"), || {
+                ctx.load_texture(
+                    "app_icon",
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [64, 64],
+                        include_bytes!("../assets/icon64.rgba"),
+                    ),
+                    egui::TextureOptions::LINEAR,
+                )
+            })
+            .clone()
+        });
+        ui.horizontal(|ui| {
+            ui.add(egui::Image::new(&icon).fit_to_exact_size(egui::vec2(18.0, 18.0)));
+            egui::MenuBar::new().ui(ui, |ui| {
+                ui.menu_button("☰", |ui| self.menus(ui))
+                    .response
+                    .on_hover_text("Меню");
+            });
+            // The rest of the row drags the window; double click maximizes.
+            let width = (ui.available_width() - 3.0 * 34.0).max(0.0);
+            let (rect, drag) = ui.allocate_exact_size(
+                egui::vec2(width, ui.spacing().interact_size.y),
+                egui::Sense::click_and_drag(),
+            );
+            ui.painter().text(
+                rect.left_center() + egui::vec2(6.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                &title,
+                egui::TextStyle::Body.resolve(ui.style()),
+                ui.visuals().weak_text_color(),
+            );
+            if drag.drag_started_by(egui::PointerButton::Primary) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+            if drag.double_clicked() && !fullscreen {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+            }
+            let button = |ui: &mut egui::Ui, text: &str, tip: &str| {
+                ui.add_sized([30.0, 20.0], egui::Button::new(text).frame(false))
+                    .on_hover_text(tip)
                     .clicked()
-                {
-                    self.save();
+            };
+            if !fullscreen {
+                if button(ui, "—", "Свернуть") {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                 }
-                if ui
-                    .add_enabled(
-                        has_doc,
-                        egui::Button::new("Сохранить как...").shortcut_text("Ctrl+Shift+S"),
-                    )
-                    .clicked()
-                {
-                    self.save_as();
+                let (glyph, tip) = if maximized {
+                    ("❐", "Восстановить")
+                } else {
+                    ("☐", "Развернуть")
+                };
+                if button(ui, glyph, tip) {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
                 }
-                if ui
-                    .button("Открывать .flpn двойным щелчком")
-                    .on_hover_text("Связать файлы проектов и наборов блоков (.flpblocks) с этим редактором в Проводнике")
-                    .clicked()
-                {
-                    match crate::assoc::register() {
-                        Ok(()) => self.info(
-                            LogLevel::Ok,
-                            "Файлы .flpn теперь открываются этим редактором",
-                        ),
-                        Err(e) => {
-                            self.info(LogLevel::Error, format!("Не удалось связать .flpn: {e}"))
+            } else if button(ui, "🗗", "Выйти из полного экрана (F11)") {
+                self.toggle_fullscreen(&ctx);
+            }
+            if button(ui, "✕", "Закрыть") {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        });
+    }
+
+    fn toggle_fullscreen(&self, ctx: &egui::Context) {
+        let on = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!on));
+    }
+
+    /// The editor menus; shown inside the burger button of the title bar.
+    fn menus(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("Файл", |ui| {
+            if ui.button("Новый проект...").clicked() {
+                self.new_project();
+            }
+            if ui.button("Открыть...").clicked() {
+                self.pick_project();
+            }
+            let has_doc = self.doc.is_some();
+            if ui
+                .add_enabled(
+                    has_doc,
+                    egui::Button::new("Сохранить").shortcut_text("Ctrl+S"),
+                )
+                .clicked()
+            {
+                self.save();
+            }
+            if ui
+                .add_enabled(
+                    has_doc,
+                    egui::Button::new("Сохранить как...").shortcut_text("Ctrl+Shift+S"),
+                )
+                .clicked()
+            {
+                self.save_as();
+            }
+            if ui
+                .button("Открывать .flpn двойным щелчком")
+                .on_hover_text("Связать файлы проектов и наборов блоков (.flpblocks) с этим редактором в Проводнике")
+                .clicked()
+            {
+                match crate::assoc::register() {
+                    Ok(()) => self.info(
+                        LogLevel::Ok,
+                        "Файлы .flpn теперь открываются этим редактором",
+                    ),
+                    Err(e) => {
+                        self.info(LogLevel::Error, format!("Не удалось связать .flpn: {e}"))
+                    }
+                }
+            }
+            ui.menu_button("Автосохранение", |ui| {
+                let mut minutes = self.autosave_minutes;
+                ui.radio_value(&mut minutes, 0, "Выключено");
+                for m in [1, 2, 5, 10, 15, 30] {
+                    ui.radio_value(&mut minutes, m, format!("Каждые {m} мин"));
+                }
+                ui.horizontal(|ui| {
+                    ui.label("Период:");
+                    ui.add(
+                        egui::DragValue::new(&mut minutes)
+                            .range(0..=240)
+                            .suffix(" мин"),
+                    );
+                });
+                if minutes != self.autosave_minutes {
+                    self.set_autosave(minutes);
+                }
+            });
+            ui.separator();
+            if ui.button("Выход").clicked() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        });
+        ui.menu_button("Примеры", |ui| {
+            let examples = self.example_projects();
+            if examples.is_empty() {
+                ui.label("Папка examples не найдена");
+            }
+            egui::ScrollArea::vertical()
+                .max_height(400.0)
+                .show(ui, |ui| {
+                    for (name, path) in examples {
+                        if ui.button(&name).clicked() {
+                            self.open_example(&name, &path);
+                            ui.close();
                         }
-                    }
-                }
-                ui.menu_button("Автосохранение", |ui| {
-                    let mut minutes = self.autosave_minutes;
-                    ui.radio_value(&mut minutes, 0, "Выключено");
-                    for m in [1, 2, 5, 10, 15, 30] {
-                        ui.radio_value(&mut minutes, m, format!("Каждые {m} мин"));
-                    }
-                    ui.horizontal(|ui| {
-                        ui.label("Период:");
-                        ui.add(
-                            egui::DragValue::new(&mut minutes)
-                                .range(0..=240)
-                                .suffix(" мин"),
-                        );
-                    });
-                    if minutes != self.autosave_minutes {
-                        self.set_autosave(minutes);
                     }
                 });
-                ui.separator();
-                if ui.button("Выход").clicked() {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-            });
-            ui.menu_button("Примеры", |ui| {
-                let examples = self.example_projects();
-                if examples.is_empty() {
-                    ui.label("Папка examples не найдена");
-                }
-                egui::ScrollArea::vertical()
-                    .max_height(400.0)
-                    .show(ui, |ui| {
-                        for (name, path) in examples {
-                            if ui.button(&name).clicked() {
-                                self.open_example(&name, &path);
-                                ui.close();
-                            }
-                        }
-                    });
-            });
-            ui.menu_button("Вид", |ui| panels::theme_menu(self, ui));
-            ui.menu_button("Правка", |ui| {
-                let (can_undo, can_redo) = self
-                    .doc
-                    .as_ref()
-                    .map_or((false, false), |d| (d.can_undo(), d.can_redo()));
-                if ui
-                    .add_enabled(
-                        can_undo,
-                        egui::Button::new("Отменить").shortcut_text("Ctrl+Z"),
-                    )
-                    .clicked()
-                {
-                    self.undo();
-                }
-                if ui
-                    .add_enabled(
-                        can_redo,
-                        egui::Button::new("Повторить").shortcut_text("Ctrl+Y"),
-                    )
-                    .clicked()
-                {
-                    self.redo();
-                }
-                ui.separator();
-                if ui
-                    .add_enabled(
-                        self.selection.is_some(),
-                        egui::Button::new("Удалить").shortcut_text("Del"),
-                    )
-                    .clicked()
-                {
-                    self.delete_selection();
-                }
-                let has_blocks = self
-                    .selection
-                    .as_ref()
-                    .is_some_and(|s| !s.blocks().is_empty());
-                if ui
-                    .add_enabled(
-                        has_blocks,
-                        egui::Button::new("Вырезать").shortcut_text("Ctrl+X"),
-                    )
-                    .clicked()
-                {
-                    self.cut_selection(ui.ctx());
-                }
-                if ui
-                    .add_enabled(
-                        has_blocks,
-                        egui::Button::new("Копировать").shortcut_text("Ctrl+C"),
-                    )
-                    .clicked()
-                {
-                    self.copy_selection(ui.ctx());
-                }
-                if ui
-                    .add_enabled(
-                        self.doc.is_some(),
-                        egui::Button::new("Вставить").shortcut_text("Ctrl+V"),
-                    )
-                    .clicked()
-                {
-                    ui.ctx()
-                        .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
-                }
-            });
-            ui.menu_button("Проект", |ui| {
-                let has_doc = self.doc.is_some();
-                let idle = !self.job_running();
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Настройки МК..."))
-                    .clicked()
-                {
-                    self.open_board_settings(ui.ctx());
-                }
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Конструктор веб-интерфейса..."))
+        });
+        ui.menu_button("Вид", |ui| {
+            let on = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
+            if ui
+                .add(
+                    egui::Button::new("На весь экран")
+                        .selected(on)
+                        .shortcut_text("F11"),
+                )
+                .clicked()
+            {
+                self.toggle_fullscreen(ui.ctx());
+                ui.close();
+            }
+            ui.separator();
+            panels::theme_menu(self, ui);
+        });
+        ui.menu_button("Правка", |ui| {
+            let (can_undo, can_redo) = self
+                .doc
+                .as_ref()
+                .map_or((false, false), |d| (d.can_undo(), d.can_redo()));
+            if ui
+                .add_enabled(
+                    can_undo,
+                    egui::Button::new("Отменить").shortcut_text("Ctrl+Z"),
+                )
+                .clicked()
+            {
+                self.undo();
+            }
+            if ui
+                .add_enabled(
+                    can_redo,
+                    egui::Button::new("Повторить").shortcut_text("Ctrl+Y"),
+                )
+                .clicked()
+            {
+                self.redo();
+            }
+            ui.separator();
+            if ui
+                .add_enabled(
+                    self.selection.is_some(),
+                    egui::Button::new("Удалить").shortcut_text("Del"),
+                )
+                .clicked()
+            {
+                self.delete_selection();
+            }
+            let has_blocks = self
+                .selection
+                .as_ref()
+                .is_some_and(|s| !s.blocks().is_empty());
+            if ui
+                .add_enabled(
+                    has_blocks,
+                    egui::Button::new("Вырезать").shortcut_text("Ctrl+X"),
+                )
+                .clicked()
+            {
+                self.cut_selection(ui.ctx());
+            }
+            if ui
+                .add_enabled(
+                    has_blocks,
+                    egui::Button::new("Копировать").shortcut_text("Ctrl+C"),
+                )
+                .clicked()
+            {
+                self.copy_selection(ui.ctx());
+            }
+            if ui
+                .add_enabled(
+                    self.doc.is_some(),
+                    egui::Button::new("Вставить").shortcut_text("Ctrl+V"),
+                )
+                .clicked()
+            {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+            }
+        });
+        ui.menu_button("Проект", |ui| {
+            let has_doc = self.doc.is_some();
+            let idle = !self.job_running();
+            if ui
+                .add_enabled(has_doc, egui::Button::new("Настройки МК..."))
+                .clicked()
+            {
+                self.open_board_settings(ui.ctx());
+            }
+            if ui
+                .add_enabled(has_doc, egui::Button::new("Конструктор веб-интерфейса..."))
+                .on_hover_text(
+                    "Страница управления на ESP32 (главная страница): откроется в браузере",
+                )
+                .clicked()
+            {
+                self.open_web_designer();
+            }
+            if let Some(doc) = self.doc.as_mut() {
+                let mut diag = doc.project.config.diagnostics.clone();
+                ui.checkbox(&mut diag.enabled, "Время цикла в порт")
                     .on_hover_text(
-                        "Страница управления на ESP32 (главная страница): откроется в браузере",
-                    )
-                    .clicked()
-                {
-                    self.open_web_designer();
-                }
-                if let Some(doc) = self.doc.as_mut() {
-                    let mut diag = doc.project.config.diagnostics.clone();
-                    ui.checkbox(&mut diag.enabled, "Время цикла в порт")
-                        .on_hover_text(
-                            "Прошивка раз в несколько секунд печатает в последовательный порт \
-                             время цикла (всего и по листам). Режим отладки не нужен",
+                        "Прошивка раз в несколько секунд печатает в последовательный порт \
+                         время цикла (всего и по листам). Режим отладки не нужен",
+                    );
+                if diag.enabled {
+                    ui.horizontal(|ui| {
+                        ui.label("Период отчёта:");
+                        ui.add(
+                            egui::DragValue::new(&mut diag.interval_ms)
+                                .range(500..=600_000)
+                                .speed(100)
+                                .suffix(" мс"),
                         );
-                    if diag.enabled {
-                        ui.horizontal(|ui| {
-                            ui.label("Период отчёта:");
-                            ui.add(
-                                egui::DragValue::new(&mut diag.interval_ms)
-                                    .range(500..=600_000)
-                                    .speed(100)
-                                    .suffix(" мс"),
-                            );
-                        });
-                    }
-                    if diag != doc.project.config.diagnostics {
-                        doc.project.config.diagnostics = diag;
-                        doc.dirty = true;
-                        doc.revision += 1;
-                    }
+                    });
                 }
+                if diag != doc.project.config.diagnostics {
+                    doc.project.config.diagnostics = diag;
+                    doc.dirty = true;
+                    doc.revision += 1;
+                }
+            }
+            ui.separator();
+            if ui
+                .add_enabled(has_doc, egui::Button::new("Проверить").shortcut_text("F7"))
+                .clicked()
+            {
+                self.run_check();
+            }
+            if ui
+                .add_enabled(has_doc, egui::Button::new("Код C++"))
+                .clicked()
+            {
+                self.code_view = Some(crate::codeview::CodeView::new());
+            }
+            if ui
+                .add_enabled(
+                    has_doc && idle,
+                    egui::Button::new("Собрать").shortcut_text("F5"),
+                )
+                .clicked()
+            {
+                self.start_job(JobKind::Build, ui.ctx());
+            }
+            if ui
+                .add_enabled(has_doc && idle, egui::Button::new("Пересобрать полностью"))
+                .on_hover_text(
+                    "Собрать заново, даже если схема не менялась: \
+                     после обновления библиотек или ядра ESP32",
+                )
+                .clicked()
+            {
+                self.start_job(JobKind::Rebuild, ui.ctx());
+            }
+            if ui
+                .add_enabled(has_doc && idle, egui::Button::new("Залить на плату"))
+                .clicked()
+            {
+                let port = self.port_choice();
+                self.start_job(JobKind::Upload { port }, ui.ctx());
+            }
+        });
+        ui.menu_button("Библиотека", |ui| {
+            if ui.button("Новый блок...").clicked() {
+                self.block_editor = Some(crate::blockedit::BlockEditor::new_block(self, ""));
+            }
+            ui.weak("Изменить блок — правой кнопкой в библиотеке");
+            ui.separator();
+            if ui.button("Перечитать блоки").clicked() {
+                self.reload_library();
+            }
+        });
+        ui.menu_button("Справка", |ui| {
+            if ui
+                .add(egui::Button::new("Содержание").shortcut_text("F1"))
+                .clicked()
+            {
+                self.open_help(crate::help::START);
+                ui.close();
+            }
+            if ui.button("Справочник блоков").clicked() {
+                self.open_help(crate::help::BLOCKS);
+                ui.close();
+            }
+            if ui.button("Частые ошибки").clicked() {
+                self.open_help(crate::help::ERRORS);
+                ui.close();
+            }
+            ui.separator();
+            ui.weak(format!("FLP_next {}", update::CURRENT));
+            ui.separator();
+            if ui
+                .add_enabled(
+                    self.update_rx.is_none(),
+                    egui::Button::new("Проверить обновления"),
+                )
+                .clicked()
+            {
+                self.start_update_check(ui.ctx(), true);
+                ui.close();
+            }
+            if ui
+                .checkbox(&mut self.update_check, "Проверять при запуске")
+                .changed()
+            {
+                theme::save_update_check(self.update_check);
+            }
+            if ui
+                .checkbox(&mut self.auto_update, "Скачивать обновления автоматически")
+                .on_hover_text(
+                    "Найденная версия скачивается в фоне; устанавливается по вашей команде",
+                )
+                .changed()
+            {
+                theme::save_auto_update(self.auto_update);
+                if self.auto_update {
+                    self.start_known_release_download();
+                }
+            }
+            if let SelfUpdate::Ready(staged) = &self.self_update {
+                let staged = staged.clone();
+                if ui.button("Перезапустить и обновить").clicked() {
+                    self.apply_update(ui.ctx(), &staged);
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui
+                .button("Сообщить об ошибке")
+                .on_hover_text("Форма: описание уйдёт на GitHub")
+                .clicked()
+            {
+                self.report.open = true;
+                ui.close();
+            }
+            if ui.button("Что нового в этой версии").clicked() {
+                self.changes_window = true;
+                ui.close();
+            }
+            if let Some(release) = &self.new_release {
                 ui.separator();
                 if ui
-                    .add_enabled(has_doc, egui::Button::new("Проверить").shortcut_text("F7"))
+                    .button(format!("Что нового в {}", release.version))
                     .clicked()
                 {
-                    self.run_check();
-                }
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Код C++"))
-                    .clicked()
-                {
-                    self.code_view = Some(crate::codeview::CodeView::new());
-                }
-                if ui
-                    .add_enabled(
-                        has_doc && idle,
-                        egui::Button::new("Собрать").shortcut_text("F5"),
-                    )
-                    .clicked()
-                {
-                    self.start_job(JobKind::Build, ui.ctx());
-                }
-                if ui
-                    .add_enabled(has_doc && idle, egui::Button::new("Пересобрать полностью"))
-                    .on_hover_text(
-                        "Собрать заново, даже если схема не менялась: \
-                         после обновления библиотек или ядра ESP32",
-                    )
-                    .clicked()
-                {
-                    self.start_job(JobKind::Rebuild, ui.ctx());
-                }
-                if ui
-                    .add_enabled(has_doc && idle, egui::Button::new("Залить на плату"))
-                    .clicked()
-                {
-                    let port = self.port_choice();
-                    self.start_job(JobKind::Upload { port }, ui.ctx());
-                }
-            });
-            ui.menu_button("Библиотека", |ui| {
-                if ui.button("Новый блок...").clicked() {
-                    self.block_editor = Some(crate::blockedit::BlockEditor::new_block(self, ""));
-                }
-                ui.weak("Изменить блок — правой кнопкой в библиотеке");
-                ui.separator();
-                if ui.button("Перечитать блоки").clicked() {
-                    self.reload_library();
-                }
-            });
-            ui.menu_button("Справка", |ui| {
-                if ui
-                    .add(egui::Button::new("Содержание").shortcut_text("F1"))
-                    .clicked()
-                {
-                    self.open_help(crate::help::START);
+                    self.update_window = true;
                     ui.close();
                 }
-                if ui.button("Справочник блоков").clicked() {
-                    self.open_help(crate::help::BLOCKS);
-                    ui.close();
-                }
-                if ui.button("Частые ошибки").clicked() {
-                    self.open_help(crate::help::ERRORS);
-                    ui.close();
-                }
-                ui.separator();
-                ui.weak(format!("FLP_next {}", update::CURRENT));
-                ui.separator();
-                if ui
-                    .add_enabled(
-                        self.update_rx.is_none(),
-                        egui::Button::new("Проверить обновления"),
-                    )
-                    .clicked()
-                {
-                    self.start_update_check(ui.ctx(), true);
-                    ui.close();
-                }
-                if ui
-                    .checkbox(&mut self.update_check, "Проверять при запуске")
-                    .changed()
-                {
-                    theme::save_update_check(self.update_check);
-                }
-                if ui
-                    .checkbox(&mut self.auto_update, "Скачивать обновления автоматически")
-                    .on_hover_text(
-                        "Найденная версия скачивается в фоне; устанавливается по вашей команде",
-                    )
-                    .changed()
-                {
-                    theme::save_auto_update(self.auto_update);
-                    if self.auto_update {
-                        self.start_known_release_download();
-                    }
-                }
-                if let SelfUpdate::Ready(staged) = &self.self_update {
-                    let staged = staged.clone();
-                    if ui.button("Перезапустить и обновить").clicked() {
-                        self.apply_update(ui.ctx(), &staged);
-                        ui.close();
-                    }
-                }
-                ui.separator();
-                if ui
-                    .button("Сообщить об ошибке")
-                    .on_hover_text("Форма: описание уйдёт на GitHub")
-                    .clicked()
-                {
-                    self.report.open = true;
-                    ui.close();
-                }
-                if ui.button("Что нового в этой версии").clicked() {
-                    self.changes_window = true;
-                    ui.close();
-                }
-                if let Some(release) = &self.new_release {
-                    ui.separator();
-                    if ui
-                        .button(format!("Что нового в {}", release.version))
-                        .clicked()
-                    {
-                        self.update_window = true;
-                        ui.close();
-                    }
-                    ui.hyperlink_to(format!("Скачать версию {}", release.version), &release.url);
-                }
-            });
+                ui.hyperlink_to(format!("Скачать версию {}", release.version), &release.url);
+            }
         });
     }
 
@@ -2154,15 +2250,19 @@ impl EditorApp {
         }
     }
 
-    fn update_title(&self, ctx: &egui::Context) {
-        let title = match &self.doc {
+    fn window_title(&self) -> String {
+        match &self.doc {
             Some(doc) => format!(
                 "{}{} — FLP_next",
                 doc.project.config.project.name,
                 if doc.dirty { " *" } else { "" }
             ),
             None => "FLP_next".to_owned(),
-        };
+        }
+    }
+
+    fn update_title(&self, ctx: &egui::Context) {
+        let title = self.window_title();
         // A viewport command always forces a repaint, so send it only on change;
         // otherwise the window redraws non-stop (~30 fps) and loads the GPU at idle.
         let id = egui::Id::unique("window_title");
@@ -2246,7 +2346,7 @@ impl eframe::App for EditorApp {
         }
 
         egui::Panel::top("menu").show(ui, |ui| {
-            self.menu_bar(ui);
+            self.title_bar(ui);
             panels::toolbar(self, ui);
         });
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
