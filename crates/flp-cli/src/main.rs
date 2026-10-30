@@ -486,10 +486,18 @@ fn load_library(project_dir: &Path, explicit: Option<&Path>) -> Option<Library> 
         );
         return None;
     };
-    // User blocks packed into the project file but missing here are restored first.
-    if flp_core::project::is_project_file(project_dir) {
-        if let Ok((lib, _)) = Library::load_with_user(&dir) {
+    // User blocks packed into the project file but missing here are restored first;
+    // a project folder (old format) may bring a board of its own.
+    if flp_core::project::is_project_file(project_dir) || project_dir.is_dir() {
+        if let Ok((mut lib, _)) = Library::load_with_user(&dir) {
             let user = flp_core::user_library_dir(&dir);
+            let boards = flp_core::packed::unpack_missing_boards(project_dir, &user, &lib);
+            if !boards.is_empty() {
+                println!("из проекта добавлена плата: {}", boards.join(", "));
+                if let Ok((reloaded, _)) = Library::load_with_user(&dir) {
+                    lib = reloaded;
+                }
+            }
             let written = flp_core::packed::unpack_missing_blocks(project_dir, &user, &lib);
             if !written.is_empty() {
                 println!("из проекта добавлены блоки: {}", written.join(", "));

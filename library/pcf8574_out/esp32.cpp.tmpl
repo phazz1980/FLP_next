@@ -1,0 +1,30 @@
+// @setup once
+{% if value.sda >= 0 and value.scl >= 0 %}Wire.begin({{ param.sda }}, {{ param.scl }});
+{% else %}Wire.begin();
+{% endif %}// @global
+uint8_t {{ id }}_state = 0;
+unsigned long {{ id }}_try = 0;
+// @setup
+// The first write goes out on the first scan.
+{{ id }}_try = millis() - 500UL;
+// @loop
+uint8_t {{ id }}_want = 0;
+if ({{ input.p0 }}) {{ id }}_want |= 0x01;
+{% if value.count > 1 %}if ({{ input.p1 }}) {{ id }}_want |= 0x02;
+{% endif %}{% if value.count > 2 %}if ({{ input.p2 }}) {{ id }}_want |= 0x04;
+{% endif %}{% if value.count > 3 %}if ({{ input.p3 }}) {{ id }}_want |= 0x08;
+{% endif %}{% if value.count > 4 %}if ({{ input.p4 }}) {{ id }}_want |= 0x10;
+{% endif %}{% if value.count > 5 %}if ({{ input.p5 }}) {{ id }}_want |= 0x20;
+{% endif %}{% if value.count > 6 %}if ({{ input.p6 }}) {{ id }}_want |= 0x40;
+{% endif %}{% if value.count > 7 %}if ({{ input.p7 }}) {{ id }}_want |= 0x80;
+{% endif %}{% if param.inverted %}{{ id }}_want = ~{{ id }}_want;
+{% endif %}// Write on change; while the chip does not answer, retry twice a second.
+if ({{ output.ok }} ? {{ id }}_want != {{ id }}_state : millis() - {{ id }}_try >= 500UL) {
+  Wire.beginTransmission({{ param.address }});
+  Wire.write({{ id }}_want);
+  {{ output.ok }} = Wire.endTransmission() == 0;
+  {{ id }}_try = millis();
+  if ({{ output.ok }}) {
+    {{ id }}_state = {{ id }}_want;
+  }
+}

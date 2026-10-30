@@ -13,11 +13,12 @@ pub mod provider;
 use std::fs;
 
 use flp_codegen::{ArduinoCpp, Backend, Program};
+use flp_core::expander::taken_pins;
 use flp_core::library::{BLOCK_FILE, DOCS_FILE, ESP32_CPP_TEMPLATE};
-use flp_core::pins::{pin_uses, Chip};
+use flp_core::pins::{pin_uses, BoardLayout};
 use flp_core::{
-    check_project, BlockPos, Library, LibraryBlock, LocalValues, ParamValue, PortRef, Project,
-    Severity, Var, VarType,
+    check_project, BlockPos, Expander, ExpanderChip, Library, LibraryBlock, LocalValues,
+    ParamValue, PortRef, Project, Severity, Var, VarType,
 };
 use serde_json::{json, Map, Value};
 
@@ -165,6 +166,33 @@ pub fn tools() -> Vec<Tool> {
             input_schema: json!({"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
         },
         Tool {
+            name: "set_expander",
+            description: "Создать или изменить расширитель портов PCF по I²C (PCF8574, PCF8574A, PCF8575). Потом цифровой вход или выход ставят на его вывод командой place_on_expander. Не указанные поля при изменении остаются прежними.",
+            input_schema: json!({"type": "object", "properties": {
+                "id": {"type": "string", "description": "имя расширителя, например relays"},
+                "chip": {"type": "string", "enum": ["pcf8574", "pcf8574a", "pcf8575"], "description": "микросхема: 8, 8 и 16 выводов"},
+                "address": {"type": "integer", "description": "адрес I²C: 32–39 (0x20–0x27) у pcf8574 и pcf8575, 56–63 (0x38–0x3F) у pcf8574a; по умолчанию первый"},
+                "sda": {"type": "integer", "description": "вывод SDA; вместе с scl, иначе -1 — шина платы по умолчанию"},
+                "scl": {"type": "integer"},
+                "period": {"type": "string", "description": "период опроса входов, по умолчанию \"20ms\""},
+                "rename_to": {"type": "string", "description": "новое имя; блоки на расширителе переедут вместе с ним"}
+            }, "required": ["id"]}),
+        },
+        Tool {
+            name: "remove_expander",
+            description: "Удалить расширитель. Пока на нём стоят блоки, удаление отклоняется.",
+            input_schema: json!({"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}),
+        },
+        Tool {
+            name: "place_on_expander",
+            description: "Поставить цифровой вход или выход (digital_in, digital_out) на вывод расширителя вместо GPIO платы. expander = null возвращает блок на GPIO: параметр pin очищается, его надо задать заново (set_params). Занятые выводы смотрите в поле expanders ответа get_schema.",
+            input_schema: json!({"type": "object", "properties": {
+                "block": {"type": "string", "description": "id блока"},
+                "expander": {"description": "имя расширителя; null — снять с расширителя"},
+                "pin": {"type": "integer", "description": "номер вывода микросхемы: 0 для P0"}
+            }, "required": ["block", "expander"]}),
+        },
+        Tool {
             name: "add_variable_block",
             description: "Поставить на плату блок чтения (var_get, выход out) или записи (var_set, вход in) переменной.",
             input_schema: json!({"type": "object", "properties": {
@@ -243,6 +271,7 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
                 "placement": p.layout.blocks,
                 "view": block_view(p, &lib),
                 "pins": pins(p, &lib),
+                "expanders": expanders(p, &lib),
                 "check": report(p, &lib),
             }))
         }
@@ -482,6 +511,81 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
             ctx.edit(&mut |p| p.remove_var(&name).map_err(|e| e.to_string()))?;
             Ok(ok(ctx, &lib))
         }
+        "set_expander" => {
+            let id = s("id")?;
+            let old = ctx.project().logic.expander(&id).cloned();
+            let chip = match args.get("chip") {
+                None | Some(Value::Null) => None,
+                Some(v) => Some(
+                    serde_json::from_value::<ExpanderChip>(v.clone())
+                        .map_err(|_| "chip: pcf8574, pcf8574a или pcf8575".to_owned())?,
+                ),
+            };
+            let int = |key: &str| args.get(key).and_then(Value::as_i64);
+            let mut e = match &old {
+                Some(e) => e.clone(),
+                None => {
+                    let chip = chip.unwrap_or_default();
+                    Expander::new(&id, chip, Expander::default_address(chip))
+                }
+            };
+            if let Some(chip) = chip.filter(|c| *c != e.chip) {
+                e.chip = chip;
+                if !chip.addresses().contains(&e.address) {
+                    e.address = Expander::default_address(chip);
+                }
+            }
+            if let Some(a) = int("address") {
+                e.address = u8::try_from(a).map_err(|_| "address: число 32–63".to_owned())?;
+            }
+            if let Some(v) = int("sda") {
+                e.sda = v;
+            }
+            if let Some(v) = int("scl") {
+                e.scl = v;
+            }
+            if let Some(period) = args.get("period").and_then(Value::as_str) {
+                e.period = period.to_owned();
+            }
+            if let (Some(_), Some(name)) = (&old, args.get("rename_to").and_then(Value::as_str)) {
+                e.id = name.to_owned();
+            }
+            ctx.edit(&mut |p| {
+                match &old {
+                    Some(_) => p.update_expander(&id, e.clone()),
+                    None => p.add_expander(e.clone()),
+                }
+                .map_err(|e| e.to_string())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "remove_expander" => {
+            let id = s("id")?;
+            ctx.edit(&mut |p| p.remove_expander(&id).map_err(|e| e.to_string()))?;
+            Ok(ok(ctx, &lib))
+        }
+        "place_on_expander" => {
+            let block = s("block")?;
+            let target = match args.get("expander") {
+                Some(Value::Null) => None,
+                Some(Value::String(name)) => {
+                    let pin = args
+                        .get("pin")
+                        .and_then(Value::as_i64)
+                        .ok_or("нужен аргумент «pin»: номер вывода расширителя")?;
+                    Some((name.clone(), pin))
+                }
+                _ => {
+                    return Err("нужен аргумент «expander» (null снимает с расширителя)".to_owned())
+                }
+            };
+            ctx.edit(&mut |p| {
+                let target = target.as_ref().map(|(name, pin)| (name.as_str(), *pin));
+                p.set_block_expander(&lib, &block, target)
+                    .map_err(|e| e.to_string())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
         "add_variable_block" => {
             let var = s("var")?;
             let write = args.get("write").and_then(Value::as_bool).unwrap_or(false);
@@ -546,22 +650,52 @@ fn ok(ctx: &dyn Context, lib: &Library) -> Value {
 }
 
 /// Pins taken by blocks and, for a known chip, the free ones with their notes.
+/// Expanders of the project with the pins other blocks hold, for the model to pick a free one.
+fn expanders(project: &Project, lib: &Library) -> Value {
+    let list: Vec<Value> = project
+        .logic
+        .expanders
+        .iter()
+        .map(|e| {
+            let taken: Vec<Value> = taken_pins(&project.logic, lib, &e.id, None)
+                .into_iter()
+                .map(|(pin, block)| json!({"pin": pin, "block": block}))
+                .collect();
+            json!({
+                "id": e.id,
+                "chip": e.chip.name(),
+                "address": e.address,
+                "pins": e.chip.pins(),
+                "taken": taken,
+            })
+        })
+        .collect();
+    json!(list)
+}
+
 fn pins(project: &Project, lib: &Library) -> Value {
     let uses = pin_uses(&project.logic, lib);
     let used: Vec<Value> = uses
         .iter()
         .map(|u| json!({"gpio": u.gpio, "block": u.block, "param": u.param}))
         .collect();
-    let Some(chip) = Chip::of_board(&project.config.board) else {
+    let Some(layout) = BoardLayout::of_board(&project.config.board, lib.boards()) else {
         return json!({"used": used});
     };
-    let free: Vec<Value> = chip
+    let free: Vec<Value> = layout
         .pins()
-        .into_iter()
+        .iter()
         .filter(|p| !p.flash && !uses.iter().any(|u| u.gpio == p.gpio))
-        .map(|p| json!({"gpio": p.gpio, "notes": p.notes()}))
+        .map(|p| {
+            let mut pin = json!({"gpio": p.gpio, "notes": p.notes()});
+            // A user board names its pins ("A1", "RS485 RX"): the model should use them.
+            if !p.label.is_empty() {
+                pin["label"] = json!(p.label);
+            }
+            pin
+        })
         .collect();
-    json!({"chip": chip.name(), "used": used, "free": free})
+    json!({"chip": layout.name(), "used": used, "free": free})
 }
 
 /// Check result in a compact form for the model: `errors` and `warnings` are

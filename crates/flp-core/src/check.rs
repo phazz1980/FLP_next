@@ -4,12 +4,12 @@
 //! editor and the AI can show everything at once.
 
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fmt;
 
 use crate::ident::is_valid_ident;
 use crate::library::{BlockDef, ParamDef, ParamKind, PortDef, SignalType};
-use crate::pins::{pin_uses, Chip, PinUse};
+use crate::pins::{pin_uses, BoardLayout, PinUse};
 use crate::value::parse_duration_ms;
 use crate::{Layout, Library, Link, Logic, ParamValue, PortRef, Project};
 
@@ -48,6 +48,10 @@ pub enum DiagKind {
     LayoutOrphan,
     Loop,
     Uart,
+    BoardBlock,
+    Expander,
+    ExpanderPin,
+    Tag,
 }
 
 impl DiagKind {
@@ -77,6 +81,10 @@ impl DiagKind {
         DiagKind::LayoutOrphan,
         DiagKind::Loop,
         DiagKind::Uart,
+        DiagKind::BoardBlock,
+        DiagKind::Expander,
+        DiagKind::ExpanderPin,
+        DiagKind::Tag,
     ];
 
     /// Stable machine-readable id, kebab-case.
@@ -107,6 +115,10 @@ impl DiagKind {
             DiagKind::LayoutOrphan => "layout-orphan",
             DiagKind::Loop => "loop",
             DiagKind::Uart => "uart",
+            DiagKind::BoardBlock => "board-block",
+            DiagKind::Expander => "expander",
+            DiagKind::ExpanderPin => "expander-pin",
+            DiagKind::Tag => "tag",
         }
     }
 }
@@ -189,11 +201,13 @@ pub fn check(logic: &Logic, lib: &Library, layout: Option<&Layout>) -> Report {
     let defs = check_blocks(logic, lib, &mut report);
     let mut edges = check_links(logic, &defs, &mut report);
     edges.extend(check_vars(logic, &defs, &mut report));
+    edges.extend(check_tags(logic, &defs, &mut report));
     check_unconnected_inputs(logic, &defs, &mut report);
     if let Some(layout) = layout {
         check_layout(logic, layout, &mut report);
     }
     check_pin_conflicts(&pin_uses(logic, lib), &mut report);
+    check_expanders(logic, lib, &mut report);
     order_blocks(logic, &defs, &edges, &mut report);
     if !report.has_errors() {
         check_number_flow(logic, &defs, &mut report);
@@ -316,19 +330,193 @@ pub fn check_project(project: &Project, lib: &Library) -> Report {
     let links = project.enabled_links();
     let project = &project.without_disabled();
     let mut report = check(&project.logic, lib, Some(&project.layout));
+    // An unused tag waits in the project tree: its inputs are not fed yet.
+    let unused = project.unused_tags(lib);
+    report.diagnostics.retain(|d| {
+        d.kind != DiagKind::InputEmpty || d.block.as_ref().is_none_or(|b| !unused.contains(b))
+    });
     // Link indices refer to the project's own list, not to the trimmed one.
     for d in &mut report.diagnostics {
         d.link = d.link.and_then(|i| links.get(i).copied());
     }
-    let chip = Chip::of_board(&project.config.board);
+    check_board_blocks(project, lib, &mut report);
+    let layout = BoardLayout::of_board(&project.config.board, lib.boards());
     let pins = pin_uses(&project.logic, lib);
-    let uarts = crate::uart::check_project_part(project, lib, &pins, chip, &mut report);
-    if let Some(chip) = chip {
-        check_board_pins(chip, &pins, &mut report);
+    let uarts = crate::uart::check_project_part(
+        project,
+        lib,
+        &pins,
+        layout.as_ref().map(BoardLayout::chip),
+        &mut report,
+    );
+    if let Some(layout) = &layout {
+        // The blocks of the board's own devices sit on the pins the board has fixed for
+        // them, so the board's remarks about those pins ("taken by the bus") are not for them.
+        let own: HashSet<&str> = project
+            .logic
+            .blocks
+            .iter()
+            .filter(|b| lib.get(&b.kind).is_some_and(|l| l.def.info.board.is_some()))
+            .map(|b| b.id.as_str())
+            .collect();
+        check_board_pins(layout, &pins, &own, &mut report);
         let uart_pins: Vec<PinUse> = uarts.iter().flat_map(|u| u.pin_uses()).collect();
-        check_board_pins(chip, &uart_pins, &mut report);
+        check_board_pins(layout, &uart_pins, &own, &mut report);
+        check_board_expanders(project, lib, layout, &mut report);
     }
     report
+}
+
+/// Blocks on pins of an expander that the board carries: the pin must be one the board
+/// brings out and must do what the block wants.
+fn check_board_expanders(
+    project: &Project,
+    lib: &Library,
+    layout: &BoardLayout,
+    report: &mut Report,
+) {
+    for u in crate::expander::expander_uses(&project.logic, lib) {
+        let Some(e) = project.logic.expander(&u.expander) else {
+            continue;
+        };
+        let Some(board) = layout.expander_for(e) else {
+            continue;
+        };
+        let id = u.block.as_str();
+        if u.pin < 0 || u.pin >= i64::from(e.chip.pins()) {
+            continue;
+        }
+        let problem = if board.pin(u.pin).is_none() {
+            "не выведен на плате"
+        } else if board.fits(u.pin, u.mode) {
+            continue;
+        } else {
+            match u.mode {
+                crate::PinMode::In => "не работает как цифровой вход",
+                crate::PinMode::Out => "не работает как цифровой выход",
+                _ => "не работает как цифровой вход и выход",
+            }
+        };
+        report.block_error(
+            DiagKind::ExpanderPin,
+            id,
+            format!(
+                "блок «{id}»: вывод P{} расширителя «{}» {problem} у {}",
+                u.pin,
+                u.expander,
+                layout.name()
+            ),
+        );
+    }
+}
+
+/// A block made for a user board (its relays) works only in a project of that board.
+fn check_board_blocks(project: &Project, lib: &Library, report: &mut Report) {
+    let model = project.config.board.model.as_deref();
+    for block in &project.logic.blocks {
+        let Some(owner) = lib
+            .get(&block.kind)
+            .and_then(|b| b.def.info.board.as_deref())
+            .filter(|&owner| Some(owner) != model)
+        else {
+            continue;
+        };
+        let owner_name = lib
+            .boards()
+            .get(owner)
+            .map_or(owner, |b| b.def.info.name.as_str());
+        let id = block.id.as_str();
+        report.block_error(
+            DiagKind::BoardBlock,
+            id,
+            format!(
+                "блок «{id}»: тип «{}» сделан для платы «{owner_name}», а в проекте выбрана другая; выберите эту плату в настройках проекта или замените блок",
+                block.kind
+            ),
+        );
+    }
+}
+
+/// Declarations of the expanders and the blocks standing on their pins.
+fn check_expanders(logic: &Logic, lib: &Library, report: &mut Report) {
+    let mut ids: HashSet<&str> = HashSet::new();
+    for (i, e) in logic.expanders.iter().enumerate() {
+        let message = if !ids.insert(e.id.as_str()) {
+            Some(format!("расширитель «{}» объявлен дважды", e.id))
+        } else if let Some(problem) = e.problem() {
+            Some(problem)
+        } else {
+            logic.expanders[..i]
+                .iter()
+                .find(|o| o.address == e.address && o.sda == e.sda && o.scl == e.scl)
+                .map(|o| {
+                    format!(
+                        "расширитель «{}»: адрес 0x{:02X} на этой шине уже занят расширителем «{}»",
+                        e.id, e.address, o.id
+                    )
+                })
+        };
+        if let Some(message) = message {
+            report.push(DiagKind::Expander, Severity::Error, None, None, message);
+        }
+    }
+    for block in logic.blocks.iter().filter(|b| b.tag.is_none()) {
+        let Some(name) = &block.expander else {
+            continue;
+        };
+        let id = block.id.as_str();
+        let supported = lib
+            .resolve(logic, block)
+            .is_none_or(|l| l.def.info.expander);
+        if !supported {
+            report.block_error(
+                DiagKind::Expander,
+                id,
+                format!(
+                    "блок «{id}»: тип «{}» не может стоять на выводе расширителя",
+                    block.kind
+                ),
+            );
+        } else if logic.expander(name).is_none() {
+            report.block_error(
+                DiagKind::Expander,
+                id,
+                format!("блок «{id}»: расширитель «{name}» не найден"),
+            );
+        }
+    }
+    let uses = crate::expander::expander_uses(logic, lib);
+    for (i, u) in uses.iter().enumerate() {
+        let Some(e) = logic.expander(&u.expander) else {
+            continue;
+        };
+        let id = u.block.as_str();
+        if u.pin < 0 || u.pin >= i64::from(e.chip.pins()) {
+            report.block_error(
+                DiagKind::ExpanderPin,
+                id,
+                format!(
+                    "блок «{id}»: у {} расширителя «{}» нет вывода P{}, допустимы P0–P{}",
+                    e.chip.name(),
+                    e.id,
+                    u.pin,
+                    e.chip.pins() - 1
+                ),
+            );
+        } else if let Some(first) = uses[..i]
+            .iter()
+            .find(|o| o.expander == u.expander && o.pin == u.pin)
+        {
+            report.block_error(
+                DiagKind::ExpanderPin,
+                id,
+                format!(
+                    "блок «{id}»: вывод P{} расширителя «{}» уже занят блоком «{}»",
+                    u.pin, u.expander, first.block
+                ),
+            );
+        }
+    }
 }
 
 /// Two blocks (or two parameters of one block) on one pin, unless the pin is
@@ -356,14 +544,21 @@ fn check_pin_conflicts(uses: &[PinUse], report: &mut Report) {
     }
 }
 
-fn check_board_pins(chip: Chip, uses: &[PinUse], report: &mut Report) {
+/// Pins a block uses against the board: missing ones and unfit ones are errors, the
+/// pin's own remark a warning, except for the `quiet` blocks.
+fn check_board_pins(
+    layout: &BoardLayout,
+    uses: &[PinUse],
+    quiet: &HashSet<&str>,
+    report: &mut Report,
+) {
     for u in uses {
         let (id, gpio) = (u.block.as_str(), u.gpio);
-        let Some(pin) = chip.pin(gpio) else {
+        let Some(pin) = layout.pin(gpio) else {
             report.block_error(
                 DiagKind::PinUnavailable,
                 id,
-                format!("блок «{id}»: у {} нет вывода GPIO{gpio}", chip.name()),
+                format!("блок «{id}»: у {} нет вывода GPIO{gpio}", layout.name()),
             );
             continue;
         };
@@ -372,7 +567,12 @@ fn check_board_pins(chip: Chip, uses: &[PinUse], report: &mut Report) {
         } else if !pin.fits(u.mode) {
             Some(match u.mode {
                 crate::PinMode::Adc => "без АЦП",
-                _ => "работает только на вход",
+                crate::PinMode::Dac => "без ЦАП",
+                crate::PinMode::Pwm => "не умеет ШИМ",
+                crate::PinMode::In => "не работает как цифровой вход",
+                _ if pin.input_only => "работает только на вход",
+                crate::PinMode::Out => "не работает как цифровой выход",
+                crate::PinMode::Io => "не работает как цифровой вход и выход",
             })
         } else {
             None
@@ -381,9 +581,12 @@ fn check_board_pins(chip: Chip, uses: &[PinUse], report: &mut Report) {
             report.block_error(
                 DiagKind::PinUnavailable,
                 id,
-                format!("блок «{id}»: вывод GPIO{gpio} {problem} у {}", chip.name()),
+                format!(
+                    "блок «{id}»: вывод GPIO{gpio} {problem} у {}",
+                    layout.name()
+                ),
             );
-        } else if let Some(warning) = pin.warning {
+        } else if let Some(warning) = pin.warning.as_ref().filter(|_| !quiet.contains(id)) {
             report.push(
                 DiagKind::PinWarning,
                 Severity::Warning,
@@ -507,12 +710,16 @@ fn check_blocks<'a>(
         }
         // Conditions that fail to evaluate (e.g. comparing a string with a number).
         let conditions = def.inputs.iter().chain(&def.outputs).map(|p| &p.when);
-        for when in conditions.chain(def.params.iter().map(|p| &p.when)) {
+        for when in conditions
+            .chain(def.params.iter().map(|p| &p.when))
+            .filter(|_| block.tag.is_none())
+        {
             if let Err(e) = def.enabled(when.as_deref(), &block.params) {
                 report.block_error(DiagKind::Condition, id, format!("блок «{id}»: {e}"));
             }
         }
-        for p in &def.params {
+        // A copy's parameters are its tag's: they are checked on the tag.
+        for p in def.params.iter().filter(|_| block.tag.is_none()) {
             if p.default.is_none()
                 && !block.params.contains_key(&p.name)
                 && !block.bound.contains_key(&p.name)
@@ -527,7 +734,7 @@ fn check_blocks<'a>(
                 );
             }
         }
-        if def.info.single {
+        if def.info.single && block.tag.is_none() {
             if let Some(first) = singles.insert(&block.kind, id) {
                 singles.insert(&block.kind, first);
                 report.block_error(
@@ -592,7 +799,7 @@ fn check_wifi_text(id: &str, name: &str, value: &ParamValue, report: &mut Report
     }
 }
 
-fn check_param(id: &str, p: &ParamDef, value: &ParamValue, report: &mut Report) {
+pub(crate) fn check_param(id: &str, p: &ParamDef, value: &ParamValue, report: &mut Report) {
     if !p.kind.accepts(value) {
         let expected = match p.kind {
             ParamKind::Bool => "true или false",
@@ -1012,6 +1219,45 @@ fn check_layout(logic: &Logic, layout: &Layout, report: &mut Report) {
     }
 }
 
+/// Copies of tags: the tag must exist, be no copy itself, have the same type and a
+/// board pin. Returns edges "tag before the copy" for copies of inputs, so that the
+/// copy gives the value read in the same scan.
+fn check_tags(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) -> Vec<Edge> {
+    let mut edges = Vec::new();
+    for (i, block) in logic.blocks.iter().enumerate() {
+        let Some(tag) = &block.tag else { continue };
+        let id = block.id.as_str();
+        let target = logic.blocks.iter().position(|b| b.id == *tag);
+        let problem = match target.map(|t| (t, &logic.blocks[t])) {
+            None => Some(format!("копия «{id}»: нет тега «{tag}»")),
+            Some((_, t)) if t.tag.is_some() => {
+                Some(format!("копия «{id}»: «{tag}» сам копия, ссылаться надо на тег"))
+            }
+            Some((_, t)) if t.kind != block.kind => Some(format!(
+                "копия «{id}»: тип «{}» не совпадает с типом тега «{tag}» («{}»)",
+                block.kind, t.kind
+            )),
+            Some((t, _)) if !defs[t].is_some_and(|d| d.params.iter().any(|p| p.kind == ParamKind::Pin)) => {
+                Some(format!("копия «{id}»: у «{tag}» нет вывода платы, копировать можно только входы и выходы"))
+            }
+            Some((t, _)) => {
+                if defs[i].is_some_and(|d| !d.outputs.is_empty()) {
+                    edges.push(Edge {
+                        link: None,
+                        from: t,
+                        to: i,
+                    });
+                }
+                None
+            }
+        };
+        if let Some(message) = problem {
+            report.block_error(DiagKind::Tag, id, message);
+        }
+    }
+    edges
+}
+
 /// Builds the execution order. Feedback loops are allowed only through a block with
 /// memory: links into such blocks inside a loop take the previous scan's value.
 fn order_blocks(logic: &Logic, defs: &[Option<&BlockDef>], edges: &[Edge], report: &mut Report) {
@@ -1408,6 +1654,24 @@ type = \"pin\"
 mode = \"adc\"
 ",
             "[block]
+type = \"pwm\"
+name = \"p\"
+group = \"Тест\"
+             [[param]]
+name = \"pin\"
+type = \"pin\"
+mode = \"pwm\"
+",
+            "[block]
+type = \"din\"
+name = \"d\"
+group = \"Тест\"
+             [[param]]
+name = \"pin\"
+type = \"pin\"
+mode = \"in\"
+",
+            "[block]
 type = \"bus\"
 name = \"b\"
 group = \"Тест\"
@@ -1528,6 +1792,227 @@ tx = 16",
                 "блок «d»: у ESP32 нет вывода GPIO40",
                 "блок «e»: вывод GPIO1 — UART0: заливка и отладка по USB",
             ]
+        );
+    }
+
+    #[test]
+    fn pins_of_a_user_board() {
+        use crate::boards::{BoardDef, BoardInfo, BoardPin, Boards, UserBoard};
+        let pin = |gpio, name: &str, busy: Option<&str>| BoardPin {
+            gpio,
+            name: name.into(),
+            note: String::new(),
+            busy: busy.map(Into::into),
+            functions: None,
+        };
+        let def = BoardDef {
+            info: BoardInfo {
+                id: "mine".into(),
+                name: "Моя плата".into(),
+                chip: "esp32".into(),
+                fqbn: "esp32:esp32:esp32".into(),
+                version: 1,
+                options: Default::default(),
+            },
+            pins: vec![
+                pin(4, "OUT1", None),
+                pin(36, "A1", None),
+                pin(15, "SCL", Some("шина I2C")),
+            ],
+            expander_pins: Vec::new(),
+            devices: Vec::new(),
+        };
+        let mut boards = Boards::default();
+        boards.insert(UserBoard {
+            def,
+            dir: Default::default(),
+        });
+        let mut lib = pin_library();
+        lib.set_boards(boards);
+        let mut project = pin_project(&[
+            ("a", "out", "pin = 4"),
+            // The chip has GPIO5, the board does not bring it out.
+            ("b", "out", "pin = 5"),
+            ("c", "ain", "pin = 36"),
+            ("d", "out", "pin = 15"),
+        ]);
+        project.config.board.model = Some("mine".into());
+        let m: Vec<String> = check_project(&project, &lib)
+            .diagnostics
+            .into_iter()
+            .map(|d| d.message)
+            .collect();
+        assert_eq!(
+            m,
+            [
+                "блок «b»: у Моя плата нет вывода GPIO5",
+                "блок «d»: вывод GPIO15 — шина I2C",
+            ]
+        );
+        // Without the model the same schema is checked against the chip table.
+        project.config.board.model = None;
+        assert!(!check_project(&project, &lib)
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("Моя плата")));
+    }
+
+    #[test]
+    fn a_pin_without_the_needed_function_is_refused() {
+        use crate::boards::{BoardDef, BoardInfo, BoardPin, Boards, UserBoard};
+        use crate::PinFunction::*;
+        let pin = |gpio, functions: Option<Vec<_>>| BoardPin {
+            gpio,
+            name: String::new(),
+            note: String::new(),
+            busy: None,
+            functions,
+        };
+        let mut boards = Boards::default();
+        boards.insert(UserBoard {
+            def: BoardDef {
+                info: BoardInfo {
+                    id: "mine".into(),
+                    name: "Моя плата".into(),
+                    chip: "esp32".into(),
+                    fqbn: "esp32:esp32:esp32".into(),
+                    version: 1,
+                    options: Default::default(),
+                },
+                pins: vec![
+                    pin(4, Some(vec![Dout])),
+                    pin(5, Some(vec![Din, Pwm])),
+                    pin(36, Some(vec![Adc])),
+                    pin(13, None),
+                ],
+                expander_pins: Vec::new(),
+                devices: Vec::new(),
+            },
+            dir: Default::default(),
+        });
+        let mut lib = pin_library();
+        lib.set_boards(boards);
+        let mut project = pin_project(&[
+            ("ok_out", "out", "pin = 4"),
+            ("ok_pwm", "pwm", "pin = 5"),
+            ("ok_adc", "ain", "pin = 36"),
+            ("ok_any", "din", "pin = 13"),
+            // GPIO4 has an ADC on the chip, but the board gives it only as an output
+            ("no_adc", "ain", "pin = 4"),
+            ("no_pwm", "pwm", "pin = 4"),
+            ("no_in", "din", "pin = 4"),
+            ("no_out", "out", "pin = 5"),
+        ]);
+        project.config.board.model = Some("mine".into());
+        let m: Vec<String> = check_project(&project, &lib)
+            .diagnostics
+            .into_iter()
+            .map(|d| d.message)
+            .filter(|m| m.contains("у Моя плата"))
+            .collect();
+        assert_eq!(
+            m,
+            [
+                "блок «no_adc»: вывод GPIO4 без АЦП у Моя плата",
+                "блок «no_pwm»: вывод GPIO4 не умеет ШИМ у Моя плата",
+                "блок «no_in»: вывод GPIO4 не работает как цифровой вход у Моя плата",
+                "блок «no_out»: вывод GPIO5 не работает как цифровой выход у Моя плата",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_block_of_another_board() {
+        use crate::boards::{BoardDef, BoardInfo, Boards, UserBoard};
+        let mut boards = Boards::default();
+        boards.insert(UserBoard {
+            def: BoardDef {
+                info: BoardInfo {
+                    id: "mine".into(),
+                    name: "Моя плата".into(),
+                    chip: "esp32".into(),
+                    fqbn: "esp32:esp32:esp32".into(),
+                    version: 1,
+                    options: Default::default(),
+                },
+                pins: Vec::new(),
+                expander_pins: Vec::new(),
+                devices: Vec::new(),
+            },
+            dir: Default::default(),
+        });
+        let mut lib = pin_library();
+        lib.set_boards(boards);
+        let mut relay = lib.get("out").unwrap().clone();
+        relay.def.info.kind = "mine_out".into();
+        relay.def.info.board = Some("mine".into());
+        lib.insert(relay);
+
+        let mut project = pin_project(&[("r", "mine_out", "pin = 4")]);
+        // A project of a built-in board, or of no board, cannot use it.
+        for model in [None, Some("other")] {
+            project.config.board.model = model.map(Into::into);
+            let report = check_project(&project, &lib);
+            let kinds: Vec<_> = report.errors().map(|d| d.kind).collect();
+            assert_eq!(kinds, [DiagKind::BoardBlock], "{:?}", report.diagnostics);
+            let message = &report.diagnostics[0].message;
+            assert!(message.contains("для платы «Моя плата»"), "{message}");
+        }
+        project.config.board.model = Some("mine".into());
+        let report = check_project(&project, &lib);
+        assert!(!report.has_errors(), "{:?}", report.diagnostics);
+    }
+
+    #[test]
+    fn the_board_does_not_warn_its_own_devices_about_its_pins() {
+        use crate::boards::{BoardDef, BoardInfo, BoardPin, Boards, UserBoard};
+        let mut boards = Boards::default();
+        boards.insert(UserBoard {
+            def: BoardDef {
+                info: BoardInfo {
+                    id: "mine".into(),
+                    name: "Моя плата".into(),
+                    chip: "esp32".into(),
+                    fqbn: "esp32:esp32:esp32".into(),
+                    version: 1,
+                    options: Default::default(),
+                },
+                pins: vec![BoardPin {
+                    gpio: 4,
+                    name: "SDA".into(),
+                    note: String::new(),
+                    busy: Some("шина I2C".into()),
+                    functions: None,
+                }],
+                expander_pins: Vec::new(),
+                devices: Vec::new(),
+            },
+            dir: Default::default(),
+        });
+        let mut lib = pin_library();
+        lib.set_boards(boards);
+        let mut relay = lib.get("out").unwrap().clone();
+        relay.def.info.kind = "mine_out".into();
+        relay.def.info.board = Some("mine".into());
+        lib.insert(relay);
+
+        let mut project = pin_project(&[("r", "mine_out", "pin = 4"), ("o", "out", "pin = 4")]);
+        project.config.board.model = Some("mine".into());
+        let m: Vec<String> = check_project(&project, &lib)
+            .diagnostics
+            .into_iter()
+            .map(|d| d.message)
+            .collect();
+        // Only the ordinary block hears about the bus (and about sharing the pin).
+        assert!(
+            m.iter()
+                .any(|s| s.contains("«o»") && s.contains("шина I2C")),
+            "{m:?}"
+        );
+        assert!(
+            !m.iter()
+                .any(|s| s.contains("«r»") && s.contains("шина I2C")),
+            "{m:?}"
         );
     }
 }

@@ -1,0 +1,69 @@
+# Два расширителя на одной шине I²C (SDA = GPIO21, SCL = GPIO22):
+# «buttons» (PCF8574, 0x22) — только входы, «relays» (PCF8575, 0x20) — выходы и один вход.
+# Блоки обычные, цифровые вход и выход; вывод расширителя выбирается в их свойствах.
+
+[[expander]]
+id = "buttons"
+chip = "pcf8574"
+address = 34
+
+[[expander]]
+id = "relays"
+chip = "pcf8575"
+address = 32
+
+# Кнопки на землю: инверсия даёт true при нажатии.
+[[block]]
+id = "button1"
+type = "digital_in"
+expander = "buttons"
+pin = 0
+inverted = true
+
+[[block]]
+id = "button2"
+type = "digital_in"
+expander = "buttons"
+pin = 1
+inverted = true
+
+# Концевик на том же расширителе, что и реле: вывод P15 работает как вход.
+[[block]]
+id = "limit"
+type = "digital_in"
+expander = "relays"
+pin = 15
+inverted = true
+
+# Реле, включаемые нулём.
+[[block]]
+id = "relay1"
+type = "digital_out"
+expander = "relays"
+pin = 0
+inverted = true
+
+[[block]]
+id = "relay2"
+type = "digital_out"
+expander = "relays"
+pin = 9
+inverted = true
+
+# Светодиод на выводе самой платы — вперемешку с расширителями.
+[[block]]
+id = "lamp"
+type = "digital_out"
+pin = 2
+
+[[link]]
+from = "button1.out"
+to   = "relay1.in"
+
+[[link]]
+from = "button2.out"
+to   = "relay2.in"
+
+[[link]]
+from = "limit.out"
+to   = "lamp.in"

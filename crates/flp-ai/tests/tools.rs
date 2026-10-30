@@ -224,6 +224,78 @@ fn variables() {
 }
 
 #[test]
+fn expanders() {
+    let mut c = ctx("expanders");
+    run(
+        &mut c,
+        "set_expander",
+        json!({"id": "relays", "chip": "pcf8575"}),
+    )
+    .unwrap();
+    // an address of another chip is refused, and the project stays as it was
+    let bad = run(
+        &mut c,
+        "set_expander",
+        json!({"id": "relays", "address": 56}),
+    );
+    assert!(bad.unwrap_err().contains("0x38"));
+    for id in ["lamp", "fan"] {
+        run(
+            &mut c,
+            "add_block",
+            json!({"type": "digital_out", "id": id}),
+        )
+        .unwrap();
+    }
+    run(
+        &mut c,
+        "place_on_expander",
+        json!({"block": "lamp", "expander": "relays", "pin": 12}),
+    )
+    .unwrap();
+    // the schema tells which pins are taken
+    let schema = run(&mut c, "get_schema", json!({})).unwrap();
+    let e = &schema["expanders"][0];
+    assert_eq!(e["id"], "relays");
+    assert_eq!(e["pins"], 16);
+    assert_eq!(e["taken"][0], json!({"pin": 12, "block": "lamp"}));
+    // busy, out of range and still-used expander are refused
+    let busy = run(
+        &mut c,
+        "place_on_expander",
+        json!({"block": "fan", "expander": "relays", "pin": 12}),
+    );
+    assert!(busy.unwrap_err().contains("lamp"));
+    let range = run(
+        &mut c,
+        "place_on_expander",
+        json!({"block": "fan", "expander": "relays", "pin": 16}),
+    );
+    assert!(range.unwrap_err().contains("P15"));
+    let used = run(&mut c, "remove_expander", json!({"id": "relays"}));
+    assert!(used.unwrap_err().contains("lamp"));
+    // a rename takes the blocks along; taking them off allows the removal
+    run(
+        &mut c,
+        "set_expander",
+        json!({"id": "relays", "rename_to": "lamps"}),
+    )
+    .unwrap();
+    assert_eq!(
+        c.project.logic.block("lamp").unwrap().expander.as_deref(),
+        Some("lamps")
+    );
+    run(
+        &mut c,
+        "place_on_expander",
+        json!({"block": "lamp", "expander": null}),
+    )
+    .unwrap();
+    run(&mut c, "remove_expander", json!({"id": "lamps"})).unwrap();
+    assert!(c.project.logic.expanders.is_empty());
+}
+
+#[test]
 fn library_queries() {
     let mut c = ctx("lib");
     let found = run(&mut c, "list_block_types", json!({"filter": "таймер"})).unwrap();

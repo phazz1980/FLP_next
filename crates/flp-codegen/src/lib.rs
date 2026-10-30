@@ -7,6 +7,7 @@
 pub mod arduino;
 pub mod debug;
 pub mod error;
+pub mod expander;
 pub mod preview;
 pub mod program;
 pub mod retain;
@@ -38,7 +39,19 @@ pub fn generate(
     lib: &Library,
     backend: &dyn Backend,
 ) -> Result<String, GenError> {
-    let project = project.without_disabled();
+    let mut project = project.without_disabled();
+    // An unused output waits in the project tree with nothing to write: it is left
+    // out of the sketch. An unused input is harmless and stays.
+    for id in project.unused_tags(lib) {
+        let output = project
+            .logic
+            .block(&id)
+            .and_then(|b| lib.resolve(&project.logic, b))
+            .is_some_and(|l| l.def.outputs.is_empty());
+        if output {
+            project.remove_block(&id).expect("listed by unused_tags");
+        }
+    }
     let program = Program::build(&project, lib)?;
     backend.generate(&program)
 }

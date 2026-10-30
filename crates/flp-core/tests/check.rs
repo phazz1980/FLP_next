@@ -380,3 +380,284 @@ fn disabled_sheet_is_left_out_of_the_check() {
         .iter()
         .all(|l| l.from.block != id && l.to.block != id));
 }
+
+const EXPANDER: &str = r#"
+[[expander]]
+id = "relays"
+chip = "pcf8574"
+address = 0x20
+"#;
+
+fn with_expander(blocks: &str) -> String {
+    format!("{EXPANDER}{blocks}")
+}
+
+#[test]
+fn block_on_expander_pin_is_valid_and_takes_no_gpio() {
+    // pin 4 on the chip and pin 4 on the board are different things
+    let src = with_expander(
+        r#"
+[[block]]
+id = "a"
+type = "digital_out"
+const = { in = true }
+expander = "relays"
+pin = 4
+
+[[block]]
+id = "b"
+type = "digital_out"
+const = { in = true }
+pin = 4
+"#,
+    );
+    let report = check_src(&src);
+    assert!(report.diagnostics.is_empty(), "{:#?}", report.diagnostics);
+}
+
+#[test]
+fn expander_pin_taken_twice() {
+    let src = with_expander(
+        r#"
+[[block]]
+id = "a"
+type = "digital_out"
+const = { in = true }
+expander = "relays"
+pin = 3
+
+[[block]]
+id = "b"
+type = "digital_in"
+expander = "relays"
+pin = 3
+"#,
+    );
+    assert_single_error(&src, "уже занят блоком «a»");
+}
+
+#[test]
+fn expander_pin_out_of_range() {
+    let src = with_expander(
+        r#"
+[[block]]
+id = "a"
+type = "digital_out"
+const = { in = true }
+expander = "relays"
+pin = 8
+"#,
+    );
+    assert_single_error(&src, "нет вывода P8");
+}
+
+#[test]
+fn unknown_expander_and_unsupported_block() {
+    assert_single_error(
+        r#"
+[[block]]
+id = "a"
+type = "digital_out"
+const = { in = true }
+expander = "nope"
+pin = 1
+"#,
+        "расширитель «nope» не найден",
+    );
+    assert_single_error(
+        &with_expander(
+            r#"
+[[block]]
+id = "a"
+type = "analog_in"
+expander = "relays"
+pin = 1
+"#,
+        ),
+        "не может стоять на выводе расширителя",
+    );
+}
+
+#[test]
+fn expander_address_clash() {
+    let src = format!(
+        "{EXPANDER}{}",
+        r#"
+[[expander]]
+id = "second"
+chip = "pcf8574"
+address = 0x20
+"#
+    );
+    assert_single_error(&src, "уже занят расширителем «relays»");
+}
+
+/// Kincony-like board: PCF8574 at 0x24 behind the device "relays"; the board brings out
+/// P0 and P2 (outputs, K1 and K2) and P1 (an input, X1) only.
+fn board_with_expander_pins() -> Library {
+    use flp_core::boards::{BoardExpanderPinDef, BoardInfo, DeviceDef};
+    use flp_core::{BoardDef, Boards, ParamValue, PinFunction, UserBoard};
+    let device = DeviceDef {
+        id: "relays".into(),
+        kind: "pcf8574_out".into(),
+        name: "Реле".into(),
+        description: String::new(),
+        channels: Vec::new(),
+        params: [("address".to_owned(), ParamValue::Int(0x24))].into(),
+    };
+    let pin = |pin, name: &str, f| BoardExpanderPinDef {
+        device: "relays".into(),
+        pin,
+        name: name.into(),
+        note: String::new(),
+        functions: Some(vec![f]),
+    };
+    let def = BoardDef {
+        info: BoardInfo {
+            id: "mine".into(),
+            name: "Моя плата".into(),
+            chip: "esp32".into(),
+            fqbn: "esp32:esp32:esp32".into(),
+            version: 1,
+            options: Default::default(),
+        },
+        pins: Vec::new(),
+        expander_pins: vec![
+            pin(0, "K1", PinFunction::Dout),
+            pin(1, "X1", PinFunction::Din),
+            pin(2, "K2", PinFunction::Dout),
+        ],
+        devices: vec![device],
+    };
+    def.validate(None).unwrap();
+    let mut boards = Boards::default();
+    boards.insert(UserBoard {
+        def,
+        dir: Default::default(),
+    });
+    let mut lib = library();
+    lib.set_boards(boards);
+    lib
+}
+
+fn board_project(blocks: &str) -> Project {
+    let src =
+        format!("[[expander]]\nid = \"relays\"\nchip = \"pcf8574\"\naddress = 0x24\n{blocks}");
+    Project {
+        path: Default::default(),
+        config: toml::from_str(
+            "[project]\nname = \"p\"\n[board]\nmodel = \"mine\"\nfqbn = \"esp32:esp32:esp32\"\n",
+        )
+        .unwrap(),
+        logic: toml::from_str(&src).unwrap(),
+        layout: Default::default(),
+    }
+}
+
+#[test]
+fn expander_pins_of_the_board_follow_its_functions() {
+    let lib = board_with_expander_pins();
+    let project = board_project(
+        r#"
+[[block]]
+id = "k1"
+type = "digital_out"
+const = { in = true }
+expander = "relays"
+pin = 0
+
+[[block]]
+id = "x1"
+type = "digital_in"
+expander = "relays"
+pin = 1
+
+[[block]]
+id = "wrong"
+type = "digital_in"
+expander = "relays"
+pin = 2
+
+[[block]]
+id = "missing"
+type = "digital_out"
+const = { in = true }
+expander = "relays"
+pin = 5
+"#,
+    );
+    let messages: Vec<String> = flp_core::check_project(&project, &lib)
+        .errors()
+        .map(|d| d.message.clone())
+        .collect();
+    assert_eq!(
+        messages,
+        [
+            "блок «wrong»: вывод P2 расширителя «relays» не работает как цифровой вход у Моя плата",
+            "блок «missing»: вывод P5 расширителя «relays» не выведен на плате у Моя плата",
+        ]
+    );
+    // Another chip address is not the board's expander: the board has no say there.
+    let mut other = project.clone();
+    other.logic.expanders[0].address = 0x25;
+    assert!(flp_core::check_project(&other, &lib)
+        .errors()
+        .next()
+        .is_none());
+}
+
+#[test]
+fn tag_copy_errors() {
+    let copy = |tag: &str, kind: &str| {
+        format!("{INPUT}\n[[block]]\nid = \"copy\"\ntype = \"{kind}\"\ntag = \"{tag}\"\n")
+    };
+    assert_single_error(&copy("nobody", "digital_in"), "нет тега «nobody»");
+    let errors = error_messages(&check_src(&copy("button", "digital_out")));
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("не совпадает с типом тега")),
+        "{errors:#?}"
+    );
+    let chain = format!(
+        "{}\n[[block]]\nid = \"copy2\"\ntype = \"digital_in\"\ntag = \"copy\"\n",
+        copy("button", "digital_in")
+    );
+    assert_single_error(&chain, "сам копия");
+    let not_tag = "[[block]]\nid = \"n\"\ntype = \"not\"\n\n[[block]]\nid = \"copy\"\ntype = \"not\"\ntag = \"n\"\n";
+    let errors = error_messages(&check_src(not_tag));
+    assert!(
+        errors.iter().any(|e| e.contains("нет вывода платы")),
+        "{errors:#?}"
+    );
+}
+
+#[test]
+fn input_copy_runs_after_tag() {
+    let src = format!("[[block]]\nid = \"copy\"\ntype = \"digital_in\"\ntag = \"button\"\n{INPUT}");
+    let logic: Logic = toml::from_str(&src).unwrap();
+    let report = check(&logic, &library(), None);
+    assert!(report.errors().next().is_none());
+    let order: Vec<&str> = report
+        .order
+        .iter()
+        .map(|&i| logic.blocks[i].id.as_str())
+        .collect();
+    assert_eq!(order, ["button", "copy"]);
+}
+
+#[test]
+fn unused_tag_waits_in_tree() {
+    let lib = library();
+    let mut p = flp_core::Project::load(repo_path("examples/tag_copies")).unwrap();
+    assert!(p.unused_tags(&lib).is_empty());
+    // Taking every image of the lamp off the sheets leaves an unused output
+    // without an "empty input" error.
+    p.take_off_board("lamp_2").unwrap();
+    p.take_off_board("lamp").unwrap();
+    assert!(p.logic.block("lamp").is_some());
+    assert_eq!(p.unused_tags(&lib), ["lamp"]);
+    let report = flp_core::check_project(&p, &lib);
+    let errors = error_messages(&report);
+    assert!(errors.is_empty(), "{errors:#?}");
+}

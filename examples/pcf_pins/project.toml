@@ -1,0 +1,6 @@
+[project]
+name = "pcf_pins"
+description = "Входы и выходы на выводах расширителей PCF8574 и PCF8575, выбранных в свойствах блока"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

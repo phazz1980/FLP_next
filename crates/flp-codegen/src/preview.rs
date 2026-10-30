@@ -53,7 +53,7 @@ pub fn preview_block(def: &BlockDef, template: &str) -> Result<String, GenError>
         dir: PathBuf::new(),
         inline_templates: [(ESP32_CPP_TEMPLATE, template.to_owned())].into(),
     });
-    let project = Project {
+    let mut project = Project {
         path: PathBuf::new(),
         config: ProjectConfig {
             project: ProjectInfo {
@@ -72,6 +72,7 @@ pub fn preview_block(def: &BlockDef, template: &str) -> Result<String, GenError>
         },
         logic: Logic {
             vars: Vec::new(),
+            expanders: Vec::new(),
             blocks: vec![Block {
                 id: preview_id(&def),
                 kind: def.info.kind.clone(),
@@ -82,6 +83,13 @@ pub fn preview_block(def: &BlockDef, template: &str) -> Result<String, GenError>
         },
         layout: Layout::default(),
     };
+    // On a sheet, so an input or output is not left out as an unused tag.
+    let pos = flp_core::BlockPos {
+        sheet: 1,
+        x: 0.0,
+        y: 0.0,
+    };
+    project.layout.blocks.insert(preview_id(&def), pos);
     crate::generate(&project, &lib, &ArduinoCpp::RELEASE)
 }
 

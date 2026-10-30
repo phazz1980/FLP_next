@@ -236,7 +236,7 @@ pub fn load_all() -> Vec<Theme> {
 }
 
 pub fn save(theme: &Theme) -> Result<(), String> {
-    let dir = themes_dir().ok_or("не найдена папка настроек пользователя")?;
+    let dir = themes_dir().ok_or(crate::i18n::tr("не найдена папка настроек пользователя"))?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     // A renamed theme may still have its old file; drop files holding the same name.
     remove(&theme.name)?;
@@ -268,6 +268,7 @@ struct Settings {
     last_project: Option<PathBuf>,
     /// Autosave period in minutes; 0 turns autosave off.
     autosave_minutes: Option<u32>,
+    language: Option<String>,
     panels: Option<PanelSizes>,
     /// Look for a newer release at startup (on by default).
     update_check: Option<bool>,
@@ -385,6 +386,15 @@ fn plain_path(path: &Path) -> PathBuf {
 pub const DEFAULT_AUTOSAVE_MINUTES: u32 = 2;
 
 /// Autosave period in minutes; 0 means off.
+/// Interface language chosen last time.
+pub fn saved_language() -> Option<String> {
+    load_settings().language
+}
+
+pub fn save_language(code: &str) {
+    update_settings(|s| s.language = Some(code.to_owned()));
+}
+
 pub fn autosave_minutes() -> u32 {
     load_settings()
         .autosave_minutes

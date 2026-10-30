@@ -4,6 +4,7 @@ name = "Цифровой выход"
 symbol = "DO"
 group = "Входы и выходы"
 description = "Выставляет логический уровень на выводе платы."
+expander = true
 
 [[input]]
 name = "in"

@@ -23,7 +23,7 @@ impl CodeView {
 
     fn refresh(&mut self, app: &EditorApp) {
         let Some(doc) = &app.doc else {
-            self.code = Err("Проект не открыт".into());
+            self.code = Err(crate::i18n::tr("Проект не открыт").into());
             self.key = None;
             return;
         };
@@ -51,7 +51,7 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
     };
     view.refresh(app);
     let mut open = true;
-    egui::Window::new("Код проекта (C++)")
+    egui::Window::new(crate::i18n::tr("Код проекта (C++)"))
         .open(&mut open)
         .collapsible(false)
         .resizable(true)
@@ -60,16 +60,19 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
         .show(ctx, |ui| match &view.code {
             Ok(code) => {
                 ui.horizontal(|ui| {
-                    if ui.button("Копировать").clicked() {
+                    if ui.button(crate::i18n::tr("Копировать")).clicked() {
                         ui.ctx().copy_text(code.clone());
-                        app.info(LogLevel::Info, "Код проекта скопирован");
+                        app.info(LogLevel::Info, crate::i18n::tr("Код проекта скопирован"));
                     }
                     let mode = if app.debug_firmware {
-                        "с модулем отладки"
+                        crate::i18n::tr("с модулем отладки")
                     } else {
-                        "без отладки"
+                        crate::i18n::tr("без отладки")
                     };
-                    ui.weak(format!("Строк: {}, {mode}", code.lines().count()));
+                    ui.weak(crate::i18n::fmt(
+                        "Строк: {0}, {1}",
+                        &[&code.lines().count(), &mode],
+                    ));
                 });
                 ui.separator();
                 egui::ScrollArea::both()
@@ -86,7 +89,7 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
                     });
             }
             Err(e) => {
-                ui.label(RichText::new("Код не сгенерирован:").strong());
+                ui.label(RichText::new(crate::i18n::tr("Код не сгенерирован:")).strong());
                 ui.colored_label(ui.visuals().error_fg_color, e);
             }
         });

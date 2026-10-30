@@ -203,7 +203,9 @@ fn number_edit(ui: &mut Ui, dbg: &DebugState, index: usize, salt: &str) -> Value
     let mut v: f64 = ui.data_mut(|d| *d.get_temp_mut_or_insert_with(id, || current));
     let speed = if ty == SignalType::Int { 1.0 } else { 0.1 };
     ui.add(egui::DragValue::new(&mut v).speed(speed))
-        .on_hover_text("Перетащите или щёлкните дважды, чтобы ввести число");
+        .on_hover_text(crate::i18n::tr(
+            "Перетащите или щёлкните дважды, чтобы ввести число",
+        ));
     ui.data_mut(|d| d.insert_temp(id, v));
     if ty == SignalType::Int {
         Value::Int(v.round() as i32)
@@ -222,7 +224,10 @@ pub fn value_menu(ui: &mut Ui, dbg: &mut DebugState, index: usize) {
     match ty {
         SignalType::Bool => {
             for b in [true, false] {
-                if ui.button(format!("Форсировать {}", u8::from(b))).clicked() {
+                if ui
+                    .button(crate::i18n::fmt("Форсировать {0}", &[&u8::from(b)]))
+                    .clicked()
+                {
                     dbg.send(Command::Force {
                         index,
                         value: Some(Value::Bool(b)),
@@ -232,8 +237,10 @@ pub fn value_menu(ui: &mut Ui, dbg: &mut DebugState, index: usize) {
             if is_var {
                 for b in [true, false] {
                     if ui
-                        .button(format!("Записать {}", u8::from(b)))
-                        .on_hover_text("Значение остаётся, пока его не перезапишет схема")
+                        .button(crate::i18n::fmt("Записать {0}", &[&u8::from(b)]))
+                        .on_hover_text(crate::i18n::tr(
+                            "Значение остаётся, пока его не перезапишет схема",
+                        ))
                         .clicked()
                     {
                         dbg.send(Command::Set {
@@ -247,11 +254,11 @@ pub fn value_menu(ui: &mut Ui, dbg: &mut DebugState, index: usize) {
         SignalType::Int | SignalType::Float => {
             let value = ui
                 .horizontal(|ui| {
-                    ui.label("Значение");
+                    ui.label(crate::i18n::tr("Значение"));
                     number_edit(ui, dbg, index, "menu")
                 })
                 .inner;
-            if ui.button("Форсировать").clicked() {
+            if ui.button(crate::i18n::tr("Форсировать")).clicked() {
                 dbg.send(Command::Force {
                     index,
                     value: Some(value),
@@ -259,8 +266,10 @@ pub fn value_menu(ui: &mut Ui, dbg: &mut DebugState, index: usize) {
             }
             if is_var
                 && ui
-                    .button("Записать один раз")
-                    .on_hover_text("Уставка: значение остаётся, пока его не перезапишет схема")
+                    .button(crate::i18n::tr("Записать один раз"))
+                    .on_hover_text(crate::i18n::tr(
+                        "Уставка: значение остаётся, пока его не перезапишет схема",
+                    ))
                     .clicked()
             {
                 dbg.send(Command::Set { index, value });
@@ -269,15 +278,15 @@ pub fn value_menu(ui: &mut Ui, dbg: &mut DebugState, index: usize) {
         // Not in the debug table.
         SignalType::String | SignalType::Any | SignalType::Number => {}
     }
-    if forced.is_some() && ui.button("Снять форсировку").clicked() {
+    if forced.is_some() && ui.button(crate::i18n::tr("Снять форсировку")).clicked() {
         dbg.send(Command::Force { index, value: None });
     }
     ui.separator();
     let on_chart = dbg.chart.contains(&index);
-    if !on_chart && ui.button("Добавить на график").clicked() {
+    if !on_chart && ui.button(crate::i18n::tr("Добавить на график")).clicked() {
         dbg.chart.push(index);
     }
-    if on_chart && ui.button("Убрать с графика").clicked() {
+    if on_chart && ui.button(crate::i18n::tr("Убрать с графика")).clicked() {
         dbg.chart.retain(|&i| i != index);
     }
 }
@@ -288,12 +297,14 @@ pub fn values_window(dbg: &mut DebugState, pal: &Palette, ctx: &egui::Context) {
         return;
     }
     let mut open = true;
-    egui::Window::new("Входы и переменные")
+    egui::Window::new(crate::i18n::tr("Входы и переменные"))
         .open(&mut open)
         .default_width(440.0)
         .show(ctx, |ui| {
             if !dbg.online() {
-                ui.label("Нет данных: плата не на связи или прошивка для другой схемы");
+                ui.label(crate::i18n::tr(
+                    "Нет данных: плата не на связи или прошивка для другой схемы",
+                ));
                 return;
             }
             let texts: Vec<usize> = (0..dbg.table.texts.len())
@@ -304,10 +315,13 @@ pub fn values_window(dbg: &mut DebugState, pal: &Palette, ctx: &egui::Context) {
                 .collect();
             let inputs: Vec<usize> = dbg.inputs.iter().map(|&(_, i)| i).collect();
             egui::ScrollArea::vertical().show(ui, |ui| {
-                for (title, rows) in [("Входы", inputs), ("Переменные", vars)] {
+                for (title, rows) in [
+                    (crate::i18n::tr("Входы"), inputs),
+                    (crate::i18n::tr("Переменные"), vars),
+                ] {
                     ui.strong(title);
                     if rows.is_empty() {
-                        ui.weak("нет");
+                        ui.weak(crate::i18n::tr("нет"));
                     }
                     egui::Grid::new(("debug_values", title))
                         .num_columns(3)
@@ -321,7 +335,7 @@ pub fn values_window(dbg: &mut DebugState, pal: &Palette, ctx: &egui::Context) {
                     ui.add_space(6.0);
                 }
                 if !texts.is_empty() {
-                    ui.strong("Строки");
+                    ui.strong(crate::i18n::tr("Строки"));
                     egui::Grid::new("debug_texts")
                         .num_columns(2)
                         .striped(true)
@@ -339,11 +353,11 @@ pub fn values_window(dbg: &mut DebugState, pal: &Palette, ctx: &egui::Context) {
                 }
             });
             ui.separator();
-            ui.weak(
+            ui.weak(crate::i18n::tr(
                 "«Записать» меняет переменную один раз — дальше её может перезаписать схема. \
                  «Форс.» держит значение, пока форсировку не снимут; форсированный вход \
                  не зависит от сигнала на выводе платы.",
-            );
+            ));
         });
     if !open {
         dbg.values = false;
@@ -366,7 +380,7 @@ fn value_row(ui: &mut Ui, dbg: &mut DebugState, pal: &Palette, index: usize) {
                 .monospace()
                 .color(pal.warning),
         )
-        .on_hover_text("Значение форсировано");
+        .on_hover_text(crate::i18n::tr("Значение форсировано"));
     } else {
         ui.monospace(text);
     }
@@ -377,11 +391,11 @@ fn value_row(ui: &mut Ui, dbg: &mut DebugState, pal: &Palette, index: usize) {
                 if is_var
                     && ui
                         .button(if on {
-                            "Записать 0"
+                            crate::i18n::tr("Записать 0")
                         } else {
-                            "Записать 1"
+                            crate::i18n::tr("Записать 1")
                         })
-                        .on_hover_text("Переключить переменную один раз")
+                        .on_hover_text(crate::i18n::tr("Переключить переменную один раз"))
                         .clicked()
                 {
                     dbg.send(Command::Set {
@@ -392,7 +406,7 @@ fn value_row(ui: &mut Ui, dbg: &mut DebugState, pal: &Palette, index: usize) {
                 for b in [true, false] {
                     let selected = forced == Some(Value::Bool(b));
                     if ui
-                        .selectable_label(selected, format!("Форс. {}", u8::from(b)))
+                        .selectable_label(selected, crate::i18n::fmt("Форс. {0}", &[&u8::from(b)]))
                         .clicked()
                     {
                         dbg.send(Command::Force {
@@ -404,10 +418,10 @@ fn value_row(ui: &mut Ui, dbg: &mut DebugState, pal: &Palette, index: usize) {
             }
             SignalType::Int | SignalType::Float => {
                 let value = number_edit(ui, dbg, index, "window");
-                if is_var && ui.button("Записать").clicked() {
+                if is_var && ui.button(crate::i18n::tr("Записать")).clicked() {
                     dbg.send(Command::Set { index, value });
                 }
-                if ui.button("Форс.").clicked() {
+                if ui.button(crate::i18n::tr("Форс.")).clicked() {
                     dbg.send(Command::Force {
                         index,
                         value: Some(value),
@@ -418,8 +432,8 @@ fn value_row(ui: &mut Ui, dbg: &mut DebugState, pal: &Palette, index: usize) {
         }
         if forced.is_some()
             && ui
-                .small_button("Снять")
-                .on_hover_text("Снять форсировку")
+                .small_button(crate::i18n::tr("Снять"))
+                .on_hover_text(crate::i18n::tr("Снять форсировку"))
                 .clicked()
         {
             dbg.send(Command::Force { index, value: None });
@@ -521,7 +535,7 @@ pub fn chart_window(dbg: &mut DebugState, pal: &Palette, ctx: &egui::Context) {
     }
     let mut open = true;
     let mut remove = None;
-    egui::Window::new("Графики")
+    egui::Window::new(crate::i18n::tr("Графики"))
         .open(&mut open)
         .default_size([460.0, 120.0 * dbg.chart.len() as f32])
         .show(ctx, |ui| {
@@ -557,47 +571,53 @@ pub fn diagnostics_window(
         return;
     }
     let mut open = true;
-    egui::Window::new("Диагностика")
+    egui::Window::new(crate::i18n::tr("Диагностика"))
         .open(&mut open)
         .default_width(360.0)
         .show(ctx, |ui| {
             let Some(s) = dbg.live.stats.clone().filter(|_| dbg.online()) else {
-                ui.label("Нет данных: плата не на связи или прошивка без диагностики");
+                ui.label(crate::i18n::tr(
+                    "Нет данных: плата не на связи или прошивка без диагностики",
+                ));
                 return;
             };
-            let us = |v: u32| format!("{v} мкс");
+            let us = |v: u32| crate::i18n::fmt("{0} мкс", &[&v]);
             egui::Grid::new("diag_total")
                 .num_columns(2)
                 .striped(true)
                 .show(ui, |ui| {
-                    ui.label("Цикл, последний");
+                    ui.label(crate::i18n::tr("Цикл, последний"));
                     ui.monospace(us(s.last_us));
                     ui.end_row();
-                    ui.label("Цикл, средний");
+                    ui.label(crate::i18n::tr("Цикл, средний"));
                     ui.monospace(us(s.avg_us));
                     ui.end_row();
-                    ui.label("Цикл, максимальный");
+                    ui.label(crate::i18n::tr("Цикл, максимальный"));
                     ui.strong(us(s.max_us));
                     ui.end_row();
                     if let Some(bg) = &s.background {
-                        ui.label("Ядро 0, проход последний")
-                            .on_hover_text("Фоновая задача: сеть и платы с признаком «фоновая»");
+                        ui.label(crate::i18n::tr("Ядро 0, проход последний"))
+                            .on_hover_text(crate::i18n::tr(
+                                "Фоновая задача: сеть и платы с признаком «фоновая»",
+                            ));
                         ui.monospace(us(bg.last_us));
                         ui.end_row();
-                        ui.label("Ядро 0, проход максимальный");
+                        ui.label(crate::i18n::tr("Ядро 0, проход максимальный"));
                         ui.strong(us(bg.max_us));
                         ui.end_row();
                     }
-                    ui.label("Период loop(), макс")
-                        .on_hover_text("Время между запусками loop(): схема, отладка и система");
+                    ui.label(crate::i18n::tr("Период loop(), макс"))
+                        .on_hover_text(crate::i18n::tr(
+                            "Время между запусками loop(): схема, отладка и система",
+                        ));
                     ui.monospace(us(s.period_max_us));
                     ui.end_row();
-                    ui.label("Циклов за 0,5 с");
+                    ui.label(crate::i18n::tr("Циклов за 0,5 с"));
                     ui.monospace(s.cycles.to_string());
                     ui.end_row();
                     if s.free_heap > 0 {
-                        ui.label("Свободная память");
-                        ui.monospace(format!("{} КБ", s.free_heap / 1024));
+                        ui.label(crate::i18n::tr("Свободная память"));
+                        ui.monospace(crate::i18n::fmt("{0} КБ", &[&(s.free_heap / 1024)]));
                         ui.end_row();
                     }
                 });
@@ -607,9 +627,9 @@ pub fn diagnostics_window(
                     .num_columns(3)
                     .striped(true)
                     .show(ui, |ui| {
-                        ui.strong("Лист");
-                        ui.strong("Последний");
-                        ui.strong("Макс");
+                        ui.strong(crate::i18n::tr("Лист"));
+                        ui.strong(crate::i18n::tr("Последний"));
+                        ui.strong(crate::i18n::tr("Макс"));
                         ui.end_row();
                         for sh in &s.sheets {
                             let name = layout
@@ -629,19 +649,19 @@ pub fn diagnostics_window(
             ui.separator();
             let charts = [
                 (
-                    "Цикл, средний, мкс",
+                    crate::i18n::tr("Цикл, средний, мкс"),
                     dbg.series(|s| Some(f64::from(s.avg_us))),
                 ),
                 (
-                    "Цикл, максимальный, мкс",
+                    crate::i18n::tr("Цикл, максимальный, мкс"),
                     dbg.series(|s| Some(f64::from(s.max_us))),
                 ),
                 (
-                    "Ядро 0, проход, мкс",
+                    crate::i18n::tr("Ядро 0, проход, мкс"),
                     dbg.series(|s| s.background.as_ref().map(|b| f64::from(b.last_us))),
                 ),
                 (
-                    "Свободная память, КБ",
+                    crate::i18n::tr("Свободная память, КБ"),
                     dbg.series(|s| (s.free_heap > 0).then(|| f64::from(s.free_heap) / 1024.0)),
                 ),
             ];
@@ -656,8 +676,10 @@ pub fn diagnostics_window(
             }
             ui.separator();
             if ui
-                .button("Сбросить максимумы")
-                .on_hover_text("Начать фиксацию максимального времени заново")
+                .button(crate::i18n::tr("Сбросить максимумы"))
+                .on_hover_text(crate::i18n::tr(
+                    "Начать фиксацию максимального времени заново",
+                ))
                 .clicked()
             {
                 dbg.send(Command::ResetStats);
@@ -676,7 +698,7 @@ fn strip(ui: &mut Ui, pal: &Palette, points: &[(f64, f64)]) {
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            "нет данных",
+            crate::i18n::tr("нет данных"),
             egui::FontId::proportional(11.0),
             pal.weak,
         );

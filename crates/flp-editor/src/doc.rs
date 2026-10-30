@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use flp_core::{check_project, BlockPos, Layout, Library, Logic, Project, Report};
+use flp_core::{check_project, BlockPos, Layout, Library, Logic, ParamKind, Project, Report};
 
 /// State that undo/redo restores.
 #[derive(Clone)]
@@ -31,7 +31,7 @@ const UNDO_LIMIT: usize = 200;
 impl Doc {
     pub fn open(path: &Path, lib: &Library) -> flp_core::Result<Self> {
         let mut project = Project::load(path)?;
-        place_unplaced(&mut project);
+        place_unplaced(&mut project, lib);
         let report = check_project(&project, lib);
         Ok(Self {
             project,
@@ -60,6 +60,7 @@ impl Doc {
         let merge = key.is_some() && key == self.last_key;
         match f(&mut self.project) {
             Ok(value) => {
+                self.project.logic.sync_tags();
                 if !merge {
                     self.undo.push(before);
                     if self.undo.len() > UNDO_LIMIT {
@@ -138,8 +139,9 @@ impl Doc {
 }
 
 /// Gives positions to blocks that have none (schemas written by hand or by AI):
-/// a grid on sheet 1 below the placed blocks.
-fn place_unplaced(project: &mut Project) {
+/// a grid on sheet 1 below the placed blocks. Inputs and outputs (blocks with a pin)
+/// stay in the project tree until they are dragged onto a sheet, like variables.
+fn place_unplaced(project: &mut Project, lib: &Library) {
     let layout = &mut project.layout;
     let bottom = layout
         .blocks
@@ -152,6 +154,12 @@ fn place_unplaced(project: &mut Project) {
         .blocks
         .iter()
         .filter(|b| !layout.blocks.contains_key(&b.id))
+        .filter(|b| {
+            let tag = lib
+                .resolve(&project.logic, b)
+                .is_some_and(|r| r.def.params.iter().any(|p| p.kind == ParamKind::Pin));
+            !tag
+        })
         .map(|b| b.id.clone())
         .collect();
     for (i, id) in missing.into_iter().enumerate() {
@@ -164,5 +172,39 @@ fn place_unplaced(project: &mut Project) {
                 y: bottom + 160.0 + 140.0 * row as f32,
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inputs_and_outputs_stay_in_the_tree_until_dragged() {
+        let (lib, _) =
+            Library::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library")).unwrap();
+        let mut project =
+            Project::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/pump")).unwrap();
+        let pins: Vec<String> = project
+            .logic
+            .blocks
+            .iter()
+            .filter(|b| {
+                lib.resolve(&project.logic, b)
+                    .is_some_and(|r| r.def.params.iter().any(|p| p.kind == ParamKind::Pin))
+            })
+            .map(|b| b.id.clone())
+            .collect();
+        assert!(!pins.is_empty());
+        project.layout.blocks.clear();
+        place_unplaced(&mut project, &lib);
+        for b in &project.logic.blocks {
+            assert_eq!(
+                project.layout.blocks.contains_key(&b.id),
+                !pins.contains(&b.id),
+                "block {}",
+                b.id
+            );
+        }
     }
 }

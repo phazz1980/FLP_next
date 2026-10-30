@@ -117,9 +117,9 @@ fn parent(path: &str) -> &str {
 /// «раздел» for a top-level folder, «папка» deeper.
 fn folder_word(path: &str) -> &'static str {
     if path.contains('/') {
-        "папка"
+        crate::i18n::tr("папка")
     } else {
-        "раздел"
+        crate::i18n::tr("раздел")
     }
 }
 
@@ -238,17 +238,22 @@ fn toolbar(app: &EditorApp, ui: &mut Ui, selected: Option<&Selected>, actions: &
     let folder = current_folder(app, selected);
     ui.horizontal_wrapped(|ui| {
         if ui
-            .small_button("+ Набор")
-            .on_hover_text("Новый набор блоков: у всех его блоков одна версия")
+            .small_button(crate::i18n::tr("+ Набор"))
+            .on_hover_text(crate::i18n::tr(
+                "Новый набор блоков: у всех его блоков одна версия",
+            ))
             .clicked()
         {
             actions.push(Action::NewPack);
         }
         let in_folder = !folder.is_empty();
         if ui
-            .add_enabled(in_folder, egui::Button::new("+ Папка").small())
-            .on_hover_text("Новая папка в выбранном наборе или папке")
-            .on_disabled_hover_text("Сначала выберите набор или папку")
+            .add_enabled(
+                in_folder,
+                egui::Button::new(crate::i18n::tr("+ Папка")).small(),
+            )
+            .on_hover_text(crate::i18n::tr("Новая папка в выбранном наборе или папке"))
+            .on_disabled_hover_text(crate::i18n::tr("Сначала выберите набор или папку"))
             .clicked()
         {
             actions.push(Action::Ask(Prompt {
@@ -258,29 +263,41 @@ fn toolbar(app: &EditorApp, ui: &mut Ui, selected: Option<&Selected>, actions: &
             }));
         }
         if ui
-            .small_button("+ Блок")
-            .on_hover_text("Новый блок в выбранном наборе или папке")
+            .small_button(crate::i18n::tr("+ Блок"))
+            .on_hover_text(crate::i18n::tr("Новый блок в выбранном наборе или папке"))
             .clicked()
         {
             actions.push(Action::NewBlock(folder.clone()));
         }
-        ui.menu_button("Импорт", |ui| {
-            if ui.button("Набор из файла .flpblocks...").clicked() {
+        ui.menu_button(crate::i18n::tr("Импорт"), |ui| {
+            if ui
+                .button(crate::i18n::tr("Набор из файла .flpblocks..."))
+                .clicked()
+            {
                 actions.push(Action::Import);
                 ui.close();
             }
-            if ui.button("Из проекта .flpn...").clicked() {
+            if ui.button(crate::i18n::tr("Из проекта .flpn...")).clicked() {
                 actions.push(Action::ImportProject);
                 ui.close();
             }
         });
         let (edit_hint, delete_hint) = match selected {
-            Some(Selected::Block(_)) => ("Открыть блок в редакторе", "Удалить блок"),
-            Some(Selected::Folder(_)) => ("Переименовать", "Удалить (только пустой)"),
+            Some(Selected::Block(_)) => (
+                crate::i18n::tr("Открыть блок в редакторе"),
+                crate::i18n::tr("Удалить блок"),
+            ),
+            Some(Selected::Folder(_)) => (
+                crate::i18n::tr("Переименовать"),
+                crate::i18n::tr("Удалить (только пустой)"),
+            ),
             None => ("", ""),
         };
         if ui
-            .add_enabled(selected.is_some(), egui::Button::new("Изменить").small())
+            .add_enabled(
+                selected.is_some(),
+                egui::Button::new(crate::i18n::tr("Изменить")).small(),
+            )
             .on_hover_text(edit_hint)
             .clicked()
         {
@@ -295,7 +312,10 @@ fn toolbar(app: &EditorApp, ui: &mut Ui, selected: Option<&Selected>, actions: &
             }
         }
         if ui
-            .add_enabled(selected.is_some(), egui::Button::new("Удалить").small())
+            .add_enabled(
+                selected.is_some(),
+                egui::Button::new(crate::i18n::tr("Удалить")).small(),
+            )
             .on_hover_text(delete_hint)
             .clicked()
         {
@@ -316,10 +336,10 @@ fn tree(app: &EditorApp, ui: &mut Ui, selected: Option<&Selected>, actions: &mut
         .show(ui, |ui| {
             folder_contents(app, ui, "", &folders, selected, actions);
             if folders.is_empty() && app.lib.iter().all(|b| !app.lib.is_user(&b.def.info.kind)) {
-                ui.weak(
+                ui.weak(crate::i18n::tr(
                     "Пусто. Создайте раздел или блок кнопками выше, либо блок на основе \
                      встроенного: правая кнопка на нём во вкладке «Встроенные».",
-                );
+                ));
             }
         });
 }
@@ -402,7 +422,7 @@ fn found(
         block_row(ui, b, &text, selected, &folders, actions);
     }
     if !any {
-        ui.weak("Ничего не найдено");
+        ui.weak(crate::i18n::tr("Ничего не найдено"));
     }
 }
 
@@ -416,13 +436,12 @@ fn block_row(
 ) {
     let kind = &b.def.info.kind;
     let is_sel = selected == Some(&Selected::Block(kind.clone()));
-    let resp = ui
-        .dnd_drag_source(
-            Id::unique(("lib", kind.as_str())),
-            DragItem::Block(kind.clone()),
-            |ui| ui.selectable_label(is_sel, text),
-        )
-        .inner;
+    let resp = crate::canvas::drag_source(
+        ui,
+        Id::unique(("lib", kind.as_str())),
+        DragItem::Block(kind.clone()),
+        |ui| ui.selectable_label(is_sel, text),
+    );
     let resp = resp.on_hover_text(&b.def.info.description);
     if resp.clicked() || resp.secondary_clicked() {
         actions.push(Action::Select(Selected::Block(kind.clone())));
@@ -431,13 +450,16 @@ fn block_row(
         actions.push(Action::Add(kind.clone()));
     }
     resp.context_menu(|ui| {
-        if ui.button("Изменить блок...").clicked() {
+        if ui.button(crate::i18n::tr("Изменить блок...")).clicked() {
             actions.push(Action::Open(kind.clone()));
         }
-        if ui.button("Новый блок на основе этого...").clicked() {
+        if ui
+            .button(crate::i18n::tr("Новый блок на основе этого..."))
+            .clicked()
+        {
             actions.push(Action::Copy(kind.clone()));
         }
-        ui.menu_button("Перенести в", |ui| {
+        ui.menu_button(crate::i18n::tr("Перенести в"), |ui| {
             let group = &b.def.info.group;
             let targets = std::iter::once(String::new()).chain(folders.iter().cloned());
             for target in targets {
@@ -457,13 +479,16 @@ fn block_row(
         });
         let example = b.dir.join(flp_core::blockfile::EXAMPLE_FILE).is_file();
         if ui
-            .add_enabled(example, egui::Button::new("Открыть пример"))
+            .add_enabled(
+                example,
+                egui::Button::new(crate::i18n::tr("Открыть пример")),
+            )
             .clicked()
         {
             actions.push(Action::Example(kind.clone()));
         }
         ui.separator();
-        if ui.button("Удалить блок...").clicked() {
+        if ui.button(crate::i18n::tr("Удалить блок...")).clicked() {
             actions.push(Action::DeleteBlock(kind.clone()));
         }
     });
@@ -471,20 +496,20 @@ fn block_row(
 
 fn folder_menu(ui: &mut Ui, path: &str, is_pack: bool, actions: &mut Vec<Action>) {
     if is_pack {
-        if ui.button("Свойства набора...").clicked() {
+        if ui.button(crate::i18n::tr("Свойства набора...")).clicked() {
             actions.push(Action::PackProps(path.to_owned()));
             ui.close();
         }
-        if ui.button("Экспорт набора...").clicked() {
+        if ui.button(crate::i18n::tr("Экспорт набора...")).clicked() {
             actions.push(Action::ExportPack(path.to_owned()));
             ui.close();
         }
         ui.separator();
     }
-    if ui.button("Новый блок...").clicked() {
+    if ui.button(crate::i18n::tr("Новый блок...")).clicked() {
         actions.push(Action::NewBlock(path.to_owned()));
     }
-    if ui.button("Новая папка...").clicked() {
+    if ui.button(crate::i18n::tr("Новая папка...")).clicked() {
         actions.push(Action::Ask(Prompt {
             target: path.to_owned(),
             rename: false,
@@ -492,14 +517,14 @@ fn folder_menu(ui: &mut Ui, path: &str, is_pack: bool, actions: &mut Vec<Action>
         }));
     }
     ui.separator();
-    if ui.button("Переименовать...").clicked() {
+    if ui.button(crate::i18n::tr("Переименовать...")).clicked() {
         actions.push(Action::Ask(Prompt {
             target: path.to_owned(),
             rename: true,
             name: leaf(path).to_owned(),
         }));
     }
-    if ui.button("Удалить").clicked() {
+    if ui.button(crate::i18n::tr("Удалить")).clicked() {
         actions.push(Action::DeleteFolder(path.to_owned()));
     }
 }
@@ -507,9 +532,9 @@ fn folder_menu(ui: &mut Ui, path: &str, is_pack: bool, actions: &mut Vec<Action>
 /// Name dialog; Some(true) — OK, Some(false) — cancelled.
 fn ask_name(app: &EditorApp, ctx: &egui::Context, p: &mut Prompt) -> Option<bool> {
     let title = match (p.rename, p.target.is_empty()) {
-        (true, _) => format!("Переименовать {}", folder_word(&p.target)),
-        (false, true) => "Новый раздел".to_owned(),
-        (false, false) => format!("Новая папка в «{}»", leaf(&p.target)),
+        (true, _) => crate::i18n::fmt("Переименовать {0}", &[&folder_word(&p.target)]),
+        (false, true) => crate::i18n::tr("Новый раздел").to_owned(),
+        (false, false) => crate::i18n::fmt("Новая папка в «{0}»", &[&leaf(&p.target)]),
     };
     let valid = is_valid_folder_name(p.name.trim());
     let error = app.theme.palette.error;
@@ -519,14 +544,22 @@ fn ask_name(app: &EditorApp, ctx: &egui::Context, p: &mut Prompt) -> Option<bool
         let edit = ui.add(egui::TextEdit::singleline(&mut p.name).desired_width(260.0));
         edit.request_focus();
         if !p.name.trim().is_empty() && !valid {
-            ui.colored_label(error, "Нельзя использовать символы < > : \" / \\ | ? *");
+            ui.colored_label(
+                error,
+                crate::i18n::tr("Нельзя использовать символы < > : \" / \\ | ? *"),
+            );
         }
         let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         ui.horizontal(|ui| {
-            if ui.add_enabled(valid, egui::Button::new("ОК")).clicked() || (enter && valid) {
+            if ui
+                .add_enabled(valid, egui::Button::new(crate::i18n::tr("ОК")))
+                .clicked()
+                || (enter && valid)
+            {
                 answer = Some(true);
             }
-            if ui.button("Отмена").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape))
+            if ui.button(crate::i18n::tr("Отмена")).clicked()
+                || ui.input(|i| i.key_pressed(egui::Key::Escape))
             {
                 answer = Some(false);
             }
@@ -546,51 +579,60 @@ fn pack_form(app: &EditorApp, ctx: &egui::Context, f: &mut PackForm) -> Option<b
     let field_width = (screen.x / 2.0 - 140.0).max(200.0);
     egui::Modal::new(Id::unique("userlib_pack_modal")).show(ctx, |ui| {
         let title = if editing {
-            "Свойства набора"
+            crate::i18n::tr("Свойства набора")
         } else {
-            "Новый набор блоков"
+            crate::i18n::tr("Новый набор блоков")
         };
         ui.set_width(screen.x / 2.0 - 24.0);
         ui.set_min_height(screen.y / 2.0 - 24.0);
         ui.label(RichText::new(title).strong());
         egui::Grid::new("pack_form").num_columns(2).show(ui, |ui| {
-            ui.label("Название");
+            ui.label(crate::i18n::tr("Название"));
             if editing {
-                ui.label(format!("{} · версия {}", f.name, f.version));
+                ui.label(crate::i18n::fmt("{0} · версия {1}", &[&f.name, &f.version]));
             } else {
                 ui.add(egui::TextEdit::singleline(&mut f.name).desired_width(field_width));
             }
             ui.end_row();
-            ui.label("Описание");
+            ui.label(crate::i18n::tr("Описание"));
             ui.add(egui::TextEdit::singleline(&mut f.description).desired_width(field_width));
             ui.end_row();
-            ui.label("Автор");
+            ui.label(crate::i18n::tr("Автор"));
             ui.add(egui::TextEdit::singleline(&mut f.authors).desired_width(field_width));
             ui.end_row();
-            ui.label("Контакты");
+            ui.label(crate::i18n::tr("Контакты"));
             ui.add(
                 egui::TextEdit::multiline(&mut f.contacts)
                     .desired_rows(5)
                     .desired_width(field_width)
-                    .hint_text("почта, ссылка или соцсеть — по одной в строке"),
+                    .hint_text(crate::i18n::tr(
+                        "почта, ссылка или соцсеть — по одной в строке",
+                    )),
             );
             ui.end_row();
-            ui.label("Лицензия");
+            ui.label(crate::i18n::tr("Лицензия"));
             ui.add(egui::TextEdit::singleline(&mut f.license).desired_width(field_width));
             ui.end_row();
         });
         if !valid && !f.name.trim().is_empty() {
-            ui.colored_label(error, "Нельзя использовать символы < > : \" / \\ | ? *");
+            ui.colored_label(
+                error,
+                crate::i18n::tr("Нельзя использовать символы < > : \" / \\ | ? *"),
+            );
         }
         if !f.error.is_empty() {
             ui.colored_label(error, &f.error);
         }
         let ok = valid && !f.name.trim().is_empty();
         ui.horizontal(|ui| {
-            if ui.add_enabled(ok, egui::Button::new("ОК")).clicked() {
+            if ui
+                .add_enabled(ok, egui::Button::new(crate::i18n::tr("ОК")))
+                .clicked()
+            {
                 answer = Some(true);
             }
-            if ui.button("Отмена").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape))
+            if ui.button(crate::i18n::tr("Отмена")).clicked()
+                || ui.input(|i| i.key_pressed(egui::Key::Escape))
             {
                 answer = Some(false);
             }
@@ -603,7 +645,7 @@ fn pack_form(app: &EditorApp, ctx: &egui::Context, f: &mut PackForm) -> Option<b
 /// The entered author is remembered for the next packs.
 fn apply_pack_form(app: &mut EditorApp, f: &mut PackForm) -> bool {
     let Some(user) = app.user_lib_dir() else {
-        f.error = "Нет папки библиотеки блоков".to_owned();
+        f.error = crate::i18n::tr("Нет папки библиотеки блоков").to_owned();
         return false;
     };
     let result = match &f.edit {
@@ -663,14 +705,14 @@ fn apply_prompt(app: &mut EditorApp, p: &Prompt) -> bool {
             return true;
         }
         if new.exists() {
-            Err(format!("«{name}» здесь уже есть"))
+            Err(crate::i18n::fmt("«{0}» здесь уже есть", &[&name]))
         } else {
             fs::rename(&target, &new).map_err(|e| e.to_string())
         }
     } else {
         let new = target.join(name);
         if new.exists() {
-            Err(format!("«{name}» здесь уже есть"))
+            Err(crate::i18n::fmt("«{0}» здесь уже есть", &[&name]))
         } else {
             fs::create_dir_all(&new).map_err(|e| e.to_string())
         }
@@ -681,7 +723,10 @@ fn apply_prompt(app: &mut EditorApp, p: &Prompt) -> bool {
             true
         }
         Err(e) => {
-            app.info(LogLevel::Error, format!("Папка не изменена: {e}"));
+            app.info(
+                LogLevel::Error,
+                crate::i18n::fmt("Папка не изменена: {0}", &[&e]),
+            );
             false
         }
     }
@@ -697,14 +742,16 @@ fn delete_folder(app: &mut EditorApp, path: &str) -> bool {
     if !empty {
         app.info(
             LogLevel::Error,
-            format!(
-                "{} «{}» не пуст(а): сначала удалите или перенесите блоки и папки из него",
-                if word == "раздел" {
-                    "Раздел"
-                } else {
-                    "Папка"
-                },
-                leaf(path)
+            crate::i18n::fmt(
+                "{0} «{1}» не пуст(а): сначала удалите или перенесите блоки и папки из него",
+                &[
+                    &if word == "раздел" {
+                        "Раздел"
+                    } else {
+                        "Папка"
+                    },
+                    &leaf(path),
+                ],
             ),
         );
         return false;
@@ -715,7 +762,10 @@ fn delete_folder(app: &mut EditorApp, path: &str) -> bool {
             true
         }
         Err(e) => {
-            app.info(LogLevel::Error, format!("Не удалось удалить {word}: {e}"));
+            app.info(
+                LogLevel::Error,
+                crate::i18n::fmt("Не удалось удалить {0}: {1}", &[&word, &e]),
+            );
             false
         }
     }
@@ -733,14 +783,17 @@ fn move_block(app: &mut EditorApp, kind: &str, folder: &str) {
     if dest.exists() {
         app.info(
             LogLevel::Error,
-            format!("Блок не перенесён: {} уже есть", dest.display()),
+            crate::i18n::fmt("Блок не перенесён: {0} уже есть", &[&dest.display()]),
         );
         return;
     }
     let result = fs::create_dir_all(&target).and_then(|()| fs::rename(&block.dir, &dest));
     match result {
         Ok(()) => app.reload_library(),
-        Err(e) => app.info(LogLevel::Error, format!("Блок не перенесён: {e}")),
+        Err(e) => app.info(
+            LogLevel::Error,
+            crate::i18n::fmt("Блок не перенесён: {0}", &[&e]),
+        ),
     }
 }
 

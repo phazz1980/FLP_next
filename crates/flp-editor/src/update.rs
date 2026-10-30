@@ -89,8 +89,9 @@ impl ApiRelease {
 /// them with the running version. `beta` also takes pre-releases into account.
 pub fn check(repo: &str, beta: bool) -> Result<Check, String> {
     if !valid_repo(repo) {
-        return Err(format!(
-            "некорректный адрес репозитория «{repo}», нужен вид владелец/имя"
+        return Err(crate::i18n::fmt(
+            "некорректный адрес репозитория «{0}», нужен вид владелец/имя",
+            &[&repo],
         ));
     }
     let token = token();
@@ -117,23 +118,29 @@ pub fn check(repo: &str, beta: bool) -> Result<Check, String> {
     let releases: Vec<ApiRelease> = match get(&format!("/releases?per_page={RELEASES_PER_PAGE}")) {
         Ok(r) => r
             .into_json()
-            .map_err(|e| format!("ответ GitHub не прочитан: {e}"))?,
+            .map_err(|e| crate::i18n::fmt("ответ GitHub не прочитан: {0}", &[&e]))?,
         Err(Failure::Status(401)) => {
-            return Err("GitHub отклонил токен (401): проверьте FLP_GITHUB_TOKEN".to_owned())
+            return Err(
+                crate::i18n::tr("GitHub отклонил токен (401): проверьте FLP_GITHUB_TOKEN")
+                    .to_owned(),
+            )
         }
         Err(Failure::Status(403 | 429)) => {
-            return Err("GitHub ограничил число запросов, попробуйте позже".to_owned())
+            return Err(
+                crate::i18n::tr("GitHub ограничил число запросов, попробуйте позже").to_owned(),
+            )
         }
         // A repository without releases answers with an empty list, so 404 means
         // the repository itself is missing or hidden.
         Err(Failure::Status(404)) => {
-            return Err(format!(
-                "репозиторий {repo} не найден или закрытый: задайте токен GitHub \
-                 в переменной FLP_GITHUB_TOKEN (право Contents: read) или выполните gh auth login"
+            return Err(crate::i18n::fmt(
+                "репозиторий {0} не найден или закрытый: задайте токен GitHub \
+                 в переменной FLP_GITHUB_TOKEN (право Contents: read) или выполните gh auth login",
+                &[&repo],
             ))
         }
-        Err(Failure::Status(code)) => return Err(format!("ошибка GitHub {code}")),
-        Err(Failure::Network(e)) => return Err(format!("нет связи с GitHub: {e}")),
+        Err(Failure::Status(code)) => return Err(crate::i18n::fmt("ошибка GitHub {0}", &[&code])),
+        Err(Failure::Network(e)) => return Err(crate::i18n::fmt("нет связи с GitHub: {0}", &[&e])),
     };
     Ok(pick(releases, CURRENT, beta))
 }
@@ -256,13 +263,13 @@ const CHANGES: &str = include_str!("../changes.md");
 
 /// Window with the changes of the running version.
 pub fn changes_window(ctx: &egui::Context, open: &mut bool) {
-    egui::Window::new("Что нового")
+    egui::Window::new(crate::i18n::tr("Что нового"))
         .open(open)
         .collapsible(false)
         .resizable(true)
         .default_width(460.0)
         .show(ctx, |ui| {
-            ui.strong(format!("Версия {CURRENT}"));
+            ui.strong(crate::i18n::fmt("Версия {0}", &[&CURRENT]));
             for line in CHANGES.lines().filter(|l| !l.trim().is_empty()) {
                 ui.label(format!("• {}", line.trim_start_matches("- ")));
             }
@@ -278,45 +285,42 @@ pub fn window(
     can_install: bool,
 ) -> bool {
     let mut start = false;
-    egui::Window::new("Доступно обновление")
+    egui::Window::new(crate::i18n::tr("Доступно обновление"))
         .open(open)
         .collapsible(false)
         .resizable(true)
         .default_width(480.0)
         .show(ctx, |ui| {
-            ui.label(format!(
-                "Новая версия {} (установлена {CURRENT})",
-                release.version
-            ));
-            ui.hyperlink_to(format!("Скачать версию {}", release.version), &release.url);
+            ui.label(crate::i18n::fmt("Новая версия {0} (установлена {1})", &[&release.version, &CURRENT]));
+            ui.hyperlink_to(crate::i18n::fmt("Скачать версию {0}", &[&release.version]), &release.url);
             match install {
                 Install::Busy(done, total) => {
                     let mb = |n: u64| n as f32 / 1_048_576.0;
                     let fraction = if total > 0 { done as f32 / total as f32 } else { 0.0 };
                     ui.add(
                         egui::ProgressBar::new(fraction)
-                            .text(format!("Скачивание: {:.1} из {:.1} МБ", mb(done), mb(total))),
+                            .text(crate::i18n::fmt("Скачивание: {0} из {1} МБ", &[&format!("{:.1}", mb(done)), &format!("{:.1}", mb(total))])),
                     );
                 }
                 Install::Ready => {
-                    ui.label("Обновление скачано.");
+                    ui.label(crate::i18n::tr("Обновление скачано."));
                     start = ui
-                        .button("Перезапустить и обновить")
-                        .on_hover_text("Заменить файлы программы и открыть её заново; несохранённый проект будет сохранён")
+                        .button(crate::i18n::tr("Перезапустить и обновить"))
+                        .on_hover_text(crate::i18n::tr("Заменить файлы программы и открыть её заново; несохранённый проект будет сохранён"))
                         .clicked();
                 }
                 Install::Idle(error) => {
                     if can_install {
                         start = ui
-                            .button("Обновить и перезапустить")
+                            .button(crate::i18n::tr("Обновить и перезапустить"))
                             .on_hover_text(
-                                "Скачать архив, заменить файлы программы и открыть её заново;                                  несохранённый проект будет сохранён",
+                                crate::i18n::tr("Скачать архив, заменить файлы программы и открыть её заново;                                  несохранённый проект будет сохранён"),
                             )
                             .clicked();
                     }
                     if can_install {
                         ui.weak(
-                            "Другие открытые окна FLP_next закройте вручную, чтобы они                              обновились: они продолжат работать на старой версии, пока их не                              перезапустят.",
+                            crate::i18n::tr("Другие открытые окна FLP_next закройте вручную, чтобы они                              обновились: они продолжат работать на старой версии, пока их не                              перезапустят."),
                         );
                     }
                     if let Some(e) = error {
@@ -331,7 +335,7 @@ pub fn window(
                     for change in &release.changes {
                         ui.strong(&change.version);
                         if change.items.is_empty() {
-                            ui.weak("описание не указано");
+                            ui.weak(crate::i18n::tr("описание не указано"));
                         }
                         for item in &change.items {
                             ui.label(format!("• {item}"));

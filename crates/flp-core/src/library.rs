@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::boards::{boards_dir, Boards, BOARDS_DIR};
 use crate::ident::is_valid_ident;
 use crate::toml_io::read_toml;
 use crate::value::parse_duration_ms;
@@ -236,6 +237,24 @@ pub struct BlockInfo {
     /// The block works through a hardware UART set up in the board settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uart: Option<crate::uart::UartUse>,
+    /// Id of the user board this block belongs to (relays soldered on it): the block
+    /// is offered and allowed only in projects of that board. See [`crate::devices`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board: Option<String>,
+    /// The `pin` parameter may be a pin of an expander chip of the project instead of
+    /// a GPIO (digital input and output). See [`crate::expander`].
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub expander: bool,
+}
+
+impl BlockInfo {
+    /// The block may be offered in a project whose board is `model` (`board.model`):
+    /// blocks of a user board belong to that board only.
+    pub fn fits_board(&self, model: Option<&str>) -> bool {
+        self.board
+            .as_deref()
+            .is_none_or(|owner| Some(owner) == model)
+    }
 }
 
 fn is_false(v: &bool) -> bool {
@@ -309,6 +328,15 @@ pub struct ParamDef {
     /// (several DS18B20 on one 1-Wire bus).
     #[serde(default, skip_serializing_if = "is_false")]
     pub shared: bool,
+    /// For `pin` parameters: name of a bus (`i2c-sda`). Blocks of any type with the
+    /// same bus name may use one pin together (chips on one I²C bus).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub bus: String,
+    /// The value is set by the board (`[[device]]` of `board.toml`): it always equals
+    /// `default` and is not shown in the properties, but pins of such a parameter
+    /// still count in the pin check.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub fixed: bool,
     /// A `bool` parameter that may come from a variable: the template uses it as a
     /// run-time condition (`if (...)`), not to choose code while generating.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -337,8 +365,12 @@ pub enum PinMode {
     In,
     /// Output only.
     Out,
+    /// PWM output.
+    Pwm,
     /// Analog input: only pins with an ADC.
     Adc,
+    /// Analog output: only pins with a DAC.
+    Dac,
 }
 
 impl PinMode {
@@ -608,6 +640,12 @@ impl BlockDef {
                     c.label, p.name
                 ));
             }
+            if !p.bus.is_empty() && p.kind != ParamKind::Pin {
+                return Err(format!(
+                    "параметр «{}» с bus должен быть выводом (type = \"pin\")",
+                    p.name
+                ));
+            }
         }
         for p in &self.params {
             let Some(key) = &p.local else { continue };
@@ -777,6 +815,8 @@ pub struct Library {
     user_folders: BTreeSet<String>,
     /// Variable access blocks, one per access kind and signal type (`var_get_float`).
     builtins: BTreeMap<String, LibraryBlock>,
+    /// Boards of `user_library/boards/`.
+    boards: Boards,
 }
 
 impl Default for Library {
@@ -786,6 +826,7 @@ impl Default for Library {
             user: HashSet::new(),
             user_folders: BTreeSet::new(),
             builtins: crate::vars::builtin_blocks(),
+            boards: Boards::default(),
         }
     }
 }
@@ -808,8 +849,33 @@ impl Library {
         let user = user_library_dir(dir);
         if user.is_dir() {
             errors.extend(lib.add_user_dir(&user)?);
+            let (boards, board_errors) = Boards::load(&boards_dir(&user));
+            errors.extend(board_errors);
+            errors.extend(lib.set_boards(boards));
         }
         Ok((lib, errors))
+    }
+
+    /// User boards: pin tables and descriptions from `user_library/boards/`.
+    pub fn boards(&self) -> &Boards {
+        &self.boards
+    }
+
+    /// Replaces the user boards, e.g. with the ones packed into a project, together
+    /// with the device blocks of the boards. A device that cannot be made is skipped
+    /// and its error returned.
+    pub fn set_boards(&mut self, boards: Boards) -> Vec<Error> {
+        self.blocks.retain(|_, b| b.def.info.board.is_none());
+        let mut errors = Vec::new();
+        for board in boards.iter() {
+            let (blocks, board_errors) = crate::devices::device_blocks(board, self);
+            errors.extend(board_errors);
+            for block in blocks {
+                self.blocks.insert(block.def.info.kind.clone(), block);
+            }
+        }
+        self.boards = boards;
+        errors
     }
 
     /// Adds built-in blocks from one more folder; blocks with the same type are replaced.
@@ -948,7 +1014,8 @@ fn read_user_tree(
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if name.starts_with('.') {
+        // `boards/` holds boards, not blocks.
+        if name.starts_with('.') || (prefix.is_empty() && name == BOARDS_DIR) {
             continue;
         }
         let folder = if prefix.is_empty() {
@@ -1328,6 +1395,38 @@ group = \"G\"
     }
 
     #[test]
+    fn boards_folder_is_not_a_section() {
+        let root = std::env::temp_dir().join(format!("flp_user_boards_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let builtin = root.join("library");
+        fs::create_dir_all(&builtin).unwrap();
+        let user = user_library_dir(&builtin);
+        let block = def("[block]\ntype = \"top\"\nname = \"N\"\ngroup = \"\"\n");
+        save_block(&user, &block, "", "").unwrap();
+        let board = crate::boards::BoardDef {
+            info: crate::boards::BoardInfo {
+                id: "my_board".into(),
+                name: "Моя плата".into(),
+                chip: "esp32".into(),
+                fqbn: "esp32:esp32:esp32".into(),
+                version: 1,
+                options: Default::default(),
+            },
+            pins: Vec::new(),
+            expander_pins: Vec::new(),
+            devices: Vec::new(),
+        };
+        crate::boards::save_board(&user, &board).unwrap();
+
+        let (lib, errors) = Library::load_with_user(&builtin).unwrap();
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(lib.user_folders().count(), 0);
+        assert!(lib.boards().get("my_board").is_some());
+        assert_eq!(lib.len(), 1);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn folder_names() {
         assert!(is_valid_folder_name("Насосы"));
         assert!(is_valid_folder_name("K-Web 3.0"));
@@ -1340,5 +1439,18 @@ group = \"G\"
     fn single_flag() {
         assert!(!def(HEADER).info.single);
         assert!(def(&format!("{HEADER}single = true\n")).info.single);
+    }
+
+    #[test]
+    fn bus_belongs_to_pins() {
+        let pin = format!(
+            "{HEADER}[[param]]\nname = \"sda\"\ntype = \"pin\"\ndefault = -1\nmin = -1\nbus = \"i2c-sda\"\n"
+        );
+        let d = def(&pin);
+        d.validate("x").unwrap();
+        assert_eq!(d.param("sda").unwrap().bus, "i2c-sda");
+
+        let bad = pin.replace("type = \"pin\"", "type = \"int\"");
+        assert!(def(&bad).validate("x").unwrap_err().contains("bus"));
     }
 }

@@ -1,0 +1,42 @@
+# Три микросхемы PCF8574 на одной шине I²C (SDA = GPIO21, SCL = GPIO22).
+# Адреса: 0x22 — входы, 0x24 и 0x20 — выходы.
+
+# Входы: кнопки или оптопары замыкают вывод на землю, инверсия даёт true при нажатии.
+[[block]]
+id = "inputs"
+type = "pcf8574_in"
+address = 34
+sda = 21
+scl = 22
+inverted = true
+
+# Выходы с реле, включаемыми нулём.
+[[block]]
+id = "relays"
+type = "pcf8574_out"
+address = 36
+sda = 21
+scl = 22
+inverted = true
+
+# Второй модуль выходов на той же шине — Wire.begin() вызывается один раз.
+[[block]]
+id = "leds"
+type = "pcf8574_out"
+address = 32
+sda = 21
+scl = 22
+
+# Первый вход включает первое реле, второй — второе.
+[[link]]
+from = "inputs.p0"
+to   = "relays.p0"
+
+[[link]]
+from = "inputs.p1"
+to   = "relays.p1"
+
+# Светодиод показывает, что микросхема входов отвечает.
+[[link]]
+from = "inputs.ok"
+to   = "leds.p0"

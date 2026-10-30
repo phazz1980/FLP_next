@@ -232,6 +232,7 @@ impl Project {
         crate::uart::migrate_legacy(&mut self.config.uart, &mut self.logic);
         migrate_wifi_mode(&mut self.logic);
         crate::uart::migrate_uart_send(&mut self.logic);
+        self.logic.sync_tags();
         self
     }
 

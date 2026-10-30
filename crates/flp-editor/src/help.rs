@@ -19,31 +19,35 @@ pub const ERRORS: &str = "errors";
 /// Anchor on the errors page that explains a check problem of this kind.
 pub fn error_anchor(kind: DiagKind) -> &'static str {
     match kind {
-        DiagKind::BadId => "недопустимый-id-блока",
-        DiagKind::DuplicateId => "одинаковые-id",
-        DiagKind::UnknownType => "неизвестный-тип-блока",
-        DiagKind::UnknownParam => "нет-такого-параметра",
-        DiagKind::MissingParam => "не-задан-параметр",
-        DiagKind::ParamValue => "недопустимое-значение-параметра",
-        DiagKind::Singleton => "блок-допускается-один-раз",
-        DiagKind::Condition => "условие-блока-не-вычисляется",
-        DiagKind::ConstantType => "константа-не-подходит-к-входу",
-        DiagKind::InvertType => "инверсия-не-подходит-к-порту",
-        DiagKind::LinkEnds => "в-связи-нет-блока-или-порта",
-        DiagKind::LinkType => "типы-порта-и-входа-не-совпадают",
-        DiagKind::InputBusy => "на-вход-уже-подан-другой-источник",
-        DiagKind::InputEmpty => "вход-без-источника",
-        DiagKind::PinBusy => "вывод-gpio-уже-занят",
-        DiagKind::PinUnavailable => "вывод-gpio-недоступен",
-        DiagKind::PinWarning => "предупреждение-о-выводе-gpio",
-        DiagKind::VariableName => "имя-переменной",
-        DiagKind::VariableType => "тип-переменной",
-        DiagKind::VariableLink => "связь-с-переменной",
-        DiagKind::VariableWriters => "несколько-записывающих-блоков",
-        DiagKind::VariableUnused => "переменная-не-используется",
-        DiagKind::LayoutOrphan => "лишние-координаты-в-разметке",
-        DiagKind::Loop => "цикл-без-памяти",
-        DiagKind::Uart => "последовательный-порт",
+        DiagKind::BadId => crate::i18n::tr("недопустимый-id-блока"),
+        DiagKind::DuplicateId => crate::i18n::tr("одинаковые-id"),
+        DiagKind::UnknownType => crate::i18n::tr("неизвестный-тип-блока"),
+        DiagKind::UnknownParam => crate::i18n::tr("нет-такого-параметра"),
+        DiagKind::MissingParam => crate::i18n::tr("не-задан-параметр"),
+        DiagKind::ParamValue => crate::i18n::tr("недопустимое-значение-параметра"),
+        DiagKind::Singleton => crate::i18n::tr("блок-допускается-один-раз"),
+        DiagKind::Condition => crate::i18n::tr("условие-блока-не-вычисляется"),
+        DiagKind::ConstantType => crate::i18n::tr("константа-не-подходит-к-входу"),
+        DiagKind::InvertType => crate::i18n::tr("инверсия-не-подходит-к-порту"),
+        DiagKind::LinkEnds => crate::i18n::tr("в-связи-нет-блока-или-порта"),
+        DiagKind::LinkType => crate::i18n::tr("типы-порта-и-входа-не-совпадают"),
+        DiagKind::InputBusy => crate::i18n::tr("на-вход-уже-подан-другой-источник"),
+        DiagKind::InputEmpty => crate::i18n::tr("вход-без-источника"),
+        DiagKind::PinBusy => crate::i18n::tr("вывод-gpio-уже-занят"),
+        DiagKind::PinUnavailable => crate::i18n::tr("вывод-gpio-недоступен"),
+        DiagKind::PinWarning => crate::i18n::tr("предупреждение-о-выводе-gpio"),
+        DiagKind::VariableName => crate::i18n::tr("имя-переменной"),
+        DiagKind::VariableType => crate::i18n::tr("тип-переменной"),
+        DiagKind::VariableLink => crate::i18n::tr("связь-с-переменной"),
+        DiagKind::VariableWriters => crate::i18n::tr("несколько-записывающих-блоков"),
+        DiagKind::VariableUnused => crate::i18n::tr("переменная-не-используется"),
+        DiagKind::LayoutOrphan => crate::i18n::tr("лишние-координаты-в-разметке"),
+        DiagKind::Loop => crate::i18n::tr("цикл-без-памяти"),
+        DiagKind::Uart => crate::i18n::tr("последовательный-порт"),
+        DiagKind::BoardBlock => crate::i18n::tr("блок-чужой-платы"),
+        DiagKind::Expander => crate::i18n::tr("расширитель"),
+        DiagKind::ExpanderPin => crate::i18n::tr("вывод-расширителя"),
+        DiagKind::Tag => crate::i18n::tr("копия-тега"),
     }
 }
 
@@ -62,6 +66,7 @@ const FILES: &[(&str, &str)] = &[
         "blockeditor",
         include_str!("../../../help/10-block-editor.md"),
     ),
+    ("boards", include_str!("../../../help/11-boards.md")),
     ("build", include_str!("../../../help/05-build.md")),
     ("debug", include_str!("../../../help/06-debug.md")),
     ("ai", include_str!("../../../help/07-ai.md")),
@@ -95,12 +100,12 @@ fn section(id: &str, text: &str) -> Page {
 
 fn kind_name(kind: ParamKind) -> &'static str {
     match kind {
-        ParamKind::Bool => "да/нет",
-        ParamKind::Int => "целое",
-        ParamKind::Float => "дробное",
-        ParamKind::Text => "текст",
-        ParamKind::Duration => "время",
-        ParamKind::Pin => "пин",
+        ParamKind::Bool => crate::i18n::tr("да/нет"),
+        ParamKind::Int => crate::i18n::tr("целое"),
+        ParamKind::Float => crate::i18n::tr("дробное"),
+        ParamKind::Text => crate::i18n::tr("текст"),
+        ParamKind::Duration => crate::i18n::tr("время"),
+        ParamKind::Pin => crate::i18n::tr("пин"),
     }
 }
 
@@ -116,9 +121,9 @@ fn block_page(block: &LibraryBlock) -> Page {
     if !info.description.is_empty() {
         text += &format!("{}\n\n", info.description);
     }
-    text += &format!("Тип: `{}`. Группа: {}.\n\n", info.kind, info.group);
+    text += &crate::i18n::fmt("Тип: `{0}`. Группа: {1}.\n\n", &[&info.kind, &info.group]);
     if !block.def.inputs.is_empty() {
-        text += "## Входы\n\n| Порт | Тип | Описание |\n|---|---|---|\n";
+        text += crate::i18n::tr("## Входы\n\n| Порт | Тип | Описание |\n|---|---|---|\n");
         for p in &block.def.inputs {
             text += &format!(
                 "| {} | {} | {} |\n",
@@ -130,7 +135,7 @@ fn block_page(block: &LibraryBlock) -> Page {
         text.push('\n');
     }
     if !block.def.outputs.is_empty() {
-        text += "## Выходы\n\n| Порт | Тип | Описание |\n|---|---|---|\n";
+        text += crate::i18n::tr("## Выходы\n\n| Порт | Тип | Описание |\n|---|---|---|\n");
         for p in &block.def.outputs {
             text += &format!(
                 "| {} | {} | {} |\n",
@@ -142,7 +147,7 @@ fn block_page(block: &LibraryBlock) -> Page {
         text.push('\n');
     }
     if !block.def.params.is_empty() {
-        text += "## Параметры\n\n| Параметр | Тип | Описание |\n|---|---|---|\n";
+        text += crate::i18n::tr("## Параметры\n\n| Параметр | Тип | Описание |\n|---|---|---|\n");
         for p in &block.def.params {
             text += &format!(
                 "| {} | {} | {} |\n",
@@ -196,7 +201,7 @@ fn block_pages(lib: &Library) -> (Vec<Page>, Vec<Group>) {
         0,
         Page {
             id: BLOCKS.to_owned(),
-            title: "Справочник блоков".to_owned(),
+            title: crate::i18n::tr("Справочник блоков").to_owned(),
             text: index,
             dir: None,
         },
@@ -306,11 +311,11 @@ impl HelpWindow {
             }
         }
         ui.separator();
-        egui::CollapsingHeader::new("Справочник блоков")
+        egui::CollapsingHeader::new(crate::i18n::tr("Справочник блоков"))
             .default_open(self.current.starts_with(BLOCKS))
             .show(ui, |ui| {
                 if ui
-                    .selectable_label(self.current == BLOCKS, "Все блоки")
+                    .selectable_label(self.current == BLOCKS, crate::i18n::tr("Все блоки"))
                     .clicked()
                 {
                     go = Some(BLOCKS.to_owned());
@@ -337,7 +342,7 @@ impl HelpWindow {
         if !self.query.trim().is_empty() {
             let hits = search(self.sections.iter().chain(&self.blocks), &self.query);
             if hits.is_empty() {
-                ui.weak("Ничего не найдено");
+                ui.weak(crate::i18n::tr("Ничего не найдено"));
             }
             let mut go = None;
             for hit in hits {
@@ -359,8 +364,10 @@ impl HelpWindow {
                 markdown::show_with_images(ui, &page.text, anchor.as_deref(), find)
             }
             None => {
-                ui.label("Такой страницы нет.");
-                ui.link("К содержанию").clicked().then(|| START.to_owned())
+                ui.label(crate::i18n::tr("Такой страницы нет."));
+                ui.link(crate::i18n::tr("К содержанию"))
+                    .clicked()
+                    .then(|| START.to_owned())
             }
         }
     }
@@ -375,7 +382,7 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
     }
     let mut open = true;
     let mut go = None;
-    egui::Window::new("Справка")
+    egui::Window::new(crate::i18n::tr("Справка"))
         .open(&mut open)
         .collapsible(false)
         .resizable(true)
@@ -384,7 +391,10 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if ui
-                    .add_enabled(!help.history.is_empty(), egui::Button::new("← Назад"))
+                    .add_enabled(
+                        !help.history.is_empty(),
+                        egui::Button::new(crate::i18n::tr("← Назад")),
+                    )
                     .clicked()
                 {
                     if let Some(prev) = help.history.pop() {
@@ -395,7 +405,7 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
                 }
                 ui.add(
                     TextEdit::singleline(&mut help.query)
-                        .hint_text("Поиск по справке")
+                        .hint_text(crate::i18n::tr("Поиск по справке"))
                         .desired_width(240.0),
                 );
                 if !help.query.is_empty() && ui.button("✕").clicked() {

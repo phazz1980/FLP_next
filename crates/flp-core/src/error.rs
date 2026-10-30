@@ -46,6 +46,9 @@ pub enum Error {
 
     #[error("неверное описание блока {}: {}", .path.display(), .message)]
     InvalidBlockDef { path: PathBuf, message: String },
+
+    #[error("неверное описание платы {}: {}", .path.display(), .message)]
+    InvalidBoard { path: PathBuf, message: String },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

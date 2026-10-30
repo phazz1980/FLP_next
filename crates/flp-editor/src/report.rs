@@ -34,31 +34,31 @@ impl Form {
     pub fn show(&mut self, ctx: &egui::Context, facts: &Context) -> Option<String> {
         let mut send = false;
         let mut open = self.open;
-        egui::Window::new("Сообщить об ошибке")
+        egui::Window::new(crate::i18n::tr("Сообщить об ошибке"))
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
             .default_width(460.0)
             .show(ctx, |ui| {
-                ui.label("Что произошло");
+                ui.label(crate::i18n::tr("Что произошло"));
                 ui.add(
                     egui::TextEdit::multiline(&mut self.what)
                         .desired_rows(4)
                         .desired_width(f32::INFINITY),
                 );
-                ui.label("Что ожидалось");
+                ui.label(crate::i18n::tr("Что ожидалось"));
                 ui.add(
                     egui::TextEdit::multiline(&mut self.expected)
                         .desired_rows(3)
                         .desired_width(f32::INFINITY),
                 );
-                ui.checkbox(&mut self.with_env, "Приложить версию, ОС и плату");
-                ui.checkbox(&mut self.with_log, "Приложить последние сообщения");
-                ui.weak("Откроется страница GitHub с этим текстом: проверьте его и отправьте. Файл проекта .flpn можно перетащить в поле описания.");
+                ui.checkbox(&mut self.with_env, crate::i18n::tr("Приложить версию, ОС и плату"));
+                ui.checkbox(&mut self.with_log, crate::i18n::tr("Приложить последние сообщения"));
+                ui.weak(crate::i18n::tr("Откроется страница GitHub с этим текстом: проверьте его и отправьте. Файл проекта .flpn можно перетащить в поле описания."));
                 send = ui
                     .add_enabled(
                         !self.what.trim().is_empty(),
-                        egui::Button::new("Отправить на GitHub"),
+                        egui::Button::new(crate::i18n::tr("Отправить на GitHub")),
                     )
                     .clicked();
             });
@@ -100,10 +100,9 @@ pub struct Context<'a> {
 
 /// URL of the new-issue form with the body filled in.
 pub fn issue_url(c: &Context, f: &Fields) -> String {
-    let mut body = format!(
-        "## Что произошло\n{}\n\n## Что ожидалось\n{}\n",
-        f.what.trim(),
-        f.expected.trim()
+    let mut body = crate::i18n::fmt(
+        "## Что произошло\n{0}\n\n## Что ожидалось\n{1}\n",
+        &[&f.what.trim(), &f.expected.trim()],
     );
     if f.with_env {
         body.push_str("\n## Данные\n");
@@ -137,7 +136,7 @@ pub fn issue_url(c: &Context, f: &Fields) -> String {
 fn title(what: &str) -> String {
     let first = what.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
     let short: String = first.trim().chars().take(80).collect();
-    format!("Ошибка: {short}")
+    crate::i18n::fmt("Ошибка: {0}", &[&short])
 }
 
 /// Percent-encoding of everything but unreserved characters.

@@ -1,0 +1,29 @@
+// @setup once
+{% if value.sda >= 0 and value.scl >= 0 %}Wire.begin({{ param.sda }}, {{ param.scl }});
+{% else %}Wire.begin();
+{% endif %}// @global
+unsigned long {{ id }}_polled = 0;
+// @setup
+// A pin reads as an input while the chip holds it high.
+Wire.beginTransmission({{ param.address }});
+Wire.write(0xFF);
+Wire.endTransmission();
+// @loop
+if (millis() - {{ id }}_polled >= {{ param.period }}UL) {
+  {{ id }}_polled = millis();
+  if (Wire.requestFrom((uint8_t){{ param.address }}, (uint8_t)1) == 1) {
+    uint8_t {{ id }}_raw = Wire.read();
+    {% if param.inverted %}{{ id }}_raw = ~{{ id }}_raw;
+    {% endif %}{{ output.p0 }} = ({{ id }}_raw & 0x01) != 0;
+{% if value.count > 1 %}    {{ output.p1 }} = ({{ id }}_raw & 0x02) != 0;
+{% endif %}{% if value.count > 2 %}    {{ output.p2 }} = ({{ id }}_raw & 0x04) != 0;
+{% endif %}{% if value.count > 3 %}    {{ output.p3 }} = ({{ id }}_raw & 0x08) != 0;
+{% endif %}{% if value.count > 4 %}    {{ output.p4 }} = ({{ id }}_raw & 0x10) != 0;
+{% endif %}{% if value.count > 5 %}    {{ output.p5 }} = ({{ id }}_raw & 0x20) != 0;
+{% endif %}{% if value.count > 6 %}    {{ output.p6 }} = ({{ id }}_raw & 0x40) != 0;
+{% endif %}{% if value.count > 7 %}    {{ output.p7 }} = ({{ id }}_raw & 0x80) != 0;
+{% endif %}    {{ output.ok }} = true;
+  } else {
+    {{ output.ok }} = false;
+  }
+}

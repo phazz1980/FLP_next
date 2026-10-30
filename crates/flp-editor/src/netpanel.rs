@@ -56,7 +56,14 @@ pub fn show(app: &EditorApp, ui: &mut Ui) -> Vec<NetAction> {
     }
     // The web interface and MQTT ride on a network service: their sections appear with one.
     if has_net {
-        service(app, ui, WEB_UI, "Веб-интерфейс", true, &mut actions);
+        service(
+            app,
+            ui,
+            WEB_UI,
+            crate::i18n::tr("Веб-интерфейс"),
+            true,
+            &mut actions,
+        );
         service(app, ui, MQTT, "MQTT", true, &mut actions);
     }
     actions
@@ -79,9 +86,12 @@ fn service(
         .default_open(block.is_some())
         .show(ui, |ui| {
             let mut on = block.is_some();
-            let check = ui.add_enabled(available || on, egui::Checkbox::new(&mut on, "Включить"));
+            let check = ui.add_enabled(
+                available || on,
+                egui::Checkbox::new(&mut on, crate::i18n::tr("Включить")),
+            );
             if !available {
-                check.on_hover_text("Сначала включите Wi-Fi или Ethernet");
+                check.on_hover_text(crate::i18n::tr("Сначала включите Wi-Fi или Ethernet"));
             } else if check.changed() {
                 actions.push(NetAction::Toggle { kind, on });
             }
@@ -111,7 +121,7 @@ fn topics_section(app: &EditorApp, ui: &mut Ui, actions: &mut Vec<NetAction>) {
                     .and_then(|p| p.default.as_ref())
             }) {
                 Some(ParamValue::Text(t)) if !t.is_empty() => t.as_str(),
-                _ => "без топика",
+                _ => crate::i18n::tr("без топика"),
             };
             let placed = doc.project.layout.blocks.contains_key(&b.id);
             ui.dnd_drag_source(
@@ -121,9 +131,9 @@ fn topics_section(app: &EditorApp, ui: &mut Ui, actions: &mut Vec<NetAction>) {
             )
             .response
             .on_hover_text(if placed {
-                "Блок уже на плате; перетащите, чтобы переставить"
+                crate::i18n::tr("Блок уже на плате; перетащите, чтобы переставить")
             } else {
-                "Перетащите на плату"
+                crate::i18n::tr("Перетащите на плату")
             });
             egui::CollapsingHeader::new(format!("{topic} ({})", b.id))
                 .id_salt(("mqtt_topic", &b.id))
@@ -133,7 +143,7 @@ fn topics_section(app: &EditorApp, ui: &mut Ui, actions: &mut Vec<NetAction>) {
                     if let Some(lib) = &lib {
                         topic_ports(ui, b, &lib.def);
                     }
-                    if ui.button("Удалить").clicked() {
+                    if ui.button(crate::i18n::tr("Удалить")).clicked() {
                         actions.push(NetAction::Remove(b.id.clone()));
                     }
                 });
@@ -148,7 +158,7 @@ fn topics_section(app: &EditorApp, ui: &mut Ui, actions: &mut Vec<NetAction>) {
 /// Ports of a topic block: each can be dragged onto the board. A port of any type
 /// takes the type chosen next to it.
 fn topic_ports(ui: &mut Ui, b: &flp_core::Block, def: &flp_core::BlockDef) {
-    ui.label("Порты (перетащите на плату):");
+    ui.label(crate::i18n::tr("Порты (перетащите на плату):"));
     let ports = def
         .active_inputs(&b.params)
         .map(|p| (p, true))
@@ -195,12 +205,12 @@ fn topic_ports(ui: &mut Ui, b: &flp_core::Block, def: &flp_core::BlockDef) {
 
 fn type_label(ty: SignalType) -> &'static str {
     match ty {
-        SignalType::Bool => "логический",
-        SignalType::Int => "целый",
-        SignalType::Float => "дробный",
-        SignalType::String => "строка",
-        SignalType::Any => "любой",
-        SignalType::Number => "число",
+        SignalType::Bool => crate::i18n::tr("логический"),
+        SignalType::Int => crate::i18n::tr("целый"),
+        SignalType::Float => crate::i18n::tr("дробный"),
+        SignalType::String => crate::i18n::tr("строка"),
+        SignalType::Any => crate::i18n::tr("любой"),
+        SignalType::Number => crate::i18n::tr("число"),
     }
 }
 
@@ -399,7 +409,7 @@ fn settings(
                         if secret
                             && ui
                                 .selectable_label(shown, "\u{1f441}")
-                                .on_hover_text("Показать или скрыть")
+                                .on_hover_text(crate::i18n::tr("Показать или скрыть"))
                                 .clicked()
                         {
                             ui.data_mut(|d| d.insert_temp(reveal, !shown));
@@ -430,12 +440,15 @@ fn settings(
             }
         });
     }
-    if ui.button("Настройки...").clicked() {
+    if ui.button(crate::i18n::tr("Настройки...")).clicked() {
         actions.push(NetAction::Settings(b.id.clone()));
     }
     if kind == WEB_UI {
         pages_section(app, ui, b, actions);
-        if ui.button("Конструктор страницы...").clicked() {
+        if ui
+            .button(crate::i18n::tr("Конструктор страницы..."))
+            .clicked()
+        {
             actions.push(NetAction::Designer);
         }
     }
@@ -494,7 +507,7 @@ fn pages_section(
             let mut text = name.clone();
             if ui
                 .add(egui::TextEdit::singleline(&mut text).desired_width(110.0))
-                .on_hover_text("Название страницы")
+                .on_hover_text(crate::i18n::tr("Название страницы"))
                 .changed()
             {
                 let mut all = names.clone();
@@ -507,7 +520,7 @@ fn pages_section(
             }
             if ui
                 .small_button("+")
-                .on_hover_text("Добавить виджет на эту страницу")
+                .on_hover_text(crate::i18n::tr("Добавить виджет на эту страницу"))
                 .clicked()
             {
                 actions.push(NetAction::NewWidget(i));
@@ -515,7 +528,9 @@ fn pages_section(
             if names.len() > 1
                 && ui
                     .small_button("✕")
-                    .on_hover_text("Удалить страницу: её виджеты перейдут на предыдущую")
+                    .on_hover_text(crate::i18n::tr(
+                        "Удалить страницу: её виджеты перейдут на предыдущую",
+                    ))
                     .clicked()
             {
                 actions.push(NetAction::DeletePage(i));
@@ -525,20 +540,19 @@ fn pages_section(
             for w in widget_blocks(logic).filter(|w| widget_page(w, names.len()) == i + 1) {
                 let caption = match w.params.get("caption") {
                     Some(ParamValue::Text(c)) if !c.is_empty() => c.as_str(),
-                    _ => "без имени",
+                    _ => crate::i18n::tr("без имени"),
                 };
                 let sel = app.selection.as_ref().is_some_and(|s| s.has_block(&w.id));
                 let text = egui::RichText::new(format!("{caption} ({})", w.id));
                 let text = if sel { text.strong() } else { text };
-                let resp = ui
-                    .dnd_drag_source(
-                        Id::unique(("widget", &w.id)),
-                        DragItem::Widget(w.id.clone()),
-                        |ui| ui.label(text),
-                    )
-                    .response
-                    .on_hover_text(
-                        "Щелчок — найти на плате, двойной щелчок — параметры.                          Перетащите на плату — появится такой же виджет.",
+                let resp = crate::canvas::drag_source(
+                    ui,
+                    Id::unique(("widget", &w.id)),
+                    DragItem::Widget(w.id.clone()),
+                    |ui| ui.label(text),
+                )
+                .on_hover_text(
+                        crate::i18n::tr("Щелчок — найти на плате, двойной щелчок — параметры.                          Перетащите на плату — появится такой же виджет."),
                     );
                 if resp.double_clicked() {
                     actions.push(NetAction::Settings(w.id.clone()));
@@ -549,10 +563,10 @@ fn pages_section(
         });
     }
     ui.horizontal(|ui| {
-        if ui.small_button("+ страница").clicked() {
+        if ui.small_button(crate::i18n::tr("+ страница")).clicked() {
             actions.push(NetAction::AddPage);
         }
-        if ui.small_button("+ виджет").clicked() {
+        if ui.small_button(crate::i18n::tr("+ виджет")).clicked() {
             actions.push(NetAction::NewWidget(0));
         }
     });
@@ -637,9 +651,10 @@ fn pull_label(
     };
     ui.dnd_drag_source(Id::unique(("pull", id, name)), item, |ui| ui.label(label))
         .response
-        .on_hover_text(format!(
-            "{hint}
-Перетащите на плату"
+        .on_hover_text(crate::i18n::fmt(
+            "{0}
+Перетащите на плату",
+            &[&hint],
         ));
     if let Some(var) = bound {
         ui.label(format!("↔ {var}"));

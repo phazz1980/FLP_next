@@ -18,16 +18,8 @@ bool relay_cmd_out_b = false;
 SemaphoreHandle_t flp_bg_lock;
 
 // modbus_rtu_master: общий код
-// Hardware UART access shared by Modbus RTU blocks; the guard keeps one copy
-// when both the slave and the master are used (`once` works per block type).
-#ifndef FLP_UART_EXECUTOR
-#define FLP_UART_EXECUTOR
-FlprogUartExecutor flpUart;
-#endif
-
-// modbus_rtu_slave: общий код
-// Hardware UART access shared by Modbus RTU blocks; the guard keeps one copy
-// when both the slave and the master are used (`once` works per block type).
+// Hardware UART access shared by Modbus RTU blocks; the guard keeps one copy even
+// if the slave and the master ever stop sharing the same text of this section.
 #ifndef FLP_UART_EXECUTOR
 #define FLP_UART_EXECUTOR
 FlprogUartExecutor flpUart;

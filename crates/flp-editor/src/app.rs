@@ -122,6 +122,9 @@ pub struct EditorApp {
     pub sheet: u32,
     /// Sheets added by the user that have no blocks yet.
     pub extra_sheets: BTreeSet<u32>,
+    /// Last tag or variable clicked in the tree and the index of the image shown:
+    /// the next click on it shows the next image.
+    pub tree_cycle: Option<(String, usize)>,
     pub canvas: CanvasState,
     pub right_tab: RightTab,
     /// Panel sizes and which side panels are expanded; saved in the editor settings.
@@ -138,6 +141,7 @@ pub struct EditorApp {
     pub theme_editor: Option<crate::themeedit::ThemeEditor>,
     /// Open "Block editor" window.
     pub block_editor: Option<crate::blockedit::BlockEditor>,
+    pub board_editor: Option<crate::boardedit::BoardEditor>,
     /// Open "Project code" window.
     pub code_view: Option<crate::codeview::CodeView>,
     pub help: Option<crate::help::HelpWindow>,
@@ -195,6 +199,7 @@ pub struct EditorApp {
     changes_window: bool,
     report: crate::report::Form,
     pub import: crate::blockio::Import,
+    pub board_import: crate::boardio::Import,
     /// User blocks whose revision differs between the project and the program.
     block_diffs: Vec<flp_core::packed::VersionDiff>,
     /// arduino-cli is missing: the window offers to install it.
@@ -239,6 +244,7 @@ impl EditorApp {
             selection: None,
             sheet: 1,
             extra_sheets: BTreeSet::new(),
+            tree_cycle: None,
             canvas: CanvasState::default(),
             right_tab: RightTab::Library,
             panels: theme::saved_panels(),
@@ -250,6 +256,7 @@ impl EditorApp {
             themes: theme::load_all(),
             theme_editor: None,
             block_editor: None,
+            board_editor: None,
             code_view: None,
             help: None,
             block_delete: None,
@@ -283,6 +290,7 @@ impl EditorApp {
             changes_window: false,
             report: Default::default(),
             import: Default::default(),
+            board_import: Default::default(),
             block_diffs: Vec::new(),
             self_update: SelfUpdate::Idle(None),
             cli_prompt: if ArduinoCli::locate().is_ok() {
@@ -296,7 +304,7 @@ impl EditorApp {
             // Kept in memory only, so the broken file is not overwritten.
             Err(e) => app.info(
                 LogLevel::Error,
-                format!("Сохранённые пароли не прочитаны: {e}"),
+                crate::i18n::fmt("Сохранённые пароли не прочитаны: {0}", &[&e]),
             ),
         }
         if let Some(t) =
@@ -304,6 +312,10 @@ impl EditorApp {
         {
             app.theme = t;
         }
+        if let Some(lang) = theme::saved_language().and_then(|c| crate::i18n::Lang::from_code(&c)) {
+            crate::i18n::set(lang);
+        }
+        crate::i18n::install_fonts(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
         theme::apply(&cc.egui_ctx, &app.theme);
         app.scan_ports(&cc.egui_ctx);
@@ -314,9 +326,12 @@ impl EditorApp {
                 LogLevel::Error
             };
             let text = if text == "ok" {
-                "Программа обновлена".to_owned()
+                crate::i18n::tr("Программа обновлена").to_owned()
             } else {
-                format!("Обновление не удалось, возвращена прежняя версия ({text})")
+                crate::i18n::fmt(
+                    "Обновление не удалось, возвращена прежняя версия ({0})",
+                    &[&text],
+                )
             };
             app.info(level, text);
         }
@@ -325,9 +340,9 @@ impl EditorApp {
         }
         app.lib_dir = find_library(project.as_deref());
         app.reload_library();
-        // A block file given on the command line goes to the import window.
+        // A block or board file given on the command line goes to the import window.
         let (project, block_file) = match project {
-            Some(p) if is_block_file(&p) => (None, Some(p)),
+            Some(p) if is_block_file(&p) || crate::boardio::is_board_file(&p) => (None, Some(p)),
             other => (other, None),
         };
         // Start with a project: the given one, the last one or a fresh one.
@@ -337,7 +352,11 @@ impl EditorApp {
             None => app.create_default_project(),
         }
         if let Some(path) = block_file {
-            crate::blockio::add_files(&mut app, &[path]);
+            if crate::boardio::is_board_file(&path) {
+                crate::boardio::add_files(&mut app, &[path]);
+            } else {
+                crate::blockio::add_files(&mut app, &[path]);
+            }
         }
         app
     }
@@ -375,7 +394,10 @@ impl EditorApp {
         self.port_scan = None;
         match result {
             Ok(ports) => self.ports = ports,
-            Err(e) => self.info(LogLevel::Warning, format!("Порты не найдены: {e}")),
+            Err(e) => self.info(
+                LogLevel::Warning,
+                crate::i18n::fmt("Порты не найдены: {0}", &[&e]),
+            ),
         }
     }
 
@@ -404,15 +426,15 @@ impl EditorApp {
             CliPrompt::Ask => {
                 let mut install = false;
                 let mut later = false;
-                egui::Window::new("arduino-cli не найден")
+                egui::Window::new(crate::i18n::tr("arduino-cli не найден"))
                     .collapsible(false)
                     .resizable(false)
                     .show(ctx, |ui| {
-                        ui.label("Для сборки и заливки прошивки нужна программа arduino-cli.");
-                        ui.label("Установить её сейчас через winget? Ядро ESP32 докачается при первой сборке.");
+                        ui.label(crate::i18n::tr("Для сборки и заливки прошивки нужна программа arduino-cli."));
+                        ui.label(crate::i18n::tr("Установить её сейчас через winget? Ядро ESP32 докачается при первой сборке."));
                         ui.horizontal(|ui| {
-                            install = ui.button("Установить").clicked();
-                            later = ui.button("Позже").clicked();
+                            install = ui.button(crate::i18n::tr("Установить")).clicked();
+                            later = ui.button(crate::i18n::tr("Позже")).clicked();
                         });
                     });
                 if install {
@@ -428,7 +450,10 @@ impl EditorApp {
                         });
                         ctx.request_repaint();
                     });
-                    self.info(LogLevel::Info, "Устанавливаю arduino-cli через winget...");
+                    self.info(
+                        LogLevel::Info,
+                        crate::i18n::tr("Устанавливаю arduino-cli через winget..."),
+                    );
                     self.cli_prompt = CliPrompt::Installing(rx);
                 } else if later {
                     self.cli_prompt = CliPrompt::Hidden;
@@ -436,13 +461,15 @@ impl EditorApp {
             }
             CliPrompt::Installing(rx) => {
                 let done = rx.try_recv().ok();
-                egui::Window::new("Установка arduino-cli")
+                egui::Window::new(crate::i18n::tr("Установка arduino-cli"))
                     .collapsible(false)
                     .resizable(false)
                     .show(ctx, |ui| {
                         ui.horizontal(|ui| {
                             panels::busy(ui);
-                            ui.label("Идёт установка, это может занять минуту...");
+                            ui.label(crate::i18n::tr(
+                                "Идёт установка, это может занять минуту...",
+                            ));
                         });
                     });
                 ctx.request_repaint_after(Duration::from_millis(300));
@@ -450,12 +477,12 @@ impl EditorApp {
                     self.cli_prompt = CliPrompt::Hidden;
                     match result {
                         Ok(_) => {
-                            self.info(LogLevel::Info, "arduino-cli установлен");
+                            self.info(LogLevel::Info, crate::i18n::tr("arduino-cli установлен"));
                             self.scan_ports(ctx);
                         }
                         Err(e) => self.info(
                             LogLevel::Error,
-                            format!("Не удалось установить arduino-cli: {e}"),
+                            crate::i18n::fmt("Не удалось установить arduino-cli: {0}", &[&e]),
                         ),
                     }
                 }
@@ -501,7 +528,10 @@ impl EditorApp {
             Ok(staged) => staged,
             Err(e) => {
                 if auto {
-                    self.info(LogLevel::Warning, format!("Автоскачивание обновления: {e}"));
+                    self.info(
+                        LogLevel::Warning,
+                        crate::i18n::fmt("Автоскачивание обновления: {0}", &[&e]),
+                    );
                 }
                 self.self_update = SelfUpdate::Idle(Some(e));
                 return;
@@ -509,8 +539,10 @@ impl EditorApp {
         };
         if auto {
             let version = self.new_release.as_ref().map_or("", |r| r.version.as_str());
-            let text =
-                format!("Обновление {version} скачано: Справка → «Перезапустить и обновить»");
+            let text = crate::i18n::fmt(
+                "Обновление {0} скачано: Справка → «Перезапустить и обновить»",
+                &[&version],
+            );
             self.info(LogLevel::Info, text);
             self.self_update = SelfUpdate::Ready(staged);
             return;
@@ -522,8 +554,9 @@ impl EditorApp {
     fn apply_update(&mut self, ctx: &egui::Context, staged: &Path) {
         // The new version opens the project again from its file: save it first.
         if self.doc.as_ref().is_some_and(|d| d.dirty) && !self.save() {
-            self.self_update =
-                SelfUpdate::Idle(Some("проект не сохранён, обновление отменено".into()));
+            self.self_update = SelfUpdate::Idle(Some(
+                crate::i18n::tr("проект не сохранён, обновление отменено").into(),
+            ));
             return;
         }
         let project = self.doc.as_ref().map(|d| d.project.path.clone());
@@ -554,11 +587,9 @@ impl EditorApp {
                 }
                 self.info(
                     LogLevel::Info,
-                    format!(
-                        "Доступна версия {} (установлена {}): {}",
-                        release.version,
-                        update::CURRENT,
-                        release.url
+                    crate::i18n::fmt(
+                        "Доступна версия {0} (установлена {1}): {2}",
+                        &[&release.version, &update::CURRENT, &release.url],
                     ),
                 );
                 self.new_release = Some(release);
@@ -570,21 +601,29 @@ impl EditorApp {
             }
             Ok(Check::UpToDate) if manual => self.info(
                 LogLevel::Info,
-                format!("Установлена последняя версия ({})", update::CURRENT),
+                crate::i18n::fmt("Установлена последняя версия ({0})", &[&update::CURRENT]),
             ),
             Ok(Check::NoReleases) if manual => self.info(
                 LogLevel::Info,
-                "Выпущенных версий не найдено (или у токена нет доступа к репозиторию)",
+                crate::i18n::tr(
+                    "Выпущенных версий не найдено (или у токена нет доступа к репозиторию)",
+                ),
             ),
             Ok(_) => {}
-            Err(e) => self.info(LogLevel::Warning, format!("Проверка обновлений: {e}")),
+            Err(e) => self.info(
+                LogLevel::Warning,
+                crate::i18n::fmt("Проверка обновлений: {0}", &[&e]),
+            ),
         }
     }
 
     /// Writes [`EditorApp::local`] to its file, reporting a failure in the log.
     pub fn save_local(&mut self) {
         if let Err(e) = self.local.save() {
-            self.info(LogLevel::Error, format!("Пароли не сохранены: {e}"));
+            self.info(
+                LogLevel::Error,
+                crate::i18n::fmt("Пароли не сохранены: {0}", &[&e]),
+            );
         }
     }
 
@@ -596,7 +635,7 @@ impl EditorApp {
             doc.dirty = true;
             self.info(
                 LogLevel::Info,
-                "Пароль Wi-Fi перенесён из файла проекта в настройки программы",
+                crate::i18n::tr("Пароль Wi-Fi перенесён из файла проекта в настройки программы"),
             );
         }
         self.save_local();
@@ -620,7 +659,9 @@ impl EditorApp {
         let Some(dir) = self.lib_dir.clone() else {
             self.info(
                 LogLevel::Error,
-                "Не найдена папка библиотеки блоков library/ (задайте FLP_LIBRARY)",
+                crate::i18n::tr(
+                    "Не найдена папка библиотеки блоков library/ (задайте FLP_LIBRARY)",
+                ),
             );
             return;
         };
@@ -633,13 +674,13 @@ impl EditorApp {
                     help.blocks_dirty = true;
                 }
                 for e in errors {
-                    self.info(LogLevel::Warning, format!("Блок пропущен: {e}"));
+                    self.info(LogLevel::Warning, crate::i18n::fmt("Пропущено: {0}", &[&e]));
                 }
                 self.info(
                     LogLevel::Info,
-                    format!(
-                        "Библиотека: {builtin} встроенных блоков из {}, {user} пользовательских",
-                        dir.display()
+                    crate::i18n::fmt(
+                        "Библиотека: {0} встроенных блоков из {1}, {2} пользовательских",
+                        &[&builtin, &dir.display(), &user],
                     ),
                 );
             }
@@ -688,7 +729,7 @@ impl EditorApp {
                 self.disk_warned = true;
                 self.info(
                     LogLevel::Warning,
-                    "Файл проекта изменён другой программой, а в редакторе есть несохранённые правки:                      сохранение перезапишет внешние изменения",
+                    crate::i18n::tr("Файл проекта изменён другой программой, а в редакторе есть несохранённые правки:                      сохранение перезапишет внешние изменения"),
                 );
             }
             return;
@@ -699,7 +740,10 @@ impl EditorApp {
                 self.doc = Some(new);
                 self.disk_stamp = stamp;
                 self.selection = None;
-                self.info(LogLevel::Info, "Проект обновлён: файл изменён снаружи");
+                self.info(
+                    LogLevel::Info,
+                    crate::i18n::tr("Проект обновлён: файл изменён снаружи"),
+                );
             }
             Err(e) => {
                 self.disk_stamp = stamp;
@@ -714,16 +758,25 @@ impl EditorApp {
         let Some(dir) = self.user_lib_dir() else {
             return;
         };
-        if !flp_core::project::is_project_file(path) {
+        if !flp_core::project::is_project_file(path) && !path.is_dir() {
             return;
+        }
+        // The board goes first: the library has to know it for the blocks of its devices.
+        let boards = flp_core::packed::unpack_missing_boards(path, &dir, &self.lib);
+        if !boards.is_empty() {
+            self.info(
+                LogLevel::Info,
+                crate::i18n::fmt("Из проекта добавлена плата: {0}", &[&boards.join(", ")]),
+            );
+            self.reload_library();
         }
         let written = flp_core::packed::unpack_missing_blocks(path, &dir, &self.lib);
         if !written.is_empty() {
             self.info(
                 LogLevel::Info,
-                format!(
-                    "Из проекта добавлены пользовательские блоки: {}",
-                    written.join(", ")
+                crate::i18n::fmt(
+                    "Из проекта добавлены пользовательские блоки: {0}",
+                    &[&written.join(", ")],
                 ),
             );
             self.reload_library();
@@ -739,12 +792,14 @@ impl EditorApp {
         let mut take: Vec<String> = Vec::new();
         let mut repack = false;
         let mut close = false;
-        egui::Window::new("Версии блоков")
+        egui::Window::new(crate::i18n::tr("Версии блоков"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                ui.label("Пользовательские блоки в проекте и в программе отличаются версией.");
+                ui.label(crate::i18n::tr(
+                    "Пользовательские блоки в проекте и в программе отличаются версией.",
+                ));
                 ui.add_space(6.0);
                 let (newer_project, newer_program): (Vec<_>, Vec<_>) = self
                     .block_diffs
@@ -753,16 +808,20 @@ impl EditorApp {
                     .partition(|d| d.project > d.program);
                 let diverged: Vec<_> = self.block_diffs.iter().filter(|d| d.diverged()).collect();
                 if !diverged.is_empty() {
-                    ui.strong("Версия одна, а содержимое разное (правили на разных компьютерах)");
+                    ui.strong(crate::i18n::tr(
+                        "Версия одна, а содержимое разное (правили на разных компьютерах)",
+                    ));
                     for d in &diverged {
                         ui.label(format!("{} (v{})", d.kind, d.project));
                     }
                     ui.horizontal(|ui| {
-                        if ui.button("Взять из проекта").clicked() {
+                        if ui.button(crate::i18n::tr("Взять из проекта")).clicked() {
                             take.extend(diverged.iter().map(|d| d.kind.clone()));
                         }
                         if ui
-                            .button("Оставить блоки программы и сохранить проект")
+                            .button(crate::i18n::tr(
+                                "Оставить блоки программы и сохранить проект",
+                            ))
                             .clicked()
                         {
                             repack = true;
@@ -771,34 +830,38 @@ impl EditorApp {
                     ui.add_space(6.0);
                 }
                 if !newer_project.is_empty() {
-                    ui.strong("В проекте блоки новее, чем в программе");
+                    ui.strong(crate::i18n::tr("В проекте блоки новее, чем в программе"));
                     for d in &newer_project {
-                        ui.label(format!(
-                            "{}: в проекте v{}, в программе v{}",
-                            d.kind, d.project, d.program
+                        ui.label(crate::i18n::fmt(
+                            "{0}: в проекте v{1}, в программе v{2}",
+                            &[&d.kind, &d.project, &d.program],
                         ));
                     }
-                    if ui.button("Обновить блоки программы из проекта").clicked()
+                    if ui
+                        .button(crate::i18n::tr("Обновить блоки программы из проекта"))
+                        .clicked()
                     {
                         take = newer_project.iter().map(|d| d.kind.clone()).collect();
                     }
                     ui.add_space(6.0);
                 }
                 if !newer_program.is_empty() {
-                    ui.strong("В программе блоки новее, чем в проекте");
+                    ui.strong(crate::i18n::tr("В программе блоки новее, чем в проекте"));
                     for d in &newer_program {
-                        ui.label(format!(
-                            "{}: в проекте v{}, в программе v{}",
-                            d.kind, d.project, d.program
+                        ui.label(crate::i18n::fmt(
+                            "{0}: в проекте v{1}, в программе v{2}",
+                            &[&d.kind, &d.project, &d.program],
                         ));
                     }
-                    if ui.button("Обновить блоки проекта из программы").clicked()
+                    if ui
+                        .button(crate::i18n::tr("Обновить блоки проекта из программы"))
+                        .clicked()
                     {
                         repack = true;
                     }
                     ui.add_space(6.0);
                 }
-                if ui.button("Оставить как есть").clicked() {
+                if ui.button(crate::i18n::tr("Оставить как есть")).clicked() {
                     close = true;
                 }
             });
@@ -808,9 +871,9 @@ impl EditorApp {
                     flp_core::packed::adopt_project_blocks(&doc.project.path, &dir, &take);
                 self.info(
                     LogLevel::Ok,
-                    format!(
-                        "Блоки программы обновлены из проекта: {}",
-                        written.join(", ")
+                    crate::i18n::fmt(
+                        "Блоки программы обновлены из проекта: {0}",
+                        &[&written.join(", ")],
                     ),
                 );
                 self.reload_library();
@@ -820,7 +883,10 @@ impl EditorApp {
         if repack {
             // Saving packs the program's copies of the blocks the schema uses.
             if self.save() {
-                self.info(LogLevel::Ok, "Блоки проекта обновлены из программы");
+                self.info(
+                    LogLevel::Ok,
+                    crate::i18n::tr("Блоки проекта обновлены из программы"),
+                );
             }
             self.block_diffs
                 .retain(|d| d.program <= d.project && !d.diverged());
@@ -853,7 +919,10 @@ impl EditorApp {
         };
         match Doc::open(path, &self.lib) {
             Ok(doc) => {
-                self.info(LogLevel::Info, format!("Открыт проект {}", path.display()));
+                self.info(
+                    LogLevel::Info,
+                    crate::i18n::fmt("Открыт проект {0}", &[&path.display()]),
+                );
                 theme::save_last_project(path);
                 self.port = doc.project.config.board.port.clone().unwrap_or_default();
                 self.doc = Some(doc);
@@ -890,7 +959,10 @@ impl EditorApp {
             });
         match copied {
             Ok(()) => self.request_open(dest),
-            Err(e) => self.info(LogLevel::Error, format!("Пример не открыт: {e}")),
+            Err(e) => self.info(
+                LogLevel::Error,
+                crate::i18n::fmt("Пример не открыт: {0}", &[&e]),
+            ),
         }
     }
 
@@ -923,8 +995,8 @@ impl EditorApp {
 
     fn new_project(&mut self) {
         let mut dialog = rfd::FileDialog::new()
-            .set_title("Новый проект")
-            .add_filter("Проект FLP_next", &[PROJECT_EXT])
+            .set_title(crate::i18n::tr("Новый проект"))
+            .add_filter(crate::i18n::tr("Проект FLP_next"), &[PROJECT_EXT])
             .set_file_name(format!("Новый проект.{PROJECT_EXT}"));
         if let Some(dir) = theme::default_projects_dir().filter(|d| d.is_dir()) {
             dialog = dialog.set_directory(dir);
@@ -945,9 +1017,12 @@ impl EditorApp {
     /// Asks for a project file; an old-format project is opened by its `project.toml`.
     fn pick_project(&mut self) {
         let Some(path) = rfd::FileDialog::new()
-            .set_title("Открыть проект")
-            .add_filter("Проект FLP_next", &[PROJECT_EXT])
-            .add_filter("Проект старого формата (project.toml)", &["toml"])
+            .set_title(crate::i18n::tr("Открыть проект"))
+            .add_filter(crate::i18n::tr("Проект FLP_next"), &[PROJECT_EXT])
+            .add_filter(
+                crate::i18n::tr("Проект старого формата (project.toml)"),
+                &["toml"],
+            )
             .pick_file()
         else {
             return;
@@ -1036,8 +1111,9 @@ impl EditorApp {
                 Err(e) => {
                     self.info(
                         LogLevel::Error,
-                        format!(
-                            "Не удалось запустить flp-web (соберите: cargo build -p flp-web): {e}"
+                        crate::i18n::fmt(
+                            "Не удалось запустить flp-web (соберите: cargo build -p flp-web): {0}",
+                            &[&e],
                         ),
                     );
                     return;
@@ -1052,9 +1128,12 @@ impl EditorApp {
         match open.spawn() {
             Ok(_) => self.info(
                 LogLevel::Info,
-                "Конструктор веб-интерфейса открыт в браузере.",
+                crate::i18n::tr("Конструктор веб-интерфейса открыт в браузере."),
             ),
-            Err(e) => self.info(LogLevel::Error, format!("Не удалось открыть браузер: {e}")),
+            Err(e) => self.info(
+                LogLevel::Error,
+                crate::i18n::fmt("Не удалось открыть браузер: {0}", &[&e]),
+            ),
         }
     }
 
@@ -1066,7 +1145,7 @@ impl EditorApp {
         match doc.save(&self.lib) {
             Ok(warning) => {
                 let path = doc.project.path.display().to_string();
-                self.info(LogLevel::Ok, format!("Сохранено: {path}"));
+                self.info(LogLevel::Ok, crate::i18n::fmt("Сохранено: {0}", &[&path]));
                 if let Some(w) = warning {
                     self.info(LogLevel::Warning, w);
                 }
@@ -1088,8 +1167,8 @@ impl EditorApp {
         let old = doc.project.path.clone();
         let name = doc.project.config.project.name.clone();
         let mut dialog = rfd::FileDialog::new()
-            .set_title("Сохранить проект как")
-            .add_filter("Проект FLP_next", &[PROJECT_EXT]);
+            .set_title(crate::i18n::tr("Сохранить проект как"))
+            .add_filter(crate::i18n::tr("Проект FLP_next"), &[PROJECT_EXT]);
         dialog = match old.parent().filter(|d| d.is_dir()) {
             Some(dir) => dialog.set_directory(dir),
             None => dialog,
@@ -1115,6 +1194,43 @@ impl EditorApp {
         } else if let Some(doc) = &mut self.doc {
             // Saving failed: stay with the previous file.
             doc.project.path = old;
+        }
+    }
+
+    /// Asks for a file and writes the picture of all sheets of the project there.
+    fn export_pdf(&mut self) {
+        let Some(doc) = &self.doc else { return };
+        let path = &doc.project.path;
+        let stem = path
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .unwrap_or("boards")
+            .to_owned();
+        let mut dialog = rfd::FileDialog::new()
+            .set_title(crate::i18n::tr("Сохранить PDF"))
+            .add_filter("PDF", &["pdf"])
+            .set_file_name(format!("{stem}.pdf"));
+        if let Some(dir) = path.parent().filter(|d| d.is_dir()) {
+            dialog = dialog.set_directory(dir);
+        }
+        let Some(mut dest) = dialog.save_file() else {
+            return;
+        };
+        if dest.extension().is_none() {
+            dest.set_extension("pdf");
+        }
+        let result = flp_pdf::render(&doc.project, &self.lib)
+            .map_err(|e| e.to_string())
+            .and_then(|pdf| std::fs::write(&dest, pdf).map_err(|e| e.to_string()));
+        match result {
+            Ok(()) => self.info(
+                LogLevel::Ok,
+                crate::i18n::fmt("PDF сохранён: {0}", &[&dest.display()]),
+            ),
+            Err(e) => self.info(
+                LogLevel::Error,
+                crate::i18n::fmt("Не удалось сохранить PDF: {0}", &[&e]),
+            ),
         }
     }
 
@@ -1163,7 +1279,17 @@ impl EditorApp {
         let result = match &sel {
             Selection::Block(_) | Selection::Blocks(_) => doc
                 .edit(&self.lib, None, |p| {
-                    sel.blocks().iter().try_for_each(|id| p.remove_block(id))?;
+                    // Copies go first: removing a tag folds its first copy into it.
+                    let mut ids = sel.blocks().to_vec();
+                    ids.sort_by_key(|id| p.logic.block(id).is_none_or(|b| b.tag.is_none()));
+                    // An input or output leaves the sheet but stays in the project tree.
+                    ids.iter().try_for_each(|id| {
+                        if p.is_tag(&self.lib, p.logic.tag_of(id)) {
+                            p.take_off_board(id)
+                        } else {
+                            p.remove_block(id)
+                        }
+                    })?;
                     p.release_unused_services(&self.lib)
                 })
                 .map_err(|e| e.to_string()),
@@ -1171,7 +1297,7 @@ impl EditorApp {
                 if p.disconnect(to) {
                     Ok(())
                 } else {
-                    Err("связь не найдена".to_owned())
+                    Err(crate::i18n::tr("связь не найдена").to_owned())
                 }
             }),
         };
@@ -1192,7 +1318,10 @@ impl EditorApp {
         let frag = doc.project.copy_fragment(sel.blocks());
         let n = frag.blocks.len();
         ctx.copy_text(frag.to_clipboard());
-        self.info(LogLevel::Info, format!("Скопировано блоков: {n}"));
+        self.info(
+            LogLevel::Info,
+            crate::i18n::fmt("Скопировано блоков: {0}", &[&n]),
+        );
     }
 
     /// Copies the selected blocks to the clipboard and removes them.
@@ -1221,7 +1350,7 @@ impl EditorApp {
                 self.sheet = at.sheet;
                 self.selection = Selection::of_blocks(ids);
             }
-            Err(e) => self.info(LogLevel::Error, format!("Вставка: {e}")),
+            Err(e) => self.info(LogLevel::Error, crate::i18n::fmt("Вставка: {0}", &[&e])),
         }
     }
 
@@ -1254,9 +1383,12 @@ impl EditorApp {
         let errors = doc.report.errors().count();
         self.log.extend(lines);
         if errors == 0 {
-            self.info(LogLevel::Ok, "Проверка: ошибок нет");
+            self.info(LogLevel::Ok, crate::i18n::tr("Проверка: ошибок нет"));
         } else {
-            self.info(LogLevel::Error, format!("Проверка: ошибок — {errors}"));
+            self.info(
+                LogLevel::Error,
+                crate::i18n::fmt("Проверка: ошибок — {0}", &[&errors]),
+            );
         }
     }
 
@@ -1266,7 +1398,10 @@ impl EditorApp {
             // It is raised to normal priority: the user waits for it now.
             if job.background && !matches!(kind, JobKind::Precompile) && self.queued.is_none() {
                 job.raise_priority();
-                self.info(LogLevel::Info, "Ждём окончания фоновой сборки...");
+                self.info(
+                    LogLevel::Info,
+                    crate::i18n::tr("Ждём окончания фоновой сборки..."),
+                );
                 self.queued = Some(kind);
             }
             return;
@@ -1279,7 +1414,10 @@ impl EditorApp {
         let Some(doc) = &self.doc else { return };
         if doc.report.has_errors() {
             self.run_check();
-            self.info(LogLevel::Error, "Сначала исправьте ошибки схемы");
+            self.info(
+                LogLevel::Error,
+                crate::i18n::tr("Сначала исправьте ошибки схемы"),
+            );
             return;
         }
         self.job_rev = Some((doc.project.path.clone(), doc.revision, self.debug_firmware));
@@ -1351,7 +1489,10 @@ impl EditorApp {
             match event {
                 JobEvent::Line(..) if background || cancelled => {}
                 JobEvent::Done(Err(_)) if cancelled => {
-                    self.info(LogLevel::Warning, format!("{title}: отменено"));
+                    self.info(
+                        LogLevel::Warning,
+                        crate::i18n::fmt("{0}: отменено", &[&title]),
+                    );
                     done = true;
                 }
                 JobEvent::Line(level, text) => self.info(level, text),
@@ -1359,7 +1500,7 @@ impl EditorApp {
                 JobEvent::Done(Err(_)) if background => {
                     self.info(
                         LogLevel::Warning,
-                        "Фоновая сборка не удалась; подробности покажет «Собрать»",
+                        crate::i18n::tr("Фоновая сборка не удалась; подробности покажет «Собрать»"),
                     );
                     done = true;
                 }
@@ -1372,7 +1513,7 @@ impl EditorApp {
                     done = true;
                 }
                 JobEvent::Done(Err(text)) => {
-                    self.info(LogLevel::Error, format!("ошибка: {text}"));
+                    self.info(LogLevel::Error, crate::i18n::fmt("ошибка: {0}", &[&text]));
                     done = true;
                 }
             }
@@ -1403,13 +1544,16 @@ impl EditorApp {
         let Some(port) = port.or_else(|| self.board_port()) else {
             self.info(
                 LogLevel::Error,
-                "Выберите порт платы на панели инструментов",
+                crate::i18n::tr("Выберите порт платы на панели инструментов"),
             );
             return;
         };
         match DebugState::start(&doc.project, &self.lib, &port, ctx) {
             Ok(state) => {
-                self.info(LogLevel::Info, format!("Отладка: подключение к {port}"));
+                self.info(
+                    LogLevel::Info,
+                    crate::i18n::fmt("Отладка: подключение к {0}", &[&port]),
+                );
                 self.debug = Some(state);
             }
             Err(e) => self.info(LogLevel::Error, e),
@@ -1450,7 +1594,7 @@ impl EditorApp {
     pub fn stop_debug(&mut self) {
         if let Some(d) = self.debug.take() {
             d.stop();
-            self.info(LogLevel::Info, "Отладка остановлена");
+            self.info(LogLevel::Info, crate::i18n::tr("Отладка остановлена"));
         }
     }
 
@@ -1675,7 +1819,7 @@ impl EditorApp {
             // The burger is drawn with lines, so it does not depend on font glyphs.
             let burger = ui
                 .allocate_response(egui::vec2(36.0, 30.0), egui::Sense::click())
-                .on_hover_text("Меню");
+                .on_hover_text(crate::i18n::tr("Меню"));
             let color = if burger.hovered() || burger.is_pointer_button_down_on() {
                 ui.visuals().strong_text_color()
             } else {
@@ -1730,13 +1874,14 @@ impl EditorApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
             }
             if !fullscreen {
-                if panels::window_button(ui, panels::WinIcon::Minimize, "Свернуть") {
+                if panels::window_button(ui, panels::WinIcon::Minimize, crate::i18n::tr("Свернуть"))
+                {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                 }
                 let (icon, tip) = if maximized {
-                    (panels::WinIcon::Restore, "Восстановить")
+                    (panels::WinIcon::Restore, crate::i18n::tr("Восстановить"))
                 } else {
-                    (panels::WinIcon::Maximize, "Развернуть")
+                    (panels::WinIcon::Maximize, crate::i18n::tr("Развернуть"))
                 };
                 if panels::window_button(ui, icon, tip) {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
@@ -1744,11 +1889,12 @@ impl EditorApp {
             } else if panels::window_button(
                 ui,
                 panels::WinIcon::ExitFullscreen,
-                "Выйти из полного экрана (F11)",
+                crate::i18n::tr("Выйти из полного экрана (F11)"),
             ) {
                 self.toggle_fullscreen(&ctx);
             }
-            if panels::window_button(ui, panels::WinIcon::Close, "Закрыть") {
+            if panels::window_button(ui, panels::WinIcon::Close, crate::i18n::tr("Закрыть"))
+            {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
@@ -1802,18 +1948,18 @@ impl EditorApp {
 
     /// The editor menus; shown inside the burger button of the title bar.
     fn menus(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Файл", |ui| {
-            if ui.button("Новый проект...").clicked() {
+        ui.menu_button(crate::i18n::tr("Файл"), |ui| {
+            if ui.button(crate::i18n::tr("Новый проект...")).clicked() {
                 self.new_project();
             }
-            if ui.button("Открыть...").clicked() {
+            if ui.button(crate::i18n::tr("Открыть...")).clicked() {
                 self.pick_project();
             }
             let has_doc = self.doc.is_some();
             if ui
                 .add_enabled(
                     has_doc,
-                    egui::Button::new("Сохранить").shortcut_text("Ctrl+S"),
+                    egui::Button::new(crate::i18n::tr("Сохранить")).shortcut_text("Ctrl+S"),
                 )
                 .clicked()
             {
@@ -1822,39 +1968,46 @@ impl EditorApp {
             if ui
                 .add_enabled(
                     has_doc,
-                    egui::Button::new("Сохранить как...").shortcut_text("Ctrl+Shift+S"),
+                    egui::Button::new(crate::i18n::tr("Сохранить как...")).shortcut_text("Ctrl+Shift+S"),
                 )
                 .clicked()
             {
                 self.save_as();
             }
             if ui
-                .button("Открывать .flpn двойным щелчком")
-                .on_hover_text("Связать файлы проектов и наборов блоков (.flpblocks) с этим редактором в Проводнике")
+                .add_enabled(has_doc, egui::Button::new(crate::i18n::tr("Сохранить PDF...")))
+                .on_hover_text(crate::i18n::tr("Схема всех плат и таблицы параметров блоков"))
+                .clicked()
+            {
+                self.export_pdf();
+            }
+            if ui
+                .button(crate::i18n::tr("Открывать .flpn двойным щелчком"))
+                .on_hover_text(crate::i18n::tr("Связать файлы проектов, наборов блоков (.flpblocks) и плат (.flpboard) с этим редактором в Проводнике"))
                 .clicked()
             {
                 match crate::assoc::register() {
                     Ok(()) => self.info(
                         LogLevel::Ok,
-                        "Файлы .flpn теперь открываются этим редактором",
+                        crate::i18n::tr("Файлы .flpn теперь открываются этим редактором"),
                     ),
                     Err(e) => {
-                        self.info(LogLevel::Error, format!("Не удалось связать .flpn: {e}"))
+                        self.info(LogLevel::Error, crate::i18n::fmt("Не удалось связать .flpn: {0}", &[&e]))
                     }
                 }
             }
-            ui.menu_button("Автосохранение", |ui| {
+            ui.menu_button(crate::i18n::tr("Автосохранение"), |ui| {
                 let mut minutes = self.autosave_minutes;
-                ui.radio_value(&mut minutes, 0, "Выключено");
+                ui.radio_value(&mut minutes, 0, crate::i18n::tr("Выключено"));
                 for m in [1, 2, 5, 10, 15, 30] {
-                    ui.radio_value(&mut minutes, m, format!("Каждые {m} мин"));
+                    ui.radio_value(&mut minutes, m, crate::i18n::fmt("Каждые {0} мин", &[&m]));
                 }
                 ui.horizontal(|ui| {
-                    ui.label("Период:");
+                    ui.label(crate::i18n::tr("Период:"));
                     ui.add(
                         egui::DragValue::new(&mut minutes)
                             .range(0..=240)
-                            .suffix(" мин"),
+                            .suffix(crate::i18n::tr(" мин")),
                     );
                 });
                 if minutes != self.autosave_minutes {
@@ -1862,14 +2015,14 @@ impl EditorApp {
                 }
             });
             ui.separator();
-            if ui.button("Выход").clicked() {
+            if ui.button(crate::i18n::tr("Выход")).clicked() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
-        ui.menu_button("Примеры", |ui| {
+        ui.menu_button(crate::i18n::tr("Примеры"), |ui| {
             let examples = self.example_projects();
             if examples.is_empty() {
-                ui.label("Папка examples не найдена");
+                ui.label(crate::i18n::tr("Папка examples не найдена"));
             }
             egui::ScrollArea::vertical()
                 .max_height(400.0)
@@ -1882,11 +2035,11 @@ impl EditorApp {
                     }
                 });
         });
-        ui.menu_button("Вид", |ui| {
+        ui.menu_button(crate::i18n::tr("Вид"), |ui| {
             let on = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
             if ui
                 .add(
-                    egui::Button::new("На весь экран")
+                    egui::Button::new(crate::i18n::tr("На весь экран"))
                         .selected(on)
                         .shortcut_text("F11"),
                 )
@@ -1897,8 +2050,19 @@ impl EditorApp {
             }
             ui.separator();
             panels::theme_menu(self, ui);
+            ui.separator();
+            ui.menu_button("Language / Язык", |ui| {
+                for lang in crate::i18n::Lang::ALL {
+                    let on = crate::i18n::current() == lang;
+                    if ui.radio(on, lang.native_name()).clicked() {
+                        crate::i18n::set(lang);
+                        theme::save_language(lang.code());
+                        ui.close();
+                    }
+                }
+            });
         });
-        ui.menu_button("Правка", |ui| {
+        ui.menu_button(crate::i18n::tr("Правка"), |ui| {
             let (can_undo, can_redo) = self
                 .doc
                 .as_ref()
@@ -1906,7 +2070,7 @@ impl EditorApp {
             if ui
                 .add_enabled(
                     can_undo,
-                    egui::Button::new("Отменить").shortcut_text("Ctrl+Z"),
+                    egui::Button::new(crate::i18n::tr("Отменить")).shortcut_text("Ctrl+Z"),
                 )
                 .clicked()
             {
@@ -1915,7 +2079,7 @@ impl EditorApp {
             if ui
                 .add_enabled(
                     can_redo,
-                    egui::Button::new("Повторить").shortcut_text("Ctrl+Y"),
+                    egui::Button::new(crate::i18n::tr("Повторить")).shortcut_text("Ctrl+Y"),
                 )
                 .clicked()
             {
@@ -1925,7 +2089,7 @@ impl EditorApp {
             if ui
                 .add_enabled(
                     self.selection.is_some(),
-                    egui::Button::new("Удалить").shortcut_text("Del"),
+                    egui::Button::new(crate::i18n::tr("Удалить")).shortcut_text("Del"),
                 )
                 .clicked()
             {
@@ -1938,7 +2102,7 @@ impl EditorApp {
             if ui
                 .add_enabled(
                     has_blocks,
-                    egui::Button::new("Вырезать").shortcut_text("Ctrl+X"),
+                    egui::Button::new(crate::i18n::tr("Вырезать")).shortcut_text("Ctrl+X"),
                 )
                 .clicked()
             {
@@ -1947,7 +2111,7 @@ impl EditorApp {
             if ui
                 .add_enabled(
                     has_blocks,
-                    egui::Button::new("Копировать").shortcut_text("Ctrl+C"),
+                    egui::Button::new(crate::i18n::tr("Копировать")).shortcut_text("Ctrl+C"),
                 )
                 .clicked()
             {
@@ -1956,7 +2120,7 @@ impl EditorApp {
             if ui
                 .add_enabled(
                     self.doc.is_some(),
-                    egui::Button::new("Вставить").shortcut_text("Ctrl+V"),
+                    egui::Button::new(crate::i18n::tr("Вставить")).shortcut_text("Ctrl+V"),
                 )
                 .clicked()
             {
@@ -1964,39 +2128,45 @@ impl EditorApp {
                     .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
             }
         });
-        ui.menu_button("Проект", |ui| {
+        ui.menu_button(crate::i18n::tr("Проект"), |ui| {
             let has_doc = self.doc.is_some();
             let idle = !self.job_running();
             if ui
-                .add_enabled(has_doc, egui::Button::new("Настройки МК..."))
+                .add_enabled(
+                    has_doc,
+                    egui::Button::new(crate::i18n::tr("Настройки МК...")),
+                )
                 .clicked()
             {
                 self.open_board_settings(ui.ctx());
             }
             if ui
-                .add_enabled(has_doc, egui::Button::new("Конструктор веб-интерфейса..."))
-                .on_hover_text(
-                    "Страница управления на ESP32 (главная страница): откроется в браузере",
+                .add_enabled(
+                    has_doc,
+                    egui::Button::new(crate::i18n::tr("Конструктор веб-интерфейса...")),
                 )
+                .on_hover_text(crate::i18n::tr(
+                    "Страница управления на ESP32 (главная страница): откроется в браузере",
+                ))
                 .clicked()
             {
                 self.open_web_designer();
             }
             if let Some(doc) = self.doc.as_mut() {
                 let mut diag = doc.project.config.diagnostics.clone();
-                ui.checkbox(&mut diag.enabled, "Время цикла в порт")
-                    .on_hover_text(
+                ui.checkbox(&mut diag.enabled, crate::i18n::tr("Время цикла в порт"))
+                    .on_hover_text(crate::i18n::tr(
                         "Прошивка раз в несколько секунд печатает в последовательный порт \
                          время цикла (всего и по листам). Режим отладки не нужен",
-                    );
+                    ));
                 if diag.enabled {
                     ui.horizontal(|ui| {
-                        ui.label("Период отчёта:");
+                        ui.label(crate::i18n::tr("Период отчёта:"));
                         ui.add(
                             egui::DragValue::new(&mut diag.interval_ms)
                                 .range(500..=600_000)
                                 .speed(100)
-                                .suffix(" мс"),
+                                .suffix(crate::i18n::tr(" мс")),
                         );
                     });
                 }
@@ -2008,13 +2178,16 @@ impl EditorApp {
             }
             ui.separator();
             if ui
-                .add_enabled(has_doc, egui::Button::new("Проверить").shortcut_text("F7"))
+                .add_enabled(
+                    has_doc,
+                    egui::Button::new(crate::i18n::tr("Проверить")).shortcut_text("F7"),
+                )
                 .clicked()
             {
                 self.run_check();
             }
             if ui
-                .add_enabled(has_doc, egui::Button::new("Код C++"))
+                .add_enabled(has_doc, egui::Button::new(crate::i18n::tr("Код C++")))
                 .clicked()
             {
                 self.code_view = Some(crate::codeview::CodeView::new());
@@ -2022,24 +2195,30 @@ impl EditorApp {
             if ui
                 .add_enabled(
                     has_doc && idle,
-                    egui::Button::new("Собрать").shortcut_text("F5"),
+                    egui::Button::new(crate::i18n::tr("Собрать")).shortcut_text("F5"),
                 )
                 .clicked()
             {
                 self.start_job(JobKind::Build, ui.ctx());
             }
             if ui
-                .add_enabled(has_doc && idle, egui::Button::new("Пересобрать полностью"))
-                .on_hover_text(
+                .add_enabled(
+                    has_doc && idle,
+                    egui::Button::new(crate::i18n::tr("Пересобрать полностью")),
+                )
+                .on_hover_text(crate::i18n::tr(
                     "Собрать заново, даже если схема не менялась: \
                      после обновления библиотек или ядра ESP32",
-                )
+                ))
                 .clicked()
             {
                 self.start_job(JobKind::Rebuild, ui.ctx());
             }
             if ui
-                .add_enabled(has_doc && idle, egui::Button::new("Залить на плату"))
+                .add_enabled(
+                    has_doc && idle,
+                    egui::Button::new(crate::i18n::tr("Залить на плату")),
+                )
                 .clicked()
             {
                 let port = self.port_choice();
@@ -2048,37 +2227,71 @@ impl EditorApp {
             if ui
                 .add_enabled(
                     has_doc && idle,
-                    egui::Button::new("Отладка: залить и подключиться"),
+                    egui::Button::new(crate::i18n::tr("Отладка: залить и подключиться")),
                 )
-                .on_hover_text("Залить прошивку с модулем отладки и подключиться к плате")
+                .on_hover_text(crate::i18n::tr(
+                    "Залить прошивку с модулем отладки и подключиться к плате",
+                ))
                 .clicked()
             {
                 self.start_debug(ui.ctx());
             }
         });
-        ui.menu_button("Библиотека", |ui| {
-            if ui.button("Новый блок...").clicked() {
+        ui.menu_button(crate::i18n::tr("Библиотека"), |ui| {
+            if ui.button(crate::i18n::tr("Новый блок...")).clicked() {
                 self.block_editor = Some(crate::blockedit::BlockEditor::new_block(self, ""));
             }
-            ui.weak("Изменить блок — правой кнопкой в библиотеке");
+            ui.weak(crate::i18n::tr(
+                "Изменить блок — правой кнопкой в библиотеке",
+            ));
             ui.separator();
-            if ui.button("Перечитать блоки").clicked() {
+            if ui.button(crate::i18n::tr("Новая плата...")).clicked() {
+                self.board_editor = Some(crate::boardedit::BoardEditor::new_board(self));
+            }
+            let boards: Vec<_> = self.lib.boards().iter().cloned().collect();
+            ui.add_enabled_ui(!boards.is_empty(), |ui| {
+                ui.menu_button(crate::i18n::tr("Изменить плату"), |ui| {
+                    for b in &boards {
+                        if ui.button(&b.def.info.name).clicked() {
+                            self.board_editor = Some(crate::boardedit::BoardEditor::edit(b));
+                            ui.close();
+                        }
+                    }
+                });
+                ui.menu_button(crate::i18n::tr("Экспорт платы"), |ui| {
+                    for b in &boards {
+                        if ui.button(&b.def.info.name).clicked() {
+                            crate::boardio::export(self, &b.def.info.id);
+                            ui.close();
+                        }
+                    }
+                });
+            });
+            if ui
+                .button(crate::i18n::tr("Импорт платы из файла..."))
+                .clicked()
+            {
+                crate::boardio::pick_files(self);
+                ui.close();
+            }
+            ui.separator();
+            if ui.button(crate::i18n::tr("Перечитать блоки")).clicked() {
                 self.reload_library();
             }
         });
-        ui.menu_button("Справка", |ui| {
+        ui.menu_button(crate::i18n::tr("Справка"), |ui| {
             if ui
-                .add(egui::Button::new("Содержание").shortcut_text("F1"))
+                .add(egui::Button::new(crate::i18n::tr("Содержание")).shortcut_text("F1"))
                 .clicked()
             {
                 self.open_help(crate::help::START);
                 ui.close();
             }
-            if ui.button("Справочник блоков").clicked() {
+            if ui.button(crate::i18n::tr("Справочник блоков")).clicked() {
                 self.open_help(crate::help::BLOCKS);
                 ui.close();
             }
-            if ui.button("Частые ошибки").clicked() {
+            if ui.button(crate::i18n::tr("Частые ошибки")).clicked() {
                 self.open_help(crate::help::ERRORS);
                 ui.close();
             }
@@ -2088,7 +2301,7 @@ impl EditorApp {
             if ui
                 .add_enabled(
                     self.update_rx.is_none(),
-                    egui::Button::new("Проверить обновления"),
+                    egui::Button::new(crate::i18n::tr("Проверить обновления")),
                 )
                 .clicked()
             {
@@ -2096,25 +2309,34 @@ impl EditorApp {
                 ui.close();
             }
             if ui
-                .checkbox(&mut self.update_check, "Проверять при запуске")
+                .checkbox(
+                    &mut self.update_check,
+                    crate::i18n::tr("Проверять при запуске"),
+                )
                 .changed()
             {
                 theme::save_update_check(self.update_check);
             }
             if ui
-                .checkbox(&mut self.update_beta, "Получать бета-версии")
-                .on_hover_text(
-                    "Предлагать и пробные версии (пререлизы на GitHub); они могут быть нестабильны",
+                .checkbox(
+                    &mut self.update_beta,
+                    crate::i18n::tr("Получать бета-версии"),
                 )
+                .on_hover_text(crate::i18n::tr(
+                    "Предлагать и пробные версии (пререлизы на GitHub); они могут быть нестабильны",
+                ))
                 .changed()
             {
                 theme::save_update_beta(self.update_beta);
             }
             if ui
-                .checkbox(&mut self.auto_update, "Скачивать обновления автоматически")
-                .on_hover_text(
-                    "Найденная версия скачивается в фоне; устанавливается по вашей команде",
+                .checkbox(
+                    &mut self.auto_update,
+                    crate::i18n::tr("Скачивать обновления автоматически"),
                 )
+                .on_hover_text(crate::i18n::tr(
+                    "Найденная версия скачивается в фоне; устанавливается по вашей команде",
+                ))
                 .changed()
             {
                 theme::save_auto_update(self.auto_update);
@@ -2124,34 +2346,43 @@ impl EditorApp {
             }
             if let SelfUpdate::Ready(staged) = &self.self_update {
                 let staged = staged.clone();
-                if ui.button("Перезапустить и обновить").clicked() {
+                if ui
+                    .button(crate::i18n::tr("Перезапустить и обновить"))
+                    .clicked()
+                {
                     self.apply_update(ui.ctx(), &staged);
                     ui.close();
                 }
             }
             ui.separator();
             if ui
-                .button("Сообщить об ошибке")
-                .on_hover_text("Форма: описание уйдёт на GitHub")
+                .button(crate::i18n::tr("Сообщить об ошибке"))
+                .on_hover_text(crate::i18n::tr("Форма: описание уйдёт на GitHub"))
                 .clicked()
             {
                 self.report.open = true;
                 ui.close();
             }
-            if ui.button("Что нового в этой версии").clicked() {
+            if ui
+                .button(crate::i18n::tr("Что нового в этой версии"))
+                .clicked()
+            {
                 self.changes_window = true;
                 ui.close();
             }
             if let Some(release) = &self.new_release {
                 ui.separator();
                 if ui
-                    .button(format!("Что нового в {}", release.version))
+                    .button(crate::i18n::fmt("Что нового в {0}", &[&release.version]))
                     .clicked()
                 {
                     self.update_window = true;
                     ui.close();
                 }
-                ui.hyperlink_to(format!("Скачать версию {}", release.version), &release.url);
+                ui.hyperlink_to(
+                    crate::i18n::fmt("Скачать версию {0}", &[&release.version]),
+                    &release.url,
+                );
             }
         });
     }
@@ -2171,6 +2402,7 @@ impl EditorApp {
             &doc.project.config.uart,
             users,
             from_blocks,
+            self.lib.boards(),
             ctx,
         );
         self.dialog = Some(Dialog::Board(dialog));
@@ -2191,16 +2423,18 @@ impl EditorApp {
             if let Some(release) = &self.new_release {
                 ui.separator();
                 let link = ui
-                    .link(format!("Доступна версия {}", release.version))
-                    .on_hover_text("Показать, что изменилось");
+                    .link(crate::i18n::fmt("Доступна версия {0}", &[&release.version]))
+                    .on_hover_text(crate::i18n::tr("Показать, что изменилось"));
                 if link.clicked() {
                     self.update_window = true;
                 }
                 // Downloaded: installing waits for the user's yes.
                 if let SelfUpdate::Ready(staged) = &self.self_update {
                     if ui
-                        .small_button("Установить и перезапустить")
-                        .on_hover_text("Проект сохранится, редактор перезапустится уже новым")
+                        .small_button(crate::i18n::tr("Установить и перезапустить"))
+                        .on_hover_text(crate::i18n::tr(
+                            "Проект сохранится, редактор перезапустится уже новым",
+                        ))
                         .clicked()
                     {
                         install = Some(staged.clone());
@@ -2213,10 +2447,10 @@ impl EditorApp {
                     let (fraction, text) = if total > 0 {
                         (
                             done as f32 / total as f32,
-                            format!("{} из {} Мб", mb(done), mb(total)),
+                            crate::i18n::fmt("{0} из {1} Мб", &[&mb(done), &mb(total)]),
                         )
                     } else {
-                        (0.0, format!("{} Мб", mb(done)))
+                        (0.0, crate::i18n::fmt("{0} Мб", &[&mb(done)]))
                     };
                     ui.add(
                         egui::ProgressBar::new(fraction)
@@ -2242,32 +2476,38 @@ impl EditorApp {
         match &self.doc {
             Some(doc) => {
                 let p = &doc.project;
-                ui.label(format!("Проект: {}", p.config.project.name));
+                ui.label(crate::i18n::fmt("Проект: {0}", &[&p.config.project.name]));
                 ui.separator();
                 let board = &p.config.board;
-                ui.label(format!("Плата: {}", crate::boardcfg::board_name(board)))
-                    .on_hover_text(&board.fqbn);
+                ui.label(crate::i18n::fmt(
+                    "Плата: {0}",
+                    &[&crate::boardcfg::board_name(board, self.lib.boards())],
+                ))
+                .on_hover_text(&board.fqbn);
                 ui.separator();
-                ui.label(format!("Блоков: {}", p.logic.blocks.len()));
+                ui.label(crate::i18n::fmt("Блоков: {0}", &[&p.logic.blocks.len()]));
                 ui.separator();
                 let errors = doc.report.errors().count();
                 if errors == 0 {
-                    ui.label(RichText::new("Схема без ошибок").color(self.theme.palette.ok));
+                    ui.label(
+                        RichText::new(crate::i18n::tr("Схема без ошибок"))
+                            .color(self.theme.palette.ok),
+                    );
                 } else {
                     ui.label(
-                        RichText::new(format!("Ошибок в схеме: {errors}"))
+                        RichText::new(crate::i18n::fmt("Ошибок в схеме: {0}", &[&errors]))
                             .color(self.theme.palette.error),
                     );
                 }
                 if doc.dirty {
                     ui.separator();
-                    ui.label("Есть несохранённые изменения");
+                    ui.label(crate::i18n::tr("Есть несохранённые изменения"));
                 }
                 if let Some(job) = &self.job {
                     ui.separator();
                     panels::busy(ui);
                     ui.label(job.title);
-                    if ui.small_button("Отменить").clicked() {
+                    if ui.small_button(crate::i18n::tr("Отменить")).clicked() {
                         *cancel = true;
                     }
                 }
@@ -2279,29 +2519,38 @@ impl EditorApp {
                         self.theme.palette.warning
                     };
                     ui.label(
-                        RichText::new(format!("Отладка {}: {}", d.port, d.live.status))
-                            .color(color),
+                        RichText::new(crate::i18n::fmt(
+                            "Отладка {0}: {1}",
+                            &[&d.port, &d.live.status],
+                        ))
+                        .color(color),
                     );
                     if let Some(s) = d.live.stats.as_ref().filter(|_| d.online()) {
                         ui.separator();
-                        ui.label(format!("Цикл {} мкс, макс {} мкс", s.last_us, s.max_us));
+                        ui.label(crate::i18n::fmt(
+                            "Цикл {0} мкс, макс {1} мкс",
+                            &[&s.last_us, &s.max_us],
+                        ));
                         if let Some(bg) = &s.background {
-                            ui.label(format!(
-                                "Ядро 0: {} мкс, макс {} мкс",
-                                bg.last_us, bg.max_us
+                            ui.label(crate::i18n::fmt(
+                                "Ядро 0: {0} мкс, макс {1} мкс",
+                                &[&bg.last_us, &bg.max_us],
                             ))
-                            .on_hover_text("Проход фоновой задачи на ядре 0: сеть и фоновые платы");
+                            .on_hover_text(crate::i18n::tr(
+                                "Проход фоновой задачи на ядре 0: сеть и фоновые платы",
+                            ));
                         }
                     }
                     if let Some(ip) = d.device_address(&p.logic.blocks) {
                         ui.separator();
-                        ui.hyperlink_to(&ip, format!("http://{ip}"))
-                            .on_hover_text("Открыть страницу устройства в браузере");
+                        ui.hyperlink_to(&ip, format!("http://{ip}")).on_hover_text(
+                            crate::i18n::tr("Открыть страницу устройства в браузере"),
+                        );
                     }
                 }
             }
             None => {
-                ui.label("Проект не открыт");
+                ui.label(crate::i18n::tr("Проект не открыт"));
             }
         }
     }
@@ -2312,17 +2561,17 @@ impl EditorApp {
         };
         let mut decision = None;
         egui::Modal::new(egui::Id::unique("unsaved")).show(ctx, |ui| {
-            ui.heading("Несохранённые изменения");
-            ui.label("Сохранить изменения в проекте?");
+            ui.heading(crate::i18n::tr("Несохранённые изменения"));
+            ui.label(crate::i18n::tr("Сохранить изменения в проекте?"));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button("Сохранить").clicked() {
+                if ui.button(crate::i18n::tr("Сохранить")).clicked() {
                     decision = Some(Some(true));
                 }
-                if ui.button("Не сохранять").clicked() {
+                if ui.button(crate::i18n::tr("Не сохранять")).clicked() {
                     decision = Some(Some(false));
                 }
-                if ui.button("Отмена").clicked() {
+                if ui.button(crate::i18n::tr("Отмена")).clicked() {
                     decision = Some(None);
                 }
             });
@@ -2353,6 +2602,9 @@ impl EditorApp {
         // An open block editor with unsaved changes asks first; the project is
         // checked on the next close.
         if let Some(ed) = self.block_editor.as_mut().filter(|e| e.dirty()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ed.ask_to_close();
+        } else if let Some(ed) = self.board_editor.as_mut().filter(|e| e.dirty()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ed.ask_to_close();
         } else if self.doc.as_ref().is_some_and(|d| d.dirty) {
@@ -2387,6 +2639,7 @@ impl EditorApp {
 impl eframe::App for EditorApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        crate::textmenu::begin(&ctx);
         self.poll_job(&ctx);
         self.precompile(&ctx);
         self.poll_debug();
@@ -2405,11 +2658,16 @@ impl eframe::App for EditorApp {
         update::changes_window(&ctx, &mut self.changes_window);
         crate::blockio::handle_drops(self, &ctx);
         crate::blockio::window(self, &ctx);
+        crate::boardio::handle_drops(self, &ctx);
+        crate::boardio::window(self, &ctx);
         if self.report.open {
             let repo = theme::update_repo();
             let board = self.doc.as_ref().map(|d| {
                 let b = &d.project.config.board;
-                (crate::boardcfg::board_name(b), b.fqbn.clone())
+                (
+                    crate::boardcfg::board_name(b, self.lib.boards()),
+                    b.fqbn.clone(),
+                )
             });
             let facts = crate::report::Context {
                 repo: &repo,
@@ -2501,6 +2759,7 @@ impl eframe::App for EditorApp {
         dialogs::show(self, &ctx);
         crate::themeedit::show(self, &ctx);
         crate::blockedit::show(self, &ctx);
+        crate::boardedit::show(self, &ctx);
         crate::codeview::show(self, &ctx);
         crate::help::show(self, &ctx);
         crate::blockedit::delete_dialog(self, &ctx);

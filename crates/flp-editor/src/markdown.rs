@@ -190,7 +190,10 @@ fn show_inner(
                         );
                     }
                     None => {
-                        ui.weak(format!("[изображение не найдено: {target}]"));
+                        ui.weak(crate::i18n::fmt(
+                            "[изображение не найдено: {0}]",
+                            &[&target],
+                        ));
                     }
                 }
             }

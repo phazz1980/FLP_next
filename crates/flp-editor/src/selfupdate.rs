@@ -46,11 +46,14 @@ pub fn download_and_stage(
     total: &AtomicU64,
 ) -> Result<PathBuf, String> {
     if !url.to_lowercase().ends_with(".zip") {
-        return Err("в релизе нет архива .zip — скачайте его вручную со страницы релиза".into());
+        return Err(crate::i18n::tr(
+            "в релизе нет архива .zip — скачайте его вручную со страницы релиза",
+        )
+        .into());
     }
     let dir = work_dir();
     let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).map_err(|e| format!("временная папка: {e}"))?;
+    fs::create_dir_all(&dir).map_err(|e| crate::i18n::fmt("временная папка: {0}", &[&e]))?;
     let zip_path = dir.join("FLP_next.zip");
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(15))
@@ -63,7 +66,7 @@ pub fn download_and_stage(
             concat!("FLP_next/", env!("CARGO_PKG_VERSION")),
         )
         .call()
-        .map_err(|e| format!("скачивание: {e}"))?;
+        .map_err(|e| crate::i18n::fmt("скачивание: {0}", &[&e]))?;
     if let Some(n) = response
         .header("Content-Length")
         .and_then(|v| v.parse::<u64>().ok())
@@ -71,17 +74,18 @@ pub fn download_and_stage(
         total.store(n, Ordering::Relaxed);
     }
     let mut reader = response.into_reader();
-    let mut file = File::create(&zip_path).map_err(|e| format!("запись архива: {e}"))?;
+    let mut file =
+        File::create(&zip_path).map_err(|e| crate::i18n::fmt("запись архива: {0}", &[&e]))?;
     let mut buf = vec![0u8; 64 * 1024];
     loop {
         let n = reader
             .read(&mut buf)
-            .map_err(|e| format!("скачивание прервано: {e}"))?;
+            .map_err(|e| crate::i18n::fmt("скачивание прервано: {0}", &[&e]))?;
         if n == 0 {
             break;
         }
         file.write_all(&buf[..n])
-            .map_err(|e| format!("запись архива: {e}"))?;
+            .map_err(|e| crate::i18n::fmt("запись архива: {0}", &[&e]))?;
         done.fetch_add(n as u64, Ordering::Relaxed);
     }
     drop(file);
@@ -89,7 +93,7 @@ pub fn download_and_stage(
     unpack(&zip_path, &staged)?;
     let _ = fs::remove_file(&zip_path);
     if !staged.join(exe_name()).is_file() {
-        return Err(format!("в архиве нет {}", exe_name()));
+        return Err(crate::i18n::fmt("в архиве нет {0}", &[&exe_name()]));
     }
     Ok(staged)
 }
@@ -109,12 +113,12 @@ fn entry_path(name: &str) -> Option<PathBuf> {
 
 fn unpack(zip_path: &Path, dest: &Path) -> Result<(), String> {
     let mut archive = zip::ZipArchive::new(File::open(zip_path).map_err(|e| e.to_string())?)
-        .map_err(|e| format!("архив повреждён: {e}"))?;
+        .map_err(|e| crate::i18n::fmt("архив повреждён: {0}", &[&e]))?;
     let mut names = Vec::new();
     for i in 0..archive.len() {
         let entry = archive
             .by_index(i)
-            .map_err(|e| format!("архив повреждён: {e}"))?;
+            .map_err(|e| crate::i18n::fmt("архив повреждён: {0}", &[&e]))?;
         names.push(entry.name().to_owned());
     }
     let paths: Vec<Option<PathBuf>> = names.iter().map(|n| entry_path(n)).collect();
@@ -130,7 +134,10 @@ fn unpack(zip_path: &Path, dest: &Path) -> Result<(), String> {
     fs::create_dir_all(dest).map_err(|e| e.to_string())?;
     for (i, path) in paths.into_iter().enumerate() {
         let Some(mut path) = path else {
-            return Err(format!("недопустимый путь в архиве: {}", names[i]));
+            return Err(crate::i18n::fmt(
+                "недопустимый путь в архиве: {0}",
+                &[&names[i]],
+            ));
         };
         if let Some(prefix) = &strip {
             path = path.strip_prefix(prefix).unwrap_or(&path).to_path_buf();
@@ -155,10 +162,12 @@ fn unpack(zip_path: &Path, dest: &Path) -> Result<(), String> {
 
 /// Starts the helper that installs `staged` after this process exits.
 pub fn launch_helper(staged: &Path, project: Option<&Path>) -> Result<(), String> {
-    let install = install_dir().ok_or("редактор запущен не из установленной папки")?;
+    let install = install_dir().ok_or(crate::i18n::tr(
+        "редактор запущен не из установленной папки",
+    ))?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let helper = work_dir().join(format!("flp-updater-{}.exe", std::process::id()));
-    fs::copy(&exe, &helper).map_err(|e| format!("помощник обновления: {e}"))?;
+    fs::copy(&exe, &helper).map_err(|e| crate::i18n::fmt("помощник обновления: {0}", &[&e]))?;
     Command::new(&helper)
         .arg(APPLY_FLAG)
         .arg(staged)
@@ -167,7 +176,7 @@ pub fn launch_helper(staged: &Path, project: Option<&Path>) -> Result<(), String
         .arg(std::process::id().to_string())
         .args(project)
         .spawn()
-        .map_err(|e| format!("помощник обновления: {e}"))?;
+        .map_err(|e| crate::i18n::fmt("помощник обновления: {0}", &[&e]))?;
     Ok(())
 }
 
@@ -182,7 +191,7 @@ pub fn run_helper(args: &[OsString]) {
     let result = wait_for_exit(pid).and_then(|()| apply(staged, install));
     let text = match &result {
         Ok(()) => "ok".to_owned(),
-        Err(e) => format!("ошибка: {e}"),
+        Err(e) => crate::i18n::fmt("ошибка: {0}", &[&e]),
     };
     let _ = fs::write(work_dir().join("update.log"), text);
     // Start the editor either way: the new version, or the old one after a rollback.
@@ -195,7 +204,7 @@ fn wait_for_exit(pid: u32) -> Result<(), String> {
     let start = Instant::now();
     while is_running(pid) {
         if start.elapsed() > WAIT_EXIT {
-            return Err("редактор не закрылся".into());
+            return Err(crate::i18n::tr("редактор не закрылся").into());
         }
         std::thread::sleep(Duration::from_millis(300));
     }

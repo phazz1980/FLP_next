@@ -56,11 +56,11 @@ impl Job {
         wake: impl Fn() + Send + 'static,
     ) -> Self {
         let title = match kind {
-            JobKind::Build => "Сборка",
-            JobKind::Rebuild => "Пересборка",
-            JobKind::Precompile => "Фоновая сборка",
-            JobKind::Upload { .. } if debug => "Заливка отладочной прошивки",
-            JobKind::Upload { .. } => "Заливка",
+            JobKind::Build => crate::i18n::tr("Сборка"),
+            JobKind::Rebuild => crate::i18n::tr("Пересборка"),
+            JobKind::Precompile => crate::i18n::tr("Фоновая сборка"),
+            JobKind::Upload { .. } if debug => crate::i18n::tr("Заливка отладочной прошивки"),
+            JobKind::Upload { .. } => crate::i18n::tr("Заливка"),
         };
         let background = matches!(kind, JobKind::Precompile);
         let uses_port = matches!(kind, JobKind::Upload { .. });
@@ -121,7 +121,10 @@ fn run(
         .map_err(|e| e.to_string())?;
     let (path, _) =
         flp_codegen::write_sketch(&project.work_dir(), &code).map_err(|e| e.to_string())?;
-    out(LogLevel::Info, &format!("Скетч: {}", path.display()));
+    out(
+        LogLevel::Info,
+        &crate::i18n::fmt("Скетч: {0}", &[&path.display()]),
+    );
 
     let cli = ArduinoCli::locate()
         .map_err(|e| e.to_string())?
@@ -133,12 +136,15 @@ fn run(
     if !installed.is_empty() {
         out(
             LogLevel::Info,
-            &format!("Установлены библиотеки: {}", installed.join(", ")),
+            &crate::i18n::fmt("Установлены библиотеки: {0}", &[&installed.join(", ")]),
         );
     }
     out(
         LogLevel::Info,
-        &format!("Сборка для {}...", crate::boardcfg::board_name(board)),
+        &crate::i18n::fmt(
+            "Сборка для {0}...",
+            &[&crate::boardcfg::board_name(board, lib.boards())],
+        ),
     );
     let opts = CompileOptions {
         mode: if debug {
@@ -189,20 +195,26 @@ fn run(
         .map_err(|e| match (&e, errors) {
             (flp_build::BuildError::Failed { .. }, 1..) => {
                 let first = first_error.as_deref().filter(|f| !f.is_empty());
-                format!(
-                    "Ошибка компиляции ({errors}): подробности в журнале{}",
-                    first.map(|f| format!(". Первая: {f}")).unwrap_or_default()
+                crate::i18n::fmt(
+                    "Ошибка компиляции ({0}): подробности в журнале{1}",
+                    &[
+                        &errors,
+                        &first.map(|f| format!(". Первая: {f}")).unwrap_or_default(),
+                    ],
                 )
             }
             _ => e.to_string(),
         })?;
     if compiled == Compiled::UpToDate {
-        out(LogLevel::Info, "Прошивка уже собрана, схема не менялась");
+        out(
+            LogLevel::Info,
+            crate::i18n::tr("Прошивка уже собрана, схема не менялась"),
+        );
     }
 
     match kind {
         JobKind::Build | JobKind::Rebuild | JobKind::Precompile => Ok(Done {
-            message: "Сборка готова".into(),
+            message: crate::i18n::tr("Сборка готова").into(),
             port: None,
             debug,
         }),
@@ -211,7 +223,10 @@ fn run(
                 .choose_port(port.as_deref(), board)
                 .map_err(|e| e.to_string())?;
             warn_if_other_board(&cli, &port, &board.fqbn, out);
-            out(LogLevel::Info, &format!("Заливка на {port}..."));
+            out(
+                LogLevel::Info,
+                &crate::i18n::fmt("Заливка на {0}...", &[&port]),
+            );
             let mut explained = None;
             let result = cli.upload(&project.work_dir(), board, &port, &mut |l| {
                 match flp_build::explain_upload(l, &board.fqbn) {
@@ -225,7 +240,7 @@ fn run(
             });
             result.map_err(|e| explained.unwrap_or_else(|| e.to_string()))?;
             Ok(Done {
-                message: format!("Прошивка залита на {port}"),
+                message: crate::i18n::fmt("Прошивка залита на {0}", &[&port]),
                 port: Some(port),
                 debug,
             })
@@ -272,10 +287,13 @@ fn warn_if_other_board(
     if !found.fqbns.iter().any(|f| short(f) == short(fqbn)) {
         out(
             LogLevel::Warning,
-            &format!(
-                "Возможно, выбрана неверная плата: на {port} опознано «{}», а в проекте — {}",
-                found.description,
-                fqbn.rsplit(':').next().unwrap_or(fqbn)
+            &crate::i18n::fmt(
+                "Возможно, выбрана неверная плата: на {0} опознано «{1}», а в проекте — {2}",
+                &[
+                    &port,
+                    &found.description,
+                    &fqbn.rsplit(':').next().unwrap_or(fqbn),
+                ],
             ),
         );
     }

@@ -6,6 +6,8 @@ use flp_core::project::PROJECT_EXT;
 const PROG_ID: &str = "FLP_next.Project";
 const BLOCK_PROG_ID: &str = "FLP_next.BlockPack";
 const BLOCK_EXT: &str = flp_core::pack::EXTENSION;
+const BOARD_PROG_ID: &str = "FLP_next.Board";
+const BOARD_EXT: &str = flp_core::boardfile::EXTENSION;
 
 /// Registers this executable as the handler of project files.
 #[cfg(windows)]
@@ -31,12 +33,19 @@ pub fn register() -> Result<(), String> {
             &format!("\"{exe}\" \"%1\""),
         )
     };
-    class(PROJECT_EXT, PROG_ID, "Проект FLP_next")
-        .and_then(|()| class(BLOCK_EXT, BLOCK_PROG_ID, "Набор блоков FLP_next"))
+    class(PROJECT_EXT, PROG_ID, crate::i18n::tr("Проект FLP_next"))
+        .and_then(|()| {
+            class(
+                BLOCK_EXT,
+                BLOCK_PROG_ID,
+                crate::i18n::tr("Набор блоков FLP_next"),
+            )
+        })
+        .and_then(|()| class(BOARD_EXT, BOARD_PROG_ID, crate::i18n::tr("Плата FLP_next")))
         .map_err(|e| e.to_string())
 }
 
 #[cfg(not(windows))]
 pub fn register() -> Result<(), String> {
-    Err("связь с файлами настраивается только в Windows".into())
+    Err(crate::i18n::tr("связь с файлами настраивается только в Windows").into())
 }

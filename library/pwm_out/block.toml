@@ -20,7 +20,7 @@ description = "Разрешение записи: пока false, выход с�
 [[param]]
 name = "pin"
 type = "pin"
-mode = "out"
+mode = "pwm"
 description = "Номер вывода GPIO"
 
 [[param]]

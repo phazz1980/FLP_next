@@ -16,6 +16,7 @@ use flp_core::{
 
 use crate::app::{EditorApp, LogLevel};
 use crate::dialogs::{type_name, value_text};
+use crate::pictures::Pictures;
 use crate::theme::Palette;
 
 const PARAM_KINDS: [ParamKind; 6] = [
@@ -36,21 +37,21 @@ const SECTIONS_HINT: &str = "Разделы: // @global — переменные
 
 fn show_label(show: ParamShow) -> &'static str {
     match show {
-        ParamShow::Named => "имя=значение",
-        ParamShow::Value => "значение",
-        ParamShow::Secret => "пароль (p***1)",
-        ParamShow::Hidden => "не показывать",
+        ParamShow::Named => crate::i18n::tr("имя=значение"),
+        ParamShow::Value => crate::i18n::tr("значение"),
+        ParamShow::Secret => crate::i18n::tr("пароль (p***1)"),
+        ParamShow::Hidden => crate::i18n::tr("не показывать"),
     }
 }
 
 fn kind_label(kind: ParamKind) -> &'static str {
     match kind {
-        ParamKind::Bool => "bool — да/нет",
-        ParamKind::Int => "int — целое",
-        ParamKind::Float => "float — дробное",
-        ParamKind::Text => "string — строка",
-        ParamKind::Duration => "duration — время",
-        ParamKind::Pin => "pin — вывод",
+        ParamKind::Bool => crate::i18n::tr("bool — да/нет"),
+        ParamKind::Int => crate::i18n::tr("int — целое"),
+        ParamKind::Float => crate::i18n::tr("float — дробное"),
+        ParamKind::Text => crate::i18n::tr("string — строка"),
+        ParamKind::Duration => crate::i18n::tr("duration — время"),
+        ParamKind::Pin => crate::i18n::tr("pin — вывод"),
     }
 }
 
@@ -119,6 +120,8 @@ struct ParamRow {
     /// For pins: direction and sharing, edited next to the type.
     mode: PinMode,
     shared: bool,
+    /// Bus of a pin, kept as it was (set in `block.toml`).
+    bus: String,
 }
 
 impl ParamRow {
@@ -137,6 +140,7 @@ impl ParamRow {
             choices: Vec::new(),
             mode: PinMode::Io,
             shared: false,
+            bus: String::new(),
         }
     }
 
@@ -156,6 +160,7 @@ impl ParamRow {
             choices: p.choices.clone(),
             mode: p.mode,
             shared: p.shared,
+            bus: p.bus.clone(),
         }
     }
 
@@ -178,6 +183,12 @@ impl ParamRow {
                 PinMode::Io
             },
             shared: self.kind == ParamKind::Pin && self.shared,
+            bus: if self.kind == ParamKind::Pin {
+                self.bus.clone()
+            } else {
+                String::new()
+            },
+            fixed: false,
             runtime: false,
             choices: self.choices.clone(),
         })
@@ -197,6 +208,8 @@ struct Form {
     description: String,
     memory: bool,
     single: bool,
+    /// The block type may stand on an expander pin; kept from the copied block.
+    expander: bool,
     /// `[block.uart]`: kept as it is, the form has no field for it yet.
     uart: Option<flp_core::UartUse>,
     /// Comma-separated.
@@ -216,10 +229,8 @@ struct Form {
 struct Attach {
     libs: Vec<AttachedLib>,
     example: Example,
-    /// Pictures of the docs not in the block folder yet: name in `images/` → file to copy.
-    images: Vec<(String, PathBuf)>,
-    /// The block folder, where the saved pictures are.
-    home: Option<PathBuf>,
+    /// Pictures of the docs.
+    pictures: Pictures,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -263,8 +274,7 @@ impl Attach {
         Self {
             libs,
             example,
-            images: Vec::new(),
-            home: Some(dir.to_owned()),
+            pictures: Pictures::in_dir(dir),
         }
     }
 
@@ -277,63 +287,8 @@ impl Attach {
         if a.example == Example::Saved {
             a.example = Example::New(dir.join(flp_core::blockfile::EXAMPLE_FILE));
         }
-        let pictures = fs::read_dir(dir.join(flp_core::blockfile::IMAGES_DIR));
-        for e in pictures.into_iter().flatten().flatten() {
-            if e.path().is_file() {
-                let name = e.file_name().to_string_lossy().into_owned();
-                a.images.push((name, e.path()));
-            }
-        }
-        a.home = None;
+        a.pictures = Pictures::copied_from(dir);
         a
-    }
-
-    /// File of a docs picture `images/<name>`: waiting to be saved or already in the folder.
-    fn image_path(&self, target: &str) -> Option<PathBuf> {
-        let name = target.strip_prefix("images/")?;
-        if name.contains('/') || !crate::markdown::is_local_image(target) {
-            return None;
-        }
-        if let Some((_, src)) = self.images.iter().find(|(n, _)| n == name) {
-            return Some(src.clone());
-        }
-        let home = self.home.as_ref()?;
-        Some(home.join(flp_core::blockfile::IMAGES_DIR).join(name))
-    }
-
-    /// Takes a picture file into the docs; returns its target `images/<name>`.
-    fn add_image(&mut self, src: PathBuf) -> String {
-        // A plain ASCII name: the target stays easy to type and safe in the docs and the archive.
-        let mut stem = String::new();
-        for c in src
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .chars()
-        {
-            if c.is_ascii_alphanumeric() || c == '-' {
-                stem.push(c);
-            } else if !stem.ends_with('_') {
-                stem.push('_');
-            }
-        }
-        let stem = stem.trim_matches('_');
-        let stem = if stem.is_empty() { "image" } else { stem };
-        let ext = src
-            .extension()
-            .map(|e| e.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_else(|| "png".into());
-        let mut name = format!("{stem}.{ext}");
-        let mut n = 1;
-        while self
-            .image_path(&format!("images/{name}"))
-            .is_some_and(|p| p.is_file() || self.images.iter().any(|(i, _)| *i == name))
-        {
-            n += 1;
-            name = format!("{stem}_{n}.{ext}");
-        }
-        self.images.push((name.clone(), src));
-        format!("images/{name}")
     }
 
     /// Makes the block folder `dir` hold exactly these attachments and the pictures `docs` uses.
@@ -367,33 +322,7 @@ impl Attach {
                 self.example = Example::Saved;
             }
         }
-        self.apply_images(dir, docs)?;
-        self.home = Some(dir.to_owned());
-        Ok(())
-    }
-
-    /// Copies the pictures the docs use into `images/` and drops the others.
-    fn apply_images(&mut self, dir: &Path, docs: &str) -> Result<(), String> {
-        let root = dir.join(flp_core::blockfile::IMAGES_DIR);
-        let used: Vec<String> = crate::markdown::image_targets(docs)
-            .iter()
-            .filter_map(|t| t.strip_prefix("images/").map(str::to_owned))
-            .collect();
-        for (name, src) in std::mem::take(&mut self.images) {
-            if !used.contains(&name) || src == root.join(&name) {
-                continue;
-            }
-            let err = |e: std::io::Error| format!("{}: {e}", src.display());
-            fs::create_dir_all(&root).map_err(err)?;
-            fs::copy(&src, root.join(&name)).map_err(err)?;
-        }
-        for e in fs::read_dir(&root).into_iter().flatten().flatten() {
-            if !used.contains(&e.file_name().to_string_lossy().into_owned()) {
-                let _ = fs::remove_file(e.path());
-            }
-        }
-        let _ = fs::remove_dir(&root);
-        Ok(())
+        self.pictures.apply(dir, docs)
     }
 }
 
@@ -415,12 +344,13 @@ impl Form {
     fn new_block(kind: String, group: String) -> Self {
         Self {
             kind,
-            name: "Новый блок".into(),
+            name: crate::i18n::tr("Новый блок").into(),
             symbol: String::new(),
             group,
             description: String::new(),
             memory: false,
             single: false,
+            expander: false,
             uart: None,
             includes: String::new(),
             libraries: String::new(),
@@ -452,6 +382,7 @@ impl Form {
             description: info.description.clone(),
             memory: info.memory,
             single: info.single,
+            expander: info.expander,
             uart: info.uart.clone(),
             includes: info.includes.join(", "),
             libraries: info.libraries.join(", "),
@@ -485,10 +416,13 @@ impl Form {
     fn to_def(&self) -> Result<BlockDef, String> {
         let kind = self.kind.trim().to_owned();
         if self.name.trim().is_empty() {
-            return Err("у блока должно быть название".into());
+            return Err(crate::i18n::tr("у блока должно быть название").into());
         }
         if kind == VAR_GET || kind == VAR_SET {
-            return Err(format!("тип «{kind}» занят встроенным блоком переменной"));
+            return Err(crate::i18n::fmt(
+                "тип «{0}» занят встроенным блоком переменной",
+                &[&kind],
+            ));
         }
         let def = BlockDef {
             info: flp_core::library::BlockInfo {
@@ -506,6 +440,8 @@ impl Form {
                 hidden: false,
                 pullable: false,
                 uart: self.uart.clone(),
+                board: None,
+                expander: self.expander,
             },
             inputs: self
                 .inputs
@@ -611,7 +547,7 @@ fn parse_signal(ty: SignalType, text: &str) -> Result<Option<ParamValue>, String
     };
     value
         .map(Some)
-        .ok_or_else(|| format!("«{t}» не подходит к типу {}", type_name(ty)))
+        .ok_or_else(|| crate::i18n::fmt("«{0}» не подходит к типу {1}", &[&t, &type_name(ty)]))
 }
 
 /// Default of a parameter; empty means "no default" (the parameter is required).
@@ -629,7 +565,7 @@ fn parse_param(kind: ParamKind, text: &str) -> Result<Option<ParamValue>, String
     };
     value
         .map(Some)
-        .ok_or_else(|| format!("«{t}» не подходит к виду «{}»", kind_label(kind)))
+        .ok_or_else(|| crate::i18n::fmt("«{0}» не подходит к виду «{1}»", &[&t, &kind_label(kind)]))
 }
 
 fn parse_number(text: &str) -> Result<Option<f64>, String> {
@@ -639,7 +575,7 @@ fn parse_number(text: &str) -> Result<Option<f64>, String> {
     }
     parse_float(t)
         .map(Some)
-        .ok_or_else(|| format!("граница «{t}» — не число"))
+        .ok_or_else(|| crate::i18n::fmt("граница «{0}» — не число", &[&t]))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -706,7 +642,7 @@ impl BlockEditor {
             form.group.clear();
         }
         form.attach = Attach::copied_from(&block.dir);
-        form.name = format!("{} (копия)", form.name);
+        form.name = crate::i18n::fmt("{0} (копия)", &[&form.name]);
         form.kind = free_kind(app, &ident_from_name(&form.name));
         Self {
             folders: user_folders(app),
@@ -790,9 +726,11 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
         return;
     };
     let title = match &ed.original {
-        Some(kind) if ed.read_only => format!("Встроенный блок — {kind} (только просмотр)"),
-        Some(kind) => format!("Редактор блока — {kind}"),
-        None => "Редактор блока — новый блок".to_owned(),
+        Some(kind) if ed.read_only => {
+            crate::i18n::fmt("Встроенный блок — {0} (только просмотр)", &[&kind])
+        }
+        Some(kind) => crate::i18n::fmt("Редактор блока — {0}", &[&kind]),
+        None => crate::i18n::tr("Редактор блока — новый блок").to_owned(),
     };
     let mut open = true;
     let mut close = false;
@@ -825,23 +763,27 @@ fn confirm_close(app: &mut EditorApp, ctx: &egui::Context, ed: &mut BlockEditor)
     let error = app.theme.palette.error;
     let mut answer = None;
     egui::Modal::new(Id::unique("block_editor_close")).show(ctx, |ui| {
-        ui.label(RichText::new("Сохранить изменения?").strong());
-        ui.label(format!("В блоке «{name}» есть несохранённые изменения."));
+        ui.label(RichText::new(crate::i18n::tr("Сохранить изменения?")).strong());
+        ui.label(crate::i18n::fmt(
+            "В блоке «{0}» есть несохранённые изменения.",
+            &[&name],
+        ));
         if let Err(e) = &def {
-            ui.colored_label(error, format!("Сохранить нельзя: {e}"));
+            ui.colored_label(error, crate::i18n::fmt("Сохранить нельзя: {0}", &[&e]));
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(def.is_ok(), egui::Button::new("Сохранить"))
+                .add_enabled(def.is_ok(), egui::Button::new(crate::i18n::tr("Сохранить")))
                 .clicked()
             {
                 answer = Some(1);
             }
-            if ui.button("Выйти без сохранения").clicked() {
+            if ui.button(crate::i18n::tr("Выйти без сохранения")).clicked() {
                 answer = Some(2);
             }
-            if ui.button("Отмена").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape))
+            if ui.button(crate::i18n::tr("Отмена")).clicked()
+                || ui.input(|i| i.key_pressed(egui::Key::Escape))
             {
                 answer = Some(0);
             }
@@ -889,11 +831,11 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
     egui::Panel::top("block_editor_header").show(ui, |ui| {
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
-                ui.label(RichText::new("Вид на плате").strong());
+                ui.label(RichText::new(crate::i18n::tr("Вид на плате")).strong());
                 match &def {
                     Ok(def) => crate::canvas::block_preview(ui, def, &pal),
                     Err(_) => {
-                        ui.weak("(исправьте ошибки описания)");
+                        ui.weak(crate::i18n::tr("(исправьте ошибки описания)"));
                     }
                 }
             });
@@ -904,29 +846,31 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
         ui.separator();
         ui.horizontal(|ui| {
             let tabs = [
-                (Tab::Ports, "Входы и выходы"),
-                (Tab::Params, "Параметры"),
-                (Tab::Code, "Код ESP32"),
-                (Tab::Docs, "Описание"),
-                (Tab::Files, "Библиотека и пример"),
-                (Tab::Sketch, "Пробная генерация"),
+                (Tab::Ports, crate::i18n::tr("Входы и выходы")),
+                (Tab::Params, crate::i18n::tr("Параметры")),
+                (Tab::Code, crate::i18n::tr("Код ESP32")),
+                (Tab::Docs, crate::i18n::tr("Описание")),
+                (Tab::Files, crate::i18n::tr("Библиотека и пример")),
+                (Tab::Sketch, crate::i18n::tr("Пробная генерация")),
             ];
             for (tab, text) in tabs {
                 ui.selectable_value(&mut ed.tab, tab, text);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
-                    .button("? Справка")
-                    .on_hover_text("Справка по редактору блока: открывается на текущей вкладке")
+                    .button(crate::i18n::tr("? Справка"))
+                    .on_hover_text(crate::i18n::tr(
+                        "Справка по редактору блока: открывается на текущей вкладке",
+                    ))
                     .clicked()
                 {
                     let anchor = match ed.tab {
-                        Tab::Ports => "входы-и-выходы",
-                        Tab::Params => "параметры",
-                        Tab::Code => "код-esp32",
-                        Tab::Docs => "описание",
-                        Tab::Files => "библиотека-и-пример",
-                        Tab::Sketch => "пробная-генерация",
+                        Tab::Ports => crate::i18n::tr("входы-и-выходы"),
+                        Tab::Params => crate::i18n::tr("параметры"),
+                        Tab::Code => crate::i18n::tr("код-esp32"),
+                        Tab::Docs => crate::i18n::tr("описание"),
+                        Tab::Files => crate::i18n::tr("библиотека-и-пример"),
+                        Tab::Sketch => crate::i18n::tr("пробная-генерация"),
                     };
                     help = Some(format!("{}#{anchor}", crate::help::BLOCK_EDITOR));
                 }
@@ -970,35 +914,39 @@ fn header(ui: &mut Ui, ed: &mut BlockEditor) {
         .num_columns(4)
         .spacing([10.0, 4.0])
         .show(ui, |ui| {
-            ui.label("Название");
+            ui.label(crate::i18n::tr("Название"));
             ui.add_sized([220.0, 20.0], TextEdit::singleline(&mut f.name))
-                .on_hover_text(format!(
-                    "Тип блока в схеме: {}. У нового блока он берётся из названия, \
+                .on_hover_text(crate::i18n::fmt(
+                    "Тип блока в схеме: {0}. У нового блока он берётся из названия, \
                      после сохранения не меняется.",
-                    f.kind
+                    &[&f.kind],
                 ));
-            ui.label("Обозначение");
+            ui.label(crate::i18n::tr("Обозначение"));
             ui.add_sized(
                 [160.0, 20.0],
-                TextEdit::singleline(&mut f.symbol).hint_text("как название"),
+                TextEdit::singleline(&mut f.symbol).hint_text(crate::i18n::tr("как название")),
             )
-            .on_hover_text("Короткая надпись на блоке: TON, a + b, &");
+            .on_hover_text(crate::i18n::tr("Короткая надпись на блоке: TON, a + b, &"));
             ui.end_row();
 
-            ui.label("Где лежит");
+            ui.label(crate::i18n::tr("Где лежит"));
             let place = if read_only {
-                format!("Встроенные / {}", f.group)
+                crate::i18n::fmt("Встроенные / {0}", &[&f.group])
             } else if f.group.is_empty() {
-                "Блоки пользователей".to_owned()
+                crate::i18n::tr("Блоки пользователей").to_owned()
             } else {
-                format!("Блоки пользователей / {}", f.group.replace('/', " / "))
+                crate::i18n::fmt("Блоки пользователей / {0}", &[&f.group.replace('/', " / ")])
             };
             if ed.original.is_none() && !read_only && !ed.folders.is_empty() {
                 // A new block: choose the pack (section or folder) it goes into.
                 egui::ComboBox::from_id_salt("block_place")
                     .selected_text(place)
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut f.group, String::new(), "Блоки пользователей");
+                        ui.selectable_value(
+                            &mut f.group,
+                            String::new(),
+                            crate::i18n::tr("Блоки пользователей"),
+                        );
                         for folder in &ed.folders {
                             ui.selectable_value(
                                 &mut f.group,
@@ -1008,38 +956,42 @@ fn header(ui: &mut Ui, ed: &mut BlockEditor) {
                         }
                     })
                     .response
-                    .on_hover_text("Набор, раздел или папка, куда сохранить новый блок");
+                    .on_hover_text(crate::i18n::tr(
+                        "Набор, раздел или папка, куда сохранить новый блок",
+                    ));
             } else {
-                ui.label(place).on_hover_text(
+                ui.label(place).on_hover_text(crate::i18n::tr(
                     "Раздел и папка в библиотеке. Перенести блок — правая кнопка на нём \
                      во вкладке «Пользовательские».",
-                );
+                ));
             }
             ui.end_row();
 
-            ui.label("Описание");
+            ui.label(crate::i18n::tr("Описание"));
             ui.add_sized([160.0, 20.0], TextEdit::singleline(&mut f.description));
             ui.label("");
             ui.horizontal(|ui| {
-                ui.checkbox(&mut f.memory, "Хранит состояние")
-                    .on_hover_text(
+                ui.checkbox(&mut f.memory, crate::i18n::tr("Хранит состояние"))
+                    .on_hover_text(crate::i18n::tr(
                         "Блок помнит значения между циклами (таймеры, триггеры, счётчики); \
                          через такой блок допустимы обратные связи",
-                    );
-                ui.checkbox(&mut f.single, "Один на проект")
-                    .on_hover_text("В проекте может быть только один такой блок (Wi-Fi, NTP)");
+                    ));
+                ui.checkbox(&mut f.single, crate::i18n::tr("Один на проект"))
+                    .on_hover_text(crate::i18n::tr(
+                        "В проекте может быть только один такой блок (Wi-Fi, NTP)",
+                    ));
             });
             ui.end_row();
 
-            ui.label("Библиотеки");
+            ui.label(crate::i18n::tr("Библиотеки"));
             ui.add_sized(
                 [220.0, 20.0],
                 TextEdit::singleline(&mut f.libraries).hint_text("DHT sensor library"),
             )
-            .on_hover_text(
+            .on_hover_text(crate::i18n::tr(
                 "Библиотеки arduino-cli через запятую, можно с версией: OneWire@2.3.8. \
                  Сборка ставит недостающие сама.",
-            );
+            ));
             ui.end_row();
         });
 }
@@ -1065,7 +1017,11 @@ fn row_ops(ui: &mut Ui, i: usize, len: usize, op: &mut Option<RowOp>) {
         {
             *op = Some(RowOp::Down(i));
         }
-        if ui.small_button("✕").on_hover_text("Удалить").clicked() {
+        if ui
+            .small_button("✕")
+            .on_hover_text(crate::i18n::tr("Удалить"))
+            .clicked()
+        {
             *op = Some(RowOp::Remove(i));
         }
     });
@@ -1107,7 +1063,7 @@ fn bool_default_combo(ui: &mut Ui, id: (&str, usize), default: &mut String) {
     }
     .to_owned();
     let shown = if default.is_empty() {
-        "обязателен"
+        crate::i18n::tr("обязателен")
     } else {
         default.as_str()
     };
@@ -1115,13 +1071,18 @@ fn bool_default_combo(ui: &mut Ui, id: (&str, usize), default: &mut String) {
         .selected_text(shown)
         .width(90.0)
         .show_ui(ui, |ui| {
-            for (value, text) in [("", "обязателен"), ("true", "true"), ("false", "false")]
-            {
+            for (value, text) in [
+                ("", crate::i18n::tr("обязателен")),
+                ("true", "true"),
+                ("false", "false"),
+            ] {
                 ui.selectable_value(default, value.to_owned(), text);
             }
         })
         .response
-        .on_hover_text("Значение неподключённого входа; «обязателен» — вход надо подключить");
+        .on_hover_text(crate::i18n::tr(
+            "Значение неподключённого входа; «обязателен» — вход надо подключить",
+        ));
 }
 
 /// A name not used by any port or parameter of the form.
@@ -1139,9 +1100,9 @@ fn free_name(f: &Form, base: &str) -> String {
 fn ports_table(ui: &mut Ui, id: &str, rows: &mut Vec<PortRow>, inputs: bool) {
     if rows.is_empty() {
         ui.weak(if inputs {
-            "Входов нет"
+            crate::i18n::tr("Входов нет")
         } else {
-            "Выходов нет"
+            crate::i18n::tr("Выходов нет")
         });
         return;
     }
@@ -1152,18 +1113,18 @@ fn ports_table(ui: &mut Ui, id: &str, rows: &mut Vec<PortRow>, inputs: bool) {
         .striped(true)
         .spacing([8.0, 4.0])
         .show(ui, |ui| {
-            ui.label(RichText::new("Имя").strong());
-            ui.label(RichText::new("Тип").strong());
+            ui.label(RichText::new(crate::i18n::tr("Имя")).strong());
+            ui.label(RichText::new(crate::i18n::tr("Тип")).strong());
             ui.label(
                 RichText::new(if inputs {
-                    "Если не подключён"
+                    crate::i18n::tr("Если не подключён")
                 } else {
                     ""
                 })
                 .strong(),
             );
-            ui.label(RichText::new("Условие when").strong());
-            ui.label(RichText::new("Описание").strong());
+            ui.label(RichText::new(crate::i18n::tr("Условие when")).strong());
+            ui.label(RichText::new(crate::i18n::tr("Описание")).strong());
             ui.label("");
             ui.end_row();
             for (i, row) in rows.iter_mut().enumerate() {
@@ -1174,20 +1135,23 @@ fn ports_table(ui: &mut Ui, id: &str, rows: &mut Vec<PortRow>, inputs: bool) {
                 } else if inputs {
                     ui.add_sized(
                         [90.0, 20.0],
-                        TextEdit::singleline(&mut row.default).hint_text("обязателен"),
+                        TextEdit::singleline(&mut row.default)
+                            .hint_text(crate::i18n::tr("обязателен")),
                     )
-                    .on_hover_text("Значение неподключённого входа; пусто — вход надо подключить");
+                    .on_hover_text(crate::i18n::tr(
+                        "Значение неподключённого входа; пусто — вход надо подключить",
+                    ));
                 } else {
                     ui.label("");
                 }
                 ui.add_sized(
                     [130.0, 20.0],
-                    TextEdit::singleline(&mut row.when).hint_text("всегда"),
+                    TextEdit::singleline(&mut row.when).hint_text(crate::i18n::tr("всегда")),
                 )
-                .on_hover_text(
+                .on_hover_text(crate::i18n::tr(
                     "Выражение по параметрам, например mode == \"input\": \
                      порт есть, только пока оно выполняется",
-                );
+                ));
                 ui.add_sized([220.0, 20.0], TextEdit::singleline(&mut row.description));
                 row_ops(ui, i, len, &mut op);
                 ui.end_row();
@@ -1198,8 +1162,11 @@ fn ports_table(ui: &mut Ui, id: &str, rows: &mut Vec<PortRow>, inputs: bool) {
 
 fn ports_tab(ui: &mut Ui, f: &mut Form) {
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Входы").strong());
-        if ui.small_button("+ Добавить вход").clicked() {
+        ui.label(RichText::new(crate::i18n::tr("Входы")).strong());
+        if ui
+            .small_button(crate::i18n::tr("+ Добавить вход"))
+            .clicked()
+        {
             let name = free_name(f, "in");
             f.inputs.push(PortRow::new(&name));
         }
@@ -1207,28 +1174,34 @@ fn ports_tab(ui: &mut Ui, f: &mut Form) {
     ports_table(ui, "block_inputs", &mut f.inputs, true);
     ui.add_space(8.0);
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Выходы").strong());
-        if ui.small_button("+ Добавить выход").clicked() {
+        ui.label(RichText::new(crate::i18n::tr("Выходы")).strong());
+        if ui
+            .small_button(crate::i18n::tr("+ Добавить выход"))
+            .clicked()
+        {
             let name = free_name(f, "out");
             f.outputs.push(PortRow::new(&name));
         }
     });
     ports_table(ui, "block_outputs", &mut f.outputs, false);
     ui.add_space(8.0);
-    ui.weak(
+    ui.weak(crate::i18n::tr(
         "Имена — буквы (можно русские), цифры и «_», без пробелов: по ним блок связан в схеме \
          и в коде; Входы, выходы и параметры не могут называться \
          одинаково, имена id и type заняты. Неявно приводится только int → float.",
-    );
+    ));
 }
 
 fn params_tab(ui: &mut Ui, f: &mut Form) {
-    if ui.small_button("+ Добавить параметр").clicked() {
+    if ui
+        .small_button(crate::i18n::tr("+ Добавить параметр"))
+        .clicked()
+    {
         let name = free_name(f, "p");
         f.params.push(ParamRow::new(&name));
     }
     if f.params.is_empty() {
-        ui.weak("Параметров нет");
+        ui.weak(crate::i18n::tr("Параметров нет"));
         return;
     }
     let mut op = None;
@@ -1239,14 +1212,14 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
         .spacing([8.0, 4.0])
         .show(ui, |ui| {
             for h in [
-                "Имя",
-                "Вид",
-                "По умолчанию",
-                "Мин.",
-                "Макс.",
-                "Условие when",
-                "Под блоком",
-                "Описание",
+                crate::i18n::tr("Имя"),
+                crate::i18n::tr("Вид"),
+                crate::i18n::tr("По умолчанию"),
+                crate::i18n::tr("Мин."),
+                crate::i18n::tr("Макс."),
+                crate::i18n::tr("Условие when"),
+                crate::i18n::tr("Под блоком"),
+                crate::i18n::tr("Описание"),
             ] {
                 ui.label(RichText::new(h).strong());
             }
@@ -1268,14 +1241,16 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
                     }
                 });
                 let hint = match row.kind {
-                    ParamKind::Duration => "обязателен (1s, 500ms)",
-                    _ => "обязателен",
+                    ParamKind::Duration => crate::i18n::tr("обязателен (1s, 500ms)"),
+                    _ => crate::i18n::tr("обязателен"),
                 };
                 ui.add_sized(
                     [110.0, 20.0],
                     TextEdit::singleline(&mut row.default).hint_text(hint),
                 )
-                .on_hover_text("Пусто — параметр надо задать в свойствах блока");
+                .on_hover_text(crate::i18n::tr(
+                    "Пусто — параметр надо задать в свойствах блока",
+                ));
                 let numeric = matches!(
                     row.kind,
                     ParamKind::Int | ParamKind::Float | ParamKind::Pin | ParamKind::Duration
@@ -1285,11 +1260,11 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
                         ui.add_sized([50.0, 20.0], TextEdit::singleline(bound))
                     })
                     .inner
-                    .on_hover_text("У duration — в миллисекундах");
+                    .on_hover_text(crate::i18n::tr("У duration — в миллисекундах"));
                 }
                 ui.add_sized(
                     [130.0, 20.0],
-                    TextEdit::singleline(&mut row.when).hint_text("всегда"),
+                    TextEdit::singleline(&mut row.when).hint_text(crate::i18n::tr("всегда")),
                 );
                 egui::ComboBox::from_id_salt(("param_show", i))
                     .selected_text(show_label(row.show))
@@ -1300,7 +1275,9 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
                         }
                     })
                     .response
-                    .on_hover_text("Как значение подписывается под блоком на плате");
+                    .on_hover_text(crate::i18n::tr(
+                        "Как значение подписывается под блоком на плате",
+                    ));
                 ui.add_sized([200.0, 20.0], TextEdit::singleline(&mut row.description));
                 row_ops(ui, i, len, &mut op);
                 ui.end_row();
@@ -1312,23 +1289,34 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
 /// Direction of a pin parameter and whether blocks of the type may share the pin.
 fn pin_mode_edit(ui: &mut Ui, i: usize, row: &mut ParamRow) {
     let label = |m: PinMode| match m {
-        PinMode::Io => "вход-выход",
-        PinMode::In => "вход",
-        PinMode::Out => "выход",
-        PinMode::Adc => "АЦП",
+        PinMode::Io => crate::i18n::tr("вход-выход"),
+        PinMode::In => crate::i18n::tr("вход"),
+        PinMode::Out => crate::i18n::tr("выход"),
+        PinMode::Pwm => crate::i18n::tr("ШИМ"),
+        PinMode::Adc => crate::i18n::tr("АЦП"),
+        PinMode::Dac => crate::i18n::tr("ЦАП"),
     };
     egui::ComboBox::from_id_salt(("pin_mode", i))
         .selected_text(label(row.mode))
         .width(90.0)
         .show_ui(ui, |ui| {
-            for m in [PinMode::Io, PinMode::In, PinMode::Out, PinMode::Adc] {
+            for m in [
+                PinMode::Io,
+                PinMode::In,
+                PinMode::Out,
+                PinMode::Pwm,
+                PinMode::Adc,
+                PinMode::Dac,
+            ] {
                 ui.selectable_value(&mut row.mode, m, label(m));
             }
         })
         .response
-        .on_hover_text("Какие выводы платы подходят: выход не ставится на вывод «только вход», АЦП — только на выводы с АЦП");
-    ui.checkbox(&mut row.shared, "общий")
-        .on_hover_text("Несколько блоков этого типа могут сидеть на одном выводе (шина 1-Wire)");
+        .on_hover_text(crate::i18n::tr("Какие выводы платы подходят: выход не ставится на вывод «только вход», ШИМ, АЦП и ЦАП — только на выводы с этой функцией"));
+    ui.checkbox(&mut row.shared, crate::i18n::tr("общий"))
+        .on_hover_text(crate::i18n::tr(
+            "Несколько блоков этого типа могут сидеть на одном выводе (шина 1-Wire)",
+        ));
 }
 
 /// Text inserted into the template from the substitution menu or buttons.
@@ -1487,14 +1475,22 @@ fn format_selection(text: &str, start: usize, end: usize, fmt: &Fmt) -> (String,
                 Fmt::Italic => "*",
                 _ => "`",
             };
-            let inner = if sel.is_empty() { "текст" } else { &sel };
+            let inner = if sel.is_empty() {
+                crate::i18n::tr("текст")
+            } else {
+                &sel
+            };
             let m = len(mark);
             (format!("{mark}{inner}{mark}"), m, m + len(inner))
         }
         Fmt::Link => {
             let url = "https://";
             if sel.is_empty() {
-                (format!("[текст]({url})"), 1, 1 + len("текст"))
+                (
+                    crate::i18n::fmt("[текст]({0})", &[&url]),
+                    1,
+                    1 + len(crate::i18n::tr("текст")),
+                )
             } else {
                 let at = len(&sel) + 3;
                 (format!("[{sel}]({url})"), at, at + len(url))
@@ -1511,12 +1507,22 @@ fn format_selection(text: &str, start: usize, end: usize, fmt: &Fmt) -> (String,
                 "\n"
             };
             let tail = if after.starts_with('\n') { "" } else { "\n" };
-            let inner = if sel.is_empty() { "код" } else { &sel };
+            let inner = if sel.is_empty() {
+                crate::i18n::tr("код")
+            } else {
+                &sel
+            };
             let (body, from, to) = match fmt {
                 Fmt::CodeBlock => (format!("```\n{inner}\n```"), 4, 4 + len(inner)),
-                Fmt::Image(target) => (format!("![описание]({target})"), 2, 2 + len("описание")),
+                Fmt::Image(target) => (
+                    crate::i18n::fmt("![описание]({0})", &[&target]),
+                    2,
+                    2 + len(crate::i18n::tr("описание")),
+                ),
                 _ => {
-                    let table = "| Колонка 1 | Колонка 2 |\n|---|---|\n| значение | значение |";
+                    let table = crate::i18n::tr(
+                        "| Колонка 1 | Колонка 2 |\n|---|---|\n| значение | значение |",
+                    );
                     (table.to_owned(), len(table), len(table))
                 }
             };
@@ -1624,79 +1630,150 @@ fn format_at_cursor(ctx: &egui::Context, id: Id, text: &mut String, fmt: &Fmt) {
 /// Tab «Описание»: formatting buttons, the Markdown text and a live preview.
 fn docs_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
     let id = Id::unique("block_docs_text");
-    ui.weak("docs.md: пояснение и пример. По нему ИИ-помощник подбирает блоки.");
+    ui.weak(crate::i18n::tr(
+        "docs.md: пояснение и пример. По нему ИИ-помощник подбирает блоки.",
+    ));
+    docs_editor(
+        ui,
+        id,
+        &mut f.docs,
+        &mut f.attach.pictures,
+        editable,
+        crate::i18n::tr("блока"),
+    );
+}
+
+/// Markdown text with the format buttons and a preview; pictures go to `pictures`.
+/// `owner` is where they are copied on save, for the hint ("блока", "платы").
+pub fn docs_editor(
+    ui: &mut Ui,
+    id: Id,
+    docs: &mut String,
+    pictures: &mut Pictures,
+    editable: bool,
+    owner: &str,
+) {
     if editable {
         let mut apply = None;
         ui.horizontal_wrapped(|ui| {
             let buttons = [
-                ("Ж", "Жирный: **текст**", Fmt::Bold),
-                ("К", "Курсив: *текст*", Fmt::Italic),
-                ("`код`", "Код в строке", Fmt::Code),
-                ("H1", "Заголовок первого уровня", Fmt::Heading(1)),
-                ("H2", "Заголовок второго уровня", Fmt::Heading(2)),
-                ("H3", "Заголовок третьего уровня", Fmt::Heading(3)),
                 (
-                    "• Список",
-                    "Маркированный список; повторное нажатие снимает",
+                    crate::i18n::tr("Ж"),
+                    crate::i18n::tr("Жирный: **текст**"),
+                    Fmt::Bold,
+                ),
+                (
+                    crate::i18n::tr("К"),
+                    crate::i18n::tr("Курсив: *текст*"),
+                    Fmt::Italic,
+                ),
+                (
+                    crate::i18n::tr("`код`"),
+                    crate::i18n::tr("Код в строке"),
+                    Fmt::Code,
+                ),
+                (
+                    "H1",
+                    crate::i18n::tr("Заголовок первого уровня"),
+                    Fmt::Heading(1),
+                ),
+                (
+                    "H2",
+                    crate::i18n::tr("Заголовок второго уровня"),
+                    Fmt::Heading(2),
+                ),
+                (
+                    "H3",
+                    crate::i18n::tr("Заголовок третьего уровня"),
+                    Fmt::Heading(3),
+                ),
+                (
+                    crate::i18n::tr("• Список"),
+                    crate::i18n::tr("Маркированный список; повторное нажатие снимает"),
                     Fmt::Bullets,
                 ),
                 (
-                    "1. Список",
-                    "Нумерованный список; повторное нажатие снимает",
+                    crate::i18n::tr("1. Список"),
+                    crate::i18n::tr("Нумерованный список; повторное нажатие снимает"),
                     Fmt::Numbered,
                 ),
-                ("Цитата", "Цитата: > текст", Fmt::Quote),
-                ("Блок кода", "Блок кода в ```", Fmt::CodeBlock),
-                ("Таблица", "Таблица 2×2", Fmt::Table),
-                ("Ссылка", "[текст](адрес)", Fmt::Link),
+                (
+                    crate::i18n::tr("Цитата"),
+                    crate::i18n::tr("Цитата: > текст"),
+                    Fmt::Quote,
+                ),
+                (
+                    crate::i18n::tr("Блок кода"),
+                    crate::i18n::tr("Блок кода в ```"),
+                    Fmt::CodeBlock,
+                ),
+                (
+                    crate::i18n::tr("Таблица"),
+                    crate::i18n::tr("Таблица 2×2"),
+                    Fmt::Table,
+                ),
+                (
+                    crate::i18n::tr("Ссылка"),
+                    crate::i18n::tr("[текст](адрес)"),
+                    Fmt::Link,
+                ),
             ];
             for (text, hint, fmt) in buttons {
                 if ui.button(text).on_hover_text(hint).clicked() {
                     apply = Some(fmt);
                 }
             }
-            let hint = "Вставить картинку из файла (png, jpg, gif, bmp). \
-                        При сохранении она копируется в папку блока";
-            if ui.button("Картинка...").on_hover_text(hint).clicked() {
+            let hint = crate::i18n::fmt(
+                "Вставить картинку из файла (png, jpg, gif, bmp). \
+                 При сохранении она копируется в папку {0}",
+                &[&owner],
+            );
+            if ui
+                .button(crate::i18n::tr("Картинка..."))
+                .on_hover_text(hint)
+                .clicked()
+            {
                 let file = rfd::FileDialog::new()
-                    .set_title("Картинка для описания")
-                    .add_filter("Изображения", &["png", "jpg", "jpeg", "gif", "bmp"])
+                    .set_title(crate::i18n::tr("Картинка для описания"))
+                    .add_filter(
+                        crate::i18n::tr("Изображения"),
+                        &["png", "jpg", "jpeg", "gif", "bmp"],
+                    )
                     .pick_file();
                 if let Some(file) = file {
-                    apply = Some(Fmt::Image(f.attach.add_image(file)));
+                    apply = Some(Fmt::Image(pictures.add(file)));
                 }
             }
         });
         if let Some(fmt) = apply {
-            format_at_cursor(ui.ctx(), id, &mut f.docs, &fmt);
+            format_at_cursor(ui.ctx(), id, docs, &fmt);
         }
     }
     ui.add_space(4.0);
     ui.columns(2, |cols| {
         cols[0].add(
-            TextEdit::multiline(&mut f.docs)
+            TextEdit::multiline(docs)
                 .id(id)
                 .interactive(editable)
                 .desired_width(f32::INFINITY)
                 .desired_rows(20),
         );
-        cols[1].label(RichText::new("Предпросмотр").weak());
-        let attach = &f.attach;
-        let find = |target: &str| attach.image_path(target);
-        crate::markdown::show_with_images(&mut cols[1], &f.docs, None, Some(&find));
+        cols[1].label(RichText::new(crate::i18n::tr("Предпросмотр")).weak());
+        let find = |target: &str| pictures.path(target);
+        crate::markdown::show_with_images(&mut cols[1], docs, None, Some(&find));
     });
 }
 
 fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
     ui.horizontal(|ui| {
-        ui.label("Заголовки");
+        ui.label(crate::i18n::tr("Заголовки"));
         ui.add_enabled(
             editable,
             TextEdit::singleline(&mut f.includes)
                 .hint_text("DHT.h, Wire.h")
                 .desired_width(260.0),
         )
-        .on_hover_text("Файлы для #include через запятую");
+        .on_hover_text(crate::i18n::tr("Файлы для #include через запятую"));
     });
     ui.weak(SECTIONS_HINT);
     let inputs = port_snippets(&f.inputs, "input");
@@ -1705,7 +1782,7 @@ fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
         .params
         .iter()
         .map(|p| {
-            let hint = format!("{} — значение как литерал C++", kind_label(p.kind));
+            let hint = crate::i18n::fmt("{0} — значение как литерал C++", &[&kind_label(p.kind)]);
             Snippet::new(
                 row_title(&p.name, &p.label),
                 format!("{{{{ param.{} }}}}", p.name),
@@ -1717,7 +1794,7 @@ fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
         .params
         .iter()
         .map(|p| {
-            let hint = "Код внутри попадёт в скетч, только если условие выполнено";
+            let hint = crate::i18n::tr("Код внутри попадёт в скетч, только если условие выполнено");
             let text = match p.kind {
                 ParamKind::Bool => format!(
                     "{{% if value.{} %}}
@@ -1747,13 +1824,28 @@ fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
         })
         .collect();
     let sections: Vec<Snippet> = [
-        ("// @global", "Переменные блока, по одной на экземпляр"),
-        ("// @setup", "Код в setup()"),
-        ("// @loop", "Код цикла, в порядке схемы"),
-        ("// @functions", "Функции блока, перед setup()"),
-        ("// @global once", "Общие переменные, один раз на проект"),
-        ("// @setup once", "Общий код в setup(), один раз"),
-        ("// @functions once", "Общие функции, один раз на проект"),
+        (
+            "// @global",
+            crate::i18n::tr("Переменные блока, по одной на экземпляр"),
+        ),
+        ("// @setup", crate::i18n::tr("Код в setup()")),
+        ("// @loop", crate::i18n::tr("Код цикла, в порядке схемы")),
+        (
+            "// @functions",
+            crate::i18n::tr("Функции блока, перед setup()"),
+        ),
+        (
+            "// @global once",
+            crate::i18n::tr("Общие переменные, один раз на проект"),
+        ),
+        (
+            "// @setup once",
+            crate::i18n::tr("Общий код в setup(), один раз"),
+        ),
+        (
+            "// @functions once",
+            crate::i18n::tr("Общие функции, один раз на проект"),
+        ),
     ]
     .into_iter()
     .map(|(text, hint)| {
@@ -1783,7 +1875,7 @@ fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
     let id = Id::unique("block_template");
     let mut insert = None;
     ui.horizontal_wrapped(|ui| {
-        ui.label("Вставить:");
+        ui.label(crate::i18n::tr("Вставить:"));
         let buttons = inputs.iter().chain(&outputs).chain(&literal);
         for s in std::iter::once(&Snippet::new("", "{{ id }}", "")).chain(buttons) {
             if ui
@@ -1794,7 +1886,9 @@ fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
             }
         }
     });
-    ui.weak("Правая кнопка в поле кода — меню подстановок; вставка идёт в место курсора.");
+    ui.weak(crate::i18n::tr(
+        "Правая кнопка в поле кода — меню подстановок; вставка идёт в место курсора.",
+    ));
     let mut layouter = crate::cpphl::layouter(true);
     let output = TextEdit::multiline(&mut f.template)
         .id(id)
@@ -1805,20 +1899,27 @@ fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
         .show(ui);
     output.response.context_menu(|ui| {
         if ui
-            .button("{{ id }} — префикс переменных блока")
-            .on_hover_text("Имена в разделах без once начинайте с него: {{ id }}_start")
+            .button(crate::i18n::tr("{{ id }} — префикс переменных блока"))
+            .on_hover_text(crate::i18n::tr(
+                "Имена в разделах без once начинайте с него: {{ id }}_start",
+            ))
             .clicked()
         {
             insert = Some("{{ id }}".into());
             ui.close();
         }
         ui.separator();
-        snippet_menu(ui, "Вход", &inputs, &mut insert);
-        snippet_menu(ui, "Выход", &outputs, &mut insert);
-        snippet_menu(ui, "Параметр", &literal, &mut insert);
-        snippet_menu(ui, "Условие по параметру", &conditions, &mut insert);
+        snippet_menu(ui, crate::i18n::tr("Вход"), &inputs, &mut insert);
+        snippet_menu(ui, crate::i18n::tr("Выход"), &outputs, &mut insert);
+        snippet_menu(ui, crate::i18n::tr("Параметр"), &literal, &mut insert);
+        snippet_menu(
+            ui,
+            crate::i18n::tr("Условие по параметру"),
+            &conditions,
+            &mut insert,
+        );
         ui.separator();
-        snippet_menu(ui, "Раздел", &sections, &mut insert);
+        snippet_menu(ui, crate::i18n::tr("Раздел"), &sections, &mut insert);
     });
     if let Some(text) = insert {
         insert_at_cursor(ui.ctx(), id, &mut f.template, &text);
@@ -1827,22 +1928,22 @@ fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
 
 fn files_tab(ui: &mut Ui, f: &mut Form) {
     let attach = &mut f.attach;
-    ui.weak(
+    ui.weak(crate::i18n::tr(
         "Библиотека Arduino и пример лежат в папке блока и едут вместе с ним \
          в файле .flpblock и в проекте. Сборка подхватывает библиотеки сама, \
          а главный заголовок прикреплённой библиотеки попадает в поле «Заголовки» \
          на вкладке «Код ESP32».",
-    );
+    ));
     ui.add_space(6.0);
-    ui.label(RichText::new("Библиотеки").strong());
+    ui.label(RichText::new(crate::i18n::tr("Библиотеки")).strong());
     let mut remove = None;
     for (i, lib) in attach.libs.iter().enumerate() {
         ui.horizontal(|ui| {
             ui.label(&lib.name);
             if lib.src.is_some() {
-                ui.weak("(будет скопирована при сохранении)");
+                ui.weak(crate::i18n::tr("(будет скопирована при сохранении)"));
             }
-            if ui.small_button("Убрать").clicked() {
+            if ui.small_button(crate::i18n::tr("Убрать")).clicked() {
                 remove = Some(i);
             }
         });
@@ -1854,15 +1955,17 @@ fn files_tab(ui: &mut Ui, f: &mut Form) {
         }
     }
     if attach.libs.is_empty() {
-        ui.weak("Нет прикреплённых библиотек");
+        ui.weak(crate::i18n::tr("Нет прикреплённых библиотек"));
     }
     if ui
-        .button("Прикрепить библиотеку...")
-        .on_hover_text("Папка библиотеки Arduino (с library.properties или src/)")
+        .button(crate::i18n::tr("Прикрепить библиотеку..."))
+        .on_hover_text(crate::i18n::tr(
+            "Папка библиотеки Arduino (с library.properties или src/)",
+        ))
         .clicked()
     {
         if let Some(dir) = rfd::FileDialog::new()
-            .set_title("Папка библиотеки Arduino")
+            .set_title(crate::i18n::tr("Папка библиотеки Arduino"))
             .pick_folder()
         {
             let name = dir
@@ -1883,30 +1986,36 @@ fn files_tab(ui: &mut Ui, f: &mut Form) {
         }
     }
     ui.add_space(10.0);
-    ui.label(RichText::new("Пример использования").strong());
+    ui.label(RichText::new(crate::i18n::tr("Пример использования")).strong());
     match &attach.example {
         Example::None => {
-            ui.weak("Пример не прикреплён");
+            ui.weak(crate::i18n::tr("Пример не прикреплён"));
         }
         Example::Saved => {
             ui.label("example.flpn");
         }
         Example::New(p) => {
-            ui.label(format!("{} (будет скопирован при сохранении)", p.display()));
+            ui.label(crate::i18n::fmt(
+                "{0} (будет скопирован при сохранении)",
+                &[&p.display()],
+            ));
         }
     }
     ui.horizontal(|ui| {
-        if ui.button("Прикрепить пример...").clicked() {
+        if ui.button(crate::i18n::tr("Прикрепить пример...")).clicked() {
             if let Some(file) = rfd::FileDialog::new()
-                .set_title("Проект-пример")
-                .add_filter("Проект FLP", &["flpn"])
+                .set_title(crate::i18n::tr("Проект-пример"))
+                .add_filter(crate::i18n::tr("Проект FLP"), &["flpn"])
                 .pick_file()
             {
                 attach.example = Example::New(file);
             }
         }
         if ui
-            .add_enabled(attach.example != Example::None, egui::Button::new("Убрать"))
+            .add_enabled(
+                attach.example != Example::None,
+                egui::Button::new(crate::i18n::tr("Убрать")),
+            )
             .clicked()
         {
             attach.example = Example::None;
@@ -1917,14 +2026,16 @@ fn files_tab(ui: &mut Ui, f: &mut Form) {
 fn sketch_tab(ui: &mut Ui, ed: &BlockEditor, pal: &Palette) {
     match &ed.generated {
         None => {
-            ui.weak("Исправьте ошибки описания блока — тогда здесь появится код.");
+            ui.weak(crate::i18n::tr(
+                "Исправьте ошибки описания блока — тогда здесь появится код.",
+            ));
         }
         Some(g) => match &g.result {
             Ok(code) => {
-                ui.weak(format!(
-                    "Скетч с одним блоком «{}»: неподключённые входы — нули, обязательные \
+                ui.weak(crate::i18n::fmt(
+                    "Скетч с одним блоком «{0}»: неподключённые входы — нули, обязательные \
                      параметры — пробные значения.",
-                    flp_codegen::preview_id(&g.def)
+                    &[&flp_codegen::preview_id(&g.def)],
                 ));
                 let mut text = code.as_str();
                 let mut layouter = crate::cpphl::layouter(false);
@@ -1944,12 +2055,15 @@ fn sketch_tab(ui: &mut Ui, ed: &BlockEditor, pal: &Palette) {
 
 fn status(ui: &mut Ui, ed: &BlockEditor, def: &Result<BlockDef, String>, pal: &Palette) {
     let (color, text): (Color32, String) = match (def, &ed.generated) {
-        (Err(e), _) => (pal.error, format!("Описание: {e}")),
+        (Err(e), _) => (pal.error, crate::i18n::fmt("Описание: {0}", &[&e])),
         (Ok(_), Some(Generated { result: Err(e), .. })) => {
             let first = e.lines().next().unwrap_or_default();
-            (pal.error, format!("Код: {first}"))
+            (pal.error, crate::i18n::fmt("Код: {0}", &[&first]))
         }
-        _ => (pal.ok, "Описание и код в порядке".to_owned()),
+        _ => (
+            pal.ok,
+            crate::i18n::tr("Описание и код в порядке").to_owned(),
+        ),
     };
     ui.colored_label(color, text);
 }
@@ -1966,15 +2080,15 @@ fn footer(
         ui.horizontal(|ui| {
             ui.colored_label(
                 app.theme.palette.warning,
-                "Встроенный блок изменять нельзя — создайте на его основе свой.",
+                crate::i18n::tr("Встроенный блок изменять нельзя — создайте на его основе свой."),
             );
-            if ui.button("Создать копию").clicked() {
+            if ui.button(crate::i18n::tr("Создать копию")).clicked() {
                 let block = ed.original.as_ref().and_then(|k| app.lib.get(k)).cloned();
                 if let Some(block) = block {
                     *ed = BlockEditor::copy_of(app, &block);
                 }
             }
-            close = ui.button("Закрыть").clicked();
+            close = ui.button(crate::i18n::tr("Закрыть")).clicked();
         });
         return close;
     }
@@ -1982,18 +2096,24 @@ fn footer(
         // A new block can be saved untouched; an opened one only after changes.
         let savable = ed.dirty() || ed.original.is_none();
         if ui
-            .add_enabled(def.is_ok() && savable, egui::Button::new("Сохранить"))
+            .add_enabled(
+                def.is_ok() && savable,
+                egui::Button::new(crate::i18n::tr("Сохранить")),
+            )
             .clicked()
         {
             save(app, ed, def);
         }
         if ui
-            .add_enabled(ed.form != ed.clean, egui::Button::new("Отменить правки"))
+            .add_enabled(
+                ed.form != ed.clean,
+                egui::Button::new(crate::i18n::tr("Отменить правки")),
+            )
             .clicked()
         {
             ed.form = ed.clean.clone();
         }
-        if ui.button("Закрыть").clicked() {
+        if ui.button(crate::i18n::tr("Закрыть")).clicked() {
             if ed.dirty() {
                 ed.confirm_close = true;
             } else {
@@ -2001,7 +2121,10 @@ fn footer(
             }
         }
         if let Some(dir) = target_dir(app, ed) {
-            ui.weak(format!("Папка: {}", dir.join(&ed.form.kind).display()));
+            ui.weak(crate::i18n::fmt(
+                "Папка: {0}",
+                &[&dir.join(&ed.form.kind).display()],
+            ));
         }
     });
     close
@@ -2029,19 +2152,28 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
     let def = match def {
         Ok(def) => def,
         Err(e) => {
-            app.info(LogLevel::Error, format!("Блок не сохранён: {e}"));
+            app.info(
+                LogLevel::Error,
+                crate::i18n::fmt("Блок не сохранён: {0}", &[&e]),
+            );
             return false;
         }
     };
     let Some(lib_dir) = target_dir(app, ed) else {
-        app.info(LogLevel::Error, "Блок не сохранён: нет папки библиотеки");
+        app.info(
+            LogLevel::Error,
+            crate::i18n::tr("Блок не сохранён: нет папки библиотеки"),
+        );
         return false;
     };
     let kind = &def.info.kind;
     if ed.read_only || app.lib.is_builtin(kind) {
         app.info(
             LogLevel::Error,
-            format!("Блок не сохранён: тип «{kind}» занят встроенным блоком, его менять нельзя"),
+            crate::i18n::fmt(
+                "Блок не сохранён: тип «{0}» занят встроенным блоком, его менять нельзя",
+                &[&kind],
+            ),
         );
         return false;
     }
@@ -2049,7 +2181,10 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
     if new && (app.lib.get(kind).is_some() || lib_dir.join(kind).exists()) {
         app.info(
             LogLevel::Error,
-            format!("Блок не сохранён: тип «{kind}» уже есть, выберите другое имя"),
+            crate::i18n::fmt(
+                "Блок не сохранён: тип «{0}» уже есть, выберите другое имя",
+                &[&kind],
+            ),
         );
         return false;
     }
@@ -2057,12 +2192,15 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
         Ok(dir) => {
             app.info(
                 LogLevel::Ok,
-                format!("Блок «{}» сохранён в {}", def.info.name, dir.display()),
+                crate::i18n::fmt(
+                    "Блок «{0}» сохранён в {1}",
+                    &[&def.info.name, &dir.display()],
+                ),
             );
             if let Err(e) = ed.form.attach.apply(&dir, &ed.form.docs) {
                 app.info(
                     LogLevel::Error,
-                    format!("Библиотека или пример не сохранены: {e}"),
+                    crate::i18n::fmt("Библиотека или пример не сохранены: {0}", &[&e]),
                 );
             }
             ed.original = Some(kind.clone());
@@ -2071,7 +2209,10 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
             true
         }
         Err(e) => {
-            app.info(LogLevel::Error, format!("Блок не сохранён: {e}"));
+            app.info(
+                LogLevel::Error,
+                crate::i18n::fmt("Блок не сохранён: {0}", &[&e]),
+            );
             false
         }
     }
@@ -2088,7 +2229,10 @@ pub fn delete_dialog(app: &mut EditorApp, ctx: &egui::Context) {
     };
     if !app.lib.is_user(&kind) {
         app.block_delete = None;
-        app.info(LogLevel::Error, "Встроенный блок удалить нельзя");
+        app.info(
+            LogLevel::Error,
+            crate::i18n::tr("Встроенный блок удалить нельзя"),
+        );
         return;
     }
     let used = app.doc.as_ref().map_or(0, |d| {
@@ -2102,25 +2246,26 @@ pub fn delete_dialog(app: &mut EditorApp, ctx: &egui::Context) {
     let warning = app.theme.palette.warning;
     let mut answer = None;
     egui::Modal::new(Id::unique("block_delete")).show(ctx, |ui| {
-        ui.label(RichText::new("Удалить блок").strong());
-        ui.label(format!(
-            "Удалить пользовательский блок «{}» ({kind})? Папка {} будет удалена.",
-            block.def.info.name,
-            block.dir.display()
+        ui.label(RichText::new(crate::i18n::tr("Удалить блок")).strong());
+        ui.label(crate::i18n::fmt(
+            "Удалить пользовательский блок «{0}» ({1})? Папка {2} будет удалена.",
+            &[&block.def.info.name, &kind, &block.dir.display()],
         ));
         if used > 0 {
             ui.colored_label(
                 warning,
-                format!(
-                    "В открытом проекте таких блоков: {used}. Схема перестанет проходить проверку."
+                crate::i18n::fmt(
+                    "В открытом проекте таких блоков: {0}. Схема перестанет проходить проверку.",
+                    &[&used],
                 ),
             );
         }
         ui.horizontal(|ui| {
-            if ui.button("Удалить").clicked() {
+            if ui.button(crate::i18n::tr("Удалить")).clicked() {
                 answer = Some(true);
             }
-            if ui.button("Отмена").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape))
+            if ui.button(crate::i18n::tr("Отмена")).clicked()
+                || ui.input(|i| i.key_pressed(egui::Key::Escape))
             {
                 answer = Some(false);
             }
@@ -2133,13 +2278,16 @@ pub fn delete_dialog(app: &mut EditorApp, ctx: &egui::Context) {
             if !block.dir.starts_with(&user_dir) || block.dir == user_dir {
                 app.info(
                     LogLevel::Error,
-                    "Блок не удалён: он не в папке пользовательских блоков",
+                    crate::i18n::tr("Блок не удалён: он не в папке пользовательских блоков"),
                 );
                 return;
             }
             match fs::remove_dir_all(&block.dir) {
                 Ok(()) => {
-                    app.info(LogLevel::Ok, format!("Блок «{kind}» удалён"));
+                    app.info(
+                        LogLevel::Ok,
+                        crate::i18n::fmt("Блок «{0}» удалён", &[&kind]),
+                    );
                     if app
                         .block_editor
                         .as_ref()
@@ -2149,7 +2297,10 @@ pub fn delete_dialog(app: &mut EditorApp, ctx: &egui::Context) {
                     }
                     app.reload_library();
                 }
-                Err(e) => app.info(LogLevel::Error, format!("Блок не удалён: {e}")),
+                Err(e) => app.info(
+                    LogLevel::Error,
+                    crate::i18n::fmt("Блок не удалён: {0}", &[&e]),
+                ),
             }
         }
         Some(false) => app.block_delete = None,
@@ -2330,11 +2481,11 @@ min = 0
         fs::write(dir.join("old.png"), "png").unwrap();
 
         let mut attach = Attach::default();
-        let target = attach.add_image(pic.clone());
+        let target = attach.pictures.add(pic.clone());
         assert_eq!(target, "images/1.png");
-        assert_eq!(attach.image_path(&target), Some(pic.clone()));
+        assert_eq!(attach.pictures.path(&target), Some(pic.clone()));
         // The same file again gets another name.
-        assert_eq!(attach.add_image(pic), "images/1_2.png");
+        assert_eq!(attach.pictures.add(pic), "images/1_2.png");
 
         let docs = format!(
             "![схема]({target})
@@ -2344,7 +2495,7 @@ min = 0
         let root = block.join(flp_core::blockfile::IMAGES_DIR);
         assert!(root.join("1.png").is_file());
         assert!(!root.join("1_2.png").exists());
-        assert_eq!(attach.image_path(&target), Some(root.join("1.png")));
+        assert_eq!(attach.pictures.path(&target), Some(root.join("1.png")));
 
         // A picture the docs no longer use is removed with the folder.
         attach.apply(&block, "без картинок").unwrap();

@@ -232,7 +232,8 @@ impl Context for WorkerContext {
             .expect("live values")
             .clone()
             .ok_or_else(|| {
-                "отладка не запущена: попросите пользователя нажать «Отладка»".to_owned()
+                crate::i18n::tr("отладка не запущена: попросите пользователя нажать «Отладка»")
+                    .to_owned()
             })
     }
 
@@ -265,22 +266,22 @@ pub fn show(chat: &mut AiChat, pal: &Palette, ui: &mut Ui, has_project: bool) ->
         let edit = egui::TextEdit::multiline(&mut chat.input)
             .desired_rows(3)
             .desired_width(f32::INFINITY)
-            .hint_text("Что сделать со схемой? Например: «Добавь мигание светодиода на GPIO2 раз в секунду»");
+            .hint_text(crate::i18n::tr("Что сделать со схемой? Например: «Добавь мигание светодиода на GPIO2 раз в секунду»"));
         let resp = ui.add_enabled(has_project && !busy, edit);
         let ctrl_enter = resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.command);
         ui.horizontal(|ui| {
             if chat.busy() {
                 crate::panels::busy(ui);
-                ui.label("Claude работает...");
+                ui.label(crate::i18n::tr("Claude работает..."));
             } else if ui
-                .add_enabled(has_project, egui::Button::new("Отправить"))
+                .add_enabled(has_project, egui::Button::new(crate::i18n::tr("Отправить")))
                 .on_hover_text("Ctrl+Enter")
                 .clicked()
                 || ctrl_enter
             {
                 send = true;
             }
-            if ui.add_enabled(!chat.busy(), egui::Button::new("Новый разговор")).clicked() {
+            if ui.add_enabled(!chat.busy(), egui::Button::new(crate::i18n::tr("Новый разговор"))).clicked() {
                 chat.clear();
             }
         });
@@ -290,13 +291,13 @@ pub fn show(chat: &mut AiChat, pal: &Palette, ui: &mut Ui, has_project: bool) ->
         .stick_to_bottom(true)
         .show(ui, |ui| {
             if chat.entries.is_empty() {
-                ui.weak("Опишите задачу словами — помощник прочитает схему, добавит и соединит блоки и проверит результат. Каждую его правку можно отменить Ctrl+Z.\n\nНужен ключ Claude в переменной окружения ANTHROPIC_API_KEY. Для другого сервиса с OpenAI-совместимым API задайте FLP_AI_BASE_URL, FLP_AI_KEY и FLP_AI_MODEL.");
+                ui.weak(crate::i18n::tr("Опишите задачу словами — помощник прочитает схему, добавит и соединит блоки и проверит результат. Каждую его правку можно отменить Ctrl+Z.\n\nНужен ключ Claude в переменной окружения ANTHROPIC_API_KEY. Для другого сервиса с OpenAI-совместимым API задайте FLP_AI_BASE_URL, FLP_AI_KEY и FLP_AI_MODEL."));
             }
             for (i, e) in chat.entries.iter().enumerate() {
                 match e {
                     Entry::User(t) => {
                         ui.add_space(6.0);
-                        ui.label(RichText::new(format!("Вы: {t}")).strong());
+                        ui.label(RichText::new(crate::i18n::fmt("Вы: {0}", &[&t])).strong());
                     }
                     Entry::Assistant(t) => {
                         ui.label(t);

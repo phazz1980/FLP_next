@@ -1,0 +1,34 @@
+# Каждый вход X1–X6 включает своё реле K1–K6, пока на входе есть напряжение.
+# Адреса микросхем PCF8574 и выводы шины I²C заданы платой — блоки их не спрашивают.
+
+[[block]]
+id = "inputs"
+type = "kincony_kc868_a6_inputs"
+
+[[block]]
+id = "relays"
+type = "kincony_kc868_a6_relays"
+
+[[link]]
+from = "inputs.p0"
+to   = "relays.p0"
+
+[[link]]
+from = "inputs.p1"
+to   = "relays.p1"
+
+[[link]]
+from = "inputs.p2"
+to   = "relays.p2"
+
+[[link]]
+from = "inputs.p3"
+to   = "relays.p3"
+
+[[link]]
+from = "inputs.p4"
+to   = "relays.p4"
+
+[[link]]
+from = "inputs.p5"
+to   = "relays.p5"

@@ -1,0 +1,119 @@
+# Kincony KC868-A6 (ESP32). Таблица выводов и реле собраны по описанию производителя
+# и форумам, НА ЖЕЛЕЗЕ НЕ ПРОВЕРЕНЫ: сверьте с документацией вашей ревизии платы (см. docs.md).
+[board]
+id = "kincony_kc868_a6"
+name = "Kincony KC868-A6"
+chip = "esp32"
+fqbn = "esp32:esp32:esp32"
+
+# Шина I²C, на которой сидят расширители реле и входов.
+[[pin]]
+gpio = 4
+name = "I2C SDA"
+note = "Шина I²C расширителей PCF8574 (реле и входы)"
+busy = "занят шиной I²C расширителей реле и входов"
+
+[[pin]]
+gpio = 15
+name = "I2C SCL"
+note = "Шина I²C расширителей PCF8574 (реле и входы)"
+busy = "занят шиной I²C расширителей реле и входов"
+
+# Аналоговые входы A1–A4 (только вход).
+[[pin]]
+gpio = 36
+name = "A1"
+note = "Аналоговый вход A1"
+
+[[pin]]
+gpio = 39
+name = "A2"
+note = "Аналоговый вход A2"
+
+[[pin]]
+gpio = 34
+name = "A3"
+note = "Аналоговый вход A3"
+
+[[pin]]
+gpio = 35
+name = "A4"
+note = "Аналоговый вход A4"
+
+# Аналоговые выходы (ЦАП).
+[[pin]]
+gpio = 26
+name = "DA1"
+note = "Аналоговый выход DA1 (ЦАП)"
+
+[[pin]]
+gpio = 25
+name = "DA2"
+note = "Аналоговый выход DA2 (ЦАП)"
+
+# Свободные выводы под датчики (1-Wire, DHT и т. п.).
+[[pin]]
+gpio = 32
+name = "IO-1"
+note = "Вывод под датчик: 1-Wire, DHT и другие"
+
+[[pin]]
+gpio = 33
+name = "IO-2"
+note = "Вывод под датчик: 1-Wire, DHT и другие"
+
+# RS-485.
+[[pin]]
+gpio = 14
+name = "RS485 RX"
+note = "Приём RS-485"
+
+[[pin]]
+gpio = 27
+name = "RS485 TX"
+note = "Передача RS-485"
+
+# Шина SPI.
+[[pin]]
+gpio = 18
+name = "SPI CLK"
+note = "Шина SPI"
+
+[[pin]]
+gpio = 23
+name = "SPI MOSI"
+note = "Шина SPI"
+
+[[pin]]
+gpio = 19
+name = "SPI MISO"
+note = "Шина SPI"
+
+[[pin]]
+gpio = 5
+name = "SPI CS"
+note = "Шина SPI"
+
+# Реле K1–K6: PCF8574, адрес 0x24, реле включаются нулём.
+[[device]]
+id = "relays"
+kind = "pcf8574_out"
+name = "Реле"
+description = "Реле K1–K6 на PCF8574 (адрес 0x24, шина I²C: SDA = GPIO4, SCL = GPIO15). Не проверено на железе."
+channels = ["K1", "K2", "K3", "K4", "K5", "K6"]
+address = 36
+sda = 4
+scl = 15
+inverted = true
+
+# Оптоизолированные входы X1–X6: PCF8574, адрес 0x22, активный вход читается нулём.
+[[device]]
+id = "inputs"
+kind = "pcf8574_in"
+name = "Входы"
+description = "Оптоизолированные входы X1–X6 на PCF8574 (адрес 0x22, шина I²C: SDA = GPIO4, SCL = GPIO15). Не проверено на железе."
+channels = ["X1", "X2", "X3", "X4", "X5", "X6"]
+address = 34
+sda = 4
+scl = 15
+inverted = true

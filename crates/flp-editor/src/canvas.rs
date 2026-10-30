@@ -52,6 +52,23 @@ pub enum DragItem {
     Topic(String),
 }
 
+/// Drag source that also reports clicks and double clicks. `Ui::dnd_drag_source` puts a
+/// drag-only area over its contents, and egui then gives clicks on it to nobody.
+pub fn drag_source(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    item: DragItem,
+    add: impl FnOnce(&mut egui::Ui) -> egui::Response,
+) -> egui::Response {
+    if ui.ctx().is_being_dragged(id) {
+        // egui paints the dragged copy under the pointer and sets the payload.
+        return ui.dnd_drag_source(id, item, add).response;
+    }
+    let rect = add(ui).rect;
+    ui.interact(rect, id, egui::Sense::click_and_drag())
+        .on_hover_cursor(egui::CursorIcon::Grab)
+}
+
 #[derive(Debug, Clone, Copy)]
 struct View {
     pan: Vec2,
@@ -548,7 +565,9 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     }
     let Some(doc) = &app.doc else {
         ui.centered_and_justified(|ui| {
-            ui.label("Откройте проект: Файл → Открыть, или создайте новый.");
+            ui.label(crate::i18n::tr(
+                "Откройте проект: Файл → Открыть, или создайте новый.",
+            ));
         });
         return;
     };
@@ -602,9 +621,18 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let painter = ui.painter_at(rect);
     let mut view = app.canvas.view;
 
+    // The view moves only to a block out of sight: a click in the tree must not
+    // make the board jump.
     if let Some(id) = app.canvas.focus.take() {
         if let Some(r) = world_rect.get(id.as_str()) {
-            view.pan = rect.size() * 0.5 - r.center().to_vec2() * view.zoom;
+            let shown = Xf {
+                origin: rect.min,
+                view,
+            }
+            .rect(*r);
+            if !rect.contains_rect(shown) {
+                view.pan = rect.size() * 0.5 - r.center().to_vec2() * view.zoom;
+            }
         }
     }
     if let Some((sheet, offset)) = app.canvas.follow_sheet.take() {
@@ -650,7 +678,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             painter.text(
                 header.right_top() + Vec2::new(-86.0 * z, 4.0 * z),
                 Align2::RIGHT_TOP,
-                "ФОНОВАЯ ЗАДАЧА · ядро 0",
+                crate::i18n::tr("ФОНОВАЯ ЗАДАЧА · ядро 0"),
                 font(10.0),
                 tint,
             );
@@ -662,19 +690,25 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             painter.text(
                 header.right_top() + Vec2::new(-86.0 * z, 16.0 * z),
                 Align2::RIGHT_TOP,
-                "ПЛАТА ОТКЛЮЧЕНА",
+                crate::i18n::tr("ПЛАТА ОТКЛЮЧЕНА"),
                 font(10.0),
                 grey,
             );
         }
         let lines = [
-            (format!("Плата: {}", band.sheet), pal.accent),
+            (crate::i18n::fmt("Плата: {0}", &[&band.sheet]), pal.accent),
             (
-                format!("Наименование: {}", info.map_or("", |i| i.name.as_str())),
+                crate::i18n::fmt(
+                    "Наименование: {0}",
+                    &[&info.map_or("", |i| i.name.as_str())],
+                ),
                 pal.text,
             ),
             (
-                format!("Комментарии: {}", info.map_or("", |i| i.comment.as_str())),
+                crate::i18n::fmt(
+                    "Комментарии: {0}",
+                    &[&info.map_or("", |i| i.comment.as_str())],
+                ),
                 pal.weak,
             ),
         ];
@@ -698,7 +732,9 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         if resp.clicked() {
             active_sheet = Some(band.sheet);
         }
-        resp.on_hover_text("Двойной щелчок — название и комментарий платы");
+        resp.on_hover_text(crate::i18n::tr(
+            "Двойной щелчок — название и комментарий платы",
+        ));
 
         // The sheet being worked on stands out.
         if app.sheet == band.sheet {
@@ -717,11 +753,11 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         let buttons = [
             (
                 "✕",
-                "Удалить плату вместе с блоками (спросит подтверждение)",
+                crate::i18n::tr("Удалить плату вместе с блоками (спросит подтверждение)"),
                 None,
             ),
-            ("▼", "Опустить плату", next),
-            ("▲", "Поднять плату", prev),
+            ("▼", crate::i18n::tr("Опустить плату"), next),
+            ("▲", crate::i18n::tr("Поднять плату"), prev),
         ];
         for (k, (label, hint, other)) in buttons.into_iter().enumerate() {
             let center = header.right_top()
@@ -785,9 +821,9 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             toggle_sheet = Some(band.sheet);
         }
         arrow_resp.on_hover_text(if band.collapsed {
-            "Развернуть плату"
+            crate::i18n::tr("Развернуть плату")
         } else {
-            "Свернуть плату"
+            crate::i18n::tr("Свернуть плату")
         });
         if band.collapsed {
             continue;
@@ -835,7 +871,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     painter.text(
         add_rect.center(),
         Align2::CENTER_CENTER,
-        "+ Добавить плату",
+        crate::i18n::tr("+ Добавить плату"),
         font(11.0),
         add_color,
     );
@@ -984,16 +1020,18 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             if resp.drag_stopped() {
                 wire_end = true;
             }
-            resp.on_hover_text("Потяните, чтобы изменить путь; двойной щелчок — путь по умолчанию");
+            resp.on_hover_text(crate::i18n::tr(
+                "Потяните, чтобы изменить путь; двойной щелчок — путь по умолчанию",
+            ));
         }
         if !cross {
             for (i, area) in menu_areas.iter().enumerate() {
                 let resp = ui.interact(*area, Id::unique(("wire-menu", &key, i)), Sense::click());
                 resp.context_menu(|ui| {
                     let label = if route_cfg.broken {
-                        "Соединить линией"
+                        crate::i18n::tr("Соединить линией")
                     } else {
-                        "Разорвать связь"
+                        crate::i18n::tr("Разорвать связь")
                     };
                     if ui.button(label).clicked() {
                         wire_break = Some((link.to.clone(), !route_cfg.broken));
@@ -1018,18 +1056,19 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             stub_areas[0] = stub_areas[0].union(painter.text(
                 a + Vec2::new(stub + 3.0 * z, 0.0),
                 Align2::LEFT_CENTER,
-                format!("→ П{}: {}.{}", sheet(to_sheet), link.to.block, link.to.port),
+                crate::i18n::fmt(
+                    "→ П{0}: {1}.{2}",
+                    &[&sheet(to_sheet), &link.to.block, &link.to.port],
+                ),
                 font(10.0),
                 color,
             ));
             stub_areas[1] = stub_areas[1].union(painter.text(
                 b - Vec2::new(stub + 3.0 * z, 0.0),
                 Align2::RIGHT_CENTER,
-                format!(
-                    "П{}: {}.{} →",
-                    sheet(from_sheet),
-                    link.from.block,
-                    link.from.port
+                crate::i18n::fmt(
+                    "П{0}: {1}.{2} →",
+                    &[&sheet(from_sheet), &link.from.block, &link.from.port],
                 ),
                 font(10.0),
                 color,
@@ -1044,7 +1083,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 if resp.clicked() {
                     wire_jump = Some(target.block.clone());
                 }
-                resp.on_hover_text(format!("Перейти к «{}»", target.block));
+                resp.on_hover_text(crate::i18n::fmt("Перейти к «{0}»", &[&target.block]));
             }
         }
     }
@@ -1075,7 +1114,8 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 ids.push(id.to_owned());
             }
             select = Some(Selection::of_blocks(ids));
-        } else if resp.clicked() || resp.secondary_clicked() || (resp.drag_started() && !in_sel) {
+        } else if resp.clicked() || ((resp.secondary_clicked() || resp.drag_started()) && !in_sel) {
+            // A right click on a selected block keeps the group for its menu.
             select = Some(Selection::of_blocks(vec![id.to_owned()]));
         }
         if resp.drag_started() {
@@ -1576,9 +1616,27 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 DragItem::Setting { id, name, ty, feed } => doc.edit(&lib, None, |p| {
                     crate::netpanel::pull_out(p, &lib, &id, &name, ty, feed, pos)
                 }),
+                // A tag already on the board gets one more copy; otherwise the
+                // block itself is placed (or moved).
                 DragItem::Topic(id) => doc.edit(&lib, None, |p| {
-                    p.layout.blocks.insert(id.clone(), pos);
-                    Ok::<_, flp_core::EditError>(id)
+                    let tag = p.logic.tag_of(&id).to_owned();
+                    let is_tag = p.logic.block(&tag).is_some_and(|b| {
+                        lib.resolve(&p.logic, b).is_some_and(|l| {
+                            l.def
+                                .params
+                                .iter()
+                                .any(|d| d.kind == flp_core::ParamKind::Pin)
+                        })
+                    });
+                    let placed = std::iter::once(tag.as_str())
+                        .chain(p.logic.tag_copies(&tag))
+                        .any(|b| p.layout.blocks.contains_key(b));
+                    if is_tag && placed {
+                        p.add_tag_copy(&tag, pos)
+                    } else {
+                        p.layout.blocks.insert(id.clone(), pos);
+                        Ok(id)
+                    }
                 }),
             };
             match result {
@@ -1681,21 +1739,23 @@ pub fn sheet_delete_dialog(app: &mut EditorApp, ctx: &egui::Context) {
         .filter(|p| p.sheet == sheet)
         .count();
     let title = if name.is_empty() {
-        format!("Плата {sheet}")
+        crate::i18n::fmt("Плата {0}", &[&sheet])
     } else {
-        format!("Плата {sheet} «{name}»")
+        crate::i18n::fmt("Плата {0} «{1}»", &[&sheet, &name])
     };
     let mut answer = None;
     egui::Modal::new(Id::unique("sheet_delete")).show(ctx, |ui| {
-        ui.label(egui::RichText::new("Удалить плату").strong());
-        ui.label(format!(
-            "Удалить «{title}» вместе с блоками на ней ({blocks})? Это можно отменить (Ctrl+Z)."
+        ui.label(egui::RichText::new(crate::i18n::tr("Удалить плату")).strong());
+        ui.label(crate::i18n::fmt(
+            "Удалить «{0}» вместе с блоками на ней ({1})? Это можно отменить (Ctrl+Z).",
+            &[&title, &blocks],
         ));
         ui.horizontal(|ui| {
-            if ui.button("Удалить").clicked() {
+            if ui.button(crate::i18n::tr("Удалить")).clicked() {
                 answer = Some(true);
             }
-            if ui.button("Отмена").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape))
+            if ui.button(crate::i18n::tr("Отмена")).clicked()
+                || ui.input(|i| i.key_pressed(egui::Key::Escape))
             {
                 answer = Some(false);
             }
@@ -1735,7 +1795,7 @@ fn clipboard_items(app: &mut EditorApp, ui: &mut Ui) {
     if ui
         .add_enabled(
             has_blocks,
-            egui::Button::new("Вырезать").shortcut_text("Ctrl+X"),
+            egui::Button::new(crate::i18n::tr("Вырезать")).shortcut_text("Ctrl+X"),
         )
         .clicked()
     {
@@ -1745,7 +1805,7 @@ fn clipboard_items(app: &mut EditorApp, ui: &mut Ui) {
     if ui
         .add_enabled(
             has_blocks,
-            egui::Button::new("Копировать").shortcut_text("Ctrl+C"),
+            egui::Button::new(crate::i18n::tr("Копировать")).shortcut_text("Ctrl+C"),
         )
         .clicked()
     {
@@ -1753,7 +1813,7 @@ fn clipboard_items(app: &mut EditorApp, ui: &mut Ui) {
         ui.close();
     }
     if ui
-        .add(egui::Button::new("Вставить").shortcut_text("Ctrl+V"))
+        .add(egui::Button::new(crate::i18n::tr("Вставить")).shortcut_text("Ctrl+V"))
         .clicked()
     {
         ui.ctx()
@@ -1843,15 +1903,17 @@ fn port_context_menu(
         if let (Some(d), Some(index)) = (&mut debug, debug_index) {
             debugview::value_menu(ui, d, index);
             if !output {
-                ui.weak("Форсируется источник входа (у всех потребителей)");
+                ui.weak(crate::i18n::tr(
+                    "Форсируется источник входа (у всех потребителей)",
+                ));
             }
             ui.separator();
         }
         if !output {
             let title = if constant.is_some() {
-                "Изменить константу"
+                crate::i18n::tr("Изменить константу")
             } else {
-                "Вставить константу"
+                crate::i18n::tr("Вставить константу")
             };
             // A click in the input field must not close the submenu.
             let config =
@@ -1874,7 +1936,7 @@ fn port_context_menu(
                         .align(egui::Align2::LEFT_CENTER),
                 );
                 let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if ui.button("Применить").clicked() || enter {
+                if ui.button(crate::i18n::tr("Применить")).clicked() || enter {
                     match parse_const(ty, text) {
                         Some(v) => {
                             set_const = Some(Some(v));
@@ -1884,13 +1946,17 @@ fn port_context_menu(
                     }
                 }
             });
-            if constant.is_some() && ui.button("Удалить константу").clicked() {
+            if constant.is_some() && ui.button(crate::i18n::tr("Удалить константу")).clicked()
+            {
                 set_const = Some(None);
             }
         }
         if ty == SignalType::Bool {
             let mut on = inverted;
-            if ui.checkbox(&mut on, "Инвертировать").clicked() {
+            if ui
+                .checkbox(&mut on, crate::i18n::tr("Инвертировать"))
+                .clicked()
+            {
                 invert = Some(on);
                 ui.close();
             }
@@ -1901,7 +1967,10 @@ fn port_context_menu(
         let text = app.canvas.const_text.clone();
         app.info(
             LogLevel::Error,
-            format!("«{text}» не подходит ко входу {port}: нужно число"),
+            crate::i18n::fmt(
+                "«{0}» не подходит ко входу {1}: нужно число",
+                &[&text, &port],
+            ),
         );
     }
     let lib = app.lib.clone();
@@ -1943,40 +2012,51 @@ fn block_context_menu(app: &mut EditorApp, id: &str, resp: &egui::Response) {
     let debug_index = var
         .as_deref()
         .and_then(|v| app.debug.as_ref().and_then(|d| d.table.var_index(v)));
+    // The menu of a selected block acts on the whole selection.
+    let group: Vec<String> = match &app.selection {
+        Some(s) if s.has_block(id) => s.blocks().to_vec(),
+        _ => vec![id.to_owned()],
+    };
     let mut debug = app.debug.take();
     resp.context_menu(|ui| {
         if let (Some(d), Some(index)) = (&mut debug, debug_index) {
-            ui.menu_button("Отладка", |ui| debugview::value_menu(ui, d, index));
+            ui.menu_button(crate::i18n::tr("Отладка"), |ui| {
+                debugview::value_menu(ui, d, index)
+            });
             ui.separator();
         }
         clipboard_items(app, ui);
         ui.separator();
-        if ui.button("Свойства...").clicked() {
+        if ui.button(crate::i18n::tr("Свойства...")).clicked() {
             props = true;
         }
-        if var.is_some() && ui.button("Изменить переменную...").clicked() {
+        if var.is_some()
+            && ui
+                .button(crate::i18n::tr("Изменить переменную..."))
+                .clicked()
+        {
             edit_var = true;
         }
         if let Some(block) = &library_kind {
             let text = if app.lib.is_user(&block.def.info.kind) {
-                "Редактировать блок..."
+                crate::i18n::tr("Редактировать блок...")
             } else {
-                "Посмотреть тип блока..."
+                crate::i18n::tr("Посмотреть тип блока...")
             };
             if ui.button(text).clicked() {
                 edit_type = true;
             }
         }
-        ui.menu_button("Перенести на плату", |ui| {
+        ui.menu_button(crate::i18n::tr("Перенести на плату"), |ui| {
             let new = sheets.last().copied().unwrap_or(1) + 1;
             for s in sheets.iter().copied().chain([new]) {
-                if s != current && ui.button(format!("Плата {s}")).clicked() {
+                if s != current && ui.button(crate::i18n::fmt("Плата {0}", &[&s])).clicked() {
                     move_to = Some(s);
                 }
             }
         });
         ui.separator();
-        if ui.button("Удалить").clicked() {
+        if ui.button(crate::i18n::tr("Удалить")).clicked() {
             delete = true;
         }
     });
@@ -1995,14 +2075,21 @@ fn block_context_menu(app: &mut EditorApp, id: &str, resp: &egui::Response) {
     if let Some(sheet) = move_to {
         let lib = app.lib.clone();
         if let Some(doc) = &mut app.doc {
-            if let Some(&pos) = doc.project.layout.blocks.get(id) {
-                let _ = doc.edit(&lib, None, |p| p.move_block(id, BlockPos { sheet, ..pos }));
-            }
+            let _ = doc.edit(&lib, None, |p| {
+                for b in &group {
+                    if let Some(&pos) = p.layout.blocks.get(b) {
+                        p.move_block(b, BlockPos { sheet, ..pos })?;
+                    }
+                }
+                Ok::<_, flp_core::EditError>(())
+            });
         }
         app.extra_sheets.insert(sheet);
     }
     if delete {
-        app.select(Some(Selection::Block(id.to_owned())));
+        if group.len() == 1 {
+            app.select(Some(Selection::Block(id.to_owned())));
+        }
         app.delete_selection();
     }
 }

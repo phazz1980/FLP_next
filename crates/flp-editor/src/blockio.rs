@@ -62,7 +62,10 @@ pub fn add_files(app: &mut EditorApp, paths: &[PathBuf]) {
                     replace: false,
                 });
             }
-            Err(e) => app.info(LogLevel::Error, format!("Набор не прочитан: {e}")),
+            Err(e) => app.info(
+                LogLevel::Error,
+                crate::i18n::fmt("Набор не прочитан: {0}", &[&e]),
+            ),
         }
     }
 }
@@ -70,8 +73,8 @@ pub fn add_files(app: &mut EditorApp, paths: &[PathBuf]) {
 /// «Набор из файла…»: choose a pack file.
 pub fn pick_files(app: &mut EditorApp) {
     let paths = rfd::FileDialog::new()
-        .set_title("Импорт набора блоков")
-        .add_filter("Набор блоков FLP", &[pack::EXTENSION])
+        .set_title(crate::i18n::tr("Импорт набора блоков"))
+        .add_filter(crate::i18n::tr("Набор блоков FLP"), &[pack::EXTENSION])
         .pick_files();
     if let Some(paths) = paths {
         add_files(app, &paths);
@@ -81,8 +84,8 @@ pub fn pick_files(app: &mut EditorApp) {
 /// «Из проекта…»: offer the user blocks packed in a project file.
 pub fn pick_project(app: &mut EditorApp) {
     let Some(path) = rfd::FileDialog::new()
-        .set_title("Блоки из проекта")
-        .add_filter("Проект FLP", &["flpn"])
+        .set_title(crate::i18n::tr("Блоки из проекта"))
+        .add_filter(crate::i18n::tr("Проект FLP"), &["flpn"])
         .pick_file()
     else {
         return;
@@ -91,7 +94,10 @@ pub fn pick_project(app: &mut EditorApp) {
     if blocks.is_empty() {
         app.info(
             LogLevel::Warning,
-            format!("В проекте {} нет пользовательских блоков", name_of(&path)),
+            crate::i18n::fmt(
+                "В проекте {0} нет пользовательских блоков",
+                &[&name_of(&path)],
+            ),
         );
     }
     for block in blocks {
@@ -123,9 +129,9 @@ pub fn export_pack(app: &mut EditorApp, folder: &str) {
         return;
     };
     let Some(dest) = rfd::FileDialog::new()
-        .set_title("Экспорт набора блоков")
+        .set_title(crate::i18n::tr("Экспорт набора блоков"))
         .set_file_name(format!("{folder}.{}", pack::EXTENSION))
-        .add_filter("Набор блоков FLP", &[pack::EXTENSION])
+        .add_filter(crate::i18n::tr("Набор блоков FLP"), &[pack::EXTENSION])
         .save_file()
     else {
         return;
@@ -133,9 +139,12 @@ pub fn export_pack(app: &mut EditorApp, folder: &str) {
     match pack::export_pack(&user_dir, folder, &dest) {
         Ok(()) => app.info(
             LogLevel::Ok,
-            format!("Набор «{folder}» сохранён в {}", dest.display()),
+            crate::i18n::fmt("Набор «{0}» сохранён в {1}", &[&folder, &dest.display()]),
         ),
-        Err(e) => app.info(LogLevel::Error, format!("Набор не экспортирован: {e}")),
+        Err(e) => app.info(
+            LogLevel::Error,
+            crate::i18n::fmt("Набор не экспортирован: {0}", &[&e]),
+        ),
     }
 }
 
@@ -146,7 +155,10 @@ pub fn open_example(app: &mut EditorApp, kind: &str) {
     };
     let src = block.dir.join(blockfile::EXAMPLE_FILE);
     if !src.is_file() {
-        app.info(LogLevel::Warning, format!("У блока «{kind}» нет примера"));
+        app.info(
+            LogLevel::Warning,
+            crate::i18n::fmt("У блока «{0}» нет примера", &[&kind]),
+        );
         return;
     }
     let dir = std::env::temp_dir().join("flp_block_examples");
@@ -154,7 +166,10 @@ pub fn open_example(app: &mut EditorApp, kind: &str) {
     let copied = std::fs::create_dir_all(&dir).and_then(|()| std::fs::copy(&src, &dest));
     match copied {
         Ok(_) => app.request_open(dest),
-        Err(e) => app.info(LogLevel::Error, format!("Пример не открыт: {e}")),
+        Err(e) => app.info(
+            LogLevel::Error,
+            crate::i18n::fmt("Пример не открыт: {0}", &[&e]),
+        ),
     }
 }
 
@@ -169,7 +184,7 @@ pub fn window(app: &mut EditorApp, ctx: &egui::Context) {
     let conflicts: Vec<Conflict> = entries.iter().map(|e| e.block.conflict(&app.lib)).collect();
     let mut answer = None;
     egui::Modal::new(Id::unique("block_import")).show(ctx, |ui| {
-        ui.label(RichText::new("Импорт блоков").strong());
+        ui.label(RichText::new(crate::i18n::tr("Импорт блоков")).strong());
         ui.add_space(4.0);
         for (e, conflict) in entries.iter_mut().zip(&conflicts) {
             ui.horizontal(|ui| {
@@ -193,27 +208,31 @@ pub fn window(app: &mut EditorApp, ctx: &egui::Context) {
                 match conflict {
                     Conflict::None => {}
                     Conflict::Builtin => {
-                        ui.colored_label(warn, "Тип занят встроенным блоком — импорт невозможен");
+                        ui.colored_label(
+                            warn,
+                            crate::i18n::tr("Тип занят встроенным блоком — импорт невозможен"),
+                        );
                     }
                     Conflict::User(have) => {
                         ui.colored_label(
                             warn,
-                            format!(
-                                "Такой блок уже есть (версия {have}, в файле {}).",
-                                e.block.def.info.version
+                            crate::i18n::fmt(
+                                "Такой блок уже есть (версия {0}, в файле {1}).",
+                                &[&have, &e.block.def.info.version],
                             ),
                         );
-                        ui.checkbox(&mut e.replace, "Заменить существующий");
+                        ui.checkbox(&mut e.replace, crate::i18n::tr("Заменить существующий"));
                     }
                 }
             });
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.button("Импортировать").clicked() {
+            if ui.button(crate::i18n::tr("Импортировать")).clicked() {
                 answer = Some(true);
             }
-            if ui.button("Отмена").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape))
+            if ui.button(crate::i18n::tr("Отмена")).clicked()
+                || ui.input(|i| i.key_pressed(egui::Key::Escape))
             {
                 answer = Some(false);
             }
@@ -228,7 +247,10 @@ pub fn window(app: &mut EditorApp, ctx: &egui::Context) {
 
 fn install(app: &mut EditorApp, entries: &[Entry], conflicts: &[Conflict]) {
     let Some(user_dir) = app.user_lib_dir() else {
-        app.info(LogLevel::Error, "Нет папки библиотеки блоков");
+        app.info(
+            LogLevel::Error,
+            crate::i18n::tr("Нет папки библиотеки блоков"),
+        );
         return;
     };
     let mut done = false;
@@ -240,7 +262,7 @@ fn install(app: &mut EditorApp, entries: &[Entry], conflicts: &[Conflict]) {
         if matches!(conflict, Conflict::User(_)) && !e.replace {
             app.info(
                 LogLevel::Warning,
-                format!("Блок «{name}» оставлен как был (замена не выбрана)"),
+                crate::i18n::fmt("Блок «{0}» оставлен как был (замена не выбрана)", &[&name]),
             );
             continue;
         }
@@ -249,12 +271,12 @@ fn install(app: &mut EditorApp, entries: &[Entry], conflicts: &[Conflict]) {
                 done = true;
                 app.info(
                     LogLevel::Ok,
-                    format!("Блок «{name}» установлен в {}", dir.display()),
+                    crate::i18n::fmt("Блок «{0}» установлен в {1}", &[&name, &dir.display()]),
                 );
             }
             Err(err) => app.info(
                 LogLevel::Error,
-                format!("Блок «{name}» не установлен: {err}"),
+                crate::i18n::fmt("Блок «{0}» не установлен: {1}", &[&name, &err]),
             ),
         }
     }
@@ -276,45 +298,56 @@ fn pack_window(app: &mut EditorApp, ctx: &egui::Context) {
     let kinds = entry.pack.kinds();
     let mut answer = None;
     egui::Modal::new(Id::unique("pack_import")).show(ctx, |ui| {
-        ui.label(RichText::new(format!("Набор «{}»", info.name)).strong());
-        ui.weak(format!("версия {} · файл {}", info.version, entry.source));
+        ui.label(RichText::new(crate::i18n::fmt("Набор «{0}»", &[&info.name])).strong());
+        ui.weak(crate::i18n::fmt(
+            "версия {0} · файл {1}",
+            &[&info.version, &entry.source],
+        ));
         if !info.description.is_empty() {
             ui.label(&info.description);
         }
         pack_credits(ui, &info);
-        ui.label(format!("Блоков: {} ({})", kinds.len(), kinds.join(", ")));
+        ui.label(crate::i18n::fmt(
+            "Блоков: {0} ({1})",
+            &[&kinds.len(), &kinds.join(", ")],
+        ));
         match status {
             PackImport::New => {}
             PackImport::Update(have) => {
                 ui.colored_label(
                     warn,
-                    format!(
-                        "Набор уже есть (версия {have}): он будет заменён целиком, \
-                         блоки, которых нет в файле, пропадут."
+                    crate::i18n::fmt(
+                        "Набор уже есть (версия {0}): он будет заменён целиком, \
+                         блоки, которых нет в файле, пропадут.",
+                        &[&have],
                     ),
                 );
             }
             PackImport::NotNewer(have) => {
                 ui.colored_label(
                     warn,
-                    format!(
-                        "Установлен набор той же или более новой версии ({have}, в файле {}).",
-                        info.version
+                    crate::i18n::fmt(
+                        "Установлен набор той же или более новой версии ({0}, в файле {1}).",
+                        &[&have, &info.version],
                     ),
                 );
-                ui.checkbox(&mut entry.replace, "Всё равно заменить целиком");
+                ui.checkbox(
+                    &mut entry.replace,
+                    crate::i18n::tr("Всё равно заменить целиком"),
+                );
             }
         }
         ui.add_space(6.0);
         let allowed = !matches!(status, PackImport::NotNewer(_)) || entry.replace;
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(allowed, egui::Button::new("Установить"))
+                .add_enabled(allowed, egui::Button::new(crate::i18n::tr("Установить")))
                 .clicked()
             {
                 answer = Some(true);
             }
-            if ui.button("Отмена").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape))
+            if ui.button(crate::i18n::tr("Отмена")).clicked()
+                || ui.input(|i| i.key_pressed(egui::Key::Escape))
             {
                 answer = Some(false);
             }
@@ -325,17 +358,23 @@ fn pack_window(app: &mut EditorApp, ctx: &egui::Context) {
         Some(false) => {}
         Some(true) => {
             let Some(user_dir) = app.user_lib_dir() else {
-                app.info(LogLevel::Error, "Нет папки библиотеки блоков");
+                app.info(
+                    LogLevel::Error,
+                    crate::i18n::tr("Нет папки библиотеки блоков"),
+                );
                 return;
             };
             match entry.pack.install(&user_dir, &app.lib) {
                 Ok(_) => {
-                    app.info(LogLevel::Ok, format!("Набор «{}» установлен", info.name));
+                    app.info(
+                        LogLevel::Ok,
+                        crate::i18n::fmt("Набор «{0}» установлен", &[&info.name]),
+                    );
                     app.reload_library();
                 }
                 Err(e) => app.info(
                     LogLevel::Error,
-                    format!("Набор «{}» не установлен: {e}", info.name),
+                    crate::i18n::fmt("Набор «{0}» не установлен: {1}", &[&info.name, &e]),
                 ),
             }
         }
@@ -345,17 +384,17 @@ fn pack_window(app: &mut EditorApp, ctx: &egui::Context) {
 /// Authors, contacts (as links) and license of a pack.
 pub fn pack_credits(ui: &mut egui::Ui, info: &pack::PackInfo) {
     if !info.authors.is_empty() {
-        ui.label(format!("Автор: {}", info.authors.join(", ")));
+        ui.label(crate::i18n::fmt("Автор: {0}", &[&info.authors.join(", ")]));
     }
     if !info.contacts.is_empty() {
         ui.horizontal_wrapped(|ui| {
-            ui.label("Контакты:");
+            ui.label(crate::i18n::tr("Контакты:"));
             for c in &info.contacts {
                 ui.hyperlink_to(c, pack::contact_url(c));
             }
         });
     }
     if !info.license.is_empty() {
-        ui.label(format!("Лицензия: {}", info.license));
+        ui.label(crate::i18n::fmt("Лицензия: {0}", &[&info.license]));
     }
 }

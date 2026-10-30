@@ -1,0 +1,7 @@
+[project]
+name = "kc868_a6_relays"
+description = "Kincony KC868-A6: входы X1–X6 включают реле K1–K6 (не проверено на железе)"
+
+[board]
+fqbn = "esp32:esp32:esp32"
+model = "kincony_kc868_a6"   # плата лежит рядом, в user_boards/

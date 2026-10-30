@@ -1,0 +1,172 @@
+[block]
+type = "pcf8574_out"
+name = "PCF8574: выходы"
+symbol = "PCF8574"
+group = "Расширители"
+description = "Восемь дискретных выходов на микросхеме PCF8574 или PCF8574A (шина I²C), например реле плат Kincony."
+includes = ["Wire.h"]
+
+[[input]]
+name = "p0"
+type = "bool"
+default = false
+description = "Вывод P0 микросхемы"
+
+[[input]]
+name = "p1"
+type = "bool"
+when = "count > 1"
+default = false
+description = "Вывод P1 микросхемы"
+
+[[input]]
+name = "p2"
+type = "bool"
+when = "count > 2"
+default = false
+description = "Вывод P2 микросхемы"
+
+[[input]]
+name = "p3"
+type = "bool"
+when = "count > 3"
+default = false
+description = "Вывод P3 микросхемы"
+
+[[input]]
+name = "p4"
+type = "bool"
+when = "count > 4"
+default = false
+description = "Вывод P4 микросхемы"
+
+[[input]]
+name = "p5"
+type = "bool"
+when = "count > 5"
+default = false
+description = "Вывод P5 микросхемы"
+
+[[input]]
+name = "p6"
+type = "bool"
+when = "count > 6"
+default = false
+description = "Вывод P6 микросхемы"
+
+[[input]]
+name = "p7"
+type = "bool"
+when = "count > 7"
+default = false
+description = "Вывод P7 микросхемы"
+
+[[output]]
+name = "ok"
+type = "bool"
+description = "true, если микросхема ответила на последнюю запись"
+
+[[param]]
+name = "address"
+label = "Адрес I²C"
+type = "int"
+default = 32
+description = "Адрес микросхемы на шине I²C; задаётся перемычками A0–A2"
+
+[[param.choice]]
+value = 32
+label = "0x20 (PCF8574, A2 A1 A0 = 000)"
+
+[[param.choice]]
+value = 33
+label = "0x21 (PCF8574, A2 A1 A0 = 001)"
+
+[[param.choice]]
+value = 34
+label = "0x22 (PCF8574, A2 A1 A0 = 010)"
+
+[[param.choice]]
+value = 35
+label = "0x23 (PCF8574, A2 A1 A0 = 011)"
+
+[[param.choice]]
+value = 36
+label = "0x24 (PCF8574, A2 A1 A0 = 100)"
+
+[[param.choice]]
+value = 37
+label = "0x25 (PCF8574, A2 A1 A0 = 101)"
+
+[[param.choice]]
+value = 38
+label = "0x26 (PCF8574, A2 A1 A0 = 110)"
+
+[[param.choice]]
+value = 39
+label = "0x27 (PCF8574, A2 A1 A0 = 111)"
+
+[[param.choice]]
+value = 56
+label = "0x38 (PCF8574A, A2 A1 A0 = 000)"
+
+[[param.choice]]
+value = 57
+label = "0x39 (PCF8574A, A2 A1 A0 = 001)"
+
+[[param.choice]]
+value = 58
+label = "0x3A (PCF8574A, A2 A1 A0 = 010)"
+
+[[param.choice]]
+value = 59
+label = "0x3B (PCF8574A, A2 A1 A0 = 011)"
+
+[[param.choice]]
+value = 60
+label = "0x3C (PCF8574A, A2 A1 A0 = 100)"
+
+[[param.choice]]
+value = 61
+label = "0x3D (PCF8574A, A2 A1 A0 = 101)"
+
+[[param.choice]]
+value = 62
+label = "0x3E (PCF8574A, A2 A1 A0 = 110)"
+
+[[param.choice]]
+value = 63
+label = "0x3F (PCF8574A, A2 A1 A0 = 111)"
+
+[[param]]
+name = "sda"
+label = "Вывод SDA"
+type = "pin"
+default = -1
+min = -1
+bus = "i2c-sda"
+description = "Вывод линии SDA; -1 — выводы I²C по умолчанию для платы"
+
+[[param]]
+name = "scl"
+label = "Вывод SCL"
+type = "pin"
+default = -1
+min = -1
+bus = "i2c-scl"
+description = "Вывод линии SCL; -1 — выводы I²C по умолчанию для платы"
+
+[[param]]
+name = "inverted"
+label = "Инверсия"
+type = "bool"
+default = false
+description = "Инвертировать выходы: true на входе даёт низкий уровень на выводе (реле, включаемые нулём)"
+
+[[param]]
+name = "count"
+label = "Число каналов"
+type = "int"
+default = 8
+min = 1
+max = 8
+description = "Сколько выводов микросхемы используется: лишние порты блока скрываются"

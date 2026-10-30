@@ -24,7 +24,7 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
         return;
     };
     let mut open = true;
-    egui::Window::new("Настройка темы")
+    egui::Window::new(crate::i18n::tr("Настройка темы"))
         .open(&mut open)
         .collapsible(false)
         .resizable(true)
@@ -41,7 +41,7 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
 fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut ThemeEditor) {
     let ctx = ui.ctx().clone();
     ui.horizontal(|ui| {
-        ui.label("Тема");
+        ui.label(crate::i18n::tr("Тема"));
         let mut chosen = None;
         egui::ComboBox::from_id_salt("theme_pick")
             .selected_text(&ed.original.name)
@@ -49,7 +49,7 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut ThemeEditor) {
             .show_ui(ui, |ui| {
                 for t in &app.themes {
                     let label = if t.builtin {
-                        format!("{} (встроенная)", t.name)
+                        crate::i18n::fmt("{0} (встроенная)", &[&t.name])
                     } else {
                         t.name.clone()
                     };
@@ -69,14 +69,17 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut ThemeEditor) {
 
     let builtin = app.theme.builtin;
     ui.horizontal(|ui| {
-        ui.label("Название");
+        ui.label(crate::i18n::tr("Название"));
         ui.add_enabled(
             !builtin,
             egui::TextEdit::singleline(&mut app.theme.name).desired_width(180.0),
         );
         let mut dark = app.theme.dark;
         if ui
-            .add_enabled(!builtin, egui::Checkbox::new(&mut dark, "Тёмная основа"))
+            .add_enabled(
+                !builtin,
+                egui::Checkbox::new(&mut dark, crate::i18n::tr("Тёмная основа")),
+            )
             .changed()
         {
             app.theme.dark = dark;
@@ -86,34 +89,42 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut ThemeEditor) {
 
     ui.horizontal(|ui| {
         if ui
-            .button("Создать копию")
-            .on_hover_text("Новая своя тема на основе текущей")
+            .button(crate::i18n::tr("Создать копию"))
+            .on_hover_text(crate::i18n::tr("Новая своя тема на основе текущей"))
             .clicked()
         {
             copy(app, ed, &ctx);
         }
         let changed = app.theme != ed.original;
         if ui
-            .add_enabled(!builtin && changed, egui::Button::new("Сохранить"))
+            .add_enabled(
+                !builtin && changed,
+                egui::Button::new(crate::i18n::tr("Сохранить")),
+            )
             .clicked()
         {
             save(app, ed);
         }
         if ui
-            .add_enabled(changed, egui::Button::new("Отменить правки"))
+            .add_enabled(
+                changed,
+                egui::Button::new(crate::i18n::tr("Отменить правки")),
+            )
             .clicked()
         {
             app.set_theme(&ctx, ed.original.clone());
         }
         if ui
-            .add_enabled(!builtin, egui::Button::new("Удалить"))
+            .add_enabled(!builtin, egui::Button::new(crate::i18n::tr("Удалить")))
             .clicked()
         {
             delete(app, ed, &ctx);
         }
     });
     if builtin {
-        ui.weak("Встроенную тему менять нельзя — создайте копию.");
+        ui.weak(crate::i18n::tr(
+            "Встроенную тему менять нельзя — создайте копию.",
+        ));
     }
     ui.separator();
 
@@ -149,10 +160,10 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut ThemeEditor) {
 
 fn unique_name(app: &EditorApp, base: &str) -> String {
     let taken = |n: &str| app.themes.iter().any(|t| t.name == n);
-    let mut name = format!("{base} (копия)");
+    let mut name = crate::i18n::fmt("{0} (копия)", &[&base]);
     let mut i = 2;
     while taken(&name) {
-        name = format!("{base} (копия {i})");
+        name = crate::i18n::fmt("{0} (копия {1})", &[&base, &i]);
         i += 1;
     }
     name
@@ -163,7 +174,10 @@ fn copy(app: &mut EditorApp, ed: &mut ThemeEditor, ctx: &egui::Context) {
     t.name = unique_name(app, &t.name);
     t.builtin = false;
     if let Err(e) = theme::save(&t) {
-        app.info(LogLevel::Error, format!("Тема не сохранена: {e}"));
+        app.info(
+            LogLevel::Error,
+            crate::i18n::fmt("Тема не сохранена: {0}", &[&e]),
+        );
         return;
     }
     app.themes = theme::load_all();
@@ -174,11 +188,17 @@ fn copy(app: &mut EditorApp, ed: &mut ThemeEditor, ctx: &egui::Context) {
 fn save(app: &mut EditorApp, ed: &mut ThemeEditor) {
     let name = app.theme.name.trim().to_owned();
     if name.is_empty() {
-        app.info(LogLevel::Error, "У темы должно быть название");
+        app.info(
+            LogLevel::Error,
+            crate::i18n::tr("У темы должно быть название"),
+        );
         return;
     }
     if name != ed.original.name && app.themes.iter().any(|t| t.name == name) {
-        app.info(LogLevel::Error, format!("Тема «{name}» уже есть"));
+        app.info(
+            LogLevel::Error,
+            crate::i18n::fmt("Тема «{0}» уже есть", &[&name]),
+        );
         return;
     }
     app.theme.name = name;
@@ -196,16 +216,22 @@ fn save(app: &mut EditorApp, ed: &mut ThemeEditor) {
             theme::save_choice(&app.theme.name);
             app.info(
                 LogLevel::Info,
-                format!("Тема «{}» сохранена", app.theme.name),
+                crate::i18n::fmt("Тема «{0}» сохранена", &[&app.theme.name]),
             );
         }
-        Err(e) => app.info(LogLevel::Error, format!("Тема не сохранена: {e}")),
+        Err(e) => app.info(
+            LogLevel::Error,
+            crate::i18n::fmt("Тема не сохранена: {0}", &[&e]),
+        ),
     }
 }
 
 fn delete(app: &mut EditorApp, ed: &mut ThemeEditor, ctx: &egui::Context) {
     if let Err(e) = theme::remove(&ed.original.name) {
-        app.info(LogLevel::Error, format!("Тема не удалена: {e}"));
+        app.info(
+            LogLevel::Error,
+            crate::i18n::fmt("Тема не удалена: {0}", &[&e]),
+        );
         return;
     }
     app.themes = theme::load_all();

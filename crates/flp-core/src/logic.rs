@@ -13,6 +13,8 @@ use crate::ParamValue;
 pub struct Logic {
     #[serde(rename = "var", default, skip_serializing_if = "Vec::is_empty")]
     pub vars: Vec<crate::vars::Var>,
+    #[serde(rename = "expander", default, skip_serializing_if = "Vec::is_empty")]
+    pub expanders: Vec<crate::expander::Expander>,
     #[serde(rename = "block", default, skip_serializing_if = "Vec::is_empty")]
     pub blocks: Vec<Block>,
     #[serde(rename = "link", default, skip_serializing_if = "Vec::is_empty")]
@@ -33,6 +35,14 @@ pub struct Block {
     /// Library block type (`analog_in`, `timer_on`).
     #[serde(rename = "type")]
     pub kind: String,
+    /// Copy of a tag (a block with a board pin) placed once more on a sheet: id of
+    /// the tag. Type, parameters and expander repeat the tag's, see [`crate::tags`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// Expander whose pin the block stands on: `pin` is then the pin number on that
+    /// chip, not a GPIO. See [`crate::expander`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expander: Option<String>,
     /// Constants on inputs without a link: port → value.
     #[serde(rename = "const", default, skip_serializing_if = "BTreeMap::is_empty")]
     pub consts: BTreeMap<String, ParamValue>,

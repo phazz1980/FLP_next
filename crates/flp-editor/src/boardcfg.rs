@@ -10,12 +10,12 @@ use std::thread;
 
 use eframe::egui::{self, RichText, Ui};
 use flp_build::{ArduinoCli, BoardMenu, SerialPort};
-use flp_core::pins::{BoardModel, Chip, BOARD_MODELS};
+use flp_core::pins::{BoardLayout, BoardModel, BOARD_MODELS};
 use flp_core::uart::{chip_uarts, UartConfig, USB_SPEED};
-use flp_core::BoardConfig;
+use flp_core::{BoardConfig, Boards};
 
 /// Common ESP32 boards: FQBN and name.
-const BOARDS: &[(&str, &str)] = &[
+pub(crate) const BOARDS: &[(&str, &str)] = &[
     ("esp32:esp32:esp32", "ESP32 Dev Module"),
     ("esp32:esp32:esp32s2", "ESP32-S2 Dev Module"),
     ("esp32:esp32:esp32s3", "ESP32-S3 Dev Module"),
@@ -25,13 +25,22 @@ const BOARDS: &[(&str, &str)] = &[
     ("esp32:esp32:lolin32", "WEMOS LOLIN32"),
 ];
 
-/// Human-readable board name: its model, the list of common boards, otherwise the last FQBN part.
-pub fn board_name(board: &BoardConfig) -> &str {
+/// Human-readable board name: its model (built-in or the user's), the list of common
+/// boards, otherwise the last FQBN part.
+pub fn board_name<'a>(board: &'a BoardConfig, boards: &'a Boards) -> &'a str {
     let fqbn = board.fqbn.as_str();
     if let Some(m) = board.model.as_deref().and_then(BoardModel::find) {
         if m.fqbn == fqbn {
             return m.name;
         }
+    }
+    if let Some(b) = board
+        .model
+        .as_deref()
+        .and_then(|id| boards.get(id))
+        .filter(|b| b.def.info.fqbn == fqbn)
+    {
+        return &b.def.info.name;
     }
     BOARDS
         .iter()
@@ -43,8 +52,11 @@ type MenusResult = Result<Vec<BoardMenu>, String>;
 
 pub struct BoardDialog {
     fqbn: String,
-    /// Exact board picked from the list; dropped when the FQBN no longer matches it.
-    model: Option<&'static BoardModel>,
+    /// Id of the exact board picked from the list (built-in model or user board);
+    /// dropped when the FQBN no longer matches it.
+    model: Option<String>,
+    /// User boards: their pin tables, FQBNs and presets.
+    boards: Boards,
     port: String,
     options: BTreeMap<String, String>,
     menus: Vec<BoardMenu>,
@@ -58,6 +70,9 @@ pub struct BoardDialog {
     users: Vec<(u8, String)>,
     /// UARTs set up by a settings block on a sheet: (number, block id).
     from_blocks: Vec<(u8, String)>,
+    /// The user asked for the board editor: `Some(None)` — a new board, `Some(Some(id))` —
+    /// the board `id`. The caller takes it with [`BoardDialog::take_editor_request`].
+    editor_request: Option<Option<String>>,
 }
 
 /// Speeds offered for a UART; any other can be typed.
@@ -72,14 +87,17 @@ impl BoardDialog {
         uarts: &[UartConfig],
         users: Vec<(u8, String)>,
         from_blocks: Vec<(u8, String)>,
+        boards: &Boards,
         ctx: &egui::Context,
     ) -> Self {
         let mut d = Self {
             uarts: uarts.to_vec(),
             users,
             from_blocks,
+            editor_request: None,
             fqbn: board.fqbn.clone(),
-            model: board.model.as_deref().and_then(BoardModel::find),
+            model: board.model.clone(),
+            boards: boards.clone(),
             port: board.port.clone().unwrap_or_default(),
             options: board.options.clone(),
             menus: Vec::new(),
@@ -128,8 +146,9 @@ impl BoardDialog {
     pub fn config(&self) -> Result<BoardConfig, String> {
         let fqbn = self.fqbn.trim();
         if fqbn.split(':').count() < 3 {
-            return Err(format!(
-                "неверное имя платы «{fqbn}»: ожидается вид пакет:архитектура:плата"
+            return Err(crate::i18n::fmt(
+                "неверное имя платы «{0}»: ожидается вид пакет:архитектура:плата",
+                &[&fqbn],
             ));
         }
         let port = self.port.trim();
@@ -148,14 +167,32 @@ impl BoardDialog {
             .collect();
         let model = self
             .model
-            .filter(|m| m.fqbn == fqbn)
-            .map(|m| m.id.to_owned());
+            .clone()
+            .filter(|id| self.model_fqbn(id) == Some(fqbn));
         Ok(BoardConfig {
             fqbn: fqbn.to_owned(),
             model,
             port: (!port.is_empty()).then(|| port.to_owned()),
             options,
         })
+    }
+
+    /// FQBN of a board model: built-in or user.
+    fn model_fqbn(&self, id: &str) -> Option<&str> {
+        BoardModel::find(id)
+            .map(|m| m.fqbn)
+            .or_else(|| self.boards.get(id).map(|b| b.def.info.fqbn.as_str()))
+    }
+
+    /// Name of the picked board model, while the FQBN still belongs to it.
+    fn model_title(&self) -> Option<&str> {
+        let id = self.model.as_deref()?;
+        if self.model_fqbn(id)? != self.fqbn.trim() {
+            return None;
+        }
+        BoardModel::find(id)
+            .map(|m| m.name)
+            .or_else(|| self.boards.get(id).map(|b| b.def.info.name.as_str()))
     }
 
     /// `[[uart]]` to write to the project file.
@@ -167,16 +204,14 @@ impl BoardDialog {
 
     fn uart_section(&mut self, ui: &mut Ui) {
         ui.label(RichText::new("UART").strong());
-        ui.weak(format!(
-            "USB — заливка, отладка и монитор порта, {USB_SPEED} бод, без настроек. UART0 у ESP32 занят USB-мостом, у ESP32-C3/S3 — свободный порт."
-        ));
+        ui.weak(crate::i18n::fmt("USB — заливка, отладка и монитор порта, {0} бод, без настроек. UART0 у ESP32 занят USB-мостом, у ESP32-C3/S3 — свободный порт.", &[&USB_SPEED]));
         let board = BoardConfig {
             fqbn: self.fqbn.trim().to_owned(),
-            model: self.model.map(|m| m.id.to_owned()),
+            model: self.model.clone(),
             port: None,
             options: BTreeMap::new(),
         };
-        let chip = Chip::of_board(&board);
+        let chip = BoardLayout::of_board(&board, &self.boards).map(|l| l.chip());
         let mut numbers: Vec<u8> = chip.map_or(vec![1, 2], |c| chip_uarts(c).to_vec());
         // A UART set up for another board stays visible, so it can be switched off.
         for u in &self.uarts {
@@ -189,8 +224,9 @@ impl BoardDialog {
             if let Some((_, id)) = self.from_blocks.iter().find(|(n, _)| *n == number) {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(format!("UART{number}")).strong());
-                    ui.weak(format!(
-                        "настроен блоком «{id}» на схеме — меняйте его свойства"
+                    ui.weak(crate::i18n::fmt(
+                        "настроен блоком «{0}» на схеме — меняйте его свойства",
+                        &[&id],
                     ));
                 });
                 continue;
@@ -206,10 +242,13 @@ impl BoardDialog {
             ui.horizontal(|ui| {
                 ui.checkbox(&mut on, format!("UART{number}"));
                 if !users.is_empty() {
-                    ui.weak(format!("используют: {}", users.join(", ")));
+                    ui.weak(crate::i18n::fmt("используют: {0}", &[&users.join(", ")]));
                 }
                 if chip.is_some_and(|c| !chip_uarts(c).contains(&number)) {
-                    ui.colored_label(ui.visuals().error_fg_color, "нет на этой плате");
+                    ui.colored_label(
+                        ui.visuals().error_fg_color,
+                        crate::i18n::tr("нет на этой плате"),
+                    );
                 }
             });
             match (on, index) {
@@ -226,58 +265,105 @@ impl BoardDialog {
         }
     }
 
+    /// What the user asked of the board editor since the last call (see the field).
+    pub fn take_editor_request(&mut self) -> Option<Option<String>> {
+        self.editor_request.take()
+    }
+
     pub fn body(&mut self, ui: &mut Ui, ports: &[SerialPort]) {
         self.poll();
         egui::Grid::new("board_main")
             .num_columns(2)
             .spacing([10.0, 6.0])
             .show(ui, |ui| {
-                ui.label("Плата (FQBN)");
+                ui.label(crate::i18n::tr("Плата (FQBN)"));
                 ui.horizontal(|ui| {
                     let edit =
                         ui.add(egui::TextEdit::singleline(&mut self.fqbn).desired_width(220.0));
                     if edit.lost_focus() {
                         self.load_menus(ui.ctx());
                     }
-                    let mut picked = None;
+                    // (FQBN, board id, presets of a user board)
+                    let mut picked: Option<(String, Option<String>, Option<BTreeMap<_, _>>)> = None;
                     ui.menu_button("▾", |ui| {
                         for (fqbn, name) in BOARDS {
                             if ui.button(*name).on_hover_text(*fqbn).clicked() {
-                                picked = Some((*fqbn, None));
+                                picked = Some(((*fqbn).to_owned(), None, None));
                                 ui.close();
                             }
                         }
                         ui.separator();
                         for m in BOARD_MODELS {
                             if ui.button(m.name).on_hover_text(m.fqbn).clicked() {
-                                picked = Some((m.fqbn, Some(m)));
+                                picked = Some((m.fqbn.to_owned(), Some(m.id.to_owned()), None));
                                 ui.close();
                             }
                         }
+                        if !self.boards.is_empty() {
+                            ui.separator();
+                            for b in self.boards.iter() {
+                                let info = &b.def.info;
+                                if ui.button(&info.name).on_hover_text(&info.fqbn).clicked() {
+                                    picked = Some((
+                                        info.fqbn.clone(),
+                                        Some(info.id.clone()),
+                                        Some(info.options.clone()),
+                                    ));
+                                    ui.close();
+                                }
+                            }
+                        }
                     });
-                    if let Some((fqbn, model)) = picked {
+                    if let Some((fqbn, model, presets)) = picked {
                         if self.fqbn != fqbn {
-                            self.fqbn = fqbn.to_owned();
+                            self.fqbn = fqbn;
                             self.options.clear();
+                        }
+                        if let Some(presets) = presets {
+                            self.options = presets;
                         }
                         self.model = model;
                         self.load_menus(ui.ctx());
                     }
-                    if let Some(m) = self.model.filter(|m| m.fqbn == self.fqbn.trim()) {
-                        ui.label(RichText::new(m.name).weak());
+                    if let Some(name) = self.model_title() {
+                        ui.label(RichText::new(name).weak());
+                    }
+                    let user_board = self
+                        .model
+                        .clone()
+                        .filter(|id| self.model_title().is_some() && self.boards.get(id).is_some());
+                    if let Some(id) = user_board {
+                        if ui
+                            .small_button(crate::i18n::tr("Изменить плату..."))
+                            .on_hover_text(crate::i18n::tr(
+                                "Выводы, периферия и описание этой платы",
+                            ))
+                            .clicked()
+                        {
+                            self.editor_request = Some(Some(id));
+                        }
+                    }
+                    if ui
+                        .small_button(crate::i18n::tr("Новая плата..."))
+                        .on_hover_text(crate::i18n::tr(
+                            "Описать свою плату: выводы, периферию, схемы",
+                        ))
+                        .clicked()
+                    {
+                        self.editor_request = Some(None);
                     }
                 });
                 ui.end_row();
 
-                ui.label("Порт");
+                ui.label(crate::i18n::tr("Порт"));
                 egui::ComboBox::from_id_salt("board_port")
                     .selected_text(if self.port.is_empty() {
-                        "авто"
+                        crate::i18n::tr("авто")
                     } else {
                         self.port.as_str()
                     })
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.port, String::new(), "авто");
+                        ui.selectable_value(&mut self.port, String::new(), crate::i18n::tr("авто"));
                         for p in ports {
                             ui.selectable_value(
                                 &mut self.port,
@@ -293,18 +379,18 @@ impl BoardDialog {
         self.uart_section(ui);
 
         ui.separator();
-        ui.label(RichText::new("Параметры прошивки").strong());
+        ui.label(RichText::new(crate::i18n::tr("Параметры прошивки")).strong());
         if self.loading.is_some() {
             ui.horizontal(|ui| {
                 crate::panels::busy(ui);
-                ui.label("Читаю параметры платы из arduino-cli...");
+                ui.label(crate::i18n::tr("Читаю параметры платы из arduino-cli..."));
             });
             return;
         }
         if let Some(e) = &self.error {
             ui.colored_label(ui.visuals().error_fg_color, e);
             if !self.options.is_empty() {
-                ui.label("Заданные параметры сохранятся как есть:");
+                ui.label(crate::i18n::tr("Заданные параметры сохранятся как есть:"));
                 for (k, v) in &self.options {
                     ui.monospace(format!("{k} = {v}"));
                 }
@@ -325,7 +411,10 @@ impl BoardDialog {
                         }
                     });
             });
-        if ui.button("Сбросить по умолчанию").clicked() {
+        if ui
+            .button(crate::i18n::tr("Сбросить по умолчанию"))
+            .clicked()
+        {
             self.options.clear();
         }
     }
@@ -382,7 +471,7 @@ fn uart_grid(ui: &mut Ui, u: &mut UartConfig) {
         .num_columns(2)
         .spacing([10.0, 4.0])
         .show(ui, |ui| {
-            ui.label("Скорость, бод");
+            ui.label(crate::i18n::tr("Скорость, бод"));
             ui.horizontal(|ui| {
                 egui::ComboBox::from_id_salt(("uart_speed", id))
                     .selected_text(u.speed.to_string())
@@ -395,7 +484,7 @@ fn uart_grid(ui: &mut Ui, u: &mut UartConfig) {
             });
             ui.end_row();
 
-            ui.label("Формат");
+            ui.label(crate::i18n::tr("Формат"));
             egui::ComboBox::from_id_salt(("uart_format", id))
                 .selected_text(u.format.as_str())
                 .show_ui(ui, |ui| {
@@ -404,13 +493,27 @@ fn uart_grid(ui: &mut Ui, u: &mut UartConfig) {
                     }
                 })
                 .response
-                .on_hover_text("биты данных, чётность (N — нет, E — чёт, O — нечет), стоп-биты");
+                .on_hover_text(crate::i18n::tr(
+                    "биты данных, чётность (N — нет, E — чёт, O — нечет), стоп-биты",
+                ));
             ui.end_row();
 
             for (label, pin, hint) in [
-                ("RX", &mut u.rx, "-1 — вывод ядра Arduino по умолчанию"),
-                ("TX", &mut u.tx, "-1 — вывод ядра Arduino по умолчанию"),
-                ("DE/RE (RS-485)", &mut u.de, "-1 — без RS-485"),
+                (
+                    "RX",
+                    &mut u.rx,
+                    crate::i18n::tr("-1 — вывод ядра Arduino по умолчанию"),
+                ),
+                (
+                    "TX",
+                    &mut u.tx,
+                    crate::i18n::tr("-1 — вывод ядра Arduino по умолчанию"),
+                ),
+                (
+                    "DE/RE (RS-485)",
+                    &mut u.de,
+                    crate::i18n::tr("-1 — без RS-485"),
+                ),
             ] {
                 ui.label(label);
                 ui.add(egui::DragValue::new(pin).range(-1..=48).prefix("GPIO "))
@@ -418,8 +521,78 @@ fn uart_grid(ui: &mut Ui, u: &mut UartConfig) {
                 ui.end_row();
             }
 
-            ui.label("Буфер приёма, байт");
+            ui.label(crate::i18n::tr("Буфер приёма, байт"));
             ui.add(egui::DragValue::new(&mut u.rx_buffer).range(64..=8192));
             ui.end_row();
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use flp_core::boards::{BoardDef, BoardInfo};
+    use flp_core::UserBoard;
+
+    use super::*;
+
+    fn boards() -> Boards {
+        let mut boards = Boards::default();
+        boards.insert(UserBoard {
+            def: BoardDef {
+                info: BoardInfo {
+                    id: "kc868".into(),
+                    name: "KC868".into(),
+                    chip: "esp32".into(),
+                    fqbn: "esp32:esp32:esp32".into(),
+                    version: 1,
+                    options: BTreeMap::new(),
+                },
+                pins: Vec::new(),
+                expander_pins: Vec::new(),
+                devices: Vec::new(),
+            },
+            dir: "kc868".into(),
+        });
+        boards
+    }
+
+    fn project_board(model: Option<&str>) -> BoardConfig {
+        BoardConfig {
+            fqbn: "esp32:esp32:esp32".into(),
+            model: model.map(str::to_owned),
+            port: None,
+            options: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn a_user_board_has_its_name_and_a_stale_model_is_dropped() {
+        let boards = boards();
+        assert_eq!(board_name(&project_board(Some("kc868")), &boards), "KC868");
+        // Another FQBN than the board's: the generic name.
+        let mut other = project_board(Some("kc868"));
+        other.fqbn = "esp32:esp32:esp32s3".into();
+        assert_eq!(board_name(&other, &boards), "ESP32-S3 Dev Module");
+        assert_eq!(
+            board_name(&project_board(None), &boards),
+            "ESP32 Dev Module"
+        );
+
+        // An empty FQBN keeps the dialog from asking arduino-cli for menus.
+        let mut empty = project_board(Some("kc868"));
+        empty.fqbn.clear();
+        let mut dialog = BoardDialog::new(
+            &empty,
+            &[],
+            Vec::new(),
+            Vec::new(),
+            &boards,
+            &egui::Context::default(),
+        );
+        dialog.fqbn = "esp32:esp32:esp32".into();
+        assert_eq!(dialog.model_title(), Some("KC868"));
+        assert_eq!(dialog.config().unwrap().model.as_deref(), Some("kc868"));
+        dialog.fqbn = "esp32:esp32:esp32s3".into();
+        assert_eq!(dialog.model_title(), None);
+        assert_eq!(dialog.config().unwrap().model, None);
+    }
 }

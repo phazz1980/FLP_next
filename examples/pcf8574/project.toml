@@ -1,0 +1,6 @@
+[project]
+name = "pcf8574"
+description = "Входы и выходы на расширителях PCF8574 по шине I²C"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

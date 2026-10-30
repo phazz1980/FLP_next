@@ -37,7 +37,16 @@ impl Backend for ArduinoCpp {
         let tasks = Tasks::new(program)?;
         let mut rendered = Vec::with_capacity(program.blocks.len());
         for inst in &program.blocks {
-            rendered.push((inst, render_block(&env, program, &tasks, inst, self.debug)?));
+            let sections = match inst.block.tag.as_deref() {
+                Some(tag) if !inst.outputs.is_empty() => input_copy(program, &tasks, inst, tag),
+                // A copy of an output writes the pin in its turn; the tag sets it up.
+                Some(_) => Sections {
+                    looped: render_block(&env, program, &tasks, inst, self.debug)?.looped,
+                    ..Default::default()
+                },
+                None => render_block(&env, program, &tasks, inst, self.debug)?,
+            };
+            rendered.push((inst, sections));
         }
         Ok(assemble(program, &tasks, &rendered, self.debug))
     }
@@ -63,7 +72,8 @@ struct Sections {
     looped: String,
     functions: String,
     /// `// @global once`, `// @setup once`, `// @functions once`: shared by all
-    /// instances of the block type; the same text goes into the sketch once.
+    /// instances of the block type (and by other types with the same text); the
+    /// same text goes into the sketch once.
     once_global: String,
     once_setup: String,
     once_functions: String,
@@ -73,6 +83,28 @@ struct Sections {
 }
 
 const SECTION_LIST: &str = "// @defines, // @global, // @setup, // @loop, // @functions";
+
+/// A copy of an input reads nothing itself: it takes the values of its tag, which
+/// runs before it.
+fn input_copy(program: &Program, tasks: &Tasks, inst: &Instance, tag: &str) -> Sections {
+    let source = program.blocks.iter().find(|b| b.block.id == tag);
+    let mut looped = String::new();
+    for (port, &s) in &inst.outputs {
+        let Some(&from) = source.and_then(|b| b.outputs.get(port)) else {
+            continue;
+        };
+        let _ = writeln!(
+            looped,
+            "{} = {};",
+            program.signals[s].name,
+            tasks.read_name(program, inst, from)
+        );
+    }
+    Sections {
+        looped,
+        ..Default::default()
+    }
+}
 
 fn render_block(
     env: &Environment,
@@ -262,7 +294,16 @@ fn render_block(
             input.insert("mode", "flpNet.eff".to_owned());
         }
     }
-    let ctx = context! { id, input, input_type, output, param, value, bound, flag, var, uart };
+    // Pin word names of the expander the block stands on, `none` otherwise.
+    let expander = match inst.block.expander.as_deref() {
+        Some(name) => {
+            let (input, output) = crate::expander::state_names(name);
+            context! { input, output }
+        }
+        None => Value::from(()),
+    };
+    let ctx =
+        context! { id, input, input_type, output, param, value, bound, flag, var, uart, expander };
     let text = env
         .render_named_str(&name, &source, ctx)
         .map_err(|source| GenError::Render {
@@ -591,6 +632,13 @@ fn assemble(
         let _ = writeln!(out, "{line}");
         included.push(line);
     }
+    if let Some(header) = crate::expander::header(program) {
+        let line = format!("#include <{header}>");
+        if !included.contains(&line) {
+            let _ = writeln!(out, "{line}");
+            included.push(line);
+        }
+    }
     // Includes typed by hand in a block template go here, ahead of all declarations.
     for (_, sec) in rendered {
         for line in &sec.includes {
@@ -644,6 +692,7 @@ fn assemble(
         }
     }
     out.push_str(&crate::retain::globals(vars));
+    out.push_str(&crate::expander::globals(program));
 
     for (kind, code) in shared(rendered, |s| &s.once_global) {
         let _ = writeln!(out, "\n{}\n{code}", shared_comment(kind));
@@ -867,7 +916,15 @@ flp_st_bg_end();
         let _ = writeln!(out, "  {}", shared_comment(kind));
         push_indented(&mut out, code.lines().map(str::to_owned));
     }
-    let after_shared = after_restore || !once_setup.is_empty();
+    let expander_setup = crate::expander::setup(program);
+    if !expander_setup.is_empty() {
+        if after_restore || !once_setup.is_empty() {
+            out.push('\n');
+        }
+        out.push_str("  // Расширители: шина и первая запись\n");
+        push_indented(&mut out, expander_setup.iter().cloned());
+    }
+    let after_shared = after_restore || !once_setup.is_empty() || !expander_setup.is_empty();
     let none = |_: &Instance| Vec::new();
     push_function_body(
         &mut out,
@@ -902,8 +959,13 @@ flp_st_bg_end();
             let _ = writeln!(out, "  // Forced variables\n  {}\n", vars.join(" "));
         }
     }
-    let mut take = tasks.gate_prologue();
-    if !take.is_empty() {
+    let mut take = crate::expander::poll(program);
+    let prologue = tasks.gate_prologue();
+    if !prologue.is_empty() {
+        if !take.is_empty() {
+            take.push(String::new());
+        }
+        take.extend(prologue);
         take.push(String::new());
     }
     take.extend(lock(tasks.take(program, false)));
@@ -919,6 +981,11 @@ flp_st_bg_end();
         &|inst| !tasks.is_background(inst),
         &|inst| tasks.gate(program, inst),
     );
+    let flush = crate::expander::flush(program);
+    if !flush.is_empty() {
+        out.push('\n');
+        push_indented(&mut out, flush.into_iter());
+    }
     let publish = lock(tasks.publish(program, false));
     if !publish.is_empty() {
         out.push('\n');
@@ -1001,17 +1068,18 @@ fn push_indented(out: &mut String, lines: impl Iterator<Item = String>) {
     }
 }
 
-/// Non-empty `once` sections, without repeats of the same block type and text,
-/// in order of first use.
+/// Non-empty `once` sections, without repeats of the same text (from one block type
+/// or from several: chips on one I²C bus start `Wire` with the same call), in order
+/// of first use. The block type is the one that came first.
 fn shared<'a>(
     rendered: &'a [(&Instance, Sections)],
     section: fn(&Sections) -> &String,
 ) -> Vec<(&'a str, &'a str)> {
     let mut out: Vec<(&str, &str)> = Vec::new();
     for (inst, sec) in rendered {
-        let item = (inst.block.kind.as_str(), section(sec).as_str());
-        if !item.1.is_empty() && !out.contains(&item) {
-            out.push(item);
+        let text = section(sec).as_str();
+        if !text.is_empty() && !out.iter().any(|(_, seen)| *seen == text) {
+            out.push((inst.block.kind.as_str(), text));
         }
     }
     out

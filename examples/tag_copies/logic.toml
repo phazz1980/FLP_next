@@ -1,0 +1,45 @@
+# Кнопка на GPIO4 и её копия, лампа на GPIO2 и её копия.
+# Копия входа даёт то же значение, что кнопка; копия выхода пишет в тот же вывод,
+# последняя по порядку выполнения побеждает.
+
+[[block]]
+id = "button"
+type = "digital_in"
+pin = 4
+pullup = true
+inverted = true
+
+[[block]]
+id = "button_2"
+type = "digital_in"
+tag = "button"
+pin = 4
+pullup = true
+inverted = true
+
+[[block]]
+id = "lamp"
+type = "digital_out"
+pin = 2
+
+[[block]]
+id = "blink"
+type = "not"
+
+[[block]]
+id = "lamp_2"
+type = "digital_out"
+tag = "lamp"
+pin = 2
+
+[[link]]
+from = "button.out"
+to = "lamp.in"
+
+[[link]]
+from = "button_2.out"
+to = "blink.in"
+
+[[link]]
+from = "blink.out"
+to = "lamp_2.in"

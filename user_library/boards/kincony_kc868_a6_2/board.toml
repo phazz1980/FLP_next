@@ -1,0 +1,227 @@
+[board]
+id = "kincony_kc868_a6_2"
+name = "Kincony KC868-A6 (копия)"
+chip = "esp32"
+fqbn = "esp32:esp32:esp32"
+
+[[pin]]
+gpio = 0
+name = "кнопка"
+note = "кнопка на плате"
+functions = ["din"]
+
+[[pin]]
+gpio = 4
+name = "I2C SDA"
+note = "Шина I²C расширителей PCF8574 (реле и входы)"
+busy = "занят шиной I²C расширителей реле и входов"
+functions = [
+    "din",
+    "dout",
+    "pwm",
+    "adc",
+]
+
+[[pin]]
+gpio = 5
+name = "SPI CS"
+note = "Шина SPI"
+functions = [
+    "din",
+    "dout",
+    "pwm",
+]
+
+[[pin]]
+gpio = 14
+name = "RS485 RX"
+note = "Приём RS-485"
+functions = [
+    "din",
+    "dout",
+    "pwm",
+    "adc",
+]
+
+[[pin]]
+gpio = 15
+name = "I2C SCL"
+note = "Шина I²C расширителей PCF8574 (реле и входы)"
+busy = "занят шиной I²C расширителей реле и входов"
+functions = [
+    "din",
+    "dout",
+    "pwm",
+    "adc",
+]
+
+[[pin]]
+gpio = 18
+name = "SPI CLK"
+note = "Шина SPI"
+functions = [
+    "din",
+    "dout",
+    "pwm",
+]
+
+[[pin]]
+gpio = 19
+name = "SPI MISO"
+note = "Шина SPI"
+functions = [
+    "din",
+    "dout",
+    "pwm",
+]
+
+[[pin]]
+gpio = 23
+name = "SPI MOSI"
+note = "Шина SPI"
+functions = [
+    "din",
+    "dout",
+    "pwm",
+]
+
+[[pin]]
+gpio = 25
+name = "DA2"
+note = "Аналоговый выход DA2 (ЦАП)"
+functions = [
+    "din",
+    "dout",
+    "pwm",
+    "adc",
+    "dac",
+]
+
+[[pin]]
+gpio = 26
+name = "DA1"
+note = "Аналоговый выход DA1 (ЦАП)"
+functions = [
+    "din",
+    "dout",
+    "pwm",
+    "adc",
+    "dac",
+]
+
+[[pin]]
+gpio = 27
+name = "RS485 TX"
+note = "Передача RS-485"
+functions = [
+    "din",
+    "dout",
+    "pwm",
+    "adc",
+]
+
+[[pin]]
+gpio = 32
+name = "IO-1"
+note = "Вывод под датчик: 1-Wire, DHT и другие"
+functions = [
+    "din",
+    "dout",
+    "pwm",
+    "adc",
+]
+
+[[pin]]
+gpio = 33
+name = "IO-2"
+note = "Вывод под датчик: 1-Wire, DHT и другие"
+functions = [
+    "din",
+    "dout",
+    "pwm",
+    "adc",
+]
+
+[[pin]]
+gpio = 34
+name = "A3"
+note = "Аналоговый вход A3"
+functions = [
+    "din",
+    "adc",
+]
+
+[[pin]]
+gpio = 35
+name = "A4"
+note = "Аналоговый вход A4"
+functions = [
+    "din",
+    "adc",
+]
+
+[[pin]]
+gpio = 36
+name = "A1"
+note = "Аналоговый вход A1"
+functions = [
+    "din",
+    "adc",
+]
+
+[[pin]]
+gpio = 39
+name = "A2"
+note = "Аналоговый вход A2"
+functions = [
+    "din",
+    "adc",
+]
+
+[[expander_pin]]
+device = "relays"
+pin = 0
+name = "Реле1"
+functions = ["dout"]
+
+[[expander_pin]]
+device = "relays"
+pin = 1
+name = "Реле2"
+functions = ["dout"]
+
+[[device]]
+id = "relays"
+kind = "pcf8574_out"
+name = "Выходы"
+description = "Реле K1–K6 на PCF8574 (адрес 0x24, шина I²C: SDA = GPIO4, SCL = GPIO15). Не проверено на железе."
+channels = [
+    "K1",
+    "K2",
+    "K3",
+    "K4",
+    "K5",
+    "K6",
+]
+address = 36
+inverted = true
+scl = 15
+sda = 4
+
+[[device]]
+id = "inputs"
+kind = "pcf8574_in"
+name = "Входы"
+description = "Оптоизолированные входы X1–X6 на PCF8574 (адрес 0x22, шина I²C: SDA = GPIO4, SCL = GPIO15). Не проверено на железе."
+channels = [
+    "X1",
+    "X2",
+    "X3",
+    "X4",
+    "X5",
+    "X6",
+]
+address = 34
+inverted = true
+scl = 15
+sda = 4

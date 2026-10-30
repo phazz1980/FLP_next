@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::check::{DiagKind, Report, Severity};
 use crate::library::PinMode;
-use crate::pins::{Chip, PinUse};
+use crate::pins::{BoardLayout, Chip, PinUse};
 use crate::{Library, Logic, ParamValue};
 
 /// Speed of the USB port; equals the debug link speed of `flp-debug`.
@@ -136,6 +136,7 @@ impl UartConfig {
             gpio,
             mode,
             shared: false,
+            bus: String::new(),
         })
         .collect()
     }
@@ -473,7 +474,7 @@ pub fn check_project_uarts(project: &crate::Project, lib: &Library) -> Report {
         &uarts,
         &block_uarts(&project.logic, lib),
         &[],
-        Chip::of_board(&project.config.board),
+        BoardLayout::of_board(&project.config.board, lib.boards()).map(|b| b.chip()),
         &mut report,
     );
     report
@@ -654,6 +655,7 @@ mod tests {
             gpio: 4,
             mode: PinMode::Out,
             shared: false,
+            bus: String::new(),
         }];
         let mut report = Report::default();
         check_uarts(uarts, &blocks, &pins, Some(chip), &mut report);

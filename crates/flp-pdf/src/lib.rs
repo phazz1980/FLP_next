@@ -2,22 +2,22 @@
 //!
 //! The drawing follows the editor canvas (block boxes, variable tags, orthogonal
 //! wires) in a fixed light palette, so the schema can be viewed and printed
-//! without the editor. It is stored in the project archive on every save.
+//! without the editor. Under the drawing of every sheet goes a table of the
+//! parameters of its blocks. The page is written as Typst markup and compiled
+//! by the embedded Typst; it is stored in the project archive on every save.
 
 use std::collections::{BTreeSet, HashMap};
+use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use flp_core::project::BOARDS_PDF;
 use flp_core::vars::{VAR_GET, VAR_SET};
 use flp_core::{
     Block, BlockDef, Library, LocalValues, ParamShow, ParamValue, PortDef, Project, SignalType,
 };
-use printpdf::path::PaintMode;
-use printpdf::{
-    Color, CustomPdfConformance, IndirectFontRef, Line, Mm, PdfConformance, PdfDocument,
-    PdfLayerReference, Point, Polygon, Rect, Rgb,
-};
+use typst_embed::{FontSet, RenderEnvironment, RenderError};
 
 // Geometry in canvas units, the same as in the editor.
 const HEAD_H: f32 = 16.0;
@@ -29,23 +29,44 @@ const SHEET_HEADER: f32 = 40.0;
 const SHEET_MIN_BODY: f32 = 300.0;
 const SHEET_MIN_W: f32 = 1200.0;
 const SHEET_PAD: f32 = 60.0;
-
-/// Millimetres per canvas unit: a minimal sheet fits A4 landscape.
-const MM: f32 = 0.25;
-/// Points per canvas unit, for font sizes.
-const PT: f32 = MM * 72.0 / 25.4;
+/// Width of the parameter table to the right of the drawing.
+const TABLE_W: f32 = 560.0;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PdfError {
-    #[error("не найден шрифт с кириллицей для PDF (искали {0})")]
-    NoFont(String),
-    #[error("не удалось построить PDF: {0}")]
-    Pdf(#[from] printpdf::Error),
+    #[error("Typst не смог построить PDF: {0}")]
+    Typst(String),
 }
+
+/// Typst helpers: one canvas unit is a quarter of a millimetre.
+const PRELUDE: &str = r##"#let u = 0.25mm
+#set text(font: FONTS, lang: "ru")
+#let T(x, y, w, al, sz, c, s) = place(top + left, dx: x * u, dy: (y - sz) * u,
+  box(width: w * u, height: 2 * sz * u, align(al + horizon, text(size: sz * u, fill: rgb(c), s))))
+#let W(c, wd, ..p) = {
+  let p = p.pos()
+  for i in range(p.len() - 1) {
+    place(top + left, line(start: (p.at(i).at(0) * u, p.at(i).at(1) * u),
+      end: (p.at(i + 1).at(0) * u, p.at(i + 1).at(1) * u),
+      stroke: stroke(paint: rgb(c), thickness: wd * u, cap: "round")))
+  }
+}
+#let R(x, y, w, h, f, b) = place(top + left, dx: x * u, dy: y * u,
+  rect(width: w * u, height: h * u, fill: rgb(f), stroke: 0.8 * u + rgb(b)))
+#let D(x, y, r, c) = place(top + left, dx: (x - r) * u, dy: (y - r) * u,
+  circle(radius: r * u, fill: rgb(c), stroke: none))
+"##;
 
 /// Renders every sheet of the project; blocks without coordinates are skipped.
 pub fn render(project: &Project, lib: &Library) -> Result<Vec<u8>, PdfError> {
-    let font_data = load_font()?;
+    let source = source(project, lib);
+    let project = typst_embed::Project::from_source(source);
+    let pdf = typst_embed::render_pdf(&project, environment()).map_err(describe)?;
+    Ok(pdf.bytes().to_vec())
+}
+
+/// The Typst markup of the whole document; see [`render`].
+pub fn source(project: &Project, lib: &Library) -> String {
     let title = &project.config.project.name;
     let logic = &project.logic;
     let layout = &project.layout;
@@ -54,7 +75,7 @@ pub fn render(project: &Project, lib: &Library) -> Result<Vec<u8>, PdfError> {
     sheets.extend(layout.sheets.iter().map(|s| s.number));
     sheets.insert(1);
 
-    let items: Vec<Item> = logic
+    let mut items: Vec<Item> = logic
         .blocks
         .iter()
         .filter_map(|b| {
@@ -62,6 +83,7 @@ pub fn render(project: &Project, lib: &Library) -> Result<Vec<u8>, PdfError> {
             let def = lib.resolve(logic, b).map(|l| &l.def);
             let (w, h) = size(b, def);
             Some(Item {
+                num: 0,
                 block: b,
                 def,
                 sheet: pos.sheet,
@@ -74,12 +96,23 @@ pub fn render(project: &Project, lib: &Library) -> Result<Vec<u8>, PdfError> {
             })
         })
         .collect();
+    // Boxes are numbered across the project (sheet, top to bottom, left to right).
+    let mut order: Vec<usize> = (0..items.len())
+        .filter(|&i| kind_of(&items[i]) == Kind::Box)
+        .collect();
+    order.sort_by(|&a, &b| {
+        let (a, b) = (&items[a], &items[b]);
+        a.sheet
+            .cmp(&b.sheet)
+            .then(a.rect.y.total_cmp(&b.rect.y))
+            .then(a.rect.x.total_cmp(&b.rect.x))
+    });
+    for (n, i) in order.into_iter().enumerate() {
+        items[i].num = n + 1;
+    }
     let by_id: HashMap<&str, &Item> = items.iter().map(|i| (i.block.id.as_str(), i)).collect();
 
-    // No PDF/X conformance: it would embed a 650 KB colour profile.
-    let doc = PdfDocument::empty(title.as_str())
-        .with_conformance(PdfConformance::Custom(CustomPdfConformance::default()));
-    let font = doc.add_external_font(font_data.as_slice())?;
+    let mut out = PRELUDE.replace("FONTS", &font_list());
     for &sheet in &sheets {
         let on_sheet: Vec<&Item> = items.iter().filter(|i| i.sheet == sheet).collect();
         let right = on_sheet
@@ -92,24 +125,20 @@ pub fn render(project: &Project, lib: &Library) -> Result<Vec<u8>, PdfError> {
             .fold(0.0, f32::max);
         let w = (right + SHEET_PAD * 2.0).max(SHEET_MIN_W);
         let h = SHEET_HEADER + (bottom + SHEET_PAD).max(SHEET_MIN_BODY);
-        let (page, layer) = doc.add_page(Mm(w * MM), Mm(h * MM), format!("Плата {sheet}"));
-        let canvas = Canvas {
-            layer: doc.get_page(page).get_layer(layer),
-            font: &font,
-            height: h,
-        };
+        let mut drawing = String::new();
+        let mut c = Canvas { out: &mut drawing };
 
         let info = layout.sheet(sheet);
         let mut head = format!("Плата {sheet}");
         if let Some(name) = info.map(|i| i.name.as_str()).filter(|n| !n.is_empty()) {
             head = format!("{head}. {name}");
         }
-        canvas.text(16.0, 16.0, &head, 12.0, Align::Left, INK);
-        canvas.text(w - 16.0, 16.0, title, 9.0, Align::Right, WEAK);
+        c.text(16.0, 16.0, &head, 12.0, Align::Left, INK);
+        c.text(w - 16.0, 16.0, title, 9.0, Align::Right, WEAK);
         if let Some(comment) = info.map(|i| i.comment.as_str()).filter(|c| !c.is_empty()) {
-            canvas.text(16.0, 30.0, comment, 9.0, Align::Left, WEAK);
+            c.text(16.0, 30.0, comment, 9.0, Align::Left, WEAK);
         }
-        canvas.line(&[(0.0, SHEET_HEADER), (w, SHEET_HEADER)], 0.6, GRID_LINE);
+        c.line(&[(0.0, SHEET_HEADER), (w, SHEET_HEADER)], 0.6, GRID_LINE);
 
         let origin = |b: Bounds| Bounds {
             y: b.y + SHEET_HEADER,
@@ -138,7 +167,7 @@ pub fn render(project: &Project, lib: &Library) -> Result<Vec<u8>, PdfError> {
                 .def
                 .and_then(|d| d.outputs.iter().find(|p| p.name == link.from.port))
                 .map_or(SignalType::Bool, |p| p.ty);
-            canvas.line(&route(a, b, GRID * 0.5), 1.0, signal_color(ty));
+            c.line(&route(a, b, GRID * 0.5), 1.0, signal_color(ty));
         }
         for item in &on_sheet {
             let fed = |port: &str| {
@@ -147,10 +176,171 @@ pub fn render(project: &Project, lib: &Library) -> Result<Vec<u8>, PdfError> {
                     .iter()
                     .any(|l| l.to.block == item.block.id && l.to.port == port)
             };
-            draw_block(&canvas, item, origin(item.rect), fed);
+            draw_block(&mut c, item, origin(item.rect), fed);
+        }
+        // The table goes to the right of the drawing; the page grows downwards if it is longer.
+        let table = param_table(&on_sheet);
+        let side = if table.is_empty() { 0.0 } else { TABLE_W };
+        let _ = write!(
+            out,
+            "#set page(width: {total:.1} * u, height: auto, margin: 0pt)\n\
+             #grid(columns: ({w:.1} * u, {side} * u),\n\
+             box(width: {w:.1} * u, height: {h:.1} * u, {{\n{drawing}}}),\n{table})\n",
+            total = w + side,
+        );
+    }
+    out
+}
+
+/// One table per sheet: every block with its parameters and their values.
+/// Empty when no block of the sheet has parameters.
+fn param_table(on_sheet: &[&Item]) -> String {
+    let mut rows: Vec<&Item> = on_sheet
+        .iter()
+        .copied()
+        .filter(|i| kind_of(i) == Kind::Box)
+        .collect();
+    rows.sort_by_key(|i| i.num);
+    let mut body = String::new();
+    for item in rows {
+        let Some(def) = item.def else { continue };
+        let block = item.block;
+        let params: Vec<(&str, String)> = def
+            .active_params(&block.params)
+            .filter(|p| !p.fixed)
+            .map(|p| {
+                let value = block.params.get(&p.name).or(p.default.as_ref());
+                let text = match value {
+                    // The PDF is easy to pass around: keep passwords out of it entirely.
+                    Some(_) if p.show == ParamShow::Secret || p.name.contains("password") => {
+                        "***".to_owned()
+                    }
+                    Some(v) => p.value_label(v),
+                    None => String::new(),
+                };
+                (
+                    p.title(),
+                    if text.is_empty() {
+                        "—".to_owned()
+                    } else {
+                        text
+                    },
+                )
+            })
+            .collect();
+        if params.is_empty() {
+            continue;
+        }
+        let _ = write!(
+            body,
+            "table.cell(rowspan: {n}, \"{num}\"), table.cell(rowspan: {n}, {id}), table.cell(rowspan: {n}, {name}),",
+            n = params.len(),
+            num = item.num,
+            id = quote(&block.id),
+            name = quote(&def.info.name),
+        );
+        for (title, value) in params {
+            let _ = write!(body, "{},{},", quote(title), quote(&value));
+        }
+        body.push('\n');
+    }
+    if body.is_empty() {
+        return String::new();
+    }
+    // A grid cell: content mode inside brackets.
+    format!(
+        "pad(left: 8 * u, right: 16 * u, top: 4 * u, bottom: 24 * u)[\n\
+         #text(size: 12 * u, weight: \"bold\")[Параметры блоков]\n\
+         #v(4 * u)\n\
+         #set text(size: 9.5 * u)\n\
+         #table(columns: (auto, auto, auto, auto, 1fr), inset: 4 * u, stroke: 0.4 * u + luma(160),\n\
+         fill: (_, y) => if y == 0 {{ rgb(\"{HEADER_HEX}\") }},\n\
+         table.header([*№*], [*Блок*], [*Тип*], [*Параметр*], [*Значение*]),\n\
+         {body})]",
+        HEADER_HEX = hex(HEADER),
+    )
+}
+
+/// Typst string literal.
+fn quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => {}
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
         }
     }
-    Ok(doc.save_to_bytes()?)
+    out.push('"');
+    out
+}
+
+/// Typst reports errors as a list; the first lines are enough to find the cause.
+fn describe(e: RenderError) -> PdfError {
+    match e {
+        RenderError::Diagnostics(list) => PdfError::Typst(
+            list.iter()
+                .take(3)
+                .map(|d| d.message().to_owned())
+                .collect::<Vec<_>>()
+                .join("; "),
+        ),
+        other => PdfError::Typst(other.to_string()),
+    }
+}
+
+/// Fonts of this computer that have Cyrillic: (family, regular file, bold file).
+const SYSTEM_FONTS: [(&str, &str, &str); 2] = [
+    ("Tahoma", "tahoma.ttf", "tahomabd.ttf"),
+    ("Segoe UI", "segoeui.ttf", "segoeuib.ttf"),
+];
+
+/// System fonts found on this computer, as (family, file contents).
+fn system_fonts() -> &'static [(&'static str, Vec<u8>)] {
+    static FONTS: OnceLock<Vec<(&'static str, Vec<u8>)>> = OnceLock::new();
+    FONTS.get_or_init(|| {
+        let dir = std::env::var_os("WINDIR")
+            .map(|w| PathBuf::from(w).join("Fonts"))
+            .unwrap_or_else(|| PathBuf::from(r"C:\Windows\Fonts"));
+        let mut found = Vec::new();
+        for (family, regular, bold) in SYSTEM_FONTS {
+            // Typst fails on an unknown family, so only fonts that were read are listed.
+            if let Ok(data) = fs::read(dir.join(regular)) {
+                found.push((family, data));
+                found.extend(fs::read(dir.join(bold)).ok().map(|d| (family, d)));
+            }
+        }
+        found
+    })
+}
+
+/// Typst font list: system fonts first, then the one bundled with Typst.
+fn font_list() -> String {
+    let mut names: Vec<&str> = Vec::new();
+    for (family, _) in system_fonts() {
+        if !names.contains(family) {
+            names.push(family);
+        }
+    }
+    names.push("Libertinus Serif");
+    let quoted: Vec<String> = names.iter().map(|n| quote(n)).collect();
+    format!("({})", quoted.join(", "))
+}
+
+/// Built once; the fonts are parsed on first use.
+fn environment() -> &'static RenderEnvironment {
+    static ENV: OnceLock<RenderEnvironment> = OnceLock::new();
+    ENV.get_or_init(|| {
+        let files: Vec<Vec<u8>> = system_fonts().iter().map(|(_, d)| d.clone()).collect();
+        RenderEnvironment::builder()
+            .font_set(FontSet::bundled_plus_font_files(files))
+            .build()
+            .expect("render environment without packages is always valid")
+    })
 }
 
 /// Saves the project archive together with [`BOARDS_PDF`]. If the picture cannot
@@ -168,8 +358,12 @@ pub fn save_project(project: &Project, lib: &Library) -> flp_core::Result<Option
         store.save()?;
     }
     let project = &clean;
-    // The user blocks the schema uses travel inside the project file.
-    let packed = flp_core::packed::pack_user_blocks(&project.logic, lib);
+    // The user blocks the schema uses and the user board travel inside the project file.
+    let mut packed = flp_core::packed::pack_user_blocks(&project.logic, lib);
+    packed.extend(flp_core::packed::pack_user_board(
+        project.config.board.model.as_deref(),
+        lib,
+    ));
     let mut extra: Vec<(&str, &[u8])> = packed
         .iter()
         .map(|(n, d)| (n.as_str(), d.as_slice()))
@@ -185,32 +379,9 @@ pub fn save_project(project: &Project, lib: &Library) -> flp_core::Result<Option
     }
 }
 
-/// A TrueType font with Cyrillic: `FLP_PDF_FONT`, otherwise a standard Windows
-/// font. Tahoma and Segoe UI come first: their subsets are small, while Arial
-/// is embedded whole (about 1 MB).
-fn load_font() -> Result<Vec<u8>, PdfError> {
-    let fonts_dir = std::env::var_os("WINDIR")
-        .map(|w| PathBuf::from(w).join("Fonts"))
-        .unwrap_or_else(|| PathBuf::from(r"C:\Windows\Fonts"));
-    let candidates: Vec<PathBuf> = std::env::var_os("FLP_PDF_FONT")
-        .map(PathBuf::from)
-        .into_iter()
-        .chain(
-            ["tahoma.ttf", "segoeui.ttf", "arial.ttf", "verdana.ttf"]
-                .iter()
-                .map(|f| fonts_dir.join(f)),
-        )
-        .chain([PathBuf::from(
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        )])
-        .collect();
-    candidates
-        .iter()
-        .find_map(|p| fs::read(p).ok())
-        .ok_or_else(|| PdfError::NoFont(fonts_dir.join("tahoma.ttf").display().to_string()))
-}
-
 struct Item<'a> {
+    /// Number among the boxes of the project, to tell blocks of one type apart.
+    num: usize,
     block: &'a Block,
     def: Option<&'a BlockDef>,
     sheet: u32,
@@ -356,7 +527,7 @@ fn value_text(v: &ParamValue) -> String {
     }
 }
 
-fn draw_block(c: &Canvas, item: &Item, r: Bounds, fed: impl Fn(&str) -> bool) {
+fn draw_block(c: &mut Canvas, item: &Item, r: Bounds, fed: impl Fn(&str) -> bool) {
     let (block, def) = (item.block, item.def);
     let kind = kind_of(item);
     match kind {
@@ -396,7 +567,8 @@ fn draw_block(c: &Canvas, item: &Item, r: Bounds, fed: impl Fn(&str) -> bool) {
                 Align::Center,
                 INK,
             );
-            c.text(r.x, r.y - 6.0, &block.id, 9.5, Align::Left, WEAK);
+            let id = format!("{} · {}", item.num, block.id);
+            c.text(r.x, r.y - 6.0, &id, 9.5, Align::Left, WEAK);
             let Some(def) = def else {
                 c.text(
                     r.x + r.w * 0.5,
@@ -472,13 +644,8 @@ fn signal_color(ty: SignalType) -> Rgb8 {
     }
 }
 
-fn color((r, g, b): Rgb8) -> Color {
-    Color::Rgb(Rgb::new(
-        f32::from(r) / 255.0,
-        f32::from(g) / 255.0,
-        f32::from(b) / 255.0,
-        None,
-    ))
+fn hex((r, g, b): Rgb8) -> String {
+    format!("#{r:02x}{g:02x}{b:02x}")
 }
 
 #[derive(Clone, Copy)]
@@ -488,74 +655,51 @@ enum Align {
     Right,
 }
 
-/// One page; takes canvas coordinates (y down) and converts them to PDF (y up, mm).
+/// Typst calls of one sheet; takes canvas coordinates (y down, units of a quarter of a millimetre).
 struct Canvas<'a> {
-    layer: PdfLayerReference,
-    font: &'a IndirectFontRef,
-    height: f32,
+    out: &'a mut String,
 }
 
 impl Canvas<'_> {
-    fn pt(&self, (x, y): (f32, f32)) -> Point {
-        Point::new(Mm(x * MM), Mm((self.height - y) * MM))
+    fn line(&mut self, points: &[(f32, f32)], width: f32, rgb: Rgb8) {
+        let _ = write!(self.out, "W(\"{}\", {width:.2}", hex(rgb));
+        for (x, y) in points {
+            let _ = write!(self.out, ", ({x:.2}, {y:.2})");
+        }
+        self.out.push_str(")\n");
     }
 
-    fn line(&self, points: &[(f32, f32)], width: f32, rgb: Rgb8) {
-        self.layer.set_outline_color(color(rgb));
-        self.layer.set_outline_thickness(width * PT);
-        self.layer.add_line(Line {
-            points: points.iter().map(|&p| (self.pt(p), false)).collect(),
-            is_closed: false,
-        });
-    }
-
-    fn rect(&self, r: Bounds, fill: Rgb8, border: Rgb8) {
-        self.layer.set_fill_color(color(fill));
-        self.layer.set_outline_color(color(border));
-        self.layer.set_outline_thickness(0.8 * PT);
-        self.layer.add_rect(
-            Rect::new(
-                Mm(r.x * MM),
-                Mm((self.height - r.y - r.h) * MM),
-                Mm((r.x + r.w) * MM),
-                Mm((self.height - r.y) * MM),
-            )
-            .with_mode(PaintMode::FillStroke),
+    fn rect(&mut self, r: Bounds, fill: Rgb8, border: Rgb8) {
+        let _ = writeln!(
+            self.out,
+            "R({:.2}, {:.2}, {:.2}, {:.2}, \"{}\", \"{}\")",
+            r.x,
+            r.y,
+            r.w,
+            r.h,
+            hex(fill),
+            hex(border)
         );
     }
 
-    fn dot(&self, (x, y): (f32, f32), rgb: Rgb8) {
-        // An octagon is round enough at this size.
-        let ring = (0..8)
-            .map(|k| {
-                let a = k as f32 * std::f32::consts::FRAC_PI_4;
-                (self.pt((x + PORT_R * a.cos(), y + PORT_R * a.sin())), false)
-            })
-            .collect();
-        self.layer.set_fill_color(color(rgb));
-        self.layer.add_polygon(Polygon {
-            rings: vec![ring],
-            mode: PaintMode::Fill,
-            winding_order: Default::default(),
-        });
+    fn dot(&mut self, (x, y): (f32, f32), rgb: Rgb8) {
+        let _ = writeln!(self.out, "D({x:.2}, {y:.2}, {PORT_R}, \"{}\")", hex(rgb));
     }
 
     /// Text vertically centred on `y`.
-    fn text(&self, x: f32, y: f32, text: &str, size: f32, align: Align, rgb: Rgb8) {
-        let w = text_w(text, size);
-        let x = match align {
-            Align::Left => x,
-            Align::Center => x - w * 0.5,
-            Align::Right => x - w,
+    fn text(&mut self, x: f32, y: f32, text: &str, size: f32, align: Align, rgb: Rgb8) {
+        // The box is wide enough that the text never wraps.
+        let w = text.chars().count() as f32 * size + 40.0;
+        let (x, al) = match align {
+            Align::Left => (x, "left"),
+            Align::Center => (x - w * 0.5, "center"),
+            Align::Right => (x - w, "right"),
         };
-        self.layer.set_fill_color(color(rgb));
-        let baseline = y + size * 0.35;
-        self.layer.use_text(
-            text,
-            size * PT,
-            Mm(x * MM),
-            Mm((self.height - baseline) * MM),
-            self.font,
+        let _ = writeln!(
+            self.out,
+            "T({x:.2}, {y:.2}, {w:.1}, {al}, {size}, \"{}\", {})",
+            hex(rgb),
+            quote(text)
         );
     }
 }
@@ -564,21 +708,32 @@ impl Canvas<'_> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn renders_pump_example() {
+    fn pump() -> (Project, Library) {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let (lib, _) = Library::load(root.join("library")).unwrap();
-        let project = Project::load(root.join("examples/pump")).unwrap();
-        match render(&project, &lib) {
-            Ok(pdf) => {
-                assert!(pdf.starts_with(b"%PDF"));
-                if let Some(out) = std::env::var_os("FLP_PDF_OUT") {
-                    fs::write(out, &pdf).unwrap();
-                }
-            }
-            // No system font on this machine: nothing to check.
-            Err(PdfError::NoFont(_)) => {}
-            Err(e) => panic!("{e}"),
+        (Project::load(root.join("examples/pump")).unwrap(), lib)
+    }
+
+    #[test]
+    fn renders_pump_example() {
+        let (project, lib) = pump();
+        let pdf = render(&project, &lib).unwrap();
+        assert!(pdf.starts_with(b"%PDF"));
+        if let Some(out) = std::env::var_os("FLP_PDF_OUT") {
+            fs::write(out, &pdf).unwrap();
         }
+    }
+
+    #[test]
+    fn lists_block_parameters_without_secrets() {
+        let (project, lib) = pump();
+        let src = source(&project, &lib);
+        assert!(src.contains("Параметры блоков"));
+        assert!(!src.contains("password"));
+    }
+
+    #[test]
+    fn quotes_typst_strings() {
+        assert_eq!(quote("a\"b\\c\nd"), r#""a\"b\\c\nd""#);
     }
 }

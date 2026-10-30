@@ -8,7 +8,8 @@
 use crate::ident::is_valid_ident;
 use crate::vars::{Var, VAR_GET, VAR_PARAM, VAR_SET, WRITE_ENABLE};
 use crate::{
-    Block, BlockPos, Layout, Library, Link, ParamValue, PortRef, Project, SignalType, WireRoute,
+    Block, BlockPos, Expander, Layout, Library, Link, ParamValue, PortRef, Project, SignalType,
+    WireRoute,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -49,6 +50,29 @@ pub enum EditError {
     DuplicateVar(String),
     #[error("начальное значение не подходит к типу переменной «{0}»")]
     BadInit(String),
+    #[error("нет расширителя «{0}»")]
+    NoExpander(String),
+    #[error("расширитель «{0}» уже есть")]
+    DuplicateExpander(String),
+    #[error("{0}")]
+    BadExpander(String),
+    #[error("расширитель «{id}» нельзя удалить: на нём стоят блоки ({blocks})")]
+    ExpanderBusy { id: String, blocks: String },
+    #[error("блок типа «{0}» не может стоять на выводе расширителя")]
+    ExpanderUnsupported(String),
+    #[error("у {chip} расширителя «{expander}» нет вывода P{pin}, допустимы P0–P{last}")]
+    ExpanderPinRange {
+        expander: String,
+        chip: &'static str,
+        pin: i64,
+        last: u8,
+    },
+    #[error("вывод P{pin} расширителя «{expander}» уже занят блоком «{block}»")]
+    ExpanderPinBusy {
+        expander: String,
+        pin: i64,
+        block: String,
+    },
 }
 
 impl Project {
@@ -150,6 +174,144 @@ impl Project {
         Ok(())
     }
 
+    /// Declares a new expander.
+    pub fn add_expander(&mut self, e: Expander) -> Result<(), EditError> {
+        self.validate_expander(&e, None)?;
+        self.logic.expanders.push(e);
+        Ok(())
+    }
+
+    /// Replaces an expander declaration. Blocks standing on it follow a rename; pins
+    /// that no longer fit the new chip stay and are reported by the check.
+    pub fn update_expander(&mut self, id: &str, e: Expander) -> Result<(), EditError> {
+        let index = self.expander_index(id)?;
+        self.validate_expander(&e, Some(id))?;
+        if e.id != id {
+            for block in &mut self.logic.blocks {
+                if block.expander.as_deref() == Some(id) {
+                    block.expander = Some(e.id.clone());
+                }
+            }
+        }
+        self.logic.expanders[index] = e;
+        Ok(())
+    }
+
+    /// Removes an expander that no block stands on.
+    pub fn remove_expander(&mut self, id: &str) -> Result<(), EditError> {
+        let index = self.expander_index(id)?;
+        let blocks: Vec<&str> = self
+            .logic
+            .blocks
+            .iter()
+            .filter(|b| b.expander.as_deref() == Some(id))
+            .map(|b| b.id.as_str())
+            .collect();
+        if !blocks.is_empty() {
+            return Err(EditError::ExpanderBusy {
+                id: id.to_owned(),
+                blocks: blocks.join(", "),
+            });
+        }
+        self.logic.expanders.remove(index);
+        Ok(())
+    }
+
+    /// Puts a block on pin `pin` of an expander, or (`None`) takes it off: the pin
+    /// parameter is then cleared, since the number meant a pin of the chip, not a GPIO.
+    pub fn set_block_expander(
+        &mut self,
+        lib: &Library,
+        id: &str,
+        target: Option<(&str, i64)>,
+    ) -> Result<(), EditError> {
+        // A copy of a tag stands where its tag stands.
+        let id = self.logic.tag_of(id).to_owned();
+        self.set_tag_expander(lib, &id, target)?;
+        self.logic.sync_tags();
+        Ok(())
+    }
+
+    fn set_tag_expander(
+        &mut self,
+        lib: &Library,
+        id: &str,
+        target: Option<(&str, i64)>,
+    ) -> Result<(), EditError> {
+        let def = self.block_def(lib, id)?;
+        let pin_param = crate::expander::pin_param(def)
+            .ok_or_else(|| EditError::ExpanderUnsupported(def.info.kind.clone()))?
+            .name
+            .clone();
+        let index = self.block_index(id)?;
+        let Some((name, pin)) = target else {
+            let block = &mut self.logic.blocks[index];
+            if block.expander.take().is_some() {
+                block.params.remove(&pin_param);
+            }
+            return Ok(());
+        };
+        if !def.info.expander {
+            return Err(EditError::ExpanderUnsupported(def.info.kind.clone()));
+        }
+        let e = self
+            .logic
+            .expander(name)
+            .ok_or_else(|| EditError::NoExpander(name.to_owned()))?;
+        if pin < 0 || pin >= i64::from(e.chip.pins()) {
+            return Err(EditError::ExpanderPinRange {
+                expander: name.to_owned(),
+                chip: e.chip.name(),
+                pin,
+                last: e.chip.pins() - 1,
+            });
+        }
+        if let Some((_, block)) = crate::expander::taken_pins(&self.logic, lib, name, Some(id))
+            .into_iter()
+            .find(|(p, _)| *p == pin)
+        {
+            return Err(EditError::ExpanderPinBusy {
+                expander: name.to_owned(),
+                pin,
+                block,
+            });
+        }
+        let block = &mut self.logic.blocks[index];
+        block.expander = Some(name.to_owned());
+        block.params.insert(pin_param, ParamValue::Int(pin));
+        Ok(())
+    }
+
+    fn expander_index(&self, id: &str) -> Result<usize, EditError> {
+        self.logic
+            .expanders
+            .iter()
+            .position(|e| e.id == id)
+            .ok_or_else(|| EditError::NoExpander(id.to_owned()))
+    }
+
+    fn validate_expander(&self, e: &Expander, old_id: Option<&str>) -> Result<(), EditError> {
+        if Some(e.id.as_str()) != old_id && self.logic.expander(&e.id).is_some() {
+            return Err(EditError::DuplicateExpander(e.id.clone()));
+        }
+        if let Some(problem) = e.problem() {
+            return Err(EditError::BadExpander(problem));
+        }
+        let clash = self.logic.expanders.iter().find(|o| {
+            Some(o.id.as_str()) != old_id
+                && o.address == e.address
+                && o.sda == e.sda
+                && o.scl == e.scl
+        });
+        if let Some(other) = clash {
+            return Err(EditError::BadExpander(format!(
+                "расширитель «{}»: адрес 0x{:02X} на этой шине уже занят расширителем «{}»",
+                e.id, e.address, other.id
+            )));
+        }
+        Ok(())
+    }
+
     fn var_index(&self, name: &str) -> Result<usize, EditError> {
         self.logic
             .vars
@@ -247,6 +409,9 @@ impl Project {
     /// Removes a block with its links and position.
     pub fn remove_block(&mut self, id: &str) -> Result<(), EditError> {
         let index = self.block_index(id)?;
+        if self.hand_tag_to_copy(id) {
+            return Ok(());
+        }
         self.logic.blocks.remove(index);
         self.logic
             .links
@@ -270,6 +435,11 @@ impl Project {
             return Err(EditError::DuplicateId(new.to_owned()));
         }
         self.logic.blocks[index].id = new.to_owned();
+        for block in &mut self.logic.blocks {
+            if block.tag.as_deref() == Some(old) {
+                block.tag = Some(new.to_owned());
+            }
+        }
         for link in &mut self.logic.links {
             for end in [&mut link.from, &mut link.to] {
                 if end.block == old {
@@ -541,12 +711,14 @@ impl Project {
         {
             return Err(EditError::BadValue(name.to_owned()));
         }
-        let index = self.block_index(id)?;
+        // Parameters of a copy are its tag's.
+        let index = self.block_index(self.logic.tag_of(id))?;
         let params = &mut self.logic.blocks[index].params;
         match value {
             Some(v) => params.insert(name.to_owned(), v),
             None => params.remove(name),
         };
+        self.logic.sync_tags();
         Ok(())
     }
 
@@ -646,7 +818,7 @@ impl Project {
         Ok(())
     }
 
-    fn block_index(&self, id: &str) -> Result<usize, EditError> {
+    pub(crate) fn block_index(&self, id: &str) -> Result<usize, EditError> {
         self.logic
             .blocks
             .iter()
@@ -838,6 +1010,21 @@ mod tests {
                 inline_templates: Default::default(),
             });
         }
+        lib
+    }
+
+    fn expander_library() -> Library {
+        let mut lib = library();
+        let def: BlockDef = toml::from_str(
+            "[block]\ntype = \"dout\"\nname = \"dout\"\ngroup = \"Тест\"\nexpander = true\n\
+             [[param]]\nname = \"pin\"\ntype = \"pin\"\nmode = \"out\"\n",
+        )
+        .unwrap();
+        lib.insert(LibraryBlock {
+            def,
+            dir: Default::default(),
+            inline_templates: Default::default(),
+        });
         lib
     }
 
@@ -1156,5 +1343,69 @@ mod tests {
         // Into another project, keeping ids.
         let mut q = project();
         assert_eq!(q.paste_fragment(&lib, &frag, POS).unwrap(), [a, b]);
+    }
+
+    #[test]
+    fn expander_commands() {
+        use crate::ExpanderChip;
+        let lib = expander_library();
+        let mut p = project();
+        p.add_expander(Expander::new("relays", ExpanderChip::Pcf8574, 0x20))
+            .unwrap();
+        // the same id, a clashing address, a wrong address
+        for bad in [
+            Expander::new("relays", ExpanderChip::Pcf8574, 0x21),
+            Expander::new("other", ExpanderChip::Pcf8575, 0x20),
+            Expander::new("far", ExpanderChip::Pcf8574, 0x50),
+        ] {
+            assert!(p.add_expander(bad).is_err());
+        }
+        let a = p.add_block(&lib, "dout", POS).unwrap();
+        let b = p.add_block(&lib, "dout", POS).unwrap();
+        p.set_block_expander(&lib, &a, Some(("relays", 3))).unwrap();
+        assert_eq!(
+            p.logic.block(&a).unwrap().expander.as_deref(),
+            Some("relays")
+        );
+        assert_eq!(p.logic.block(&a).unwrap().params["pin"], ParamValue::Int(3));
+        // taken, out of range, unknown, unsupported type
+        assert!(matches!(
+            p.set_block_expander(&lib, &b, Some(("relays", 3))),
+            Err(EditError::ExpanderPinBusy { .. })
+        ));
+        assert!(matches!(
+            p.set_block_expander(&lib, &b, Some(("relays", 8))),
+            Err(EditError::ExpanderPinRange { .. })
+        ));
+        assert!(matches!(
+            p.set_block_expander(&lib, &b, Some(("nope", 1))),
+            Err(EditError::NoExpander(_))
+        ));
+        let sink = p.add_block(&lib, "sink", POS).unwrap();
+        assert!(matches!(
+            p.set_block_expander(&lib, &sink, Some(("relays", 1))),
+            Err(EditError::ExpanderUnsupported(_))
+        ));
+        // a block may re-take its own pin
+        p.set_block_expander(&lib, &a, Some(("relays", 3))).unwrap();
+
+        // rename follows, removal is refused while a block stands on the chip
+        let mut renamed = p.logic.expander("relays").unwrap().clone();
+        renamed.id = "lamps".into();
+        p.update_expander("relays", renamed).unwrap();
+        assert_eq!(
+            p.logic.block(&a).unwrap().expander.as_deref(),
+            Some("lamps")
+        );
+        assert!(matches!(
+            p.remove_expander("lamps"),
+            Err(EditError::ExpanderBusy { .. })
+        ));
+        // taking the block off clears the chip pin number
+        p.set_block_expander(&lib, &a, None).unwrap();
+        assert_eq!(p.logic.block(&a).unwrap().expander, None);
+        assert!(!p.logic.block(&a).unwrap().params.contains_key("pin"));
+        p.remove_expander("lamps").unwrap();
+        assert!(p.logic.expanders.is_empty());
     }
 }

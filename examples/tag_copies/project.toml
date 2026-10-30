@@ -1,0 +1,6 @@
+[project]
+name = "tag_copies"
+description = "Копии входа и выхода: кнопка стоит на плате дважды, лампа — тоже"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

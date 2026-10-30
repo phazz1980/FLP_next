@@ -34,7 +34,7 @@ impl Ending {
 
     fn label(self) -> &'static str {
         match self {
-            Ending::None => "без окончания",
+            Ending::None => crate::i18n::tr("без окончания"),
             Ending::Lf => "\\n",
             Ending::CrLf => "\\r\\n",
         }
@@ -110,7 +110,7 @@ impl Default for PortConsole {
             debug_online: false,
             debug_reader: false,
             debug_out: Vec::new(),
-            status: "Отключено".into(),
+            status: crate::i18n::tr("Отключено").into(),
             hold: false,
             unread: 0,
         }
@@ -121,9 +121,9 @@ impl PortConsole {
     /// Tab title: the console while debugging, the monitor otherwise.
     pub fn title(&self) -> &'static str {
         if self.in_debug {
-            "Консоль отладки"
+            crate::i18n::tr("Консоль отладки")
         } else {
-            "Монитор порта"
+            crate::i18n::tr("Монитор порта")
         }
     }
 
@@ -133,7 +133,7 @@ impl PortConsole {
         if let Some((monitor, port, _)) = self.monitor.take() {
             monitor.stop();
             self.connected = false;
-            self.note(format!("{port} освобождён"));
+            self.note(crate::i18n::fmt("{0} освобождён", &[&port]));
         }
     }
 
@@ -151,7 +151,7 @@ impl PortConsole {
                 self.release();
                 self.in_debug = true;
                 self.debug_seen = 0;
-                self.note("консоль отладки".into());
+                self.note(crate::i18n::tr("консоль отладки").into());
             }
             // A new session (reconnect) counts its lines from zero again.
             if live.console_total < self.debug_seen {
@@ -169,13 +169,13 @@ impl PortConsole {
         }
         if self.in_debug {
             self.in_debug = false;
-            self.note("отладка остановлена".into());
+            self.note(crate::i18n::tr("отладка остановлена").into());
         }
 
         let target = match (self.want && !busy, port) {
             (true, Some(port)) => Some(port),
             (true, None) => {
-                self.status = "Выберите порт платы на панели инструментов".into();
+                self.status = crate::i18n::tr("Выберите порт платы на панели инструментов").into();
                 None
             }
             (false, _) => None,
@@ -201,7 +201,7 @@ impl PortConsole {
             Some((connected, status, lines, port, baud)) => {
                 if connected != self.connected {
                     let text = if connected {
-                        format!("подключено к {port}, {baud} бод")
+                        crate::i18n::fmt("подключено к {0}, {1} бод", &[&port, &baud])
                     } else {
                         status.clone()
                     };
@@ -216,9 +216,9 @@ impl PortConsole {
             None => {
                 self.connected = false;
                 if !self.want {
-                    self.status = "Отключено".into();
+                    self.status = crate::i18n::tr("Отключено").into();
                 } else if busy {
-                    self.status = "Порт занят заливкой".into();
+                    self.status = crate::i18n::tr("Порт занят заливкой").into();
                 }
             }
         }
@@ -298,15 +298,15 @@ pub fn show(console: &mut PortConsole, pal: &Palette, ui: &mut Ui) {
         ui.label(RichText::new("●").color(color));
         if !console.in_debug {
             let text = if console.want {
-                "Отключить"
+                crate::i18n::tr("Отключить")
             } else {
-                "Подключить"
+                crate::i18n::tr("Подключить")
             };
             if ui.button(text).clicked() {
                 console.want = !console.want;
             }
             egui::ComboBox::from_id_salt("monitor_baud")
-                .selected_text(format!("{} бод", console.baud))
+                .selected_text(crate::i18n::fmt("{0} бод", &[&console.baud]))
                 .show_ui(ui, |ui| {
                     for b in BAUDS {
                         ui.selectable_value(&mut console.baud, b, b.to_string());
@@ -315,12 +315,12 @@ pub fn show(console: &mut PortConsole, pal: &Palette, ui: &mut Ui) {
         }
         ui.label(RichText::new(&console.status).color(pal.weak));
         ui.separator();
-        ui.checkbox(&mut console.timestamps, "Время");
-        ui.checkbox(&mut console.autoscroll, "Автопрокрутка");
+        ui.checkbox(&mut console.timestamps, crate::i18n::tr("Время"));
+        ui.checkbox(&mut console.autoscroll, crate::i18n::tr("Автопрокрутка"));
         let pause = if console.paused {
-            format!("Продолжить (+{})", console.held.len())
+            crate::i18n::fmt("Продолжить (+{0})", &[&console.held.len()])
         } else {
-            "Пауза".to_owned()
+            crate::i18n::tr("Пауза").to_owned()
         };
         if ui.selectable_label(console.paused, pause).clicked() {
             if console.paused {
@@ -331,17 +331,17 @@ pub fn show(console: &mut PortConsole, pal: &Palette, ui: &mut Ui) {
         }
         ui.add(
             egui::TextEdit::singleline(&mut console.filter)
-                .hint_text("фильтр")
+                .hint_text(crate::i18n::tr("фильтр"))
                 .desired_width(120.0),
         );
-        if ui.small_button("Копировать").clicked() {
+        if ui.small_button(crate::i18n::tr("Копировать")).clicked() {
             let text = visible(console)
                 .map(|l| format_line(console, l))
                 .collect::<Vec<_>>()
                 .join("\n");
             ui.ctx().copy_text(text);
         }
-        if ui.small_button("Очистить").clicked() {
+        if ui.small_button(crate::i18n::tr("Очистить")).clicked() {
             console.clear();
         }
     });
@@ -375,15 +375,17 @@ fn input_row(console: &mut PortConsole, ui: &mut Ui) {
     ui.horizontal(|ui| {
         let enabled = console.can_send();
         let hint = if console.in_debug && !console.debug_reader {
-            "в схеме нет блока «Чтение из UART» с портом USB — строку некому прочитать"
+            crate::i18n::tr(
+                "в схеме нет блока «Чтение из UART» с портом USB — строку некому прочитать",
+            )
         } else if console.in_debug && !enabled {
-            "плата не на связи"
+            crate::i18n::tr("плата не на связи")
         } else if console.in_debug {
-            "строка для «Чтения из UART» с USB, Enter — отправить"
+            crate::i18n::tr("строка для «Чтения из UART» с USB, Enter — отправить")
         } else if enabled {
-            "строка для платы, Enter — отправить"
+            crate::i18n::tr("строка для платы, Enter — отправить")
         } else {
-            "монитор не подключён"
+            crate::i18n::tr("монитор не подключён")
         };
         let width = (ui.available_width() - 220.0).max(120.0);
         let edit = ui.add_enabled(
@@ -401,7 +403,7 @@ fn input_row(console: &mut PortConsole, ui: &mut Ui) {
                 }
             });
         let send = ui
-            .add_enabled(enabled, egui::Button::new("Отправить"))
+            .add_enabled(enabled, egui::Button::new(crate::i18n::tr("Отправить")))
             .clicked();
         if enter || send {
             console.send_input();

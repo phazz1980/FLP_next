@@ -313,6 +313,8 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                     hidden: false,
                     pullable: false,
                     uart: None,
+                    board: None,
+                    expander: false,
                 },
                 inputs: match (get, en) {
                     (true, _) => Vec::new(),
@@ -344,6 +346,8 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                         local: None,
                         mode: Default::default(),
                         shared: false,
+                        bus: String::new(),
+                        fixed: false,
                         runtime: false,
                         choices: Vec::new(),
                     }];
@@ -361,6 +365,8 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                             local: None,
                             mode: Default::default(),
                             shared: false,
+                            bus: String::new(),
+                            fixed: false,
                             runtime: false,
                             choices: Vec::new(),
                         });

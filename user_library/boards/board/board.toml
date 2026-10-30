@@ -1,0 +1,29 @@
+[board]
+id = "board"
+name = "тестовая"
+chip = "esp32"
+fqbn = "esp32:esp32:esp32"
+
+[[pin]]
+gpio = 0
+name = "кнопка"
+functions = ["din"]
+
+[[device]]
+id = "relays"
+kind = "pcf8574_out"
+name = "Реле"
+channels = [
+    "K1",
+    "K2",
+    "K3",
+    "K4",
+    "K5",
+    "K6",
+    "K7",
+    "K8",
+]
+address = 32
+inverted = false
+scl = 2
+sda = 1

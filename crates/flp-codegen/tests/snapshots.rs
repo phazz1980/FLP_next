@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use flp_codegen::{generate, ArduinoCpp, GenError};
+use flp_core::boards::Boards;
 use flp_core::{Library, ParamValue, Project};
 
 fn repo_path(rel: &str) -> PathBuf {
@@ -18,6 +19,18 @@ fn repo_path(rel: &str) -> PathBuf {
 fn library() -> Library {
     let (lib, errors) = Library::load(repo_path("library")).unwrap();
     assert!(errors.is_empty(), "{errors:?}");
+    lib
+}
+
+/// The library with the boards the example carries in its `user_boards/` folder.
+fn library_for(example: &Path) -> Library {
+    let mut lib = library();
+    let (boards, errors) = Boards::load(&example.join("user_boards"));
+    assert!(errors.is_empty(), "{errors:?}");
+    if !boards.is_empty() {
+        let errors = lib.set_boards(boards);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
     lib
 }
 
@@ -51,8 +64,8 @@ fn assert_snapshot(path: &Path, actual: &str) {
 
 #[test]
 fn examples_match_snapshots() {
-    let lib = library();
     for dir in examples() {
+        let lib = library_for(&dir);
         let project = Project::load(&dir).unwrap();
         let code = generate(&project, &lib, &ArduinoCpp::RELEASE)
             .unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
@@ -724,4 +737,17 @@ fn background_sheet_rules() {
     c3.config.board.fqbn = "esp32:esp32:esp32c3".into();
     let code = generate(&c3, &lib, &ArduinoCpp::RELEASE).unwrap();
     assert!(!code.contains("flp_bg_task"), "{code}");
+}
+
+/// An output taken off every sheet stays in the project tree, unfed: it is left
+/// out of the sketch, which still builds.
+#[test]
+fn unused_tag_is_generated_idle() {
+    let lib = library();
+    let mut project = Project::load(repo_path("examples/tag_copies")).unwrap();
+    project.take_off_board("lamp_2").unwrap();
+    project.take_off_board("lamp").unwrap();
+    let code = generate(&project, &lib, &ArduinoCpp::RELEASE).unwrap();
+    assert!(!code.contains("pinMode(2, OUTPUT);"), "{code}");
+    assert!(code.contains("button_out"), "{code}");
 }
