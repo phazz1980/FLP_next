@@ -1692,6 +1692,14 @@ version = "0.5.0"
 dependencies = [
  "flp-core",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "flp-pdf-render"
+version = "0.5.0"
+dependencies = [
+ "flp-core",
+ "flp-pdf",
  "typst-embed",
 ]
 
@@ -5395,7 +5403,6 @@ dependencies = [
  "rustc-hash 2.1.3",
  "serde",
  "serde_json",
- "typst-assets",
  "typst-library",
  "typst-syntax",
  "typst-timing",

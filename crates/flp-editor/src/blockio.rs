@@ -74,7 +74,10 @@ pub fn add_files(app: &mut EditorApp, paths: &[PathBuf]) {
 pub fn pick_files(app: &mut EditorApp) {
     let paths = rfd::FileDialog::new()
         .set_title(crate::i18n::tr("Импорт набора блоков"))
-        .add_filter(crate::i18n::tr("Набор блоков FLP"), &[pack::EXTENSION, pack::LEGACY_EXTENSION])
+        .add_filter(
+            crate::i18n::tr("Набор блоков FLP"),
+            &[pack::EXTENSION, pack::LEGACY_EXTENSION],
+        )
         .pick_files();
     if let Some(paths) = paths {
         add_files(app, &paths);
@@ -85,7 +88,13 @@ pub fn pick_files(app: &mut EditorApp) {
 pub fn pick_project(app: &mut EditorApp) {
     let Some(path) = rfd::FileDialog::new()
         .set_title(crate::i18n::tr("Блоки из проекта"))
-        .add_filter(crate::i18n::tr("Проект FLP"), &[flp_core::project::PROJECT_EXT, flp_core::project::LEGACY_PROJECT_EXT])
+        .add_filter(
+            crate::i18n::tr("Проект FLP"),
+            &[
+                flp_core::project::PROJECT_EXT,
+                flp_core::project::LEGACY_PROJECT_EXT,
+            ],
+        )
         .pick_file()
     else {
         return;
@@ -113,11 +122,10 @@ pub fn handle_drops(app: &mut EditorApp, ctx: &egui::Context) {
             .iter()
             .map(|f| f.path().to_path_buf())
             .filter(|p| {
-                p.extension()
-                    .is_some_and(|e| {
-                        e.eq_ignore_ascii_case(pack::EXTENSION)
-                            || e.eq_ignore_ascii_case(pack::LEGACY_EXTENSION)
-                    })
+                p.extension().is_some_and(|e| {
+                    e.eq_ignore_ascii_case(pack::EXTENSION)
+                        || e.eq_ignore_ascii_case(pack::LEGACY_EXTENSION)
+                })
             })
             .collect()
     });

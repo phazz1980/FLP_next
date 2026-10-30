@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $dist = Join-Path $root 'dist\FLP_next'
 $zip = Join-Path $root 'dist\FLP_next.zip'
-$bins = 'crablogic-editor.exe', 'crablogic-mcp.exe', 'crablogic-web.exe', 'crablogic.exe'
+$bins = 'crablogic-editor.exe', 'crablogic-mcp.exe', 'crablogic-web.exe', 'crablogic.exe', 'crablogic-pdf.exe'
 
 # The editor running from dist is closed before the build and started again afterwards.
 $script:reopen = $false

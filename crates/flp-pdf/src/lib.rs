@@ -4,20 +4,19 @@
 //! wires) in a fixed light palette, so the schema can be viewed and printed
 //! without the editor. Under the drawing of every sheet goes a table of the
 //! parameters of its blocks. The page is written as Typst markup and compiled
-//! by the embedded Typst; it is stored in the project archive on every save.
+//! by Typst in the `crablogic-pdf` helper (`flp-pdf-render`); it is stored in the project archive on every save.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
-use std::fs;
-use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use flp_core::project::BOARDS_PDF;
 use flp_core::vars::{VAR_GET, VAR_SET};
 use flp_core::{
     Block, BlockDef, Library, LocalValues, ParamShow, ParamValue, PortDef, Project, SignalType,
 };
-use typst_embed::{FontSet, RenderEnvironment, RenderError};
 
 // Geometry in canvas units, the same as in the editor.
 const HEAD_H: f32 = 16.0;
@@ -34,9 +33,16 @@ const TABLE_W: f32 = 560.0;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PdfError {
+    #[error("не найден {HELPER} рядом с программой")]
+    NoHelper,
+    #[error("не удалось запустить {HELPER}: {0}")]
+    Spawn(String),
     #[error("Typst не смог построить PDF: {0}")]
     Typst(String),
 }
+
+/// Typst lives only in this executable (it is large); everything else starts it.
+const HELPER: &str = "crablogic-pdf.exe";
 
 /// Typst helpers: one canvas unit is a quarter of a millimetre.
 const PRELUDE: &str = r##"#let u = 0.25mm
@@ -59,10 +65,50 @@ const PRELUDE: &str = r##"#let u = 0.25mm
 
 /// Renders every sheet of the project; blocks without coordinates are skipped.
 pub fn render(project: &Project, lib: &Library) -> Result<Vec<u8>, PdfError> {
-    let source = source(project, lib);
-    let project = typst_embed::Project::from_source(source);
-    let pdf = typst_embed::render_pdf(&project, environment()).map_err(describe)?;
-    Ok(pdf.bytes().to_vec())
+    run_helper(&helper_path()?, source(project, lib))
+}
+
+/// The helper lies next to the running program (in tests, one level up from `deps`).
+fn helper_path() -> Result<PathBuf, PdfError> {
+    if let Some(p) = std::env::var_os("CRABLOGIC_PDF") {
+        return Ok(PathBuf::from(p));
+    }
+    let exe = std::env::current_exe().map_err(|e| PdfError::Spawn(e.to_string()))?;
+    exe.ancestors()
+        .skip(1)
+        .take(2)
+        .map(|d| d.join(HELPER))
+        .find(|p| p.is_file())
+        .ok_or(PdfError::NoHelper)
+}
+
+/// Feeds the markup to the helper and takes the PDF back from its stdout.
+fn run_helper(helper: &Path, source: String) -> Result<Vec<u8>, PdfError> {
+    let mut cmd = Command::new(helper);
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // No console window flashing up when started from the editor.
+        cmd.creation_flags(0x0800_0000);
+    }
+    let mut child = cmd.spawn().map_err(|e| PdfError::Spawn(e.to_string()))?;
+    let mut stdin = child.stdin.take().expect("stdin is piped");
+    // Written from a thread: the helper may fill its stdout pipe before it has read everything.
+    let writer = std::thread::spawn(move || stdin.write_all(source.as_bytes()));
+    let out = child
+        .wait_with_output()
+        .map_err(|e| PdfError::Spawn(e.to_string()))?;
+    let _ = writer.join();
+    if out.status.success() {
+        Ok(out.stdout)
+    } else {
+        Err(PdfError::Typst(
+            String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+        ))
+    }
 }
 
 /// The Typst markup of the whole document; see [`render`].
@@ -112,7 +158,7 @@ pub fn source(project: &Project, lib: &Library) -> String {
     }
     let by_id: HashMap<&str, &Item> = items.iter().map(|i| (i.block.id.as_str(), i)).collect();
 
-    let mut out = PRELUDE.replace("FONTS", &font_list());
+    let mut out = PRELUDE.to_owned();
     for &sheet in &sheets {
         let on_sheet: Vec<&Item> = items.iter().filter(|i| i.sheet == sheet).collect();
         let right = on_sheet
@@ -277,70 +323,6 @@ fn quote(s: &str) -> String {
     }
     out.push('"');
     out
-}
-
-/// Typst reports errors as a list; the first lines are enough to find the cause.
-fn describe(e: RenderError) -> PdfError {
-    match e {
-        RenderError::Diagnostics(list) => PdfError::Typst(
-            list.iter()
-                .take(3)
-                .map(|d| d.message().to_owned())
-                .collect::<Vec<_>>()
-                .join("; "),
-        ),
-        other => PdfError::Typst(other.to_string()),
-    }
-}
-
-/// Fonts of this computer that have Cyrillic: (family, regular file, bold file).
-const SYSTEM_FONTS: [(&str, &str, &str); 2] = [
-    ("Tahoma", "tahoma.ttf", "tahomabd.ttf"),
-    ("Segoe UI", "segoeui.ttf", "segoeuib.ttf"),
-];
-
-/// System fonts found on this computer, as (family, file contents).
-fn system_fonts() -> &'static [(&'static str, Vec<u8>)] {
-    static FONTS: OnceLock<Vec<(&'static str, Vec<u8>)>> = OnceLock::new();
-    FONTS.get_or_init(|| {
-        let dir = std::env::var_os("WINDIR")
-            .map(|w| PathBuf::from(w).join("Fonts"))
-            .unwrap_or_else(|| PathBuf::from(r"C:\Windows\Fonts"));
-        let mut found = Vec::new();
-        for (family, regular, bold) in SYSTEM_FONTS {
-            // Typst fails on an unknown family, so only fonts that were read are listed.
-            if let Ok(data) = fs::read(dir.join(regular)) {
-                found.push((family, data));
-                found.extend(fs::read(dir.join(bold)).ok().map(|d| (family, d)));
-            }
-        }
-        found
-    })
-}
-
-/// Typst font list: system fonts first, then the one bundled with Typst.
-fn font_list() -> String {
-    let mut names: Vec<&str> = Vec::new();
-    for (family, _) in system_fonts() {
-        if !names.contains(family) {
-            names.push(family);
-        }
-    }
-    names.push("Libertinus Serif");
-    let quoted: Vec<String> = names.iter().map(|n| quote(n)).collect();
-    format!("({})", quoted.join(", "))
-}
-
-/// Built once; the fonts are parsed on first use.
-fn environment() -> &'static RenderEnvironment {
-    static ENV: OnceLock<RenderEnvironment> = OnceLock::new();
-    ENV.get_or_init(|| {
-        let files: Vec<Vec<u8>> = system_fonts().iter().map(|(_, d)| d.clone()).collect();
-        RenderEnvironment::builder()
-            .font_set(FontSet::bundled_plus_font_files(files))
-            .build()
-            .expect("render environment without packages is always valid")
-    })
 }
 
 /// Saves the project archive together with [`BOARDS_PDF`]. If the picture cannot
@@ -640,7 +622,7 @@ fn signal_color(ty: SignalType) -> Rgb8 {
         SignalType::Int => (0x2a, 0x5d, 0xb0),
         SignalType::Float => (0xc0, 0x6a, 0x10),
         SignalType::String => (0x8a, 0x3f, 0xa8),
-        SignalType::Any | SignalType::Number => (0x60, 0x60, 0x60),
+        SignalType::Any | SignalType::Number | SignalType::Same => (0x60, 0x60, 0x60),
     }
 }
 
@@ -712,16 +694,6 @@ mod tests {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let (lib, _) = Library::load(root.join("library")).unwrap();
         (Project::load(root.join("examples/pump")).unwrap(), lib)
-    }
-
-    #[test]
-    fn renders_pump_example() {
-        let (project, lib) = pump();
-        let pdf = render(&project, &lib).unwrap();
-        assert!(pdf.starts_with(b"%PDF"));
-        if let Some(out) = std::env::var_os("FLP_PDF_OUT") {
-            fs::write(out, &pdf).unwrap();
-        }
     }
 
     #[test]

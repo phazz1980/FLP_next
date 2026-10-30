@@ -1,0 +1,20 @@
+[package]
+name = "flp-pdf-render"
+description = "Typst-to-PDF helper of CrabLogic: the only executable that carries Typst"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "flp_pdf_render"
+path = "src/lib.rs"
+
+[[bin]]
+name = "crablogic-pdf"
+path = "src/main.rs"
+
+[dependencies]
+typst-embed = { version = "0.1", features = ["pdf"] }
+
+[dev-dependencies]
+flp-core = { path = "../flp-core" }
+flp-pdf = { path = "../flp-pdf" }

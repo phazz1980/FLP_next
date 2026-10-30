@@ -312,10 +312,9 @@ pub fn find_project_file(dir: &Path) -> Option<PathBuf> {
 
 /// Whether `path` has the project file extension.
 pub fn is_project_file(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|e| {
-            e.eq_ignore_ascii_case(PROJECT_EXT) || e.eq_ignore_ascii_case(LEGACY_PROJECT_EXT)
-        })
+    path.extension().is_some_and(|e| {
+        e.eq_ignore_ascii_case(PROJECT_EXT) || e.eq_ignore_ascii_case(LEGACY_PROJECT_EXT)
+    })
 }
 
 /// Whether `path` is something [`Project::load`] can open.

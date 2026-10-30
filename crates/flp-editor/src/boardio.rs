@@ -31,11 +31,10 @@ fn name_of(path: &Path) -> String {
 
 /// Whether `path` is a board file by its extension.
 pub fn is_board_file(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|e| {
-            e.eq_ignore_ascii_case(boardfile::EXTENSION)
-                || e.eq_ignore_ascii_case(boardfile::LEGACY_EXTENSION)
-        })
+    path.extension().is_some_and(|e| {
+        e.eq_ignore_ascii_case(boardfile::EXTENSION)
+            || e.eq_ignore_ascii_case(boardfile::LEGACY_EXTENSION)
+    })
 }
 
 /// Reads `.crabboard` files and shows the boards in the import window.

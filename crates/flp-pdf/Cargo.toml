@@ -6,5 +6,4 @@ edition.workspace = true
 
 [dependencies]
 flp-core = { path = "../flp-core" }
-typst-embed = { version = "0.1", features = ["pdf", "bundled-fonts"] }
 thiserror.workspace = true

@@ -1103,7 +1103,8 @@ impl EditorApp {
                 .ok()
                 .and_then(|p| p.parent().map(|d| d.join("crablogic-web.exe")))
                 .filter(|p| p.is_file());
-            let mut cmd = std::process::Command::new(sibling.unwrap_or_else(|| "crablogic-web".into()));
+            let mut cmd =
+                std::process::Command::new(sibling.unwrap_or_else(|| "crablogic-web".into()));
             cmd.arg(&path);
             if let Some(dir) = &self.lib_dir {
                 cmd.arg("--library").arg(dir);
@@ -2857,9 +2858,8 @@ fn newest_mtime(dir: &Path) -> Option<SystemTime> {
 }
 
 fn is_block_file(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|e| {
-            e.eq_ignore_ascii_case(flp_core::pack::EXTENSION)
-                || e.eq_ignore_ascii_case(flp_core::pack::LEGACY_EXTENSION)
-        })
+    path.extension().is_some_and(|e| {
+        e.eq_ignore_ascii_case(flp_core::pack::EXTENSION)
+            || e.eq_ignore_ascii_case(flp_core::pack::LEGACY_EXTENSION)
+    })
 }

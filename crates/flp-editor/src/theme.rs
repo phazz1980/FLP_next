@@ -442,7 +442,11 @@ pub fn default_projects_dir() -> Option<PathBuf> {
     let docs = home.join("Documents");
     let base = if docs.is_dir() { docs } else { home };
     let old = base.join("FLP_next");
-    Some(if old.is_dir() { old } else { base.join("CrabLogic") })
+    Some(if old.is_dir() {
+        old
+    } else {
+        base.join("CrabLogic")
+    })
 }
 
 /// Makes `theme` the egui look.
