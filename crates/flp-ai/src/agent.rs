@@ -19,6 +19,7 @@ set_expander создаёт его, place_on_expander ставит блок на
 Как работать:
 - перед правками прочитай схему (get_schema) и подходящие типы блоков (list_block_types: без фильтра — короткий список, \
 порты видны при поиске по словам; не запрашивай описание блоков, которые не нужны);
+- независимые вызовы инструментов делай в одном ответе, а не по одному;
 - давай блокам осмысленные id и связывай всё, что добавил; после каждой правки смотри поле check \
 и исправляй ошибки, пока их не останется;
 - не собирай и не заливай прошивку, пока пользователь об этом не попросил;
@@ -200,7 +201,13 @@ mod tests {
             ]}));
         }
         trim_old_results(&mut history);
-        let len = |i: usize| history[i]["content"][0]["content"].as_str().unwrap().chars().count();
+        let len = |i: usize| {
+            history[i]["content"][0]["content"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count()
+        };
         assert!(len(0) < OLD_RESULT_CHARS + 40);
         assert!(len(1) < OLD_RESULT_CHARS + 40);
         assert_eq!(len(2), OLD_RESULT_CHARS * 3);

@@ -58,18 +58,31 @@ impl Claude {
     }
 
     pub(crate) fn request_body(&self, system: &str, messages: &[Value], tools: &[Tool]) -> Value {
-        let tools: Vec<Value> = tools
+        let mut tools: Vec<Value> = tools
             .iter()
             .map(|t| json!({"name": t.name, "description": t.description, "input_schema": t.input_schema}))
             .collect();
+        // Prompt caching: tools and system are identical on every step, and the
+        // history grows by appending, so the last block is a moving breakpoint.
+        if let Some(last) = tools.last_mut() {
+            last["cache_control"] = json!({"type": "ephemeral"});
+        }
+        let mut messages = messages.to_vec();
+        if let Some(block) = messages
+            .last_mut()
+            .and_then(|m| m["content"].as_array_mut())
+            .and_then(|blocks| blocks.last_mut())
+        {
+            block["cache_control"] = json!({"type": "ephemeral"});
+        }
         json!({
             "model": self.model,
             "max_tokens": 16000,
-            "system": system,
+            "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             "messages": messages,
             "tools": tools,
-            // Editing schemas is multistep tool work: a bit above the model's default.
-            "output_config": {"effort": "high"},
+            // Every tool step pays this latency again; `FLP_AI_EFFORT=high` for harder schemas.
+            "output_config": {"effort": std::env::var("FLP_AI_EFFORT").unwrap_or_else(|_| "medium".to_owned())},
             // On a safety decline the API retries on a fallback model in the same call.
             "fallbacks": "default",
         })
