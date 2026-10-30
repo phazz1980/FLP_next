@@ -1,4 +1,4 @@
-//! Import and export of user blocks: a pack of blocks is one `.flpblocks` file with the
+//! Import and export of user blocks: a pack of blocks is one `.crabblocks` file with the
 //! Arduino libraries and examples of its blocks. Single blocks can be taken from a project.
 
 use std::path::{Path, PathBuf};
@@ -51,7 +51,7 @@ fn name_of(path: &Path) -> String {
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
 }
 
-/// Reads `.flpblocks` files and shows the pack in the import window.
+/// Reads `.crabblocks` files and shows the pack in the import window.
 pub fn add_files(app: &mut EditorApp, paths: &[PathBuf]) {
     for path in paths {
         match pack::read_pack_file(path) {
@@ -74,7 +74,7 @@ pub fn add_files(app: &mut EditorApp, paths: &[PathBuf]) {
 pub fn pick_files(app: &mut EditorApp) {
     let paths = rfd::FileDialog::new()
         .set_title(crate::i18n::tr("Импорт набора блоков"))
-        .add_filter(crate::i18n::tr("Набор блоков FLP"), &[pack::EXTENSION])
+        .add_filter(crate::i18n::tr("Набор блоков FLP"), &[pack::EXTENSION, pack::LEGACY_EXTENSION])
         .pick_files();
     if let Some(paths) = paths {
         add_files(app, &paths);
@@ -85,7 +85,7 @@ pub fn pick_files(app: &mut EditorApp) {
 pub fn pick_project(app: &mut EditorApp) {
     let Some(path) = rfd::FileDialog::new()
         .set_title(crate::i18n::tr("Блоки из проекта"))
-        .add_filter(crate::i18n::tr("Проект FLP"), &["flpn"])
+        .add_filter(crate::i18n::tr("Проект FLP"), &[flp_core::project::PROJECT_EXT, flp_core::project::LEGACY_PROJECT_EXT])
         .pick_file()
     else {
         return;
@@ -105,7 +105,7 @@ pub fn pick_project(app: &mut EditorApp) {
     }
 }
 
-/// Files dropped onto the window: `.flpblocks` go to the import window.
+/// Files dropped onto the window: `.crabblocks` go to the import window.
 pub fn handle_drops(app: &mut EditorApp, ctx: &egui::Context) {
     let dropped: Vec<PathBuf> = ctx.input(|i| {
         i.raw
@@ -114,7 +114,10 @@ pub fn handle_drops(app: &mut EditorApp, ctx: &egui::Context) {
             .map(|f| f.path().to_path_buf())
             .filter(|p| {
                 p.extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case(pack::EXTENSION))
+                    .is_some_and(|e| {
+                        e.eq_ignore_ascii_case(pack::EXTENSION)
+                            || e.eq_ignore_ascii_case(pack::LEGACY_EXTENSION)
+                    })
             })
             .collect()
     });
@@ -162,7 +165,7 @@ pub fn open_example(app: &mut EditorApp, kind: &str) {
         return;
     }
     let dir = std::env::temp_dir().join("flp_block_examples");
-    let dest = dir.join(format!("{kind}_пример.flpn"));
+    let dest = dir.join(format!("{kind}_пример.crab"));
     let copied = std::fs::create_dir_all(&dir).and_then(|()| std::fs::copy(&src, &dest));
     match copied {
         Ok(_) => app.request_open(dest),

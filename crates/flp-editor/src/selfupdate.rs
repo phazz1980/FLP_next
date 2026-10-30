@@ -25,9 +25,9 @@ fn work_dir() -> PathBuf {
 
 fn exe_name() -> &'static str {
     if cfg!(windows) {
-        "flp-editor.exe"
+        "crablogic-editor.exe"
     } else {
-        "flp-editor"
+        "crablogic-editor"
     }
 }
 
@@ -314,21 +314,21 @@ mod tests {
         fs::create_dir_all(staged.join("library")).unwrap();
         fs::create_dir_all(install.join("library")).unwrap();
         fs::create_dir_all(install.join("user_library")).unwrap();
-        fs::write(staged.join("flp-editor.exe"), "new").unwrap();
+        fs::write(staged.join("crablogic-editor.exe"), "new").unwrap();
         fs::write(staged.join("library/a"), "new").unwrap();
-        fs::write(install.join("flp-editor.exe"), "old").unwrap();
+        fs::write(install.join("crablogic-editor.exe"), "old").unwrap();
         fs::write(install.join("library/old_only"), "x").unwrap();
         fs::write(install.join("user_library/mine"), "mine").unwrap();
         apply(&staged, &install).unwrap();
         assert_eq!(
-            fs::read_to_string(install.join("flp-editor.exe")).unwrap(),
+            fs::read_to_string(install.join("crablogic-editor.exe")).unwrap(),
             "new"
         );
         assert!(install.join("library/a").is_file());
         assert!(!install.join("library/old_only").exists());
         assert!(install.join("user_library/mine").is_file());
         assert_eq!(
-            fs::read_to_string(install.join(BACKUP_DIR).join("flp-editor.exe")).unwrap(),
+            fs::read_to_string(install.join(BACKUP_DIR).join("crablogic-editor.exe")).unwrap(),
             "old"
         );
         let _ = fs::remove_dir_all(&root);

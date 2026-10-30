@@ -1,11 +1,11 @@
 [package]
 name = "flp-cli"
-description = "Command line of FLP_next: check / gen / build / upload"
+description = "Command line of CrabLogic: check / gen / build / upload"
 version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "flp"
+name = "crablogic"
 path = "src/main.rs"
 
 [dependencies]

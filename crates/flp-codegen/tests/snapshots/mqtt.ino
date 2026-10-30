@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «mqtt». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «mqtt». Ручные правки будут перезаписаны.
 // Порядок выполнения: wifi → broker → sensor → temp_pub → button → button_pub → led_sub → temp_w → button_w → led_r → led
 
 #define FLPROG_MQTT_MAX_SUBSCRIPTIONS 4U

@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $dist = Join-Path $root 'dist\FLP_next'
 $zip = Join-Path $root 'dist\FLP_next.zip'
-$bins = 'flp-editor.exe', 'flp-mcp.exe', 'flp-web.exe', 'flp.exe'
+$bins = 'crablogic-editor.exe', 'crablogic-mcp.exe', 'crablogic-web.exe', 'crablogic.exe'
 
 # The editor running from dist is closed before the build and started again afterwards.
 $script:reopen = $false
@@ -15,7 +15,7 @@ function Start-Editor {
     if (-not $script:reopen) { return }
     $script:reopen = $false
     Write-Host 'Запускаю редактор снова.' -ForegroundColor Cyan
-    Start-Process (Join-Path $dist 'flp-editor.exe')
+    Start-Process (Join-Path $dist 'crablogic-editor.exe')
 }
 
 function Fail($msg) {
@@ -34,19 +34,19 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
 }
 
 # Close the editor politely: with unsaved changes it asks to save, so wait for the answer.
-$editors = @(Get-DistProcesses 'flp-editor')
+$editors = @(Get-DistProcesses 'crablogic-editor')
 if ($editors.Count -gt 0) {
     Write-Host 'Закрываю редактор (если есть несохранённые изменения — ответьте в его окне)...' -ForegroundColor Yellow
     $script:reopen = $true
     $editors | ForEach-Object { [void]$_.CloseMainWindow() }
     $deadline = [DateTime]::Now.AddMinutes(3)
-    while ((Get-DistProcesses 'flp-editor') -and [DateTime]::Now -lt $deadline) {
+    while ((Get-DistProcesses 'crablogic-editor') -and [DateTime]::Now -lt $deadline) {
         Start-Sleep -Milliseconds 300
     }
-    if (Get-DistProcesses 'flp-editor') { Fail 'редактор не закрылся за 3 минуты — сборка отменена.' }
+    if (Get-DistProcesses 'crablogic-editor') { Fail 'редактор не закрылся за 3 минуты — сборка отменена.' }
 }
 
-# A running exe (e.g. flp-mcp started by Claude) cannot be overwritten but can be renamed:
+# A running exe (e.g. crablogic-mcp started by Claude) cannot be overwritten but can be renamed:
 # move locked binaries aside so cargo can write new ones; remove leftovers when free.
 $release = Join-Path $root 'target\release'
 Get-ChildItem $release -Filter '*.exe.old*' -ErrorAction SilentlyContinue |
@@ -74,7 +74,7 @@ try {
 
 $running = Get-DistProcesses ($bins | ForEach-Object { $_ -replace '\.exe$' })
 if ($running) {
-    # Helpers (flp-mcp, flp-web, flp) hold no user data: stop them so the files can be replaced.
+    # Helpers (crablogic-mcp, crablogic-web, crablogic) hold no user data: stop them so the files can be replaced.
     Write-Host "Останавливаю запущенные из dist: $(($running.Name | Sort-Object -Unique) -join ', ')" -ForegroundColor Yellow
     $running | Stop-Process -Force -ErrorAction SilentlyContinue
     $deadline = [DateTime]::Now.AddSeconds(10)

@@ -1,4 +1,4 @@
-//! Opening `.flpn` project files by double click: registers the running editor
+//! Opening `.crab` project files by double click: registers the running editor
 //! as their handler for the current user (`HKCU\Software\Classes`, no admin rights).
 
 use flp_core::project::PROJECT_EXT;
@@ -33,15 +33,15 @@ pub fn register() -> Result<(), String> {
             &format!("\"{exe}\" \"%1\""),
         )
     };
-    class(PROJECT_EXT, PROG_ID, crate::i18n::tr("Проект FLP_next"))
+    class(PROJECT_EXT, PROG_ID, crate::i18n::tr("Проект CrabLogic"))
         .and_then(|()| {
             class(
                 BLOCK_EXT,
                 BLOCK_PROG_ID,
-                crate::i18n::tr("Набор блоков FLP_next"),
+                crate::i18n::tr("Набор блоков CrabLogic"),
             )
         })
-        .and_then(|()| class(BOARD_EXT, BOARD_PROG_ID, crate::i18n::tr("Плата FLP_next")))
+        .and_then(|()| class(BOARD_EXT, BOARD_PROG_ID, crate::i18n::tr("Плата CrabLogic")))
         .map_err(|e| e.to_string())
 }
 

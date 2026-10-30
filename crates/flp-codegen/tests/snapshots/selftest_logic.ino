@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «selftest_logic». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «selftest_logic». Ручные правки будут перезаписаны.
 // Порядок выполнения: abs → mn → mx → lim → rt → sqr → pw → md → sw → mx4 → dm → gen → tog → deb → tt_n → deb_n → tick → t_abs → t_min → t_max → t_lim → t_sqrt → t_sq → t_pow → t_mod → t_sw → t_mux → t_dms1 → t_dms2 → t_dms3 → t_tt → t_deb → gn → t_gen → line1 → tx1 → line2 → tx2 → line3 → tx3 → line4 → tx4
 
 #include <Arduino.h>

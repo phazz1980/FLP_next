@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «selftest_logic2». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «selftest_logic2». Ручные правки будут перезаписаны.
 // Порядок выполнения: cmp → sr → sn → cs → tn → band → bor → bxor → bnot → bread → bwrite → bts → tby → dec → enc → f2i → i2f → w2b → b2w → d2b → b2d → fnd → chr → addc → pid1 → and3 → xor3 → mux16 → dms16 → chg → schg → bchg → rt → rnd → tick → n_cmp → n_sr → n_bread → n_b0 → n_b1 → n_b2 → n_dec → n_any → n_and3 → n_xor3 → n_chg → n_schg → n_bchg → t_cmp → t_sr → t_sin → t_cos → t_tan → t_band → t_bor → t_bxor → t_bnot → t_bread → t_bwrite → t_b0 → t_b1 → t_b2 → t_tobyte → t_dec → t_enc → t_any → t_f2i → t_i2f → t_lo → t_hi → t_word → t_d0 → t_d1 → t_d2 → t_d3 → t_dword → t_find → t_code → t_and3 → t_xor3 → t_pid → t_mux16 → t_dms16 → t_chg → t_schg → t_bchg → t_rnd → line1 → tx1 → line2 → tx2 → line3 → tx3 → line4 → tx4 → line5 → tx5 → line6 → tx6 → line7 → tx7 → line8 → tx8 → line9 → tx9 → line10 → tx10
 
 #include <Arduino.h>

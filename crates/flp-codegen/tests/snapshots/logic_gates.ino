@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «logic_gates». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «logic_gates». Ручные правки будут перезаписаны.
 // Порядок выполнения: a → b → both → any → differ → not_a → led_and → led_or → led_xor → led_not
 
 #include <Arduino.h>

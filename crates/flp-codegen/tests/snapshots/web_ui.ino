@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «web_ui». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «web_ui». Ручные правки будут перезаписаны.
 // Порядок выполнения: wifi → ui → head → sw → btn → sld → inp → val → bar → any → lamp → led → txt → info → line → box → trend → net → tank → clock → pic → fan → arrow → panel → sepv
 
 // Tells the web page block to add the network form handlers (/ui/net, /ui/scan).

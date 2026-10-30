@@ -1,4 +1,4 @@
-//! Import and export of user boards: a board is one `.flpboard` file with its folder
+//! Import and export of user boards: a board is one `.crabboard` file with its folder
 //! (`board.toml`, the description and the pictures).
 
 use std::path::{Path, PathBuf};
@@ -32,10 +32,13 @@ fn name_of(path: &Path) -> String {
 /// Whether `path` is a board file by its extension.
 pub fn is_board_file(path: &Path) -> bool {
     path.extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case(boardfile::EXTENSION))
+        .is_some_and(|e| {
+            e.eq_ignore_ascii_case(boardfile::EXTENSION)
+                || e.eq_ignore_ascii_case(boardfile::LEGACY_EXTENSION)
+        })
 }
 
-/// Reads `.flpboard` files and shows the boards in the import window.
+/// Reads `.crabboard` files and shows the boards in the import window.
 pub fn add_files(app: &mut EditorApp, paths: &[PathBuf]) {
     for path in paths {
         match boardfile::read_board_file(path) {
@@ -70,7 +73,7 @@ pub fn pick_files(app: &mut EditorApp) {
     }
 }
 
-/// Files dropped onto the window: `.flpboard` go to the import window.
+/// Files dropped onto the window: `.crabboard` go to the import window.
 pub fn handle_drops(app: &mut EditorApp, ctx: &egui::Context) {
     let dropped: Vec<PathBuf> = ctx.input(|i| {
         i.raw
@@ -219,9 +222,9 @@ mod tests {
 
     #[test]
     fn board_files_are_told_by_extension() {
-        assert!(is_board_file(Path::new("kc868_a6.flpboard")));
+        assert!(is_board_file(Path::new("kc868_a6.crabboard")));
         assert!(is_board_file(Path::new("D:/x/KC868.FLPBOARD")));
-        assert!(!is_board_file(Path::new("pack.flpblocks")));
+        assert!(!is_board_file(Path::new("pack.crabblocks")));
         assert!(!is_board_file(Path::new("flpboard")));
     }
 }

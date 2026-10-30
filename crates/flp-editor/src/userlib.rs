@@ -271,7 +271,7 @@ fn toolbar(app: &EditorApp, ui: &mut Ui, selected: Option<&Selected>, actions: &
         }
         ui.menu_button(crate::i18n::tr("Импорт"), |ui| {
             if ui
-                .button(crate::i18n::tr("Набор из файла .flpblocks..."))
+                .button(crate::i18n::tr("Набор из файла .crabblocks..."))
                 .clicked()
             {
                 actions.push(Action::Import);

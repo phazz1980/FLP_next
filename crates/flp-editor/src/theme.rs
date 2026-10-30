@@ -198,12 +198,9 @@ impl Theme {
     }
 }
 
-/// `%APPDATA%\FLP_next` (or `~/.config/FLP_next` elsewhere).
+/// `%APPDATA%\CrabLogic` (or `~/.config/CrabLogic` elsewhere).
 fn config_dir() -> Option<PathBuf> {
-    std::env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-        .map(|d| d.join("FLP_next"))
+    flp_core::local::config_dir()
 }
 
 pub fn themes_dir() -> Option<PathBuf> {
@@ -437,12 +434,15 @@ pub fn update_repo() -> String {
         .unwrap_or_else(|| crate::update::DEFAULT_REPO.to_owned())
 }
 
-/// Folder for projects created without asking: `Documents/FLP_next` when it exists.
+/// Folder for projects created without asking: `Documents/CrabLogic`
+/// (or the former `Documents/FLP_next` when that one exists).
 pub fn default_projects_dir() -> Option<PathBuf> {
     let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
     let home = PathBuf::from(home);
     let docs = home.join("Documents");
-    Some(if docs.is_dir() { docs } else { home }.join("FLP_next"))
+    let base = if docs.is_dir() { docs } else { home };
+    let old = base.join("FLP_next");
+    Some(if old.is_dir() { old } else { base.join("CrabLogic") })
 }
 
 /// Makes `theme` the egui look.

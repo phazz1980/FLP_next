@@ -1,4 +1,4 @@
-// Embeds the program icon into the exe (Explorer, taskbar, icon of `.flpn` files).
+// Embeds the program icon into the exe (Explorer, taskbar, icon of `.crab` files).
 fn main() {
     println!("cargo:rerun-if-changed=assets/icon.ico");
     println!("cargo:rerun-if-changed=assets/icon.rc");

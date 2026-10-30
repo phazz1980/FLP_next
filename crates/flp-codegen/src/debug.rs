@@ -103,7 +103,7 @@ pub fn runtime(table: &DebugTable, text_in: bool, background: bool) -> String {
     let _ = write!(
         out,
         r#"
-// ---- Онлайн-отладка FLP_next (протокол v{version}) ----
+// ---- Онлайн-отладка CrabLogic (протокол v{version}) ----
 // Кадры: 0xAA 0x55, тип, длина, данные, CRC-16/CCITT. Обычный Serial.print не мешает.
 const uint32_t FLP_DBG_FINGERPRINT = 0x{fingerprint:08X}UL;
 const uint16_t FLP_DBG_COUNT = {n};

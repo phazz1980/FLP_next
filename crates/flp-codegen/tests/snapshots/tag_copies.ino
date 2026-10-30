@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «tag_copies». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «tag_copies». Ручные правки будут перезаписаны.
 // Порядок выполнения: button → button_2 → lamp → blink → lamp_2
 
 #include <Arduino.h>

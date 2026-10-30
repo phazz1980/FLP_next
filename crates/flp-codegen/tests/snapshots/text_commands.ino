@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «text_commands». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «text_commands». Ручные правки будут перезаписаны.
 // Порядок выполнения: adc → bar → p_text → name → tick → p_send → port2 → rx → command_w → command_r → message → message_w → length → length_w → report → is_on → pump → head → is_set → arg → number → apply → setpoint_w
 
 #include <Arduino.h>

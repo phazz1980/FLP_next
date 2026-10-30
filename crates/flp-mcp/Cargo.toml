@@ -1,11 +1,11 @@
 [package]
 name = "flp-mcp"
-description = "MCP server of FLP_next: the AI command set over stdio"
+description = "MCP server of CrabLogic: the AI command set over stdio"
 version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "flp-mcp"
+name = "crablogic-mcp"
 path = "src/main.rs"
 
 [dependencies]

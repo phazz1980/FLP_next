@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «pcf_pins». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «pcf_pins». Ручные правки будут перезаписаны.
 // Порядок выполнения: button1 → button2 → limit → relay1 → relay2 → lamp
 
 #include <Arduino.h>

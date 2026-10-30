@@ -31,7 +31,7 @@ pub enum Error {
         source: toml::ser::Error,
     },
 
-    #[error("в папке {} нет проекта (файла .flpn)", .path.display())]
+    #[error("в папке {} нет проекта (файла .crab)", .path.display())]
     NoProject { path: PathBuf },
 
     #[error("{} — не архив проекта: {}", .path.display(), .source)]

@@ -1,4 +1,4 @@
-//! A user board as one file: `<id>.flpboard` is a ZIP with the files of the board folder
+//! A user board as one file: `<id>.crabboard` is a ZIP with the files of the board folder
 //! (`board.toml`, `docs.md`, `images/…`).
 
 use std::fs;
@@ -13,7 +13,9 @@ use crate::boards::{boards_dir, BoardDef, BOARD_FILE};
 use crate::library::Library;
 
 /// Extension of a board file.
-pub const EXTENSION: &str = "flpboard";
+pub const EXTENSION: &str = "crabboard";
+/// Extension used before the rename; still opened.
+pub const LEGACY_EXTENSION: &str = "flpboard";
 /// Upper bound of the unpacked size, against archives that blow up.
 const MAX_BYTES: u64 = 128 * 1024 * 1024;
 
@@ -74,7 +76,7 @@ impl IncomingBoard {
     }
 }
 
-/// Reads a `.flpboard` file.
+/// Reads a `.crabboard` file.
 pub fn read_board_file(path: &Path) -> Result<IncomingBoard, String> {
     let file = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut zip = ZipArchive::new(std::io::BufReader::new(file))
@@ -153,9 +155,9 @@ name = \"OUT1\"
         let (lib, errors) = Library::load_with_user(&builtin).unwrap();
         assert!(errors.is_empty(), "{errors:?}");
 
-        let file = root.join("mine.flpboard");
+        let file = root.join("mine.crabboard");
         export_board(&lib, "mine", &file).unwrap();
-        assert!(export_board(&lib, "esp32", &root.join("x.flpboard")).is_err());
+        assert!(export_board(&lib, "esp32", &root.join("x.crabboard")).is_err());
         let incoming = read_board_file(&file).unwrap();
         assert_eq!((incoming.id(), incoming.name()), ("mine", "Моя плата"));
         assert_eq!(incoming.conflict(&lib), BoardConflict::User(1));

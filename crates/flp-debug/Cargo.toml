@@ -1,6 +1,6 @@
 [package]
 name = "flp-debug"
-description = "Online debugging protocol and host session of FLP_next"
+description = "Online debugging protocol and host session of CrabLogic"
 version.workspace = true
 edition.workspace = true
 
