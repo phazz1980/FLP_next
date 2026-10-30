@@ -130,6 +130,27 @@ fn run(
         .map_err(|e| e.to_string())?
         .with_control(control);
     let board = &project.config.board;
+    let opts = CompileOptions {
+        mode: if debug {
+            BuildMode::Debug
+        } else {
+            BuildMode::Release
+        },
+        verbose: !background,
+        low_priority: background,
+        force: matches!(kind, JobKind::Rebuild),
+        libraries: program.attached_libraries(),
+        ..Default::default()
+    };
+    // Only the sketch body changed: the user's build takes seconds without arduino-cli,
+    // so precompiling after every edit would only load the computer.
+    if background && !cli.needs_cli(&project.work_dir(), board, &opts) {
+        return Ok(Done {
+            message: crate::i18n::tr("Сборка готова").into(),
+            port: None,
+            debug,
+        });
+    }
     let installed = cli
         .ensure_libraries(&program.libraries(), &mut |l| out(LogLevel::Info, l))
         .map_err(|e| e.to_string())?;
@@ -146,18 +167,6 @@ fn run(
             &[&crate::boardcfg::board_name(board, lib.boards())],
         ),
     );
-    let opts = CompileOptions {
-        mode: if debug {
-            BuildMode::Debug
-        } else {
-            BuildMode::Release
-        },
-        verbose: !background,
-        low_priority: background,
-        force: matches!(kind, JobKind::Rebuild),
-        libraries: program.attached_libraries(),
-        ..Default::default()
-    };
     // Only build stages and diagnostics; compiler command lines stay hidden.
     let sketch = std::fs::read_to_string(&path).unwrap_or_default();
     let blocks: Vec<(String, String)> = project
@@ -205,11 +214,16 @@ fn run(
             }
             _ => e.to_string(),
         })?;
-    if compiled == Compiled::UpToDate {
-        out(
+    match compiled {
+        Compiled::UpToDate => out(
             LogLevel::Info,
             crate::i18n::tr("Прошивка уже собрана, схема не менялась"),
-        );
+        ),
+        Compiled::Direct => out(
+            LogLevel::Info,
+            crate::i18n::tr("Прямая сборка: изменилась только схема, arduino-cli не запускался"),
+        ),
+        Compiled::Built => {}
     }
 
     match kind {

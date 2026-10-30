@@ -591,6 +591,7 @@
  "Прошивка залита на {0}": "Firmware uploaded to {0}",
  "Прошивка раз в несколько секунд печатает в последовательный порт время цикла (всего и по листам). Режим отладки не нужен": "Every few seconds the firmware prints the cycle time (total and per sheet) to the serial port. Debug mode is not needed",
  "Прошивка уже собрана, схема не менялась": "The firmware is already built, the schematic has not changed",
+ "Прямая сборка: изменилась только схема, arduino-cli не запускался": "Direct build: only the schematic changed, arduino-cli was not run",
  "Публикации": "Publications",
  "Пусто — параметр надо задать в свойствах блока": "Empty — the parameter must be set in the block properties",
  "Пусто. Создайте раздел или блок кнопками выше, либо блок на основе встроенного: правая кнопка на нём во вкладке «Встроенные».": "Empty. Create a section or block with the buttons above, or a block based on a built-in one: right-click it in the “Built-in” tab.",

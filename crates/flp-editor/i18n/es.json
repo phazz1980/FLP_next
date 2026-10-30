@@ -591,6 +591,7 @@
  "Прошивка залита на {0}": "Firmware cargado en {0}",
  "Прошивка раз в несколько секунд печатает в последовательный порт время цикла (всего и по листам). Режим отладки не нужен": "Cada pocos segundos el firmware imprime en el puerto serie el tiempo de ciclo (total y por hoja). No hace falta el modo de depuración",
  "Прошивка уже собрана, схема не менялась": "El firmware ya está compilado, el esquema no ha cambiado",
+ "Прямая сборка: изменилась только схема, arduino-cli не запускался": "Compilación directa: solo cambió el esquema, no se ejecutó arduino-cli",
  "Публикации": "Publicaciones",
  "Пусто — параметр надо задать в свойствах блока": "Vacío: el parámetro debe fijarse en las propiedades del bloque",
  "Пусто. Создайте раздел или блок кнопками выше, либо блок на основе встроенного: правая кнопка на нём во вкладке «Встроенные».": "Vacío. Cree una sección o un bloque con los botones de arriba, o un bloque basado en uno integrado: clic derecho sobre él en la pestaña «Integrados».",

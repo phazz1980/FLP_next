@@ -333,6 +333,9 @@ fn run_build(
     println!("Сборка для {}...", board.fqbn);
     match cli.compile(&project.work_dir(), board, &opts, &mut print) {
         Ok(Compiled::UpToDate) => println!("Прошивка уже собрана, скетч не менялся"),
+        Ok(Compiled::Direct) => {
+            println!("Прямая сборка: изменился только скетч, arduino-cli не запускался")
+        }
         Ok(Compiled::Built) => {}
         Err(e) => return build_failed(e),
     }

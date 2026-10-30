@@ -18,6 +18,7 @@ use flp_codegen::sketch_dir;
 use flp_core::BoardConfig;
 use serde::Deserialize;
 
+mod direct;
 mod output;
 pub use output::{
     classify, explain_compile, explain_upload, locate_block, parse_diagnostic, OutputLine,
@@ -94,6 +95,9 @@ pub struct CompileOptions {
 pub enum Compiled {
     /// arduino-cli compiled the sketch.
     Built,
+    /// Only the sketch body changed: it was compiled and linked with the commands of
+    /// the last full build, without arduino-cli.
+    Direct,
     /// The build folder already held firmware for this sketch and settings.
     UpToDate,
 }
@@ -227,6 +231,18 @@ fn build_stamp(exe: &Path, work_dir: &Path, board: &BoardConfig, opts: &CompileO
 }
 
 /// The build folder holds a firmware image (`.bin` for ESP32, `.hex` for AVR).
+/// Plain work dir and options with the bundled libraries of the project added.
+fn with_bundled(work_dir: &Path, opts: &CompileOptions) -> (PathBuf, CompileOptions) {
+    let work_dir = plain_path(work_dir);
+    let mut opts = opts.clone();
+    for dir in bundled_libraries(&work_dir) {
+        if !opts.libraries.contains(&dir) {
+            opts.libraries.push(dir);
+        }
+    }
+    (work_dir, opts)
+}
+
 fn has_firmware(work_dir: &Path) -> bool {
     let dir = build_dir(work_dir);
     ["sketch.ino.bin", "sketch.ino.hex"]
@@ -391,35 +407,116 @@ impl ArduinoCli {
         opts: &CompileOptions,
         on_line: &mut dyn FnMut(&str),
     ) -> Result<Compiled, BuildError> {
-        let work_dir = &plain_path(work_dir);
-        let mut opts = opts.clone();
-        for dir in bundled_libraries(work_dir) {
-            if !opts.libraries.contains(&dir) {
-                opts.libraries.push(dir);
-            }
-        }
+        let (work_dir, opts) = &with_bundled(work_dir, opts);
         let stamp_path = build_dir(work_dir).join(BUILD_STAMP);
-        let stamp = build_stamp(&self.exe, work_dir, board, &opts);
-        if !opts.force
-            && has_firmware(work_dir)
-            && std::fs::read_to_string(&stamp_path).is_ok_and(|s| s.trim() == stamp)
-        {
+        let stamp = build_stamp(&self.exe, work_dir, board, opts);
+        if !opts.force && self.is_up_to_date(work_dir, board, opts) {
             return Ok(Compiled::UpToDate);
         }
         // A failed or cancelled build leaves no stamp, so the next one runs for real.
         let _ = std::fs::remove_file(&stamp_path);
+        let verbose = opts.verbose;
+        // The full build always runs verbose (to capture the recipe); without `verbose`
+        // only diagnostics and the size report get through.
+        let mut show = |line: &str| {
+            if verbose || !matches!(classify(line), OutputLine::Detail | OutputLine::Stage(_)) {
+                on_line(line);
+            }
+        };
+        if !opts.force && self.compile_direct(work_dir, board, opts, &mut show)? {
+            let _ = std::fs::write(&stamp_path, &stamp);
+            return Ok(Compiled::Direct);
+        }
+        direct::Recipe::remove(work_dir);
         // A quiet background build must not start a download of hundreds of megabytes.
         if !opts.low_priority {
-            if let Some(core) = self.ensure_core(&board.fqbn, on_line)? {
-                on_line(&format!("Установлено ядро {core}"));
+            if let Some(core) = self.ensure_core(&board.fqbn, &mut show)? {
+                show(&format!("Установлено ядро {core}"));
             }
         }
-        let args = compile_args(work_dir, board, &opts);
-        let status = self.run(&args, opts.low_priority, on_line)?;
+        let args = compile_args(work_dir, board, opts);
+        let mut capture = direct::Capture::default();
+        let status = self.run(&args, opts.low_priority, &mut |line| {
+            capture.feed(line);
+            show(line);
+        })?;
         check_status("сборка", status)?;
         // Only a missed shortcut next time if this fails.
         let _ = std::fs::write(&stamp_path, &stamp);
+        if let Some(compile) = direct::sketch_compile_command(work_dir) {
+            if let Some(key) = direct::recipe_key(&self.exe, work_dir, board, opts, &compile) {
+                if !capture.post.is_empty() {
+                    let post = capture.post;
+                    direct::Recipe { key, compile, post }.save(work_dir);
+                }
+            }
+        }
         Ok(Compiled::Built)
+    }
+
+    /// The next [`compile`](Self::compile) of the sketch written to `work_dir` would run
+    /// arduino-cli: libraries, includes, board or options changed since the last full
+    /// build, or there was none. Otherwise the build is up to date or a direct rebuild
+    /// of a few seconds, so a background build can leave it to the user's build.
+    pub fn needs_cli(&self, work_dir: &Path, board: &BoardConfig, opts: &CompileOptions) -> bool {
+        let (work_dir, opts) = &with_bundled(work_dir, opts);
+        opts.force
+            || !self.is_up_to_date(work_dir, board, opts)
+                && self.fitting_recipe(work_dir, board, opts).is_none()
+    }
+
+    fn is_up_to_date(&self, work_dir: &Path, board: &BoardConfig, opts: &CompileOptions) -> bool {
+        let stamp = build_stamp(&self.exe, work_dir, board, opts);
+        has_firmware(work_dir)
+            && std::fs::read_to_string(build_dir(work_dir).join(BUILD_STAMP))
+                .is_ok_and(|s| s.trim() == stamp)
+    }
+
+    /// The recipe of the last full build, if only the sketch body changed since.
+    fn fitting_recipe(
+        &self,
+        work_dir: &Path,
+        board: &BoardConfig,
+        opts: &CompileOptions,
+    ) -> Option<direct::Recipe> {
+        let recipe = direct::Recipe::load(work_dir)?;
+        let key = direct::recipe_key(&self.exe, work_dir, board, opts, &recipe.compile);
+        (key.as_deref() == Some(recipe.key.as_str())
+            && build_dir(work_dir).join("sketch.ino.elf").is_file())
+        .then_some(recipe)
+    }
+
+    /// Rebuilds with the recipe of the last full build when it still fits. `false` means
+    /// "build with arduino-cli": no recipe, something besides the sketch body changed,
+    /// or a command failed (its output is dropped; the full build shows the errors).
+    fn compile_direct(
+        &self,
+        work_dir: &Path,
+        board: &BoardConfig,
+        opts: &CompileOptions,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<bool, BuildError> {
+        let Some(recipe) = self.fitting_recipe(work_dir, board, opts) else {
+            return Ok(false);
+        };
+        let Ok(commands) =
+            direct::write_sketch_cpp(work_dir).and_then(|()| recipe.commands(work_dir))
+        else {
+            return Ok(false);
+        };
+        let mut lines = Vec::new();
+        for mut cmd in commands {
+            cmd.stdin(Stdio::null());
+            match self.run_command(cmd, opts.low_priority, &mut |l| lines.push(l.to_owned())) {
+                Ok(status) if status.success() => {}
+                Err(BuildError::Cancelled) => return Err(BuildError::Cancelled),
+                _ => return Ok(false),
+            }
+        }
+        for line in &lines {
+            on_line(line);
+        }
+        Ok(true)
     }
 
     /// Uploads the last build to the board on `port`.
@@ -572,21 +669,35 @@ impl ArduinoCli {
         on_line: &mut dyn FnMut(&str),
     ) -> Result<ExitStatus, BuildError> {
         let mut cmd = self.command();
-        cmd.args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        cmd.args(args).stdin(Stdio::null());
+        if args.iter().any(|a| a == "-v") {
+            // `classify` and the recipe capture match the English stage messages.
+            cmd.env("ARDUINO_LOCALE", "en");
+        }
+        self.run_command(cmd, low_priority, on_line)
+    }
+
+    /// Runs `cmd` under the build control (cancel, priority), passing stdout and stderr
+    /// lines to `on_line` as they come.
+    fn run_command(
+        &self,
+        mut cmd: Command,
+        low_priority: bool,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<ExitStatus, BuildError> {
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
         let control = self.control.clone().unwrap_or_default();
         if control.is_cancelled() {
             return Err(BuildError::Cancelled);
         }
         let mut low = low_priority && !control.raised();
         set_low_priority(&mut cmd, low);
-        if args.iter().any(|a| a == "-v") {
-            // `classify` matches the English stage messages.
-            cmd.env("ARDUINO_LOCALE", "en");
-        }
-        let mut child = cmd.spawn().map_err(|source| self.spawn_error(source))?;
+        let exe = PathBuf::from(cmd.get_program());
+        let spawn_error = |source| BuildError::Spawn {
+            exe: exe.clone(),
+            source,
+        };
+        let mut child = cmd.spawn().map_err(spawn_error)?;
 
         let (tx, rx) = mpsc::channel::<String>();
         let streams: [Option<Box<dyn Read + Send>>; 2] = [
@@ -625,7 +736,7 @@ impl ArduinoCli {
                 low = false;
             }
         }
-        let status = child.wait().map_err(|source| self.spawn_error(source))?;
+        let status = child.wait().map_err(spawn_error)?;
         if control.is_cancelled() {
             return Err(BuildError::Cancelled);
         }
@@ -757,8 +868,10 @@ fn compile_args(work_dir: &Path, board: &BoardConfig, opts: &CompileOptions) -> 
         args.push("--build-property".into());
         args.push(format!("compiler.cpp.extra_flags=-D{WEBUI_RESPONSE_DEFINE}").into());
     }
+    // Always verbose: the log carries the link commands for the direct rebuild
+    // (`compile` hides the noise unless `verbose` is set).
+    args.push("-v".into());
     if opts.verbose {
-        args.push("-v".into());
         args.push("--warnings".into());
         args.push("default".into());
     }
@@ -992,6 +1105,38 @@ mod tests {
     }
 
     #[test]
+    fn background_build_needs_cli_only_for_new_includes() {
+        let root = env::temp_dir().join(format!("flp-needs-cli-{}", std::process::id()));
+        let sketch = sketch_dir(&root);
+        let build = build_dir(&root);
+        std::fs::create_dir_all(&sketch).unwrap();
+        std::fs::create_dir_all(&build).unwrap();
+        let ino = sketch.join("sketch.ino");
+        std::fs::write(&ino, "#include <A.h>\nvoid loop() {}").unwrap();
+        let cli = ArduinoCli::new("arduino-cli");
+        let opts = CompileOptions::default();
+        assert!(cli.needs_cli(&root, &board(), &opts), "no full build yet");
+
+        let compile = vec!["g++".to_owned()];
+        let (_, bundled) = with_bundled(&root, &opts);
+        let key = direct::recipe_key(&cli.exe, &root, &board(), &bundled, &compile).unwrap();
+        let post = Vec::new();
+        direct::Recipe { key, compile, post }.save(&root);
+        std::fs::write(build.join("sketch.ino.elf"), "").unwrap();
+        std::fs::write(&ino, "#include <A.h>\nvoid loop() { int x = 2; }").unwrap();
+        assert!(!cli.needs_cli(&root, &board(), &opts), "body edit");
+        let forced = CompileOptions {
+            force: true,
+            ..Default::default()
+        };
+        assert!(cli.needs_cli(&root, &board(), &forced), "rebuild");
+
+        std::fs::write(&ino, "#include <A.h>\n#include <B.h>\nvoid loop() {}").unwrap();
+        assert!(cli.needs_cli(&root, &board(), &opts), "new include");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn compile_passes_library_folders() {
         let opts = CompileOptions {
             libraries: vec![PathBuf::from("libs")],
@@ -1037,6 +1182,7 @@ mod tests {
                 "CPUFreq=240",
                 "--build-path",
                 &build,
+                "-v",
                 &sketch,
             ]
         );
