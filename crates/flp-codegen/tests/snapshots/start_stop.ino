@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «start_stop». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «start_stop». Ручные правки будут перезаписаны.
 // Порядок выполнения: start → stop → run → motor → fan_delay → fan → stopped → bell → buzzer → started → starts
 
 #include <Arduino.h>

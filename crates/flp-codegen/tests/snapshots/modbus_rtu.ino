@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «modbus_rtu». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «modbus_rtu». Ручные правки будут перезаписаны.
 // Порядок выполнения: master → panel → temp → temp_out → sensor_ok → relay_cmd → relay
 
 #include <Arduino.h>

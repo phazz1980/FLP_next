@@ -1,6 +1,6 @@
 [package]
 name = "flp-ai"
-description = "Shared command set for the AI assistant and the MCP server of FLP_next"
+description = "Shared command set for the AI assistant and the MCP server of CrabLogic"
 version.workspace = true
 edition.workspace = true
 

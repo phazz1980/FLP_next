@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «text_commands». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «text_commands». Ручные правки будут перезаписаны.
 // Порядок выполнения: adc → bar → p_text → name → tick → p_send → port2 → rx → command_w → command_r → message → message_w → length → length_w → report → is_on → pump → head → is_set → arg → number → apply → setpoint_w
 
 #include <Arduino.h>
@@ -145,7 +145,7 @@ uint32_t flp_st_free_heap() {
 #endif
 }
 
-// ---- Онлайн-отладка FLP_next (протокол v2) ----
+// ---- Онлайн-отладка CrabLogic (протокол v2) ----
 // Кадры: 0xAA 0x55, тип, длина, данные, CRC-16/CCITT. Обычный Serial.print не мешает.
 const uint32_t FLP_DBG_FINGERPRINT = 0xD1DEAEFFUL;
 const uint16_t FLP_DBG_COUNT = 16;

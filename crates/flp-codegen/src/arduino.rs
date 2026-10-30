@@ -610,7 +610,7 @@ fn assemble(
     let order: Vec<&str> = program.blocks.iter().map(|b| b.block.id.as_str()).collect();
     let _ = writeln!(
         out,
-        "// Сгенерировано FLP_next из проекта «{}». Ручные правки будут перезаписаны.",
+        "// Сгенерировано CrabLogic из проекта «{}». Ручные правки будут перезаписаны.",
         program.project.config.project.name
     );
     let _ = writeln!(out, "// Порядок выполнения: {}", order.join(" → "));

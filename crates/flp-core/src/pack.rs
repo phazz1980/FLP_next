@@ -1,6 +1,6 @@
 //! A pack of user blocks: a folder of `user_library/` with `pack.toml` (name, version,
 //! author) and block folders inside. The version belongs to the pack as a whole: editing
-//! any block of the pack raises it. A pack travels as one `<name>.flpblocks` file, a ZIP
+//! any block of the pack raises it. A pack travels as one `<name>.crabblocks` file, a ZIP
 //! of that folder.
 
 use std::fs;
@@ -15,7 +15,9 @@ use crate::blockfile::{read_files, safe_part, safe_path, write_files};
 use crate::library::{BlockDef, Library};
 
 /// Extension of a pack file.
-pub const EXTENSION: &str = "flpblocks";
+pub const EXTENSION: &str = "crabblocks";
+/// Extension used before the rename; still opened.
+pub const LEGACY_EXTENSION: &str = "flpblocks";
 /// Description file in the root of a pack folder.
 pub const PACK_FILE: &str = "pack.toml";
 /// Pack that receives blocks created without choosing one.
@@ -262,7 +264,7 @@ impl IncomingPack {
     }
 }
 
-/// Reads a `.flpblocks` file.
+/// Reads a `.crabblocks` file.
 pub fn read_pack_file(path: &Path) -> Result<IncomingPack, String> {
     let file = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut zip = ZipArchive::new(std::io::BufReader::new(file))
@@ -352,7 +354,7 @@ mod tests {
         create(&user, &info).unwrap();
         block(&user, "Мои", "a", "N");
         block(&user, "Мои", "b", "N");
-        let file = root.join("my.flpblocks");
+        let file = root.join("my.crabblocks");
         export_pack(&user, "Мои", &file).unwrap();
         let pack = read_pack_file(&file).unwrap();
         assert_eq!(pack.info.contacts, ["me@mail.ru"]);
@@ -385,7 +387,7 @@ mod tests {
         let user = user_library_dir(&builtin);
         create(&user, &PackInfo::new("Первый")).unwrap();
         block(&user, "Первый", "a", "N");
-        let file = root.join("p.flpblocks");
+        let file = root.join("p.crabblocks");
         export_pack(&user, "Первый", &file).unwrap();
         let mut pack = read_pack_file(&file).unwrap();
         pack.info.name = "Второй".into();

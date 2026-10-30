@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «tags». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «tags». Ручные правки будут перезаписаны.
 // Порядок выполнения: adc → to_c → temp_w → temp_r → setpoint_r → error → cold → heating_w → heating_r → heater
 
 #include <Arduino.h>

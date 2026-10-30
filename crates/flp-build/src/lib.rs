@@ -144,7 +144,7 @@ fn port_order(a: &str, b: &str) -> std::cmp::Ordering {
     split(a).cmp(&split(b)).then_with(|| a.cmp(b))
 }
 
-/// Folder with third-party Arduino libraries shipped with FLP_next (FLProg_Network,
+/// Folder with third-party Arduino libraries shipped with CrabLogic (FLProg_Network,
 /// Modbus, ...); every subfolder is one library.
 const BUNDLED_LIBRARIES: &str = "libs";
 

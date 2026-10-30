@@ -54,7 +54,7 @@ impl Form {
                 );
                 ui.checkbox(&mut self.with_env, crate::i18n::tr("Приложить версию, ОС и плату"));
                 ui.checkbox(&mut self.with_log, crate::i18n::tr("Приложить последние сообщения"));
-                ui.weak(crate::i18n::tr("Откроется страница GitHub с этим текстом: проверьте его и отправьте. Файл проекта .flpn можно перетащить в поле описания."));
+                ui.weak(crate::i18n::tr("Откроется страница GitHub с этим текстом: проверьте его и отправьте. Файл проекта .crab можно перетащить в поле описания."));
                 send = ui
                     .add_enabled(
                         !self.what.trim().is_empty(),
@@ -113,7 +113,7 @@ pub fn issue_url(c: &Context, f: &Fields) -> String {
             None => body.push_str("- Плата: проект не открыт\n"),
         }
     }
-    body.push_str("\nПроект `.flpn` можно приложить к issue перетаскиванием.\n");
+    body.push_str("\nПроект `.crab` можно приложить к issue перетаскиванием.\n");
     if f.with_log && !c.log.is_empty() {
         body.push_str("\n## Последние сообщения\n```\n");
         let skip = c.log.len().saturating_sub(LOG_LINES);

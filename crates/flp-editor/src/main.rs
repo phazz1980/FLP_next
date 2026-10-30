@@ -1,4 +1,4 @@
-//! `flp-editor` — graphical FBD editor of FLP_next.
+//! `crablogic-editor` — graphical FBD editor of CrabLogic.
 //!
 //! Layout follows FLProg: menu and toolbar on top, project tree and tags on the left,
 //! block library and the AI tab on the right, numbered sheets in the centre,
@@ -50,7 +50,7 @@ fn main() -> eframe::Result {
     let project = std::env::args_os().nth(1).map(PathBuf::from);
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("FLP_next")
+            .with_title("CrabLogic")
             .with_decorations(false)
             .with_icon(eframe::egui::IconData {
                 rgba: include_bytes!("../assets/icon64.rgba").to_vec(),
@@ -62,7 +62,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "FLP_next",
+        "CrabLogic",
         options,
         Box::new(move |cc| Ok(Box::new(app::EditorApp::new(cc, project)))),
     )

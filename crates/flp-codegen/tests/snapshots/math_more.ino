@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «math_more». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «math_more». Ручные правки будут перезаписаны.
 // Порядок выполнения: adc → level → root → square → cube → rest → mode → choose → route → out1 → out2 → out3
 
 #include <Arduino.h>

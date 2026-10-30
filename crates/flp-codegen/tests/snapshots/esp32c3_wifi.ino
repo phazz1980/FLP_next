@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «esp32c3_wifi». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «esp32c3_wifi». Ручные правки будут перезаписаны.
 // Порядок выполнения: wifi → button → in2 → in3 → blink → led → out2 → out3
 
 #include <Arduino.h>

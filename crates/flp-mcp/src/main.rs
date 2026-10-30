@@ -1,7 +1,7 @@
-//! `flp-mcp` — MCP server: exposes the FLP_next command set to any MCP client
+//! `crablogic-mcp` — MCP server: exposes the CrabLogic command set to any MCP client
 //! (Claude Desktop, Claude Code, ...) over stdio, one JSON-RPC message per line.
 //!
-//! Usage: `flp-mcp [project file] [--library <dir>]`. Without a project the
+//! Usage: `crablogic-mcp [project file] [--library <dir>]`. Without a project the
 //! client opens one with the `open_project` tool (also used to switch).
 //! Only JSON-RPC goes to stdout; diagnostics go to stderr.
 
@@ -15,11 +15,11 @@ use serde_json::{json, Value};
 /// Protocol revisions this server speaks, newest first.
 const PROTOCOL_VERSIONS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "Сервер проекта FLP_next — визуального программирования ESP32 \
+const INSTRUCTIONS: &str = "Сервер проекта CrabLogic — визуального программирования ESP32 \
 (FBD, как в FLProg). Схема — блоки с понятными id и связи «блок.порт» → «блок.порт». \
 Если проект не открыт или пользователь называет другой — вызовите open_project. \
 Начните с get_schema и list_block_types; после правок смотрите поле check в ответе. \
-Правки сразу сохраняются в файл проекта .flpn.";
+Правки сразу сохраняются в файл проекта .crab.";
 
 const OPEN_PROJECT: &str = "open_project";
 
@@ -34,7 +34,7 @@ impl Server {
     /// Opens (or switches to) the project file `path` (or a folder holding one).
     fn open(&mut self, path: &Path) -> Result<Value, String> {
         if !flp_core::project::is_project(path) {
-            return Err(format!("{} — не проект FLP_next (.flpn)", path.display()));
+            return Err(format!("{} — не проект CrabLogic (.crab)", path.display()));
         }
         let library = self
             .library
@@ -44,7 +44,7 @@ impl Server {
         let ctx = FolderContext::open(path, &library)?;
         self.ctx = Some(ctx);
         eprintln!(
-            "flp-mcp: проект {}, библиотека {}",
+            "crablogic-mcp: проект {}, библиотека {}",
             path.display(),
             library.display()
         );
@@ -56,7 +56,7 @@ impl Server {
             let path = args
                 .get("path")
                 .and_then(Value::as_str)
-                .ok_or("нужен аргумент path — файл проекта .flpn")?;
+                .ok_or("нужен аргумент path — файл проекта .crab")?;
             return self.open(Path::new(path));
         }
         let ctx = self
@@ -71,11 +71,11 @@ impl Server {
 fn open_project_tool() -> Value {
     json!({
         "name": OPEN_PROJECT,
-        "description": "Открыть проект FLP_next (файл .flpn или папку с ним) или переключиться на другой. \
+        "description": "Открыть проект CrabLogic (файл .crab или папку с ним) или переключиться на другой. \
     Остальные команды работают с открытым проектом.",
         "inputSchema": {
             "type": "object",
-            "properties": {"path": {"type": "string", "description": "Абсолютный путь к файлу проекта .flpn"}},
+            "properties": {"path": {"type": "string", "description": "Абсолютный путь к файлу проекта .crab"}},
             "required": ["path"],
         },
     })
@@ -100,7 +100,7 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             }
         }
-        None => eprintln!("flp-mcp: проект не открыт, ждём open_project"),
+        None => eprintln!("crablogic-mcp: проект не открыт, ждём open_project"),
     }
 
     let stdin = io::stdin();

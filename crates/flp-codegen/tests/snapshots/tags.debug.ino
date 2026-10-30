@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «tags». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «tags». Ручные правки будут перезаписаны.
 // Порядок выполнения: adc → to_c → temp_w → temp_r → setpoint_r → error → cold → heating_w → heating_r → heater
 
 #include <Arduino.h>
@@ -98,7 +98,7 @@ uint32_t flp_st_free_heap() {
 #endif
 }
 
-// ---- Онлайн-отладка FLP_next (протокол v2) ----
+// ---- Онлайн-отладка CrabLogic (протокол v2) ----
 // Кадры: 0xAA 0x55, тип, длина, данные, CRC-16/CCITT. Обычный Serial.print не мешает.
 const uint32_t FLP_DBG_FINGERPRINT = 0x84B418D3UL;
 const uint16_t FLP_DBG_COUNT = 10;

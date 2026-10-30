@@ -1,9 +1,9 @@
-//! `flp-web` — the web constructor of the ESP32 web interface (`/`, also `/designer`).
+//! `crablogic-web` — the web constructor of the ESP32 web interface (`/`, also `/designer`).
 //! A tiny local HTTP server (std only): it serves the page and forwards `POST /api/<command>` to the same command set
 //! that the AI chat and the MCP server use, so every edit is validated and saved
 //! to the project file exactly as there.
 //!
-//! Usage: `flp-web <project> [--library <dir>] [--port <n>]`; open
+//! Usage: `crablogic-web <project> [--library <dir>] [--port <n>]`; open
 //! `http://127.0.0.1:<port>/` (default 8080). Listens on the loopback only.
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -29,7 +29,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("flp-web: {e}");
+            eprintln!("crablogic-web: {e}");
             ExitCode::FAILURE
         }
     }
@@ -53,7 +53,7 @@ fn run() -> Result<(), String> {
         }
     }
     let project =
-        project.ok_or("использование: flp-web <проект.flpn> [--library папка] [--port N]")?;
+        project.ok_or("использование: crablogic-web <проект.crab> [--library папка] [--port N]")?;
     let library = library
         .or_else(|| find_library(&project))
         .ok_or("не найдена папка библиотеки блоков library/; укажите --library")?;
@@ -74,7 +74,7 @@ fn run() -> Result<(), String> {
             .elapsed()
             .saturating_sub(Duration::from_secs(watch.load(Ordering::Relaxed)));
         if idle > IDLE_LIMIT {
-            println!("flp-web: нет запросов {} с, выход.", idle.as_secs());
+            println!("crablogic-web: нет запросов {} с, выход.", idle.as_secs());
             std::process::exit(0);
         }
     });
@@ -82,7 +82,7 @@ fn run() -> Result<(), String> {
         last_seen.store(started.elapsed().as_secs(), Ordering::Relaxed);
         // One user: requests are handled one at a time, edits never race.
         if let Err(e) = handle(stream, &mut ctx, &library, port) {
-            eprintln!("flp-web: {e}");
+            eprintln!("crablogic-web: {e}");
         }
     }
     Ok(())

@@ -1,6 +1,6 @@
 [package]
 name = "flp-pdf"
-description = "Picture of all sheets of an FLP_next project as PDF"
+description = "Picture of all sheets of an CrabLogic project as PDF"
 version.workspace = true
 edition.workspace = true
 

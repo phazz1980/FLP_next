@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «selftest_logic3». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «selftest_logic3». Ручные правки будут перезаписаны.
 // Порядок выполнения: poly → poly_text → ip → ip_back → ip_bad → ok_show → bad_show → ok_text → bad_text → d_text → line → line2 → tick → tx → tx2
 
 #include <Arduino.h>

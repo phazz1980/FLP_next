@@ -60,7 +60,7 @@ pub fn tools() -> Vec<Tool> {
         },
         Tool {
             name: "list_block_types",
-            description: "Список типов блоков библиотеки с описаниями, входами, выходами и параметрами. Можно отфильтровать по словам.",
+            description: "Типы блоков библиотеки. Без фильтра — короткий список (тип, название, группа, описание); с фильтром по словам — ещё входы, выходы и параметры найденных блоков.",
             input_schema: json!({"type": "object", "properties": {
                 "filter": {"type": "string", "description": "слова для поиска в названии и описании"}
             }}),
@@ -292,7 +292,15 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
                                 .contains(w)
                         })
                 })
-                .map(block_summary)
+                .map(|b| {
+                    if filter.is_empty() {
+                        // Whole library: names only, ports via get_block_type or a filter.
+                        let i = &b.def.info;
+                        json!({"type": i.kind, "name": i.name, "group": i.group, "description": i.description})
+                    } else {
+                        block_summary(b)
+                    }
+                })
                 .collect();
             Ok(json!(list))
         }

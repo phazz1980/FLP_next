@@ -1,4 +1,4 @@
-//! `flp` — command line of FLP_next.
+//! `crablogic` — command line of CrabLogic.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -19,9 +19,9 @@ const EXIT_BUILD_FAILED: u8 = 4;
 
 #[derive(Parser)]
 #[command(
-    name = "flp",
+    name = "crablogic",
     version,
-    about = "FLP_next: визуальное программирование микроконтроллеров"
+    about = "CrabLogic: визуальное программирование микроконтроллеров"
 )]
 struct Cli {
     /// Папка библиотеки блоков (по умолчанию ищется `library/` рядом с проектом
@@ -37,12 +37,12 @@ struct Cli {
 enum Command {
     /// Проверить схему проекта
     Check {
-        /// Файл проекта .flpn (или папка с ним)
+        /// Файл проекта .crab (или папка с ним)
         project: PathBuf,
     },
     /// Сгенерировать скетч Arduino в .flp/<проект>/sketch/sketch.ino рядом с проектом
     Gen {
-        /// Файл проекта .flpn (или папка с ним)
+        /// Файл проекта .crab (или папка с ним)
         project: PathBuf,
         /// Вывести скетч в консоль вместо записи в файл
         #[arg(long)]
@@ -53,7 +53,7 @@ enum Command {
     },
     /// Сгенерировать скетч и собрать прошивку через arduino-cli
     Build {
-        /// Файл проекта .flpn (или папка с ним)
+        /// Файл проекта .crab (или папка с ним)
         project: PathBuf,
         /// Отладочная сборка: модуль онлайн-отладки, без сильной оптимизации
         #[arg(long)]
@@ -64,7 +64,7 @@ enum Command {
     },
     /// Показывать живые значения с платы (прошивка собрана с --debug)
     Monitor {
-        /// Файл проекта .flpn (или папка с ним)
+        /// Файл проекта .crab (или папка с ним)
         project: PathBuf,
         /// Порт платы, например COM3 (по умолчанию из настроек проекта)
         #[arg(long, short)]
@@ -72,7 +72,7 @@ enum Command {
     },
     /// Собрать прошивку и залить её на плату
     Upload {
-        /// Файл проекта .flpn (или папка с ним)
+        /// Файл проекта .crab (или папка с ним)
         project: PathBuf,
         /// Порт платы, например COM3 (по умолчанию из настроек проекта или единственный найденный)
         #[arg(long, short)]
@@ -90,7 +90,7 @@ enum Command {
         action: BlockAction,
     },
     /// Перевести проект из старого формата (папка с project.toml, logic.toml,
-    /// layout.toml) в один файл <папка>/<папка>.flpn; старые файлы не удаляются
+    /// layout.toml) в один файл <папка>/<папка>.crab; старые файлы не удаляются
     Convert {
         /// Папка проекта в старом формате
         project: PathBuf,
@@ -377,7 +377,7 @@ fn generate(
         Ok(generated) => Ok(generated),
         Err(GenError::Schema(diagnostics)) => {
             print_diagnostics(&diagnostics);
-            eprintln!("Генерация отменена: в схеме есть ошибки (подробнее — flp check)");
+            eprintln!("Генерация отменена: в схеме есть ошибки (подробнее — crablogic check)");
             Err(ExitCode::from(EXIT_SCHEMA_ERRORS))
         }
         Err(e) => {

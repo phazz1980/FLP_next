@@ -1,6 +1,6 @@
 [package]
 name = "flp-build"
-description = "Building and uploading FLP_next firmware with arduino-cli"
+description = "Building and uploading CrabLogic firmware with arduino-cli"
 version.workspace = true
 edition.workspace = true
 

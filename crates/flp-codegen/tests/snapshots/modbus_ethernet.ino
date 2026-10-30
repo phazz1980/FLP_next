@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «modbus_ethernet». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «modbus_ethernet». Ручные правки будут перезаписаны.
 // Порядок выполнения: eth → slave → button → button_reg → online_reg → error_reg → relay_reg → relay
 
 #include <Arduino.h>

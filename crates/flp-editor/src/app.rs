@@ -106,7 +106,7 @@ enum Pending {
 pub struct EditorApp {
     pub lib: Library,
     pub lib_dir: Option<PathBuf>,
-    /// `flp-web` started from the "Конструктор веб-интерфейса" menu item.
+    /// `crablogic-web` started from the "Конструктор веб-интерфейса" menu item.
     web_editor: Option<std::process::Child>,
     lib_stamp: Option<SystemTime>,
     lib_checked: Instant,
@@ -942,7 +942,7 @@ impl EditorApp {
     /// touch the files in `examples/` (they live in git).
     fn open_example(&mut self, name: &str, src: &Path) {
         let dir = std::env::temp_dir().join("flp_examples");
-        let dest = dir.join(format!("{name}.flpn"));
+        let dest = dir.join(format!("{name}.crab"));
         let copied = std::fs::create_dir_all(&dir)
             .map_err(|e| e.to_string())
             .and_then(|()| {
@@ -966,7 +966,7 @@ impl EditorApp {
         }
     }
 
-    /// Projects from `examples/` next to the library: `(name, path)`, a `.flpn` wins over a folder of the same name.
+    /// Projects from `examples/` next to the library: `(name, path)`, a `.crab` wins over a folder of the same name.
     fn example_projects(&self) -> Vec<(String, PathBuf)> {
         let Some(dir) = self
             .lib_dir
@@ -996,7 +996,7 @@ impl EditorApp {
     fn new_project(&mut self) {
         let mut dialog = rfd::FileDialog::new()
             .set_title(crate::i18n::tr("Новый проект"))
-            .add_filter(crate::i18n::tr("Проект FLP_next"), &[PROJECT_EXT])
+            .add_filter(crate::i18n::tr("Проект CrabLogic"), &[PROJECT_EXT])
             .set_file_name(format!("Новый проект.{PROJECT_EXT}"));
         if let Some(dir) = theme::default_projects_dir().filter(|d| d.is_dir()) {
             dialog = dialog.set_directory(dir);
@@ -1018,7 +1018,10 @@ impl EditorApp {
     fn pick_project(&mut self) {
         let Some(path) = rfd::FileDialog::new()
             .set_title(crate::i18n::tr("Открыть проект"))
-            .add_filter(crate::i18n::tr("Проект FLP_next"), &[PROJECT_EXT])
+            .add_filter(
+                crate::i18n::tr("Проект CrabLogic"),
+                &[PROJECT_EXT, flp_core::project::LEGACY_PROJECT_EXT],
+            )
             .add_filter(
                 crate::i18n::tr("Проект старого формата (project.toml)"),
                 &["toml"],
@@ -1034,7 +1037,7 @@ impl EditorApp {
         self.request_open(path);
     }
 
-    /// Creates "Новый проект N.flpn" in the default projects folder and opens it.
+    /// Creates "Новый проект N.crab" in the default projects folder and opens it.
     fn create_default_project(&mut self) {
         let Some(base) = theme::default_projects_dir() else {
             return;
@@ -1083,7 +1086,7 @@ impl EditorApp {
         self.open(path);
     }
 
-    /// Starts the web interface constructor (`flp-web`) for the open project and shows it
+    /// Starts the web interface constructor (`crablogic-web`) for the open project and shows it
     /// in the browser. The project is saved first: the constructor edits the file itself.
     pub fn open_web_designer(&mut self) {
         let Some(doc) = &self.doc else { return };
@@ -1098,9 +1101,9 @@ impl EditorApp {
         if !running {
             let sibling = std::env::current_exe()
                 .ok()
-                .and_then(|p| p.parent().map(|d| d.join("flp-web.exe")))
+                .and_then(|p| p.parent().map(|d| d.join("crablogic-web.exe")))
                 .filter(|p| p.is_file());
-            let mut cmd = std::process::Command::new(sibling.unwrap_or_else(|| "flp-web".into()));
+            let mut cmd = std::process::Command::new(sibling.unwrap_or_else(|| "crablogic-web".into()));
             cmd.arg(&path);
             if let Some(dir) = &self.lib_dir {
                 cmd.arg("--library").arg(dir);
@@ -1112,7 +1115,7 @@ impl EditorApp {
                     self.info(
                         LogLevel::Error,
                         crate::i18n::fmt(
-                            "Не удалось запустить flp-web (соберите: cargo build -p flp-web): {0}",
+                            "Не удалось запустить crablogic-web (соберите: cargo build -p flp-web): {0}",
                             &[&e],
                         ),
                     );
@@ -1161,14 +1164,14 @@ impl EditorApp {
     }
 
     /// Asks for a new file and saves the project there; the editor then works with
-    /// the new file. Also converts an old-format project folder into a `.flpn`.
+    /// the new file. Also converts an old-format project folder into a `.crab`.
     pub fn save_as(&mut self) {
         let Some(doc) = &self.doc else { return };
         let old = doc.project.path.clone();
         let name = doc.project.config.project.name.clone();
         let mut dialog = rfd::FileDialog::new()
             .set_title(crate::i18n::tr("Сохранить проект как"))
-            .add_filter(crate::i18n::tr("Проект FLP_next"), &[PROJECT_EXT]);
+            .add_filter(crate::i18n::tr("Проект CrabLogic"), &[PROJECT_EXT]);
         dialog = match old.parent().filter(|d| d.is_dir()) {
             Some(dir) => dialog.set_directory(dir),
             None => dialog,
@@ -1853,7 +1856,7 @@ impl EditorApp {
             );
             let font = egui::TextStyle::Body.resolve(ui.style());
             let galley = ui.painter().layout_no_wrap(
-                "FLP_next".to_owned(),
+                "CrabLogic".to_owned(),
                 font,
                 ui.visuals().weak_text_color(),
             );
@@ -1982,17 +1985,17 @@ impl EditorApp {
                 self.export_pdf();
             }
             if ui
-                .button(crate::i18n::tr("Открывать .flpn двойным щелчком"))
-                .on_hover_text(crate::i18n::tr("Связать файлы проектов, наборов блоков (.flpblocks) и плат (.flpboard) с этим редактором в Проводнике"))
+                .button(crate::i18n::tr("Открывать .crab двойным щелчком"))
+                .on_hover_text(crate::i18n::tr("Связать файлы проектов, наборов блоков (.crabblocks) и плат (.crabboard) с этим редактором в Проводнике"))
                 .clicked()
             {
                 match crate::assoc::register() {
                     Ok(()) => self.info(
                         LogLevel::Ok,
-                        crate::i18n::tr("Файлы .flpn теперь открываются этим редактором"),
+                        crate::i18n::tr("Файлы .crab теперь открываются этим редактором"),
                     ),
                     Err(e) => {
-                        self.info(LogLevel::Error, crate::i18n::fmt("Не удалось связать .flpn: {0}", &[&e]))
+                        self.info(LogLevel::Error, crate::i18n::fmt("Не удалось связать .crab: {0}", &[&e]))
                     }
                 }
             }
@@ -2296,7 +2299,7 @@ impl EditorApp {
                 ui.close();
             }
             ui.separator();
-            ui.weak(format!("FLP_next {}", update::CURRENT));
+            ui.weak(format!("CrabLogic {}", update::CURRENT));
             ui.separator();
             if ui
                 .add_enabled(
@@ -2616,11 +2619,11 @@ impl EditorApp {
     fn window_title(&self) -> String {
         match &self.doc {
             Some(doc) => format!(
-                "{}{} — FLP_next",
+                "{}{} — CrabLogic",
                 doc.project.config.project.name,
                 if doc.dirty { " *" } else { "" }
             ),
-            None => "FLP_next".to_owned(),
+            None => "CrabLogic".to_owned(),
         }
     }
 
@@ -2855,5 +2858,8 @@ fn newest_mtime(dir: &Path) -> Option<SystemTime> {
 
 fn is_block_file(path: &Path) -> bool {
     path.extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case(flp_core::pack::EXTENSION))
+        .is_some_and(|e| {
+            e.eq_ignore_ascii_case(flp_core::pack::EXTENSION)
+                || e.eq_ignore_ascii_case(flp_core::pack::LEGACY_EXTENSION)
+        })
 }

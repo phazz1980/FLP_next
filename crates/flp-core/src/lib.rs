@@ -1,4 +1,4 @@
-//! Core of FLP_next: project model, TOML loading/saving and the block library.
+//! Core of CrabLogic: project model, TOML loading/saving and the block library.
 //!
 //! The core knows nothing about GUI, AI or arduino-cli.
 

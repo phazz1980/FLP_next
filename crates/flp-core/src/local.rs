@@ -3,7 +3,7 @@
 //! password kept for each SSID. The project file stays safe to pass around;
 //! the values are put back only for generating the sketch.
 //!
-//! The file is `%APPDATA%\FLP_next\local.toml` (`~/.config/FLP_next` elsewhere),
+//! The file is `%APPDATA%\CrabLogic\local.toml` (`~/.config/CrabLogic` elsewhere),
 //! a table per block type and parameter, keyed by the value of the key parameter.
 //! A key with an empty value is just remembered (the list of entered SSIDs):
 //!
@@ -22,12 +22,18 @@ use crate::{Block, BlockDef, Error, Library, ParamValue, Project, Result};
 
 pub const LOCAL_FILE: &str = "local.toml";
 
-/// Settings folder of the program: `%APPDATA%\FLP_next` (or `~/.config/FLP_next`).
+/// Settings folder of the program: `%APPDATA%\CrabLogic` (or `~/.config/CrabLogic`).
+/// A folder left by the former name (`FLP_next`) is moved there on first use.
 pub fn config_dir() -> Option<PathBuf> {
-    std::env::var_os("APPDATA")
+    let base = std::env::var_os("APPDATA")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-        .map(|d| d.join("FLP_next"))
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+    let dir = base.join("CrabLogic");
+    let old = base.join("FLP_next");
+    if !dir.exists() && old.is_dir() {
+        let _ = std::fs::rename(&old, &dir);
+    }
+    Some(dir)
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

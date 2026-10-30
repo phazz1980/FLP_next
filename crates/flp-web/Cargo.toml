@@ -1,11 +1,11 @@
 [package]
 name = "flp-web"
-description = "Web editor of FLP_next: a local HTTP server over the shared AI command set"
+description = "Web editor of CrabLogic: a local HTTP server over the shared AI command set"
 version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "flp-web"
+name = "crablogic-web"
 path = "src/main.rs"
 
 [dependencies]

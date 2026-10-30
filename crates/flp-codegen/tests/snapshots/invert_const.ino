@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «invert_const». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «invert_const». Ручные правки будут перезаписаны.
 // Порядок выполнения: temp → corrected → hot → led
 
 #include <Arduino.h>

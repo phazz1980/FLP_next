@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «retain». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «retain». Ручные правки будут перезаписаны.
 // Порядок выполнения: button → press → total_r → one → next → total_w → limit_r → rest → reached → led
 
 #include <Arduino.h>

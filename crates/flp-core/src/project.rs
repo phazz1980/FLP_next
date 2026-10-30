@@ -1,4 +1,4 @@
-//! Project file `<name>.flpn`: a ZIP archive (opens in any archiver) with
+//! Project file `<name>.crab`: a ZIP archive (opens in any archiver) with
 //! `project.toml` (board, settings), `logic.toml` (blocks and links),
 //! `layout.toml` (coordinates, editor only) and `boards.pdf` (picture of all
 //! sheets). Old projects were folders of the three TOML files; they are still
@@ -20,7 +20,9 @@ use crate::toml_io::{parse_toml, read_toml, to_toml};
 use crate::{Error, Layout, Logic, Result};
 
 /// Extension of project files.
-pub const PROJECT_EXT: &str = "flpn";
+pub const PROJECT_EXT: &str = "crab";
+/// Extension of projects saved before the rename; still opened.
+pub const LEGACY_PROJECT_EXT: &str = "flpn";
 /// Work folder next to the project file: generated sketches and build caches.
 pub const WORK_DIR: &str = ".flp";
 
@@ -92,7 +94,7 @@ pub struct BoardConfig {
     pub options: BTreeMap<String, String>,
 }
 
-/// Loaded project: one `.flpn` archive next to its work folder `.flp/<name>/`.
+/// Loaded project: one `.crab` archive next to its work folder `.flp/<name>/`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Project {
     /// The project file (it may not exist yet for a folder in the old format).
@@ -148,7 +150,7 @@ impl Project {
     }
 
     /// Loads a project file, or a folder holding one. A folder in the old
-    /// three-file format is read too; saving converts it to `<folder>/<folder>.flpn`.
+    /// three-file format is read too; saving converts it to `<folder>/<folder>.crab`.
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         if !path.is_dir() {
@@ -298,7 +300,7 @@ impl Project {
     }
 }
 
-/// The only `.flpn` file in `dir`, if there is exactly one.
+/// The only `.crab` file in `dir`, if there is exactly one.
 pub fn find_project_file(dir: &Path) -> Option<PathBuf> {
     let mut files = std::fs::read_dir(dir)
         .ok()?
@@ -311,7 +313,9 @@ pub fn find_project_file(dir: &Path) -> Option<PathBuf> {
 /// Whether `path` has the project file extension.
 pub fn is_project_file(path: &Path) -> bool {
     path.extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case(PROJECT_EXT))
+        .is_some_and(|e| {
+            e.eq_ignore_ascii_case(PROJECT_EXT) || e.eq_ignore_ascii_case(LEGACY_PROJECT_EXT)
+        })
 }
 
 /// Whether `path` is something [`Project::load`] can open.
@@ -384,7 +388,7 @@ wifi_mode = 2
         let config: ProjectConfig =
             toml::from_str("[project]\nname = \"t\"\n[board]\nfqbn = \"x:y:z\"\n").unwrap();
         let project = Project {
-            path: dir.join("t.flpn"),
+            path: dir.join("t.crab"),
             config,
             logic: Logic::default(),
             layout: Layout::default(),

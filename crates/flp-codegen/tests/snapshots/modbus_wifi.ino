@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «modbus_wifi». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «modbus_wifi». Ручные правки будут перезаписаны.
 // Порядок выполнения: wifi → slave → sensor → temp_reg → button → button_reg → online_reg → led_reg → led
 
 #include <Arduino.h>

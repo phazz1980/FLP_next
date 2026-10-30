@@ -1,6 +1,6 @@
-﻿FLP_next — визуальное программирование ESP32 (FBD)
+﻿CrabLogic — визуальное программирование ESP32 (FBD). Ядро написано на Rust.
 
-Запуск: flp-editor.exe. Папки library и libs должны лежать рядом с exe.
+Запуск: crablogic-editor.exe. Папки library и libs должны лежать рядом с exe.
 
 Для сборки и заливки прошивок нужны arduino-cli и ядро ESP32:
   winget install ArduinoSA.CLI

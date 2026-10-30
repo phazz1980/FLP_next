@@ -1,11 +1,11 @@
 [package]
 name = "flp-editor"
-description = "Graphical FBD editor of FLP_next"
+description = "Graphical FBD editor of CrabLogic"
 version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "flp-editor"
+name = "crablogic-editor"
 path = "src/main.rs"
 
 [dependencies]

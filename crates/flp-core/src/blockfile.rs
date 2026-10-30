@@ -1,4 +1,4 @@
-//! A user block as one file: `<type>.flpblock` is a ZIP with the files of the block folder
+//! A user block as one file: `<type>.crabblock` is a ZIP with the files of the block folder
 //! (`block.toml`, templates, `docs.md`), the Arduino libraries it uses (`lib/<Name>/…`)
 //! and an example project (`example.flpn`).
 
@@ -12,7 +12,9 @@ use zip::{ZipArchive, ZipWriter};
 use crate::library::{BlockDef, Library};
 
 /// Extension of a block file.
-pub const EXTENSION: &str = "flpblock";
+pub const EXTENSION: &str = "crabblock";
+/// Extension used before the rename; still opened.
+pub const LEGACY_EXTENSION: &str = "flpblock";
 /// Example project inside the block folder.
 pub const EXAMPLE_FILE: &str = "example.flpn";
 /// Folder with the Arduino libraries of the block; every subfolder is one library.
@@ -126,7 +128,7 @@ impl Incoming {
     }
 }
 
-/// Reads a `.flpblock` file.
+/// Reads a `.crabblock` file.
 pub fn read_block_file(path: &Path) -> Result<Incoming, String> {
     let file = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut zip = ZipArchive::new(std::io::BufReader::new(file))
@@ -248,7 +250,7 @@ mod tests {
         fs::write(dir.join(EXAMPLE_FILE), "zip").unwrap();
         let (lib, _) = Library::load_with_user(&builtin).unwrap();
 
-        let file = root.join("mine.flpblock");
+        let file = root.join("mine.crabblock");
         export_block(&lib, "mine", &file).unwrap();
         let inc = read_block_file(&file).unwrap();
         assert_eq!(inc.libraries(), ["Fancy"]);

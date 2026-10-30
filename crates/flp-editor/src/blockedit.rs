@@ -1930,7 +1930,7 @@ fn files_tab(ui: &mut Ui, f: &mut Form) {
     let attach = &mut f.attach;
     ui.weak(crate::i18n::tr(
         "Библиотека Arduino и пример лежат в папке блока и едут вместе с ним \
-         в файле .flpblock и в проекте. Сборка подхватывает библиотеки сама, \
+         в файле .crabblock и в проекте. Сборка подхватывает библиотеки сама, \
          а главный заголовок прикреплённой библиотеки попадает в поле «Заголовки» \
          на вкладке «Код ESP32».",
     ));
@@ -2005,7 +2005,7 @@ fn files_tab(ui: &mut Ui, f: &mut Form) {
         if ui.button(crate::i18n::tr("Прикрепить пример...")).clicked() {
             if let Some(file) = rfd::FileDialog::new()
                 .set_title(crate::i18n::tr("Проект-пример"))
-                .add_filter(crate::i18n::tr("Проект FLP"), &["flpn"])
+                .add_filter(crate::i18n::tr("Проект FLP"), &[flp_core::project::PROJECT_EXT, flp_core::project::LEGACY_PROJECT_EXT])
                 .pick_file()
             {
                 attach.example = Example::New(file);

@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «thermostat». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «thermostat». Ручные правки будут перезаписаны.
 // Порядок выполнения: adc1 → adc2 → t1 → t2 → sum → two → temp → heat → heater → setpoint → excess → gain → duty → fan → hot → blink → alarm
 
 #include <Arduino.h>

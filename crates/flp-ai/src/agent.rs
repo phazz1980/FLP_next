@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use crate::provider::Provider;
 use crate::{call, tools, Context};
 
-pub const SYSTEM_PROMPT: &str = "Ты — помощник в FLP_next, программе визуального \
+pub const SYSTEM_PROMPT: &str = "Ты — помощник в CrabLogic, программе визуального \
 программирования микроконтроллеров ESP32 на языке FBD (как FLProg). Пользователь — \
 разработчик устройств; отвечай по-русски, коротко и по делу.
 
@@ -17,7 +17,8 @@ pub const SYSTEM_PROMPT: &str = "Ты — помощник в FLP_next, прог
 set_expander создаёт его, place_on_expander ставит блок на вывод (занятые видны в expanders).
 
 Как работать:
-- перед правками прочитай схему (get_schema) и подходящие типы блоков (list_block_types);
+- перед правками прочитай схему (get_schema) и подходящие типы блоков (list_block_types: без фильтра — короткий список, \
+порты видны при поиске по словам; не запрашивай описание блоков, которые не нужны);
 - давай блокам осмысленные id и связывай всё, что добавил; после каждой правки смотри поле check \
 и исправляй ошибки, пока их не останется;
 - не собирай и не заливай прошивку, пока пользователь об этом не попросил;
@@ -42,6 +43,38 @@ pub enum Event {
 /// Upper bound on model calls per user message, against runaway loops.
 const MAX_STEPS: usize = 40;
 
+/// Tool results older than the last `KEEP_RECENT_RESULTS` are cut to
+/// `OLD_RESULT_CHARS`: the whole history is re-sent on every step, and free
+/// tiers cap the request size.
+const KEEP_RECENT_RESULTS: usize = 4;
+const OLD_RESULT_CHARS: usize = 400;
+
+/// Shortens old tool results in place, keeping every message and `tool_use_id`.
+fn trim_old_results(history: &mut [Value]) {
+    let mut seen = 0;
+    for msg in history.iter_mut().rev() {
+        let Some(blocks) = msg["content"].as_array_mut() else {
+            continue;
+        };
+        for block in blocks.iter_mut().rev() {
+            if block["type"] != "tool_result" {
+                continue;
+            }
+            seen += 1;
+            if seen <= KEEP_RECENT_RESULTS {
+                continue;
+            }
+            let Some(text) = block["content"].as_str() else {
+                continue;
+            };
+            if text.chars().count() > OLD_RESULT_CHARS {
+                let cut: String = text.chars().take(OLD_RESULT_CHARS).collect();
+                block["content"] = json!(format!("{cut}… [результат сокращён]"));
+            }
+        }
+    }
+}
+
 /// Runs one user turn. `history` holds the whole conversation in Messages API
 /// shape and grows with every assistant reply and tool result.
 pub fn run_turn(
@@ -54,6 +87,7 @@ pub fn run_turn(
     history.push(json!({"role": "user", "content": user_text}));
     let tools = tools();
     for _ in 0..MAX_STEPS {
+        trim_old_results(history);
         let reply = provider.complete(SYSTEM_PROMPT, history, &tools)?;
         // Append the content as returned: thinking blocks must go back unchanged.
         history.push(json!({"role": "assistant", "content": reply.content}));
@@ -154,6 +188,23 @@ mod tests {
         fn reload_library(&mut self) -> Result<(), String> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn old_tool_results_are_trimmed() {
+        let long = "я".repeat(OLD_RESULT_CHARS * 3);
+        let mut history = Vec::new();
+        for i in 0..KEEP_RECENT_RESULTS + 2 {
+            history.push(json!({"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": format!("t{i}"), "content": long, "is_error": false}
+            ]}));
+        }
+        trim_old_results(&mut history);
+        let len = |i: usize| history[i]["content"][0]["content"].as_str().unwrap().chars().count();
+        assert!(len(0) < OLD_RESULT_CHARS + 40);
+        assert!(len(1) < OLD_RESULT_CHARS + 40);
+        assert_eq!(len(2), OLD_RESULT_CHARS * 3);
+        assert_eq!(history[0]["content"][0]["tool_use_id"], "t0");
     }
 
     #[test]

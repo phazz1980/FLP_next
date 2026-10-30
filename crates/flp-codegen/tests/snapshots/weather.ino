@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «weather». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «weather». Ручные правки будут перезаписаны.
 // Порядок выполнения: air → humid → fan → water → period → tick → save_now → last_water → all_ok → fault → fault_led
 
 #include <Arduino.h>

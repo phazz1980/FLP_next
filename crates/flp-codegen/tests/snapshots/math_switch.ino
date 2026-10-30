@@ -1,4 +1,4 @@
-// Сгенерировано FLP_next из проекта «math_switch». Ручные правки будут перезаписаны.
+// Сгенерировано CrabLogic из проекта «math_switch». Ручные правки будут перезаписаны.
 // Порядок выполнения: adc → level → dev → lowest → highest → clamp → button → pick → fan → dev_out → max_out
 
 #include <Arduino.h>
