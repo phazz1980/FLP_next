@@ -3,93 +3,93 @@ type = "dms"
 name = "Демультиплексор"
 symbol = "DMS"
 group = "Переключатели"
-description = "Направляет in на один из 2–16 выходов по номеру sel (0 — o1, 1 — o2…); остальные выходы равны 0."
+description = "Направляет in на один из 2–16 выходов по номеру sel (0 — o1, 1 — o2…); остальные выходы равны 0 (false, пустой строке). Выходы того же типа, что in."
 
 [[input]]
 name = "sel"
-type = "float"
+type = "number"
 label = "Номер"
 
 [[input]]
 name = "in"
-type = "float"
+type = "same"
 
 [[output]]
 name = "o1"
-type = "float"
+type = "same"
 
 [[output]]
 name = "o2"
-type = "float"
+type = "same"
 
 [[output]]
 name = "o3"
-type = "float"
+type = "same"
 when = "count >= 3"
 
 [[output]]
 name = "o4"
-type = "float"
+type = "same"
 when = "count >= 4"
 
 [[output]]
 name = "o5"
-type = "float"
+type = "same"
 when = "count >= 5"
 
 [[output]]
 name = "o6"
-type = "float"
+type = "same"
 when = "count >= 6"
 
 [[output]]
 name = "o7"
-type = "float"
+type = "same"
 when = "count >= 7"
 
 [[output]]
 name = "o8"
-type = "float"
+type = "same"
 when = "count >= 8"
 
 [[output]]
 name = "o9"
-type = "float"
+type = "same"
 when = "count >= 9"
 
 [[output]]
 name = "o10"
-type = "float"
+type = "same"
 when = "count >= 10"
 
 [[output]]
 name = "o11"
-type = "float"
+type = "same"
 when = "count >= 11"
 
 [[output]]
 name = "o12"
-type = "float"
+type = "same"
 when = "count >= 12"
 
 [[output]]
 name = "o13"
-type = "float"
+type = "same"
 when = "count >= 13"
 
 [[output]]
 name = "o14"
-type = "float"
+type = "same"
 when = "count >= 14"
 
 [[output]]
 name = "o15"
-type = "float"
+type = "same"
 when = "count >= 15"
 
 [[output]]
 name = "o16"
-type = "float"
+type = "same"
 when = "count >= 16"
 
 [[param]]

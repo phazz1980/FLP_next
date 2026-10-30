@@ -3,111 +3,111 @@ type = "mux"
 name = "Мультиплексор"
 symbol = "MUX"
 group = "Переключатели"
-description = "Выбор из 2–16 входов по номеру sel: 0 — a, 1 — b, 2 — c … 15 — p. Номер за пределами берётся с ближайшего края."
+description = "Выбор из 2–16 входов по номеру sel: 0 — a, 1 — b, 2 — c … 15 — p. Номер за пределами берётся с ближайшего края. Входы a…p — любого, но одного типа."
 
 [[input]]
 name = "sel"
-type = "float"
+type = "number"
 default = 0.0
 label = "Номер"
 
 [[input]]
 name = "a"
-type = "float"
+type = "same"
 default = 0.0
 
 [[input]]
 name = "b"
-type = "float"
+type = "same"
 default = 0.0
 
 [[input]]
 name = "c"
-type = "float"
+type = "same"
 default = 0.0
 when = "count >= 3"
 
 [[input]]
 name = "d"
-type = "float"
+type = "same"
 default = 0.0
 when = "count >= 4"
 
 [[input]]
 name = "e"
-type = "float"
+type = "same"
 default = 0.0
 when = "count >= 5"
 
 [[input]]
 name = "f"
-type = "float"
+type = "same"
 default = 0.0
 when = "count >= 6"
 
 [[input]]
 name = "g"
-type = "float"
+type = "same"
 default = 0.0
 when = "count >= 7"
 
 [[input]]
 name = "h"
-type = "float"
+type = "same"
 default = 0.0
 when = "count >= 8"
 
 [[input]]
 name = "i"
-type = "float"
+type = "same"
 default = 0.0
 when = "count >= 9"
 
 [[input]]
 name = "j"
-type = "float"
+type = "same"
 default = 0.0
 when = "count >= 10"
 
 [[input]]
 name = "k"
-type = "float"
+type = "same"
 default = 0.0
 when = "count >= 11"
 
 [[input]]
 name = "l"
-type = "float"
+type = "same"
 default = 0.0
 when = "count >= 12"
 
 [[input]]
 name = "m"
-type = "float"
+type = "same"
 default = 0.0
 when = "count >= 13"
 
 [[input]]
 name = "n"
-type = "float"
+type = "same"
 default = 0.0
 when = "count >= 14"
 
 [[input]]
 name = "o"
-type = "float"
+type = "same"
 default = 0.0
 when = "count >= 15"
 
 [[input]]
 name = "p"
-type = "float"
+type = "same"
 default = 0.0
 when = "count >= 16"
 
 [[output]]
 name = "out"
-type = "float"
+type = "same"
 
 [[param]]
 name = "count"

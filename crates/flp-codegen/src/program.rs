@@ -150,6 +150,8 @@ impl<'a> Program<'a> {
             let lib = lib_block(block);
             let def = &lib.def;
             let mut inputs = BTreeMap::new();
+            let same = check::same_type(logic, &defs, &resolved, block, def)
+                .expect("same types checked by flp_core::check");
             for port in def.active_inputs(&block.params) {
                 let link = logic
                     .links
@@ -165,10 +167,19 @@ impl<'a> Program<'a> {
                             .block(&l.from.block)
                             .is_some_and(|b| b.inverted.contains(&l.from.port)),
                     },
+                    // A default of another type on a `same` input becomes zero of the shared one.
+                    (None, None, Some(value))
+                        if port.ty == SignalType::Same
+                            && !block.consts.contains_key(&port.name)
+                            && !same.accepts(value) =>
+                    {
+                        Source::Default(zero_value(same))
+                    }
                     (None, None, Some(value)) => Source::Default(value.clone()),
                     (None, None, None) => unreachable!("unconnected inputs checked"),
                 };
                 let ty = match (&source, port.ty) {
+                    (_, SignalType::Same) => same,
                     (Source::Var(name), SignalType::Any | SignalType::Number) => {
                         logic.var(name).map_or(SignalType::Any, |v| v.ty.signal())
                     }
@@ -235,5 +246,15 @@ impl<'a> Program<'a> {
             signals,
             uarts: flp_core::uart::project_uarts(project, lib),
         })
+    }
+}
+
+/// Zero constant of a concrete signal type.
+fn zero_value(ty: SignalType) -> ParamValue {
+    match ty {
+        SignalType::Bool => ParamValue::Bool(false),
+        SignalType::Int => ParamValue::Int(0),
+        SignalType::String => ParamValue::Text(String::new()),
+        _ => ParamValue::Float(0.0),
     }
 }

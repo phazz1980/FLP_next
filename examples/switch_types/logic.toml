@@ -1,0 +1,116 @@
+# Кнопка листает режимы 0…2: мультиплексор выбирает строку-сообщение и шлёт в порт,
+# переключатель выбирает, мигать светодиоду или гореть по второй кнопке,
+# демультиплексор раздаёт номер режима (int) по трём ШИМ-выходам
+
+[[block]]
+id = "next"
+type = "digital_in"
+pin = 12
+pullup = true
+inverted = true
+
+[[block]]
+id = "hold"
+type = "digital_in"
+pin = 13
+pullup = true
+inverted = true
+
+[[block]]
+id = "mode"
+type = "counter"
+
+[[block]]
+id = "msg"
+type = "mux"
+count = 3
+const = { a = "Стоп", b = "Работа", c = "Авария" }
+
+[[block]]
+id = "tx"
+type = "uart_send"
+port = -1
+trigger = 0
+const = { en = true }
+
+[[block]]
+id = "blink"
+type = "generator"
+const = { en = true }
+
+[[block]]
+id = "led_src"
+type = "switch"
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[block]]
+id = "route"
+type = "dms"
+count = 3
+
+[[block]]
+id = "pwm1"
+type = "pwm_out"
+pin = 25
+
+[[block]]
+id = "pwm2"
+type = "pwm_out"
+pin = 26
+
+[[block]]
+id = "pwm3"
+type = "pwm_out"
+pin = 27
+
+[[link]]
+from = "next.out"
+to   = "mode.up"
+
+[[link]]
+from = "mode.count"
+to   = "msg.sel"
+
+[[link]]
+from = "msg.out"
+to   = "tx.value"
+
+[[link]]
+from = "hold.out"
+to   = "led_src.sel"
+
+[[link]]
+from = "blink.out"
+to   = "led_src.a"
+
+[[link]]
+from = "hold.out"
+to   = "led_src.b"
+
+[[link]]
+from = "led_src.out"
+to   = "led.in"
+
+[[link]]
+from = "mode.count"
+to   = "route.sel"
+
+[[link]]
+from = "mode.count"
+to   = "route.in"
+
+[[link]]
+from = "route.o1"
+to   = "pwm1.in"
+
+[[link]]
+from = "route.o2"
+to   = "pwm2.in"
+
+[[link]]
+from = "route.o3"
+to   = "pwm3.in"

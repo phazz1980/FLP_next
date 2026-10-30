@@ -540,7 +540,7 @@ fn parse_signal(ty: SignalType, text: &str) -> Result<Option<ParamValue>, String
         SignalType::Int => t.parse().ok().map(ParamValue::Int),
         SignalType::Float => parse_float(t).map(ParamValue::Float),
         SignalType::String => Some(ParamValue::Text(t.to_owned())),
-        SignalType::Any => Some(SignalType::guess_value(t)),
+        SignalType::Any | SignalType::Same => Some(SignalType::guess_value(t)),
         SignalType::Number => {
             Some(SignalType::guess_value(t)).filter(|v| SignalType::of_value(v).is_numeric())
         }
@@ -1044,10 +1044,11 @@ fn type_combo(ui: &mut Ui, id: (&str, usize), ty: &mut SignalType) {
         .width(70.0)
         .show_ui(ui, |ui| {
             // `any` fits inputs only; the block check says so for an output.
-            for t in SignalType::ALL
-                .into_iter()
-                .chain([SignalType::Any, SignalType::Number])
-            {
+            for t in SignalType::ALL.into_iter().chain([
+                SignalType::Any,
+                SignalType::Number,
+                SignalType::Same,
+            ]) {
                 ui.selectable_value(ty, t, type_name(t));
             }
         });
@@ -2005,7 +2006,13 @@ fn files_tab(ui: &mut Ui, f: &mut Form) {
         if ui.button(crate::i18n::tr("Прикрепить пример...")).clicked() {
             if let Some(file) = rfd::FileDialog::new()
                 .set_title(crate::i18n::tr("Проект-пример"))
-                .add_filter(crate::i18n::tr("Проект FLP"), &[flp_core::project::PROJECT_EXT, flp_core::project::LEGACY_PROJECT_EXT])
+                .add_filter(
+                    crate::i18n::tr("Проект FLP"),
+                    &[
+                        flp_core::project::PROJECT_EXT,
+                        flp_core::project::LEGACY_PROJECT_EXT,
+                    ],
+                )
                 .pick_file()
             {
                 attach.example = Example::New(file);

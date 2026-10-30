@@ -476,7 +476,7 @@ pub(crate) fn cpp_type(ty: SignalType) -> &'static str {
         SignalType::Int => "int32_t",
         SignalType::Float => "float",
         SignalType::String => "String",
-        SignalType::Any | SignalType::Number => {
+        SignalType::Any | SignalType::Number | SignalType::Same => {
             unreachable!("an any input gets the type of its source")
         }
     }
@@ -488,7 +488,7 @@ pub(crate) fn zero(ty: SignalType) -> &'static str {
         SignalType::Int => "0",
         SignalType::Float => "0.0f",
         SignalType::String => "String()",
-        SignalType::Any | SignalType::Number => {
+        SignalType::Any | SignalType::Number | SignalType::Same => {
             unreachable!("an any input gets the type of its source")
         }
     }

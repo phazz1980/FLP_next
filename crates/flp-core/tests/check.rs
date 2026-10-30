@@ -661,3 +661,62 @@ fn unused_tag_waits_in_tree() {
     let errors = error_messages(&report);
     assert!(errors.is_empty(), "{errors:#?}");
 }
+
+#[test]
+fn switch_inputs_share_one_type() {
+    // A string and a number on the data inputs of a mux.
+    let mixed = r#"
+[[block]]
+id = "pick"
+type = "mux"
+const = { sel = 1, a = "текст", b = 5 }
+"#;
+    assert_single_error(mixed, "разные типы");
+
+    // `int` and `float` meet as `float`; a bool goes through a switch to a lamp.
+    let fine = format!(
+        r#"{INPUT}{LAMP}
+[[block]]
+id = "pick"
+type = "mux"
+const = {{ sel = 1, a = 2, b = 2.5 }}
+
+[[block]]
+id = "led_src"
+type = "switch"
+const = {{ a = false }}
+
+[[link]]
+from = "button.out"
+to   = "led_src.sel"
+
+[[link]]
+from = "button.out"
+to   = "led_src.b"
+
+[[link]]
+from = "led_src.out"
+to   = "lamp.in"
+"#
+    );
+    let report = check_src(&fine);
+    assert!(!report.has_errors(), "{:#?}", error_messages(&report));
+}
+
+#[test]
+fn same_output_keeps_its_real_type() {
+    // A switch of strings cannot feed a lamp.
+    let src = format!(
+        r#"{LAMP}
+[[block]]
+id = "pick"
+type = "switch"
+const = {{ sel = true, a = "да", b = "нет" }}
+
+[[link]]
+from = "pick.out"
+to   = "lamp.in"
+"#
+    );
+    assert_single_error(&src, "нужен блок преобразования");
+}

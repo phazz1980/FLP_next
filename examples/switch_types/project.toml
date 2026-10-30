@@ -1,0 +1,6 @@
+[project]
+name = "switch_types"
+description = "Переключатели любых типов: строка по номеру, выбор логического сигнала, раздача целого по выходам"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

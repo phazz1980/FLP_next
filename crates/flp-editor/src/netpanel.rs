@@ -211,6 +211,7 @@ fn type_label(ty: SignalType) -> &'static str {
         SignalType::String => crate::i18n::tr("строка"),
         SignalType::Any => crate::i18n::tr("любой"),
         SignalType::Number => crate::i18n::tr("число"),
+        SignalType::Same => crate::i18n::tr("однотипный"),
     }
 }
 
@@ -718,7 +719,7 @@ fn var_type(ty: SignalType) -> VarType {
         SignalType::Bool => VarType::Bool,
         SignalType::Float => VarType::Float,
         SignalType::String => VarType::String,
-        SignalType::Int | SignalType::Any | SignalType::Number => VarType::Int,
+        SignalType::Int | SignalType::Any | SignalType::Number | SignalType::Same => VarType::Int,
     }
 }
 

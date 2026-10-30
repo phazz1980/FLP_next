@@ -1,7 +1,8 @@
 // @loop
+{% set zero = {"bool": "false", "int": "0", "float": "0.0f", "string": "String()"}[input_type.in] %}
 {
   int idx = (int){{ input.sel }};
 {% for port in ["o1", "o2", "o3", "o4", "o5", "o6", "o7", "o8", "o9", "o10", "o11", "o12", "o13", "o14", "o15", "o16"][:value.count] %}
-  {{ output[port] }} = idx == {{ loop.index0 }} ? {{ input.in }} : 0.0f;
+  {{ output[port] }} = idx == {{ loop.index0 }} ? {{ input.in }} : {{ zero }};
 {% endfor %}
 }

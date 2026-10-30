@@ -215,7 +215,7 @@ pub fn check(logic: &Logic, lib: &Library, layout: Option<&Layout>) -> Report {
     report
 }
 
-/// Real type of every output once `number` outputs follow their inputs, by
+/// Real type of every output once `number` and `same` outputs follow their inputs, by
 /// (block index, port name). Blocks go in execution order; an input whose source
 /// is not known yet (a feedback loop) counts as `float`.
 pub fn resolved_outputs<'a>(
@@ -233,16 +233,47 @@ pub fn resolved_outputs<'a>(
             .filter(|p| p.ty == SignalType::Number)
             .map(|p| input_type(logic, defs, &types, block, p))
             .collect();
+        let same = same_type(logic, defs, &types, block, def).unwrap_or(SignalType::Float);
         for out in def.active_outputs(&block.params) {
-            let ty = if out.ty == SignalType::Number {
-                SignalType::widest(numbers.iter().copied())
-            } else {
-                out.ty
+            let ty = match out.ty {
+                SignalType::Number => SignalType::widest(numbers.iter().copied()),
+                SignalType::Same => same,
+                ty => ty,
             };
             types.insert((bi, out.name.as_str()), ty);
         }
     }
     types
+}
+
+/// Type shared by the `same` inputs of a block: of the fed ones (link, variable or
+/// constant), or of the defaults when none is fed; `float` for a block without them.
+/// `Err` with two types that cannot meet. `types` holds the outputs resolved so far.
+pub fn same_type(
+    logic: &Logic,
+    defs: &[Option<&BlockDef>],
+    types: &HashMap<(usize, &str), SignalType>,
+    block: &crate::Block,
+    def: &BlockDef,
+) -> Result<SignalType, (SignalType, SignalType)> {
+    let ports: Vec<_> = def
+        .active_inputs(&block.params)
+        .filter(|p| p.ty == SignalType::Same)
+        .collect();
+    let fed = |p: &&&crate::PortDef| {
+        block.bound.contains_key(&p.name)
+            || block.consts.contains_key(&p.name)
+            || logic
+                .links
+                .iter()
+                .any(|l| l.to.block == block.id && l.to.port == p.name)
+    };
+    let real = |p: &&crate::PortDef| input_type(logic, defs, types, block, p);
+    let shared = match SignalType::common(ports.iter().filter(fed).map(real))? {
+        Some(ty) => Some(ty),
+        None => SignalType::common(ports.iter().map(real))?,
+    };
+    Ok(shared.unwrap_or(SignalType::Float))
 }
 
 /// Real type of the signal on an input port: of its link, variable or constant.
@@ -272,7 +303,7 @@ fn input_type(
                         defs[i]?
                             .output(&link.from.port)
                             .map(|o| o.ty)
-                            .filter(|t| *t != SignalType::Number)
+                            .filter(|t| !matches!(t, SignalType::Number | SignalType::Same))
                     })
             })
             .unwrap_or(SignalType::Float);
@@ -285,9 +316,31 @@ fn input_type(
 }
 
 /// A `number` output that turned out `float` cannot go to an `int` input: the
-/// narrowing needs an explicit block.
+/// narrowing needs an explicit block. The same for a `same` output of the wrong type;
+/// the `same` inputs of a block must share one type.
 fn check_number_flow(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) {
     let types = resolved_outputs(logic, defs, &report.order.clone());
+    for (bi, block) in logic.blocks.iter().enumerate() {
+        let Some(def) = defs[bi] else { continue };
+        if let Err((a, b)) = same_type(logic, defs, &types, block, def) {
+            let ports: Vec<&str> = def
+                .active_inputs(&block.params)
+                .filter(|p| p.ty == SignalType::Same)
+                .map(|p| p.name.as_str())
+                .collect();
+            report.block_error(
+                DiagKind::LinkType,
+                &block.id,
+                format!(
+                    "блок «{}»: на входы {} поданы разные типы — {} и {}; нужен один тип",
+                    block.id,
+                    ports.join(", "),
+                    type_name(a),
+                    type_name(b)
+                ),
+            );
+        }
+    }
     for (li, link) in logic.links.iter().enumerate() {
         let (Some(fi), Some(ti)) = (
             logic.blocks.iter().position(|b| b.id == link.from.block),
@@ -301,7 +354,7 @@ fn check_number_flow(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Rep
         let (Some(out), Some(inp)) = (fd.output(&link.from.port), td.input(&link.to.port)) else {
             continue;
         };
-        if out.ty != SignalType::Number {
+        if !matches!(out.ty, SignalType::Number | SignalType::Same) {
             continue;
         }
         let real = types
@@ -1130,7 +1183,7 @@ fn check_bindings(logic: &Logic, block: &crate::Block, def: &BlockDef, report: &
                 format!("блок «{id}»: «{name}» нельзя связать с переменной"),
             ),
             Some(ty)
-                if ty != SignalType::Any
+                if !matches!(ty, SignalType::Any | SignalType::Same)
                     && ty != v.ty.signal()
                     && !(ty == SignalType::Number && v.ty.signal().is_numeric()) =>
             {
@@ -1173,6 +1226,7 @@ fn type_name(ty: SignalType) -> &'static str {
         SignalType::String => "string (строка)",
         SignalType::Any => "any (любой)",
         SignalType::Number => "число (int или float)",
+        SignalType::Same => "same (как у соседних входов)",
     }
 }
 

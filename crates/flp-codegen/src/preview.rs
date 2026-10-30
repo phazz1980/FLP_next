@@ -31,7 +31,7 @@ pub fn preview_block(def: &BlockDef, template: &str) -> Result<String, GenError>
             SignalType::Float => ParamValue::Float(0.0),
             SignalType::String => ParamValue::Text(String::new()),
             // Any type will do; a number keeps the preview simple.
-            SignalType::Any | SignalType::Number => ParamValue::Float(0.0),
+            SignalType::Any | SignalType::Number | SignalType::Same => ParamValue::Float(0.0),
         });
     }
     let mut params = BTreeMap::new();

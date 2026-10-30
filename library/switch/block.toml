@@ -3,7 +3,7 @@ type = "switch"
 name = "Переключатель"
 symbol = "SWITCH"
 group = "Переключатели"
-description = "Выбор из двух: out = a, если sel = 0, иначе b."
+description = "Выбор из двух: out = a, если sel = 0, иначе b. a и b — любого, но одного типа."
 
 [[input]]
 name = "sel"
@@ -12,12 +12,12 @@ label = "Выбор"
 
 [[input]]
 name = "a"
-type = "float"
+type = "same"
 
 [[input]]
 name = "b"
-type = "float"
+type = "same"
 
 [[output]]
 name = "out"
-type = "float"
+type = "same"

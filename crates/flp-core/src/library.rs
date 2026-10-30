@@ -44,6 +44,10 @@ pub enum SignalType {
     /// as the widest `number` input (`int` only when all of them are `int`).
     /// Not in [`SignalType::ALL`].
     Number,
+    /// Switch ports: an input takes any type, but all fed `same` inputs of a block share
+    /// one (`int` with `float` gives `float`); an output of this type gets that type.
+    /// Not in [`SignalType::ALL`].
+    Same,
 }
 
 impl SignalType {
@@ -58,11 +62,13 @@ impl SignalType {
     /// Only `int` → `float` widening is implicit; an `any` input takes everything.
     /// A `number` input takes `int` and `float`; a `number` output is checked once its
     /// real type is known (see [`SignalType::widest`]), here it may go to any numeric port.
+    /// A `same` port takes and feeds everything here; its real type is checked later.
     pub fn can_feed(self, to: SignalType) -> bool {
         use SignalType::*;
         match (self, to) {
             (Any, _) => false,
-            (_, Any) => true,
+            (_, Any | Same) => true,
+            (Same, _) => true,
             (Int | Float | Number, Number) => true,
             (Number, Int | Float) => true,
             (Int, Float) => true,
@@ -90,6 +96,23 @@ impl SignalType {
         } else {
             SignalType::Float
         }
+    }
+
+    /// Type shared by the signals on `same` inputs: `None` for no signals, `int` with
+    /// `float` widens to `float`; `Err` with the first two types that cannot meet.
+    pub fn common(
+        types: impl IntoIterator<Item = SignalType>,
+    ) -> Result<Option<SignalType>, (SignalType, SignalType)> {
+        let mut out: Option<SignalType> = None;
+        for t in types {
+            out = Some(match out {
+                None => t,
+                Some(a) if a == t => a,
+                Some(a) if a.is_numeric() && t.is_numeric() => SignalType::Float,
+                Some(a) => return Err((a, t)),
+            });
+        }
+        Ok(out)
     }
 
     /// Constant typed for an `any` input: `true`/`false`, a whole number, a number
@@ -132,7 +155,7 @@ impl SignalType {
                     SignalType::Number,
                     ParamValue::Int(_) | ParamValue::Float(_)
                 )
-                | (SignalType::Any, _)
+                | (SignalType::Any | SignalType::Same, _)
         )
     }
 
@@ -145,6 +168,7 @@ impl SignalType {
             SignalType::String => "string",
             SignalType::Any => "any",
             SignalType::Number => "number",
+            SignalType::Same => "same",
         }
     }
 }
@@ -604,6 +628,17 @@ impl BlockDef {
         {
             return Err(format!(
                 "выход «{}» типа number следует типу входов, а у блока нет входов number",
+                p.name
+            ));
+        }
+        if let Some(p) = self
+            .outputs
+            .iter()
+            .find(|p| p.ty == SignalType::Same)
+            .filter(|_| !self.inputs.iter().any(|i| i.ty == SignalType::Same))
+        {
+            return Err(format!(
+                "выход «{}» типа same следует типу входов, а у блока нет входов same",
                 p.name
             ));
         }
@@ -1067,6 +1102,19 @@ mod tests {
         assert!(!Bool.can_feed(Number) && !String.can_feed(Number));
         assert_eq!(SignalType::widest([Int, Int]), Int);
         assert_eq!(SignalType::widest([Int, Float]), Float);
+    }
+
+    #[test]
+    fn same_ports_share_one_type() {
+        use SignalType::*;
+        assert!(String.can_feed(Same) && Same.can_feed(Bool));
+        assert_eq!(SignalType::common([]), Ok(None));
+        assert_eq!(SignalType::common([String, String]), Ok(Some(String)));
+        assert_eq!(SignalType::common([Int, Float, Int]), Ok(Some(Float)));
+        assert_eq!(SignalType::common([Bool, Int]), Err((Bool, Int)));
+        let only_out = format!("{HEADER}[[output]]\nname = \"out\"\ntype = \"same\"\n");
+        let err = def(&only_out).validate("x").unwrap_err();
+        assert!(err.contains("same"), "{err}");
     }
 
     #[test]
