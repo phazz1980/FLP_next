@@ -253,7 +253,7 @@ fn param_table(on_sheet: &[&Item]) -> String {
          #text(size: 12 * u, weight: \"bold\")[Параметры блоков]\n\
          #v(4 * u)\n\
          #set text(size: 9.5 * u)\n\
-         #table(columns: (auto, auto, auto, auto, 1fr), inset: 4 * u, stroke: 0.4 * u + luma(160),\n\
+         #table(columns: (auto, auto, auto, auto, auto), inset: 4 * u, stroke: 0.4 * u + luma(160),\n\
          fill: (_, y) => if y == 0 {{ rgb(\"{HEADER_HEX}\") }},\n\
          table.header([*№*], [*Блок*], [*Тип*], [*Параметр*], [*Значение*]),\n\
          {body})]",
