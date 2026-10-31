@@ -1605,7 +1605,7 @@ dependencies = [
 
 [[package]]
 name = "flp-ai"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "flp-build",
  "flp-codegen",
@@ -1620,7 +1620,7 @@ dependencies = [
 
 [[package]]
 name = "flp-build"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "flp-codegen",
  "flp-core",
@@ -1631,7 +1631,7 @@ dependencies = [
 
 [[package]]
 name = "flp-cli"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "clap",
  "flp-build",
@@ -1643,7 +1643,7 @@ dependencies = [
 
 [[package]]
 name = "flp-codegen"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "flp-core",
  "flp-debug",
@@ -1654,7 +1654,7 @@ dependencies = [
 
 [[package]]
 name = "flp-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "minijinja",
  "serde",
@@ -1666,7 +1666,7 @@ dependencies = [
 
 [[package]]
 name = "flp-debug"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "flp-core",
  "serialport",
@@ -1674,7 +1674,7 @@ dependencies = [
 
 [[package]]
 name = "flp-editor"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "chrono",
  "eframe",
@@ -1699,7 +1699,7 @@ dependencies = [
 
 [[package]]
 name = "flp-mcp"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "flp-ai",
  "flp-build",
@@ -1711,7 +1711,7 @@ dependencies = [
 
 [[package]]
 name = "flp-pdf"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "flp-core",
  "thiserror 2.0.21",
@@ -1719,7 +1719,7 @@ dependencies = [
 
 [[package]]
 name = "flp-pdf-render"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "flp-core",
  "flp-pdf",
@@ -1728,7 +1728,7 @@ dependencies = [
 
 [[package]]
 name = "flp-web"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "flp-ai",
  "serde_json",
