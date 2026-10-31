@@ -8,6 +8,8 @@ use std::fmt::Write;
 use flp_core::vars::storage_name;
 use flp_core::{SignalType, Var};
 
+use crate::Lang;
+
 /// NVS namespace of the variables; blocks use their own ones.
 const NAMESPACE: &str = "flp_vars";
 const SAVE_PERIOD_MS: u32 = 1000;
@@ -36,32 +38,44 @@ fn is_text(var: &Var) -> bool {
 }
 
 /// Global declarations, empty without retained variables.
-pub fn globals(vars: &[Var]) -> String {
+pub fn globals(vars: &[Var], lang: Lang) -> String {
     let mut out = String::new();
     if retained(vars).next().is_none() {
         return out;
     }
-    out.push_str("\n// Сохранение переменных во флеш\n");
+    out.push_str(lang.pick(
+        "\n// Сохранение переменных во флеш\n",
+        "\n// Saving variables to flash\n",
+    ));
     out.push_str("Preferences flp_retain;\nuint32_t flp_retain_ms = 0;\n");
     for v in retained(vars) {
         let _ = writeln!(
             out,
-            "{} {};  // последнее сохранённое «{}»",
-            v.ty.cpp(),
-            saved_name(v),
-            v.name
+            "{}",
+            crate::locf!(
+                lang,
+                "{} {};  // последнее сохранённое «{}»",
+                "{} {};  // last saved value of \"{}\"",
+                v.ty.cpp(),
+                saved_name(v),
+                v.name
+            )
         );
     }
     out
 }
 
 /// Lines of `setup()` restoring the values.
-pub fn setup(vars: &[Var]) -> Vec<String> {
+pub fn setup(vars: &[Var], lang: Lang) -> Vec<String> {
     if retained(vars).next().is_none() {
         return Vec::new();
     }
     let mut lines = vec![
-        "// Восстановление переменных из флеша".to_owned(),
+        lang.pick(
+            "// Восстановление переменных из флеша",
+            "// Restoring variables from flash",
+        )
+        .to_owned(),
         format!("flp_retain.begin(\"{NAMESPACE}\", false);"),
     ];
     for v in retained(vars) {
@@ -90,12 +104,16 @@ pub fn setup(vars: &[Var]) -> Vec<String> {
 }
 
 /// Lines of `loop()` saving changed values.
-pub fn save(vars: &[Var]) -> Vec<String> {
+pub fn save(vars: &[Var], lang: Lang) -> Vec<String> {
     if retained(vars).next().is_none() {
         return Vec::new();
     }
     let mut lines = vec![
-        "// Сохранение переменных во флеш: только изменившиеся значения".to_owned(),
+        lang.pick(
+            "// Сохранение переменных во флеш: только изменившиеся значения",
+            "// Saving variables to flash: changed values only",
+        )
+        .to_owned(),
         format!("if (millis() - flp_retain_ms >= {SAVE_PERIOD_MS}) {{"),
         "  flp_retain_ms = millis();".to_owned(),
     ];

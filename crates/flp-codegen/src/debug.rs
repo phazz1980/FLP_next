@@ -9,7 +9,7 @@ use flp_debug::protocol;
 use flp_debug::transport::BAUD;
 use flp_debug::{DebugTable, Entry, Source, TextEntry};
 
-use crate::Program;
+use crate::{locf, Lang, Program};
 
 /// Block outputs in signal order, then variables in declaration order.
 /// Strings go to a table of their own: values travel as 4 bytes, strings in `TEXT` frames.
@@ -85,7 +85,7 @@ fn type_code(e: &Entry) -> u8 {
 /// `text_in`: a block reads USB, so the module keeps the console input
 /// (`TEXT_IN` frames) for it in `flp_dbg_input`.
 /// `background`: a task on core 0 exists; its pass time goes into `STATS` as a trailer.
-pub fn runtime(table: &DebugTable, text_in: bool, background: bool) -> String {
+pub fn runtime(table: &DebugTable, text_in: bool, background: bool, lang: Lang) -> String {
     let n = table.entries.len();
     let ptrs: Vec<String> = table
         .entries
@@ -103,11 +103,10 @@ pub fn runtime(table: &DebugTable, text_in: bool, background: bool) -> String {
     let _ = write!(
         out,
         r#"
-// ---- Онлайн-отладка CrabLogic (протокол v{version}) ----
-// Кадры: 0xAA 0x55, тип, длина, данные, CRC-16/CCITT. Обычный Serial.print не мешает.
+{head}
 const uint32_t FLP_DBG_FINGERPRINT = 0x{fingerprint:08X}UL;
 const uint16_t FLP_DBG_COUNT = {n};
-// Наблюдаемые значения: выходы блоков, затем переменные (+ пустой элемент в конце).
+{watched}
 void* const flp_dbg_ptr[FLP_DBG_COUNT + 1] = {{ {ptrs} }};
 const uint8_t flp_dbg_type[FLP_DBG_COUNT + 1] = {{ {types} }};  // see type_code in flp-codegen
 bool flp_dbg_forced[FLP_DBG_COUNT + 1];
@@ -315,7 +314,19 @@ void flp_dbg_loop() {{
         reset_stats = protocol::RESET_STATS,
         per_frame = protocol::VALUES_PER_FRAME,
         baud = BAUD,
-        texts = texts_module(table),
+        head = locf!(
+            lang,
+            "// ---- Онлайн-отладка CrabLogic (протокол v{}) ----
+// Кадры: 0xAA 0x55, тип, длина, данные, CRC-16/CCITT. Обычный Serial.print не мешает.",
+            "// ---- CrabLogic online debugging (protocol v{}) ----
+// Frames: 0xAA 0x55, type, length, data, CRC-16/CCITT. Plain Serial.print does not interfere.",
+            protocol::VERSION
+        ),
+        watched = lang.pick(
+            "// Наблюдаемые значения: выходы блоков, затем переменные (+ пустой элемент в конце).",
+            "// Watched values: block outputs, then variables (+ an empty element at the end)."
+        ),
+        texts = texts_module(table, lang),
         bg_tail = if background {
             "  memcpy(p + 25 + 10 * FLP_ST_SHEETS, &flp_st_bg_last, 4);
   memcpy(p + 29 + 10 * FLP_ST_SHEETS, &flp_st_bg_max, 4);
@@ -324,7 +335,18 @@ void flp_dbg_loop() {{
             ""
         },
         bg_len = if background { " + 8" } else { "" },
-        text_in = if text_in { TEXT_IN_MODULE } else { "" },
+        text_in = if text_in {
+            format!(
+                "{}
+{TEXT_IN_MODULE}",
+                lang.pick(
+                    "// Ввод из консоли отладки (кадры TEXT_IN) для «Чтения из UART» с USB.",
+                    "// Debug console input (TEXT_IN frames) for \"UART read\" on USB."
+                )
+            )
+        } else {
+            String::new()
+        },
         text_in_command = if text_in {
             format!(
                 "\n  if (type == 0x{:02X}) {{\n    flp_dbg_in_push(p, len);\n    return;\n  }}",
@@ -349,7 +371,7 @@ void flp_dbg_loop() {{
 
 /// Strings of the table: each one goes in a `TEXT` frame when its checksum changes,
 /// at most a few frames per tick so values are not delayed. Empty without strings.
-fn texts_module(table: &DebugTable) -> String {
+fn texts_module(table: &DebugTable, lang: Lang) -> String {
     if table.texts.is_empty() {
         return String::new();
     }
@@ -359,7 +381,7 @@ fn texts_module(table: &DebugTable) -> String {
         .map(|t| format!("&{}", t.storage))
         .collect();
     format!(
-        r#"// Строки: кадр TEXT, только когда строка изменилась (до {max} байт).
+        r#"{comment}
 const uint16_t FLP_DBG_TEXTS = {n};
 String* const flp_dbg_text[FLP_DBG_TEXTS] = {{ {ptrs} }};
 uint16_t flp_dbg_text_crc[FLP_DBG_TEXTS];
@@ -407,6 +429,12 @@ void flp_dbg_texts() {{
 "#,
         n = table.texts.len(),
         ptrs = ptrs.join(", "),
+        comment = locf!(
+            lang,
+            "// Строки: кадр TEXT, только когда строка изменилась (до {} байт).",
+            "// Strings: a TEXT frame only when the string has changed (up to {} bytes).",
+            protocol::TEXT_MAX
+        ),
         max = protocol::TEXT_MAX,
         budget = 8,
         kind = protocol::TEXT,
@@ -415,8 +443,7 @@ void flp_dbg_texts() {{
 
 /// Console input of the debug session: a ring buffer that `uart_read` on USB
 /// reads through `flp_dbg_input` the way it reads a `HardwareSerial`.
-const TEXT_IN_MODULE: &str = r#"// Ввод из консоли отладки (кадры TEXT_IN) для «Чтения из UART» с USB.
-uint8_t flp_dbg_in_buf[256];
+const TEXT_IN_MODULE: &str = r#"uint8_t flp_dbg_in_buf[256];
 uint8_t flp_dbg_in_head = 0;
 uint8_t flp_dbg_in_tail = 0;
 

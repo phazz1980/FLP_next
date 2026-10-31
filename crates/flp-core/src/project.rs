@@ -76,6 +76,9 @@ pub struct ProjectInfo {
     pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+    /// Language of the comments in the generated sketch (`ru`, `en`); empty means `ru`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub comment_lang: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

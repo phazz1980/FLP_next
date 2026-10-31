@@ -59,6 +59,7 @@ pub fn preview_block(def: &BlockDef, template: &str) -> Result<String, GenError>
             project: ProjectInfo {
                 name: def.info.name.clone(),
                 description: String::new(),
+                comment_lang: String::new(),
             },
             board: BoardConfig {
                 fqbn: "esp32:esp32:esp32".into(),

@@ -1779,7 +1779,7 @@ fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
         )
         .on_hover_text(crate::i18n::tr("Файлы для #include через запятую"));
     });
-    ui.weak(SECTIONS_HINT);
+    ui.weak(crate::i18n::tr(SECTIONS_HINT));
     let inputs = port_snippets(&f.inputs, "input");
     let outputs = port_snippets(&f.outputs, "output");
     let literal: Vec<Snippet> = f

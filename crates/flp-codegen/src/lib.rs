@@ -8,6 +8,7 @@ pub mod arduino;
 pub mod debug;
 pub mod error;
 pub mod expander;
+pub mod lang;
 pub mod preview;
 pub mod program;
 pub mod retain;
@@ -19,6 +20,7 @@ use std::path::{Path, PathBuf};
 
 pub use arduino::ArduinoCpp;
 pub use error::GenError;
+pub use lang::Lang;
 pub use preview::{preview_block, preview_id};
 pub use program::{Input, Instance, Program, Signal, Source};
 

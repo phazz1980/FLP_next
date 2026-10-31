@@ -95,6 +95,7 @@ pub fn header(program: &Program) -> Option<&'static str> {
 
 /// State and functions of the expanders, for the global part of the sketch.
 pub fn globals(program: &Program) -> String {
+    let lang = program.lang();
     let mut out = String::new();
     for u in used(program) {
         let (input, output) = state_names(u.id);
@@ -102,10 +103,15 @@ pub fn globals(program: &Program) -> String {
         let all = u.all_pins();
         let _ = writeln!(
             out,
-            "\n// Расширитель {}: {}, адрес 0x{:02X}",
-            u.id,
-            u.chip.name(),
-            u.address
+            "{}",
+            crate::locf!(
+                lang,
+                "\n// Расширитель {}: {}, адрес 0x{:02X}",
+                "\n// Expander {}: {}, address 0x{:02X}",
+                u.id,
+                u.chip.name(),
+                u.address
+            )
         );
         let _ = writeln!(out, "uint16_t {input} = 0x{all:04X};");
         let _ = writeln!(out, "uint16_t {output} = 0x{all:04X};");
@@ -117,8 +123,13 @@ pub fn globals(program: &Program) -> String {
             let bytes = u.bytes();
             let _ = writeln!(
                 out,
-                "\n// Читает выводы: не чаще одного раза в {} мс; при ошибке остаются прежние значения.",
-                u.period_ms
+                "{}",
+                crate::locf!(
+                    lang,
+                    "\n// Читает выводы: не чаще одного раза в {} мс; при ошибке остаются прежние значения.",
+                    "\n// Reads the pins: at most once per {} ms; on an error the previous values are kept.",
+                    u.period_ms
+                )
             );
             let _ = writeln!(out, "void flp_x_{n}_poll() {{");
             let _ = writeln!(
@@ -140,13 +151,21 @@ pub fn globals(program: &Program) -> String {
             let _ = writeln!(out, "  }} else {{");
             let _ = writeln!(
                 out,
-                "    // Чип мог потерять питание: выводы будут записаны заново."
+                "    // {}",
+                lang.pick(
+                    "Чип мог потерять питание: выводы будут записаны заново.",
+                    "The chip may have lost power: the pins will be written again."
+                )
             );
             let _ = writeln!(out, "    flp_x_{n}_ok = false;\n  }}\n}}");
         }
         let _ = writeln!(
             out,
-            "\n// Записывает выводы при изменении; пока чип молчит, повторяет дважды в секунду."
+            "\n// {}",
+            lang.pick(
+                "Записывает выводы при изменении; пока чип молчит, повторяет дважды в секунду.",
+                "Writes the pins when they change; while the chip is silent, retries twice a second."
+            )
         );
         let _ = writeln!(out, "void flp_x_{n}_flush() {{");
         let _ = writeln!(
@@ -200,7 +219,15 @@ pub fn poll(program: &Program) -> Vec<String> {
     used(program)
         .iter()
         .filter(|u| u.in_mask != 0)
-        .map(|u| format!("flp_x_{}_poll();  // расширитель {}", u.name, u.id))
+        .map(|u| {
+            crate::locf!(
+                program.lang(),
+                "flp_x_{}_poll();  // расширитель {}",
+                "flp_x_{}_poll();  // expander {}",
+                u.name,
+                u.id
+            )
+        })
         .collect()
 }
 
@@ -208,6 +235,14 @@ pub fn poll(program: &Program) -> Vec<String> {
 pub fn flush(program: &Program) -> Vec<String> {
     used(program)
         .iter()
-        .map(|u| format!("flp_x_{}_flush();  // расширитель {}", u.name, u.id))
+        .map(|u| {
+            crate::locf!(
+                program.lang(),
+                "flp_x_{}_flush();  // расширитель {}",
+                "flp_x_{}_flush();  // expander {}",
+                u.name,
+                u.id
+            )
+        })
         .collect()
 }

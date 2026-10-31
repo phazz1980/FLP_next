@@ -341,7 +341,7 @@ fn toolbar(app: &EditorApp, ui: &mut Ui, selected: Option<&Selected>, actions: &
 
 fn tree(app: &EditorApp, ui: &mut Ui, selected: Option<&Selected>, actions: &mut Vec<Action>) {
     let folders: Vec<&str> = app.lib.user_folders().collect();
-    egui::CollapsingHeader::new(RichText::new(ROOT).strong())
+    egui::CollapsingHeader::new(RichText::new(crate::i18n::tr(ROOT)).strong())
         .id_salt("userlib_root")
         .default_open(true)
         .show(ui, |ui| {
@@ -404,7 +404,14 @@ fn folder_contents(
     blocks.sort_by(|a, b| a.def.info.name.cmp(&b.def.info.name));
     let folders_all: Vec<String> = folders.iter().map(|f| (*f).to_owned()).collect();
     for b in blocks {
-        block_row(ui, b, &b.def.info.name, selected, &folders_all, actions);
+        block_row(
+            ui,
+            b,
+            crate::i18n::tr(&b.def.info.name),
+            selected,
+            &folders_all,
+            actions,
+        );
     }
 }
 
@@ -426,9 +433,13 @@ fn found(
         }
         any = true;
         let text = if info.group.is_empty() {
-            info.name.clone()
+            crate::i18n::tr(&info.name).to_owned()
         } else {
-            format!("{}  — {}", info.name, info.group.replace('/', " / "))
+            format!(
+                "{}  — {}",
+                crate::i18n::tr(&info.name),
+                info.group.replace('/', " / ")
+            )
         };
         block_row(ui, b, &text, selected, &folders, actions);
     }
@@ -475,7 +486,7 @@ fn block_row(
             let targets = std::iter::once(String::new()).chain(folders.iter().cloned());
             for target in targets {
                 let label = if target.is_empty() {
-                    ROOT.to_owned()
+                    crate::i18n::tr(ROOT).to_owned()
                 } else {
                     target.replace('/', " / ")
                 };

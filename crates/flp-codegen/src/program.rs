@@ -19,6 +19,13 @@ pub struct Program<'a> {
     pub uarts: Vec<flp_core::UartConfig>,
 }
 
+impl Program<'_> {
+    /// Language of the comments in the sketch.
+    pub fn lang(&self) -> crate::Lang {
+        crate::Lang::from_code(&self.project.config.project.comment_lang)
+    }
+}
+
 /// Variable holding the value of one block output between scans.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Signal {

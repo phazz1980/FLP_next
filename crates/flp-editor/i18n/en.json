@@ -1182,5 +1182,10 @@
  "Скопировать только конфиг": "Copy config only",
  "Промпт...": "Prompt...",
  "Сервер MCP для внешнего ИИ (Claude Code и др.): он работает с проектом, открытым здесь": "MCP server for external AI (Claude Code etc.): it works with the project open here",
- "Из проекта .flpn...": "From a .flpn project..."
+ "Из проекта .flpn...": "From a .flpn project...",
+ "Ключ": "Key",
+ "Модель": "Model",
+ "Адрес API": "API address",
+ "Комментарии в скетче:": "Sketch comments:",
+ "Язык комментариев в сгенерированном скетче (project.toml, comment_lang). Не зависит от языка интерфейса": "Language of the comments in the generated sketch (project.toml, comment_lang). Independent of the interface language"
 }

@@ -33,6 +33,7 @@ mod panels;
 mod pictures;
 mod report;
 mod selfupdate;
+mod splash;
 mod textmenu;
 mod theme;
 mod themeedit;

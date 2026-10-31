@@ -50,6 +50,9 @@ enum Command {
         /// Встроить модуль онлайн-отладки
         #[arg(long)]
         debug: bool,
+        /// Язык комментариев в скетче: ru или en (по умолчанию из project.toml)
+        #[arg(long)]
+        lang: Option<String>,
     },
     /// Сгенерировать скетч и собрать прошивку через arduino-cli
     Build {
@@ -126,7 +129,8 @@ fn main() -> ExitCode {
             project,
             stdout,
             debug,
-        } => run_gen(&project, cli.library.as_deref(), stdout, debug),
+            lang,
+        } => run_gen(&project, cli.library.as_deref(), stdout, debug, lang),
         Command::Build {
             project,
             debug,
@@ -273,11 +277,24 @@ fn run_check(project_dir: &Path, library: Option<&Path>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn run_gen(project_dir: &Path, library: Option<&Path>, stdout: bool, debug: bool) -> ExitCode {
-    let (project, lib) = match load(project_dir, library) {
+fn run_gen(
+    project_dir: &Path,
+    library: Option<&Path>,
+    stdout: bool,
+    debug: bool,
+    lang: Option<String>,
+) -> ExitCode {
+    let (mut project, lib) = match load(project_dir, library) {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
+    if let Some(lang) = lang {
+        if !["ru", "en"].contains(&lang.as_str()) {
+            eprintln!("Язык комментариев «{lang}» не поддерживается: допустимы ru и en");
+            return ExitCode::FAILURE;
+        }
+        project.config.project.comment_lang = lang;
+    }
     let code = match generate(&project, &lib, debug) {
         Ok((code, ..)) => code,
         Err(exit) => return exit,

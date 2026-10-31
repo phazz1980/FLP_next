@@ -9,7 +9,7 @@ use std::fmt::Write as _;
 
 use flp_debug::protocol::MAX_STAT_SHEETS;
 
-use crate::{Instance, Program};
+use crate::{Instance, Lang, Program};
 
 /// Sheet a block is drawn on; blocks without coordinates are on sheet 1.
 pub fn sheet_of(program: &Program, inst: &Instance) -> u32 {
@@ -53,7 +53,7 @@ void flp_st_bg_end() {
 "#;
 
 /// Measurement code, placed after all globals of the sketch.
-pub fn runtime(sheets: &[u32], background: bool) -> String {
+pub fn runtime(sheets: &[u32], background: bool, lang: Lang) -> String {
     let numbers: Vec<String> = sheets
         .iter()
         .map(u32::to_string)
@@ -61,7 +61,7 @@ pub fn runtime(sheets: &[u32], background: bool) -> String {
         .collect();
     format!(
         r#"
-// ---- Диагностика: время цикла (мкс), всего и по листам ----
+// ---- {title} ----
 const uint8_t FLP_ST_SHEETS = {n};
 const uint16_t flp_st_sheet_no[FLP_ST_SHEETS + 1] = {{ {numbers} }};
 uint32_t flp_st_acc[FLP_ST_SHEETS + 1];
@@ -142,6 +142,10 @@ uint32_t flp_st_free_heap() {{
 #endif
 }}
 "#,
+        title = lang.pick(
+            "Диагностика: время цикла (мкс), всего и по листам",
+            "Diagnostics: cycle time (us), total and per sheet"
+        ),
         n = sheets.len(),
         numbers = numbers.join(", "),
         bg_globals = if background { BG_MODULE } else { "" },
@@ -155,15 +159,23 @@ uint32_t flp_st_free_heap() {{
 }
 
 /// Text report of normal firmware, printed every `interval_ms`.
-pub fn text_report(interval_ms: u32, background: bool) -> String {
+pub fn text_report(interval_ms: u32, background: bool, lang: Lang) -> String {
+    let t = |ru: &'static str, en: &'static str| lang.pick(ru, en);
     let bg_report = if background {
-        "
-  Serial.print(\"[FLP]   ядро 0 (фоновая задача): последний проход \");
+        format!(
+            "
+  Serial.print(\"{}\");
   Serial.print(flp_st_bg_last);
-  Serial.print(\", макс \");
-  Serial.println(flp_st_bg_max);"
+  Serial.print(\"{}\");
+  Serial.println(flp_st_bg_max);",
+            t(
+                "[FLP]   ядро 0 (фоновая задача): последний проход ",
+                "[FLP]   core 0 (background task): last pass "
+            ),
+            t(", макс ", ", max ")
+        )
     } else {
-        ""
+        String::new()
     };
     let mut out = String::new();
     let _ = write!(
@@ -178,28 +190,36 @@ void flp_st_report() {{
   flp_st_report_last = millis();
   uint32_t cycles = flp_st_cycles;
   uint32_t avg = flp_st_take_avg();
-  Serial.print("[FLP] цикл, мкс: последний ");
+  Serial.print("{cycle}");
   Serial.print(flp_st_last);
-  Serial.print(", средний ");
+  Serial.print("{avg}");
   Serial.print(avg);
-  Serial.print(", макс ");
+  Serial.print("{max}");
   Serial.print(flp_st_max);
-  Serial.print(", макс период loop ");
+  Serial.print("{period}");
   Serial.print(flp_st_period_max);
-  Serial.print("; циклов ");
+  Serial.print("{cycles}");
   Serial.print(cycles);
-  Serial.print("; своб. память ");
+  Serial.print("{heap}");
   Serial.println(flp_st_free_heap());{bg_report}
   for (uint8_t k = 0; k < FLP_ST_SHEETS; k++) {{
-    Serial.print("[FLP]   лист ");
+    Serial.print("{sheet}");
     Serial.print(flp_st_sheet_no[k]);
-    Serial.print(": последний ");
+    Serial.print("{last}");
     Serial.print(flp_st_sheet_last[k]);
-    Serial.print(", макс ");
+    Serial.print("{max}");
     Serial.println(flp_st_sheet_max[k]);
   }}
 }}
-"#
+"#,
+        cycle = t("[FLP] цикл, мкс: последний ", "[FLP] cycle, us: last "),
+        avg = t(", средний ", ", average "),
+        max = t(", макс ", ", max "),
+        period = t(", макс период loop ", ", max loop period "),
+        cycles = t("; циклов ", "; cycles "),
+        heap = t("; своб. память ", "; free memory "),
+        sheet = t("[FLP]   лист ", "[FLP]   sheet "),
+        last = t(": последний ", ": last "),
     );
     out
 }

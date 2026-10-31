@@ -1027,6 +1027,7 @@ impl EditorApp {
                 project: ProjectInfo {
                     name,
                     description: String::new(),
+                    comment_lang: String::new(),
                 },
                 board: BoardConfig {
                     fqbn: "esp32:esp32:esp32".into(),
@@ -2168,6 +2169,27 @@ impl EditorApp {
                     doc.revision += 1;
                 }
             }
+            if let Some(doc) = self.doc.as_mut() {
+                let mut lang = doc.project.config.project.comment_lang.clone();
+                ui.horizontal(|ui| {
+                    ui.label(crate::i18n::tr("Комментарии в скетче:"))
+                        .on_hover_text(crate::i18n::tr(
+                            "Язык комментариев в сгенерированном скетче (project.toml, comment_lang).                              Не зависит от языка интерфейса",
+                        ));
+                    let en = lang == "en";
+                    if ui.radio(!en, "Русский").clicked() {
+                        lang = String::new();
+                    }
+                    if ui.radio(en, "English").clicked() {
+                        lang = "en".to_owned();
+                    }
+                });
+                if lang != doc.project.config.project.comment_lang {
+                    doc.project.config.project.comment_lang = lang;
+                    doc.dirty = true;
+                    doc.revision += 1;
+                }
+            }
             ui.separator();
             if ui
                 .add_enabled(
@@ -2631,6 +2653,7 @@ impl EditorApp {
 impl eframe::App for EditorApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        crate::splash::show(&ctx);
         flp_core::local::editor_beat(self.doc.as_ref().map(|d| d.project.path.as_path()));
         ctx.request_repaint_after(flp_core::local::EDITOR_BEAT);
         crate::textmenu::begin(&ctx);

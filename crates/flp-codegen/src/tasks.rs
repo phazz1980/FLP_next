@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use flp_core::vars::storage_name;
 use flp_core::SignalType;
 
-use crate::{GenError, Instance, Program, Source};
+use crate::{GenError, Instance, Lang, Program, Source};
 
 #[derive(Debug, Default)]
 pub struct Tasks {
@@ -122,28 +122,33 @@ impl Tasks {
 
     /// Timers of the gated sheets; the first run of sheet `i` of `n` is delayed by
     /// `i / n` of its period.
-    pub fn gate_globals(&self) -> Vec<String> {
+    pub fn gate_globals(&self, lang: Lang) -> Vec<String> {
         let n = self.gates.len() as u32;
         self.gates
             .iter()
             .enumerate()
             .map(|(i, &(sheet, period))| {
                 let offset = i as u32 * period / n;
-                format!(
-                    "uint32_t flp_bg{sheet}_t = {offset}u - {period}u;  // плата {sheet}: раз в {period} мс"
+                crate::locf!(
+                    lang,
+                    "uint32_t flp_bg{sheet}_t = {offset}u - {period}u;  // плата {sheet}: раз в {period} мс",
+                    "uint32_t flp_bg{sheet}_t = {offset}u - {period}u;  // sheet {sheet}: every {period} ms"
                 )
             })
             .collect()
     }
 
     /// Start of `loop()`: decides which gated sheet runs in this pass (at most one).
-    pub fn gate_prologue(&self) -> Vec<String> {
+    pub fn gate_prologue(&self, lang: Lang) -> Vec<String> {
         if self.gates.is_empty() {
             return Vec::new();
         }
         let mut out = vec![
-            "// Фоновые платы на одноядерном МК: каждая раз в свой период, не больше одной за проход"
-                .to_owned(),
+            lang.pick(
+                "// Фоновые платы на одноядерном МК: каждая раз в свой период, не больше одной за проход",
+                "// Background sheets on a single-core MCU: each in its own period, at most one per pass",
+            )
+            .to_owned(),
             "uint32_t flp_now = millis();".to_owned(),
         ];
         let many = self.gates.len() > 1;
