@@ -2651,6 +2651,11 @@ impl EditorApp {
 }
 
 impl eframe::App for EditorApp {
+    /// Only the window geometry is remembered between runs, not egui's own widget state.
+    fn persist_egui_memory(&self) -> bool {
+        false
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         crate::splash::show(&ctx);
