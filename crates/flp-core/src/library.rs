@@ -447,9 +447,22 @@ impl ParamDef {
     /// Text under the block on the sheet; `None` when the parameter is not shown
     /// (hidden, or an empty value without a caption).
     pub fn caption(&self, value: &ParamValue) -> Option<String> {
-        let text = self.value_label(value);
+        self.caption_with(value, &str::to_owned)
+    }
+
+    /// Like [`caption`](Self::caption), with `tr` applied to the caption and
+    /// to the choice label (the editor passes its translator).
+    pub fn caption_with(&self, value: &ParamValue, tr: &dyn Fn(&str) -> String) -> Option<String> {
+        let text = match self
+            .choices
+            .iter()
+            .find(|c| choice_matches(&c.value, value))
+        {
+            Some(c) => tr(&c.label),
+            None => value.to_string(),
+        };
         match self.show {
-            ParamShow::Named => Some(format!("{}={text}", self.title())),
+            ParamShow::Named => Some(format!("{}={text}", tr(self.title()))),
             ParamShow::Hidden => None,
             _ if text.is_empty() => None,
             ParamShow::Value => Some(text),

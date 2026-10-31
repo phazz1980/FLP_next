@@ -59,6 +59,7 @@ description = "true один цикл после сохранения новых
 [[param]]
 name = "caption"
 type = "string"
+show = "value"
 label = "Подпись"
 default = "Настройки сети"
 description = "Подпись виджета на странице"

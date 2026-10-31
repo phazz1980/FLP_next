@@ -89,7 +89,7 @@ pub enum LogLevel {
 
 pub struct LogLine {
     pub level: LogLevel,
-    pub text: String,
+    pub text: crate::i18n::LogText,
     /// Block to select when the line is clicked.
     pub block: Option<String>,
     /// Help target (`page#anchor`) that explains the problem, for the "Что это?" link.
@@ -308,7 +308,7 @@ impl EditorApp {
             // Kept in memory only, so the broken file is not overwritten.
             Err(e) => app.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Сохранённые пароли не прочитаны: {0}", &[&e]),
+                crate::i18n::msg("Сохранённые пароли не прочитаны: {0}", &[&e]),
             ),
         }
         if let Some(t) =
@@ -401,7 +401,7 @@ impl EditorApp {
             Ok(ports) => self.ports = ports,
             Err(e) => self.info(
                 LogLevel::Warning,
-                crate::i18n::fmt("Порты не найдены: {0}", &[&e]),
+                crate::i18n::msg("Порты не найдены: {0}", &[&e]),
             ),
         }
     }
@@ -487,7 +487,7 @@ impl EditorApp {
                         }
                         Err(e) => self.info(
                             LogLevel::Error,
-                            crate::i18n::fmt("Не удалось установить arduino-cli: {0}", &[&e]),
+                            crate::i18n::msg("Не удалось установить arduino-cli: {0}", &[&e]),
                         ),
                     }
                 }
@@ -535,7 +535,7 @@ impl EditorApp {
                 if auto {
                     self.info(
                         LogLevel::Warning,
-                        crate::i18n::fmt("Автоскачивание обновления: {0}", &[&e]),
+                        crate::i18n::msg("Автоскачивание обновления: {0}", &[&e]),
                     );
                 }
                 self.self_update = SelfUpdate::Idle(Some(e));
@@ -592,7 +592,7 @@ impl EditorApp {
                 }
                 self.info(
                     LogLevel::Info,
-                    crate::i18n::fmt(
+                    crate::i18n::msg(
                         "Доступна версия {0} (установлена {1}): {2}",
                         &[&release.version, &update::CURRENT, &release.url],
                     ),
@@ -606,7 +606,7 @@ impl EditorApp {
             }
             Ok(Check::UpToDate) if manual => self.info(
                 LogLevel::Info,
-                crate::i18n::fmt("Установлена последняя версия ({0})", &[&update::CURRENT]),
+                crate::i18n::msg("Установлена последняя версия ({0})", &[&update::CURRENT]),
             ),
             Ok(Check::NoReleases) if manual => self.info(
                 LogLevel::Info,
@@ -617,7 +617,7 @@ impl EditorApp {
             Ok(_) => {}
             Err(e) => self.info(
                 LogLevel::Warning,
-                crate::i18n::fmt("Проверка обновлений: {0}", &[&e]),
+                crate::i18n::msg("Проверка обновлений: {0}", &[&e]),
             ),
         }
     }
@@ -627,7 +627,7 @@ impl EditorApp {
         if let Err(e) = self.local.save() {
             self.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Пароли не сохранены: {0}", &[&e]),
+                crate::i18n::msg("Пароли не сохранены: {0}", &[&e]),
             );
         }
     }
@@ -646,7 +646,7 @@ impl EditorApp {
         self.save_local();
     }
 
-    pub fn info(&mut self, level: LogLevel, text: impl Into<String>) {
+    pub fn info(&mut self, level: LogLevel, text: impl Into<crate::i18n::LogText>) {
         self.log.push(LogLine {
             level,
             text: text.into(),
@@ -679,11 +679,11 @@ impl EditorApp {
                     help.blocks_dirty = true;
                 }
                 for e in errors {
-                    self.info(LogLevel::Warning, crate::i18n::fmt("Пропущено: {0}", &[&e]));
+                    self.info(LogLevel::Warning, crate::i18n::msg("Пропущено: {0}", &[&e]));
                 }
                 self.info(
                     LogLevel::Info,
-                    crate::i18n::fmt(
+                    crate::i18n::msg(
                         "Библиотека: {0} встроенных блоков из {1}, {2} пользовательских",
                         &[&builtin, &dir.display(), &user],
                     ),
@@ -771,7 +771,7 @@ impl EditorApp {
         if !boards.is_empty() {
             self.info(
                 LogLevel::Info,
-                crate::i18n::fmt("Из проекта добавлена плата: {0}", &[&boards.join(", ")]),
+                crate::i18n::msg("Из проекта добавлена плата: {0}", &[&boards.join(", ")]),
             );
             self.reload_library();
         }
@@ -779,7 +779,7 @@ impl EditorApp {
         if !written.is_empty() {
             self.info(
                 LogLevel::Info,
-                crate::i18n::fmt(
+                crate::i18n::msg(
                     "Из проекта добавлены пользовательские блоки: {0}",
                     &[&written.join(", ")],
                 ),
@@ -833,7 +833,7 @@ impl EditorApp {
                     flp_core::packed::adopt_project_blocks(&doc.project.path, &dir, &take);
                 self.info(
                     LogLevel::Ok,
-                    crate::i18n::fmt(
+                    crate::i18n::msg(
                         "Блоки программы обновлены из проекта: {0}",
                         &[&written.join(", ")],
                     ),
@@ -882,7 +882,7 @@ impl EditorApp {
             Ok(doc) => {
                 self.info(
                     LogLevel::Info,
-                    crate::i18n::fmt("Открыт проект {0}", &[&path.display()]),
+                    crate::i18n::msg("Открыт проект {0}", &[&path.display()]),
                 );
                 theme::save_last_project(path);
                 self.port = doc.project.config.board.port.clone().unwrap_or_default();
@@ -922,7 +922,7 @@ impl EditorApp {
             Ok(()) => self.request_open(dest),
             Err(e) => self.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Пример не открыт: {0}", &[&e]),
+                crate::i18n::msg("Пример не открыт: {0}", &[&e]),
             ),
         }
     }
@@ -1076,7 +1076,7 @@ impl EditorApp {
                 Err(e) => {
                     self.info(
                         LogLevel::Error,
-                        crate::i18n::fmt(
+                        crate::i18n::msg(
                             "Не удалось запустить crablogic-web (соберите: cargo build -p flp-web): {0}",
                             &[&e],
                         ),
@@ -1097,7 +1097,7 @@ impl EditorApp {
             ),
             Err(e) => self.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Не удалось открыть браузер: {0}", &[&e]),
+                crate::i18n::msg("Не удалось открыть браузер: {0}", &[&e]),
             ),
         }
     }
@@ -1110,7 +1110,7 @@ impl EditorApp {
         match doc.save(&self.lib) {
             Ok(warning) => {
                 let path = doc.project.path.display().to_string();
-                self.info(LogLevel::Ok, crate::i18n::fmt("Сохранено: {0}", &[&path]));
+                self.info(LogLevel::Ok, crate::i18n::msg("Сохранено: {0}", &[&path]));
                 if let Some(w) = warning {
                     self.info(LogLevel::Warning, w);
                 }
@@ -1190,11 +1190,11 @@ impl EditorApp {
         match result {
             Ok(()) => self.info(
                 LogLevel::Ok,
-                crate::i18n::fmt("PDF сохранён: {0}", &[&dest.display()]),
+                crate::i18n::msg("PDF сохранён: {0}", &[&dest.display()]),
             ),
             Err(e) => self.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Не удалось сохранить PDF: {0}", &[&e]),
+                crate::i18n::msg("Не удалось сохранить PDF: {0}", &[&e]),
             ),
         }
     }
@@ -1285,7 +1285,7 @@ impl EditorApp {
         ctx.copy_text(frag.to_clipboard());
         self.info(
             LogLevel::Info,
-            crate::i18n::fmt("Скопировано блоков: {0}", &[&n]),
+            crate::i18n::msg("Скопировано блоков: {0}", &[&n]),
         );
     }
 
@@ -1315,7 +1315,7 @@ impl EditorApp {
                 self.sheet = at.sheet;
                 self.selection = Selection::of_blocks(ids);
             }
-            Err(e) => self.info(LogLevel::Error, crate::i18n::fmt("Вставка: {0}", &[&e])),
+            Err(e) => self.info(LogLevel::Error, crate::i18n::msg("Вставка: {0}", &[&e])),
         }
     }
 
@@ -1336,7 +1336,7 @@ impl EditorApp {
             });
             lines.push(LogLine {
                 level,
-                text: d.to_string(),
+                text: crate::i18n::LogText::Plain(d.to_string()),
                 block,
                 help: Some(format!(
                     "{}#{}",
@@ -1352,7 +1352,7 @@ impl EditorApp {
         } else {
             self.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Проверка: ошибок — {0}", &[&errors]),
+                crate::i18n::msg("Проверка: ошибок — {0}", &[&errors]),
             );
         }
     }
@@ -1478,14 +1478,14 @@ impl EditorApp {
                 JobEvent::Done(Err(_)) if cancelled => {
                     self.info(
                         LogLevel::Warning,
-                        crate::i18n::fmt("{0}: отменено", &[&title]),
+                        crate::i18n::msg("{0}: отменено", &[&title]),
                     );
                     done = true;
                 }
                 JobEvent::Done(Ok(_)) if background => done = true,
                 JobEvent::Done(Err(_)) if background => {
                     self.info(
-                        LogLevel::Warning,
+                        LogLevel::Info,
                         crate::i18n::tr("Фоновая сборка не удалась; подробности покажет «Собрать»"),
                     );
                     done = true;
@@ -1499,7 +1499,7 @@ impl EditorApp {
                     done = true;
                 }
                 JobEvent::Done(Err(text)) => {
-                    self.info(LogLevel::Error, crate::i18n::fmt("ошибка: {0}", &[&text]));
+                    self.info(LogLevel::Error, crate::i18n::msg("ошибка: {0}", &[&text]));
                     done = true;
                 }
             }
@@ -1538,7 +1538,7 @@ impl EditorApp {
             Ok(state) => {
                 self.info(
                     LogLevel::Info,
-                    crate::i18n::fmt("Отладка: подключение к {0}", &[&port]),
+                    crate::i18n::msg("Отладка: подключение к {0}", &[&port]),
                 );
                 self.debug = Some(state);
             }
@@ -1984,7 +1984,7 @@ impl EditorApp {
                         crate::i18n::tr("Файлы .crab теперь открываются этим редактором"),
                     ),
                     Err(e) => {
-                        self.info(LogLevel::Error, crate::i18n::fmt("Не удалось связать .crab: {0}", &[&e]))
+                        self.info(LogLevel::Error, crate::i18n::msg("Не удалось связать .crab: {0}", &[&e]))
                     }
                 }
             }
@@ -2244,7 +2244,7 @@ impl EditorApp {
             ui.add_enabled_ui(!boards.is_empty(), |ui| {
                 ui.menu_button(crate::i18n::tr("Изменить плату"), |ui| {
                     for b in &boards {
-                        if ui.button(&b.def.info.name).clicked() {
+                        if ui.button(crate::i18n::tr(&b.def.info.name)).clicked() {
                             self.board_editor = Some(crate::boardedit::BoardEditor::edit(b));
                             ui.close();
                         }
@@ -2252,7 +2252,7 @@ impl EditorApp {
                 });
                 ui.menu_button(crate::i18n::tr("Экспорт платы"), |ui| {
                     for b in &boards {
-                        if ui.button(&b.def.info.name).clicked() {
+                        if ui.button(crate::i18n::tr(&b.def.info.name)).clicked() {
                             crate::boardio::export(self, &b.def.info.id);
                             ui.close();
                         }
@@ -2671,7 +2671,7 @@ impl eframe::App for EditorApp {
                 repo: &repo,
                 version: update::CURRENT,
                 board: board.as_ref().map(|(n, f)| (*n, f.as_str())),
-                log: self.log.iter().map(|l| l.text.clone()).collect(),
+                log: self.log.iter().map(|l| l.text.to_string()).collect(),
             };
             if let Some(url) = self.report.show(&ctx, &facts) {
                 ctx.open_url(egui::OpenUrl::new_tab(url));

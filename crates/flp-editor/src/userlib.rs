@@ -145,14 +145,22 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui, needle: &str) -> Option<String> {
         });
 
     let mut form: Option<PackForm> = ui.data_mut(|d| d.get_temp(form_id)).flatten();
+    let mut new_block_in: Option<String> = None;
     if let Some(f) = &mut form {
         match pack_form(app, ui.ctx(), f) {
-            Some(true) => {
+            Some(PackAnswer::Ok) => {
                 if apply_pack_form(app, f) {
                     form = None;
                 }
             }
-            Some(false) => form = None,
+            Some(PackAnswer::AddBlock) => {
+                let folder = f.edit.clone().unwrap_or_else(|| f.name.trim().to_owned());
+                if apply_pack_form(app, f) {
+                    form = None;
+                    new_block_in = Some(folder);
+                }
+            }
+            Some(PackAnswer::Cancel) => form = None,
             None => {}
         }
     }
@@ -172,6 +180,9 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui, needle: &str) -> Option<String> {
 
     let mut selected = selected;
     let mut add = None;
+    if let Some(folder) = new_block_in {
+        app.block_editor = Some(BlockEditor::new_block(app, &folder));
+    }
     for action in actions {
         match action {
             Action::Select(s) => selected = Some(s),
@@ -568,8 +579,16 @@ fn ask_name(app: &EditorApp, ctx: &egui::Context, p: &mut Prompt) -> Option<bool
     answer
 }
 
-/// Pack dialog; Some(true) — OK, Some(false) — cancelled.
-fn pack_form(app: &EditorApp, ctx: &egui::Context, f: &mut PackForm) -> Option<bool> {
+/// How the pack dialog was closed.
+enum PackAnswer {
+    Ok,
+    /// Save the pack and go on to a new block in it.
+    AddBlock,
+    Cancel,
+}
+
+/// Pack dialog; `None` while it is open.
+fn pack_form(app: &EditorApp, ctx: &egui::Context, f: &mut PackForm) -> Option<PackAnswer> {
     let editing = f.edit.is_some();
     let valid = editing || is_valid_folder_name(f.name.trim());
     let error = app.theme.palette.error;
@@ -629,12 +648,21 @@ fn pack_form(app: &EditorApp, ctx: &egui::Context, f: &mut PackForm) -> Option<b
                 .add_enabled(ok, egui::Button::new(crate::i18n::tr("ОК")))
                 .clicked()
             {
-                answer = Some(true);
+                answer = Some(PackAnswer::Ok);
+            }
+            if ui
+                .add_enabled(ok, egui::Button::new(crate::i18n::tr("ОК и добавить блок")))
+                .on_hover_text(crate::i18n::tr(
+                    "Сохранить набор и сразу создать в нём новый блок",
+                ))
+                .clicked()
+            {
+                answer = Some(PackAnswer::AddBlock);
             }
             if ui.button(crate::i18n::tr("Отмена")).clicked()
                 || ui.input(|i| i.key_pressed(egui::Key::Escape))
             {
-                answer = Some(false);
+                answer = Some(PackAnswer::Cancel);
             }
         });
     });
@@ -725,7 +753,7 @@ fn apply_prompt(app: &mut EditorApp, p: &Prompt) -> bool {
         Err(e) => {
             app.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Папка не изменена: {0}", &[&e]),
+                crate::i18n::msg("Папка не изменена: {0}", &[&e]),
             );
             false
         }
@@ -742,7 +770,7 @@ fn delete_folder(app: &mut EditorApp, path: &str) -> bool {
     if !empty {
         app.info(
             LogLevel::Error,
-            crate::i18n::fmt(
+            crate::i18n::msg(
                 "{0} «{1}» не пуст(а): сначала удалите или перенесите блоки и папки из него",
                 &[
                     &if word == "раздел" {
@@ -764,7 +792,7 @@ fn delete_folder(app: &mut EditorApp, path: &str) -> bool {
         Err(e) => {
             app.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Не удалось удалить {0}: {1}", &[&word, &e]),
+                crate::i18n::msg("Не удалось удалить {0}: {1}", &[&word, &e]),
             );
             false
         }
@@ -783,7 +811,7 @@ fn move_block(app: &mut EditorApp, kind: &str, folder: &str) {
     if dest.exists() {
         app.info(
             LogLevel::Error,
-            crate::i18n::fmt("Блок не перенесён: {0} уже есть", &[&dest.display()]),
+            crate::i18n::msg("Блок не перенесён: {0} уже есть", &[&dest.display()]),
         );
         return;
     }
@@ -792,7 +820,7 @@ fn move_block(app: &mut EditorApp, kind: &str, folder: &str) {
         Ok(()) => app.reload_library(),
         Err(e) => app.info(
             LogLevel::Error,
-            crate::i18n::fmt("Блок не перенесён: {0}", &[&e]),
+            crate::i18n::msg("Блок не перенесён: {0}", &[&e]),
         ),
     }
 }

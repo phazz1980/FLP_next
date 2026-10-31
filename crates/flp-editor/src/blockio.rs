@@ -64,7 +64,7 @@ pub fn add_files(app: &mut EditorApp, paths: &[PathBuf]) {
             }
             Err(e) => app.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Набор не прочитан: {0}", &[&e]),
+                crate::i18n::msg("Набор не прочитан: {0}", &[&e]),
             ),
         }
     }
@@ -103,7 +103,7 @@ pub fn pick_project(app: &mut EditorApp) {
     if blocks.is_empty() {
         app.info(
             LogLevel::Warning,
-            crate::i18n::fmt(
+            crate::i18n::msg(
                 "В проекте {0} нет пользовательских блоков",
                 &[&name_of(&path)],
             ),
@@ -150,11 +150,11 @@ pub fn export_pack(app: &mut EditorApp, folder: &str) {
     match pack::export_pack(&user_dir, folder, &dest) {
         Ok(()) => app.info(
             LogLevel::Ok,
-            crate::i18n::fmt("Набор «{0}» сохранён в {1}", &[&folder, &dest.display()]),
+            crate::i18n::msg("Набор «{0}» сохранён в {1}", &[&folder, &dest.display()]),
         ),
         Err(e) => app.info(
             LogLevel::Error,
-            crate::i18n::fmt("Набор не экспортирован: {0}", &[&e]),
+            crate::i18n::msg("Набор не экспортирован: {0}", &[&e]),
         ),
     }
 }
@@ -168,7 +168,7 @@ pub fn open_example(app: &mut EditorApp, kind: &str) {
     if !src.is_file() {
         app.info(
             LogLevel::Warning,
-            crate::i18n::fmt("У блока «{0}» нет примера", &[&kind]),
+            crate::i18n::msg("У блока «{0}» нет примера", &[&kind]),
         );
         return;
     }
@@ -179,7 +179,7 @@ pub fn open_example(app: &mut EditorApp, kind: &str) {
         Ok(_) => app.request_open(dest),
         Err(e) => app.info(
             LogLevel::Error,
-            crate::i18n::fmt("Пример не открыт: {0}", &[&e]),
+            crate::i18n::msg("Пример не открыт: {0}", &[&e]),
         ),
     }
 }
@@ -267,7 +267,7 @@ fn install(app: &mut EditorApp, entries: &[Entry], conflicts: &[Conflict]) {
         if matches!(conflict, Conflict::User) && !e.replace {
             app.info(
                 LogLevel::Warning,
-                crate::i18n::fmt("Блок «{0}» оставлен как был (замена не выбрана)", &[&name]),
+                crate::i18n::msg("Блок «{0}» оставлен как был (замена не выбрана)", &[&name]),
             );
             continue;
         }
@@ -276,12 +276,12 @@ fn install(app: &mut EditorApp, entries: &[Entry], conflicts: &[Conflict]) {
                 done = true;
                 app.info(
                     LogLevel::Ok,
-                    crate::i18n::fmt("Блок «{0}» установлен в {1}", &[&name, &dir.display()]),
+                    crate::i18n::msg("Блок «{0}» установлен в {1}", &[&name, &dir.display()]),
                 );
             }
             Err(err) => app.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Блок «{0}» не установлен: {1}", &[&name, &err]),
+                crate::i18n::msg("Блок «{0}» не установлен: {1}", &[&name, &err]),
             ),
         }
     }
@@ -373,13 +373,13 @@ fn pack_window(app: &mut EditorApp, ctx: &egui::Context) {
                 Ok(_) => {
                     app.info(
                         LogLevel::Ok,
-                        crate::i18n::fmt("Набор «{0}» установлен", &[&info.name]),
+                        crate::i18n::msg("Набор «{0}» установлен", &[&info.name]),
                     );
                     app.reload_library();
                 }
                 Err(e) => app.info(
                     LogLevel::Error,
-                    crate::i18n::fmt("Набор «{0}» не установлен: {1}", &[&info.name, &e]),
+                    crate::i18n::msg("Набор «{0}» не установлен: {1}", &[&info.name, &e]),
                 ),
             }
         }

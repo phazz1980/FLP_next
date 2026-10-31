@@ -1309,7 +1309,7 @@ fn save(app: &mut EditorApp, ed: &mut BoardEditor) -> bool {
         Err(e) => {
             app.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Плата не сохранена: {0}", &[&e]),
+                crate::i18n::msg("Плата не сохранена: {0}", &[&e]),
             );
             return false;
         }
@@ -1326,7 +1326,7 @@ fn save(app: &mut EditorApp, ed: &mut BoardEditor) -> bool {
     if new && (app.lib.boards().get(&id).is_some() || boards_dir(&user_dir).join(&id).exists()) {
         app.info(
             LogLevel::Error,
-            crate::i18n::fmt(
+            crate::i18n::msg(
                 "Плата не сохранена: идентификатор «{0}» уже занят, выберите другой",
                 &[&id],
             ),
@@ -1337,7 +1337,7 @@ fn save(app: &mut EditorApp, ed: &mut BoardEditor) -> bool {
         Ok(dir) => {
             app.info(
                 LogLevel::Ok,
-                crate::i18n::fmt(
+                crate::i18n::msg(
                     "Плата «{0}» сохранена в {1}",
                     &[&def.info.name, &dir.display()],
                 ),
@@ -1350,7 +1350,7 @@ fn save(app: &mut EditorApp, ed: &mut BoardEditor) -> bool {
         Err(e) => {
             app.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Плата не сохранена: {0}", &[&e]),
+                crate::i18n::msg("Плата не сохранена: {0}", &[&e]),
             );
             false
         }
@@ -1380,7 +1380,7 @@ fn delete(app: &mut EditorApp, id: &str) -> bool {
     if !board.dir.starts_with(&root) || board.dir == root {
         app.info(
             LogLevel::Error,
-            crate::i18n::fmt("Плата «{0}» не удалена: её папка вне библиотеки", &[&id]),
+            crate::i18n::msg("Плата «{0}» не удалена: её папка вне библиотеки", &[&id]),
         );
         return false;
     }
@@ -1388,7 +1388,7 @@ fn delete(app: &mut EditorApp, id: &str) -> bool {
         Ok(()) => {
             app.info(
                 LogLevel::Ok,
-                crate::i18n::fmt("Плата «{0}» удалена", &[&board.def.info.name]),
+                crate::i18n::msg("Плата «{0}» удалена", &[&board.def.info.name]),
             );
             app.reload_library();
             true
@@ -1396,7 +1396,7 @@ fn delete(app: &mut EditorApp, id: &str) -> bool {
         Err(e) => {
             app.info(
                 LogLevel::Error,
-                crate::i18n::fmt(
+                crate::i18n::msg(
                     "Плата «{0}» не удалена: {1}: {2}",
                     &[&id, &board.dir.display(), &e],
                 ),

@@ -178,7 +178,12 @@ fn label(block: &Block, def: Option<&BlockDef>) -> String {
     }
     def.map_or_else(
         || block.kind.clone(),
-        |d| d.info.symbol.clone().unwrap_or_else(|| d.info.name.clone()),
+        |d| {
+            d.info
+                .symbol
+                .clone()
+                .unwrap_or_else(|| crate::i18n::tr(&d.info.name).to_owned())
+        },
     )
 }
 
@@ -215,7 +220,7 @@ fn size(block: &Block, def: Option<&BlockDef>) -> Vec2 {
             let longest = |ports: &[&PortDef]| {
                 ports
                     .iter()
-                    .map(|p| text_w(p.title(), 9.5))
+                    .map(|p| text_w(crate::i18n::tr(p.title()), 9.5))
                     .fold(0.0, f32::max)
             };
             let ports_w = longest(&ins) + longest(&outs) + 22.0;
@@ -294,12 +299,12 @@ fn paint_box(
     );
     if let Some(def) = def {
         for (i, port) in def.active_inputs(&block.params).enumerate() {
-            let p = port_pos(r, kind, i, false);
+            let p = port_pos(r, kind, i, false, z);
             painter.circle_filled(p, PORT_R * z.sqrt(), signal_color(pal, port.ty));
             painter.text(
                 p + Vec2::new(5.0 * z, 0.0),
                 Align2::LEFT_CENTER,
-                port.title(),
+                crate::i18n::tr(port.title()),
                 font(9.0),
                 pal.weak,
             );
@@ -316,12 +321,12 @@ fn paint_box(
             }
         }
         for (i, port) in def.active_outputs(&block.params).enumerate() {
-            let p = port_pos(r, kind, i, true);
+            let p = port_pos(r, kind, i, true, z);
             painter.circle_filled(p, PORT_R * z.sqrt(), signal_color(pal, port.ty));
             painter.text(
                 p - Vec2::new(5.0 * z, 0.0),
                 Align2::RIGHT_CENTER,
-                port.title(),
+                crate::i18n::tr(port.title()),
                 font(9.0),
                 pal.weak,
             );
@@ -330,7 +335,12 @@ fn paint_box(
         let summary: Vec<String> = def
             .params
             .iter()
-            .filter_map(|p| block.params.get(&p.name).and_then(|v| p.caption(v)))
+            .filter_map(|p| {
+                block
+                    .params
+                    .get(&p.name)
+                    .and_then(|v| p.caption_with(v, &|t| crate::i18n::tr(t).to_owned()))
+            })
             .collect();
         if !summary.is_empty() {
             let full = summary.join(" ");
@@ -419,7 +429,7 @@ fn tag_linked(logic: &Logic, lib: &flp_core::Library, id: &str) -> bool {
             .any(|l| l.from.block == id || l.to.block == id)
 }
 
-fn port_pos(rect: Rect, kind: Kind, index: usize, output: bool) -> Pos2 {
+fn port_pos(rect: Rect, kind: Kind, index: usize, output: bool, z: f32) -> Pos2 {
     match kind {
         Kind::Tag { en: false, .. } => {
             if output {
@@ -436,7 +446,7 @@ fn port_pos(rect: Rect, kind: Kind, index: usize, output: bool) -> Pos2 {
         }
         Kind::Box => {
             let x = if output { rect.max.x } else { rect.min.x };
-            Pos2::new(x, rect.min.y + HEAD_H + ROW_H * (index as f32 + 0.5))
+            Pos2::new(x, rect.min.y + (HEAD_H + ROW_H * (index as f32 + 0.5)) * z)
         }
     }
 }
@@ -896,7 +906,13 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         };
         let i = ports.iter().position(|q| q.name == r.port)?;
         Some((
-            port_pos(screen_rect(&r.block)?, kind_of(block, Some(def)), i, output),
+            port_pos(
+                screen_rect(&r.block)?,
+                kind_of(block, Some(def)),
+                i,
+                output,
+                z,
+            ),
             ports[i].ty,
         ))
     };
@@ -1170,7 +1186,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 };
                 painter.text(center, Align2::CENTER_CENTER, text, font(11.0), pal.text);
                 if en {
-                    let p = port_pos(r, kind, 1, false);
+                    let p = port_pos(r, kind, 1, false, z);
                     painter.text(
                         p + Vec2::new(6.0 * z, 0.0),
                         Align2::LEFT_CENTER,
@@ -1186,11 +1202,15 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 }
                 if let Some(port) = def.and_then(|d| d.inputs.first().or(d.outputs.first())) {
                     let color = signal_color(&pal, port.ty);
-                    painter.circle_filled(port_pos(r, kind, 0, !write), PORT_R * z.sqrt(), color);
+                    painter.circle_filled(
+                        port_pos(r, kind, 0, !write, z),
+                        PORT_R * z.sqrt(),
+                        color,
+                    );
                     // Not connected yet: the other side is free too.
                     if !tag_linked(logic, &app.lib, &block.id) {
                         painter.circle_filled(
-                            port_pos(r, kind, 0, write),
+                            port_pos(r, kind, 0, write, z),
                             PORT_R * z.sqrt(),
                             color,
                         );
@@ -1277,7 +1297,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             (q, write)
         });
         if let Some((q, output)) = &tag_port {
-            let pos = port_pos(r, kind, 0, *output);
+            let pos = port_pos(r, kind, 0, *output, z);
             painter.circle_filled(pos, PORT_R * xf.view.zoom.sqrt(), signal_color(&pal, q.ty));
         }
         let ports = def
@@ -1292,7 +1312,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             .map(|(i, q, output)| (i, q, output, true))
             .chain(tag_port.as_ref().map(|(q, output)| (0, q, *output, false)));
         for (i, q, output, real) in ports {
-            let pos = port_pos(r, kind, i, output);
+            let pos = port_pos(r, kind, i, output, z);
             let area = Rect::from_center_size(pos, Vec2::splat(10.0));
             let resp = ui.interact(
                 area,
@@ -1967,7 +1987,7 @@ fn port_context_menu(
         let text = app.canvas.const_text.clone();
         app.info(
             LogLevel::Error,
-            crate::i18n::fmt(
+            crate::i18n::msg(
                 "«{0}» не подходит ко входу {1}: нужно число",
                 &[&text, &port],
             ),

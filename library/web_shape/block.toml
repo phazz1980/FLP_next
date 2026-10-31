@@ -60,6 +60,7 @@ label = "Панель (плитка с подписью)"
 [[param]]
 name = "caption"
 type = "string"
+show = "value"
 label = "Подпись"
 default = ""
 description = "Подпись панели (вверху слева); у остальных фигур не показывается"

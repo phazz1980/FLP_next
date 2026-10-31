@@ -188,7 +188,7 @@ fn topic_ports(ui: &mut Ui, b: &flp_core::Block, def: &flp_core::BlockDef) {
                         });
                 }
             }
-            let label = p.label.as_deref().unwrap_or(&p.name);
+            let label = crate::i18n::tr(p.label.as_deref().unwrap_or(&p.name));
             pull_label(
                 ui,
                 &b.id,
@@ -233,7 +233,7 @@ fn settings(
         .active_params(&b.params)
         .filter(|p| !(kind == WEB_UI && p.name == "pages"))
     {
-        let label = p.label.as_deref().unwrap_or(&p.name);
+        let label = crate::i18n::tr(p.label.as_deref().unwrap_or(&p.name));
         // Values kept by the program (Wi-Fi password) are not in the project file.
         let stored = p.local.as_ref().and_then(|key_param| {
             let key = match b
@@ -254,7 +254,10 @@ fn settings(
             .or(p.default.as_ref());
         ui.horizontal(|ui| {
             if !p.choices.is_empty() {
-                let selected = current.map_or_else(|| "не задан".to_owned(), |v| p.value_label(v));
+                let selected = current.map_or_else(
+                    || crate::i18n::tr("не задан").to_owned(),
+                    |v| crate::i18n::tr(&p.value_label(v)).to_owned(),
+                );
                 if p.name == "wifi_mode" && def.input("mode").is_some() {
                     // Pulled out as the `mode` input: the choice becomes «set by input».
                     pull_label(
@@ -275,7 +278,10 @@ fn settings(
                     .show_ui(ui, |ui| {
                         for c in &p.choices {
                             let sel = current == Some(&c.value);
-                            if ui.selectable_label(sel, &c.label).clicked() {
+                            if ui
+                                .selectable_label(sel, crate::i18n::tr(&c.label))
+                                .clicked()
+                            {
                                 actions.push(NetAction::SetParam {
                                     id: b.id.clone(),
                                     name: p.name.clone(),

@@ -10,6 +10,7 @@ memory = true
 [[param]]
 name = "caption"
 type = "string"
+show = "value"
 label = "Подпись"
 default = ""
 description = "Подпись виджета на странице"

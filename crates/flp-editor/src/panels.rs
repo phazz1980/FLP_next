@@ -365,7 +365,8 @@ pub fn bottom(app: &mut EditorApp, ui: &mut Ui, open: &mut bool) {
                     LogLevel::Warning => pal.warning,
                     LogLevel::Error => pal.error,
                 };
-                let text = line.text.lines().next().unwrap_or("");
+                let full = line.text.to_string();
+                let text = full.lines().next().unwrap_or("");
                 ui.add(egui::Label::new(RichText::new(text).color(color).monospace()).truncate());
             }
         }
@@ -398,7 +399,9 @@ fn log(app: &mut EditorApp, ui: &mut Ui) {
                     LogLevel::Warning => pal.warning,
                     LogLevel::Error => pal.error,
                 };
-                let text = RichText::new(&line.text).color(color).monospace();
+                let text = RichText::new(line.text.to_string())
+                    .color(color)
+                    .monospace();
                 ui.horizontal_wrapped(|ui| {
                     match &line.block {
                         Some(block) => {
@@ -855,7 +858,7 @@ pub fn left(app: &mut EditorApp, ui: &mut Ui) {
                         crate::i18n::fmt("Плата {0}: {1}", &[&s, &name])
                     };
                     if doc.project.layout.is_background(s) {
-                        title.push_str(" (фон)");
+                        title.push_str(crate::i18n::tr(" (фон)"));
                     }
                     let blocks = by_sheet.remove(&s).unwrap_or_default();
                     let header = egui::CollapsingHeader::new(title)
@@ -999,6 +1002,8 @@ pub fn right(app: &mut EditorApp, ui: &mut Ui) {
 
 /// Library group of the board input/output blocks, not shown in the library panel.
 const IO_GROUP: &str = "Входы и выходы";
+/// Web widgets are added from the web interface section of the project tree.
+const WEB_GROUP: &str = "Веб-интерфейс";
 
 fn library(app: &mut EditorApp, ui: &mut Ui) {
     let filter_id = Id::unique("library_filter");
@@ -1034,18 +1039,27 @@ fn library(app: &mut EditorApp, ui: &mut Ui) {
         // Blocks of a user board are offered in projects of that board only.
         if app.lib.is_user(&info.kind)
             || info.group == IO_GROUP
+            || info.group == WEB_GROUP
             || info.hidden
             || !info.fits_board(model)
         {
             continue;
         }
-        let hay = format!("{} {} {}", info.kind, info.name, info.description).to_lowercase();
+        let hay = format!(
+            "{} {} {} {}",
+            info.kind,
+            info.name,
+            crate::i18n::tr(&info.name),
+            info.description
+        )
+        .to_lowercase();
         if needle.is_empty() || hay.contains(&needle) {
             let symbol = info.symbol.as_deref().unwrap_or("");
+            let name = crate::i18n::tr(&info.name);
             let text = if symbol.is_empty() || symbol == info.name {
-                info.name.clone()
+                name.to_owned()
             } else {
-                format!("{}  ({symbol})", info.name)
+                format!("{name}  ({symbol})")
             };
             groups
                 .entry(&info.group)
@@ -1061,7 +1075,7 @@ fn library(app: &mut EditorApp, ui: &mut Ui) {
         .auto_shrink([ui.is_sizing_pass(), false])
         .show(ui, |ui| {
             for (group, blocks) in &groups {
-                egui::CollapsingHeader::new(*group)
+                egui::CollapsingHeader::new(crate::i18n::tr(group))
                     .default_open(!needle.is_empty())
                     .show(ui, |ui| {
                         for (kind, text, description) in blocks {
@@ -1071,7 +1085,7 @@ fn library(app: &mut EditorApp, ui: &mut Ui) {
                                 DragItem::Block(kind.to_string()),
                                 |ui| ui.label(text),
                             );
-                            let resp = resp.on_hover_text(*description);
+                            let resp = resp.on_hover_text(crate::i18n::tr(description));
                             if resp.double_clicked() {
                                 add = Some(kind.to_string());
                             }
@@ -1197,7 +1211,10 @@ pub fn free_spot(app: &EditorApp) -> BlockPos {
 pub fn theme_menu(app: &mut EditorApp, ui: &mut Ui) {
     let mut chosen = None;
     for t in &app.themes {
-        if ui.radio(t.name == app.theme.name, &t.name).clicked() {
+        if ui
+            .radio(t.name == app.theme.name, crate::i18n::tr(&t.name))
+            .clicked()
+        {
             chosen = Some(t.clone());
         }
     }

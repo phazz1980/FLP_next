@@ -156,6 +156,17 @@ pub fn source(project: &Project, lib: &Library) -> String {
     }
     let by_id: HashMap<&str, &Item> = items.iter().map(|i| (i.block.id.as_str(), i)).collect();
 
+    // Empty sheets are left out; a project without any block keeps its sheets.
+    let used: Vec<u32> = sheets
+        .iter()
+        .copied()
+        .filter(|s| items.iter().any(|i| i.sheet == *s))
+        .collect();
+    let sheets: Vec<u32> = if used.is_empty() {
+        sheets.into_iter().collect()
+    } else {
+        used
+    };
     let mut out = PRELUDE.to_owned();
     for &sheet in &sheets {
         let on_sheet: Vec<&Item> = items.iter().filter(|i| i.sheet == sheet).collect();
@@ -176,6 +187,22 @@ pub fn source(project: &Project, lib: &Library) -> String {
         let mut head = format!("Плата {sheet}");
         if let Some(name) = info.map(|i| i.name.as_str()).filter(|n| !n.is_empty()) {
             head = format!("{head}. {name}");
+        }
+        // Properties of the sheet go to its title.
+        if let Some(info) = info {
+            let mut props = Vec::new();
+            if info.background {
+                props.push("фоновая задача, ядро 0".to_owned());
+                if info.period > 0 {
+                    props.push(format!("период {} мс", info.period));
+                }
+            }
+            if info.disabled {
+                props.push("плата отключена".to_owned());
+            }
+            if !props.is_empty() {
+                head = format!("{head} ({})", props.join(", "));
+            }
         }
         c.text(16.0, 16.0, &head, 12.0, Align::Left, INK);
         c.text(w - 16.0, 16.0, title, 9.0, Align::Right, WEAK);
@@ -231,10 +258,10 @@ pub fn source(project: &Project, lib: &Library) -> String {
             "#set page(width: {w:.1} * u, height: auto, margin: 0pt)
              #box(width: {w:.1} * u, height: {h:.1} * u, {{
 {drawing}}})
-{}",
-            param_page(&on_sheet),
+"
         );
     }
+    out.push_str(&param_page(&items));
     out
 }
 
@@ -244,7 +271,7 @@ fn block_params<'a>(item: &Item<'a>) -> Vec<(&'a str, String)> {
         return Vec::new();
     };
     def.active_params(&item.block.params)
-        .filter(|p| !p.fixed)
+        .filter(|p| !p.fixed && p.show != ParamShow::Hidden)
         .map(|p| {
             let value = item.block.params.get(&p.name).or(p.default.as_ref());
             let text = match value {
@@ -290,12 +317,11 @@ fn block_link(item: &Item, r: Bounds) -> String {
     )
 }
 
-/// The page after the drawing of a sheet: every block with its parameters.
-/// Empty when no block of the sheet has parameters.
-fn param_page(on_sheet: &[&Item]) -> String {
-    let mut rows: Vec<&Item> = on_sheet
+/// The common list at the end of the document: every block of the project with its
+/// parameters, on portrait A4 pages. Empty when no block has parameters.
+fn param_page(items: &[Item]) -> String {
+    let mut rows: Vec<&Item> = items
         .iter()
-        .copied()
         .filter(|i| !block_params(i).is_empty())
         .collect();
     rows.sort_by_key(|i| i.num);
@@ -315,7 +341,7 @@ fn param_page(on_sheet: &[&Item]) -> String {
         }
         let _ = write!(
             body,
-            "table.cell(rowspan: {n})[#place(top + left, dy: -{ANCHOR_LEAD} * u, [#metadata(none)#label(\"p{num}\")])#link(label(\"b{num}\"))[#underline[{num}]]], \
+            "table.cell(rowspan: {n})[#place(top + left, dy: -25mm, [#metadata(none)#label(\"p{num}\")])#link(label(\"b{num}\"))[#underline[{num}]]], \
              table.cell(rowspan: {n}, {id}), table.cell(rowspan: {n}, {name}),",
             num = item.num,
             id = quote(&item.block.id),
@@ -335,17 +361,16 @@ fn param_page(on_sheet: &[&Item]) -> String {
         body.push('\n');
     }
     format!(
-        "#pagebreak()
-         #pad(x: 16 * u, y: 16 * u)[
-         #text(size: 12 * u, weight: \"bold\")[Параметры блоков]
-         #v(2 * u)
-         #text(size: 9 * u, fill: rgb(\"{WEAK_HEX}\"))[Номер блока — ссылка на него на схеме; нажатие на блок на схеме приводит сюда.]
-         #v(6 * u)
-         #set text(size: 9.5 * u)
-         #table(columns: (auto, auto, auto, auto, auto), inset: 4 * u, stroke: 0.4 * u + luma(160),
+        "#set page(paper: \"a4\", margin: 15mm)
+         #text(size: 14pt, weight: \"bold\")[Параметры блоков]
+         #v(2mm)
+         #text(size: 9pt, fill: rgb(\"{WEAK_HEX}\"))[Номер блока — ссылка на него на схеме; нажатие на блок на схеме приводит сюда.]
+         #v(4mm)
+         #set text(size: 9pt)
+         #table(columns: (auto, auto, auto, auto, 1fr), inset: 4pt, stroke: 0.4pt + luma(160),
          fill: (_, y) => if y == 0 {{ rgb(\"{HEADER_HEX}\") }},
          table.header([*№*], [*Блок*], [*Тип*], [*Параметр*], [*Значение*]),
-         {body})]
+         {body})
 ",
         WEAK_HEX = hex(WEAK),
         HEADER_HEX = hex(HEADER),
@@ -748,6 +773,15 @@ mod tests {
         assert!(src.contains("Параметры блоков"));
         assert!(src.contains("link(label(\"p1\")"));
         assert!(!src.to_lowercase().contains("password"));
+    }
+
+    #[test]
+    fn parameter_list_is_one_portrait_page_run_at_the_end() {
+        let (project, lib) = pump();
+        let src = source(&project, &lib);
+        assert_eq!(src.matches("Параметры блоков").count(), 1);
+        let list = src.find("paper: \"a4\"").expect("portrait page");
+        assert!(src.rfind("height: auto").unwrap() < list);
     }
 
     #[test]

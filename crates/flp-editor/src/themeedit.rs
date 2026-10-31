@@ -49,9 +49,9 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut ThemeEditor) {
             .show_ui(ui, |ui| {
                 for t in &app.themes {
                     let label = if t.builtin {
-                        crate::i18n::fmt("{0} (встроенная)", &[&t.name])
+                        crate::i18n::fmt("{0} (встроенная)", &[&crate::i18n::tr(&t.name)])
                     } else {
-                        t.name.clone()
+                        crate::i18n::tr(&t.name).to_owned()
                     };
                     if ui
                         .selectable_label(t.name == ed.original.name, label)
@@ -176,7 +176,7 @@ fn copy(app: &mut EditorApp, ed: &mut ThemeEditor, ctx: &egui::Context) {
     if let Err(e) = theme::save(&t) {
         app.info(
             LogLevel::Error,
-            crate::i18n::fmt("Тема не сохранена: {0}", &[&e]),
+            crate::i18n::msg("Тема не сохранена: {0}", &[&e]),
         );
         return;
     }
@@ -197,7 +197,7 @@ fn save(app: &mut EditorApp, ed: &mut ThemeEditor) {
     if name != ed.original.name && app.themes.iter().any(|t| t.name == name) {
         app.info(
             LogLevel::Error,
-            crate::i18n::fmt("Тема «{0}» уже есть", &[&name]),
+            crate::i18n::msg("Тема «{0}» уже есть", &[&name]),
         );
         return;
     }
@@ -216,12 +216,12 @@ fn save(app: &mut EditorApp, ed: &mut ThemeEditor) {
             theme::save_choice(&app.theme.name);
             app.info(
                 LogLevel::Info,
-                crate::i18n::fmt("Тема «{0}» сохранена", &[&app.theme.name]),
+                crate::i18n::msg("Тема «{0}» сохранена", &[&app.theme.name]),
             );
         }
         Err(e) => app.info(
             LogLevel::Error,
-            crate::i18n::fmt("Тема не сохранена: {0}", &[&e]),
+            crate::i18n::msg("Тема не сохранена: {0}", &[&e]),
         ),
     }
 }
@@ -230,7 +230,7 @@ fn delete(app: &mut EditorApp, ed: &mut ThemeEditor, ctx: &egui::Context) {
     if let Err(e) = theme::remove(&ed.original.name) {
         app.info(
             LogLevel::Error,
-            crate::i18n::fmt("Тема не удалена: {0}", &[&e]),
+            crate::i18n::msg("Тема не удалена: {0}", &[&e]),
         );
         return;
     }

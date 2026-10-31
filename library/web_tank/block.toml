@@ -14,6 +14,7 @@ type = "float"
 [[param]]
 name = "caption"
 type = "string"
+show = "value"
 label = "Подпись"
 default = "Уровень"
 description = "Подпись виджета на странице"

@@ -55,7 +55,7 @@ pub fn add_files(app: &mut EditorApp, paths: &[PathBuf]) {
             }
             Err(e) => app.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Плата не прочитана: {0}", &[&e]),
+                crate::i18n::msg("Плата не прочитана: {0}", &[&e]),
             ),
         }
     }
@@ -100,11 +100,11 @@ pub fn export(app: &mut EditorApp, id: &str) {
     match boardfile::export_board(&app.lib, id, &dest) {
         Ok(()) => app.info(
             LogLevel::Ok,
-            crate::i18n::fmt("Плата «{0}» сохранена в {1}", &[&id, &dest.display()]),
+            crate::i18n::msg("Плата «{0}» сохранена в {1}", &[&id, &dest.display()]),
         ),
         Err(e) => app.info(
             LogLevel::Error,
-            crate::i18n::fmt("Плата не экспортирована: {0}", &[&e]),
+            crate::i18n::msg("Плата не экспортирована: {0}", &[&e]),
         ),
     }
 }
@@ -189,7 +189,7 @@ fn install(app: &mut EditorApp, entries: &[Entry], conflicts: &[BoardConflict]) 
         if matches!(conflict, BoardConflict::User(_)) && !e.replace {
             app.info(
                 LogLevel::Warning,
-                crate::i18n::fmt(
+                crate::i18n::msg(
                     "Плата «{0}» оставлена как была (замена не выбрана)",
                     &[&name],
                 ),
@@ -201,12 +201,12 @@ fn install(app: &mut EditorApp, entries: &[Entry], conflicts: &[BoardConflict]) 
                 done = true;
                 app.info(
                     LogLevel::Ok,
-                    crate::i18n::fmt("Плата «{0}» установлена в {1}", &[&name, &dir.display()]),
+                    crate::i18n::msg("Плата «{0}» установлена в {1}", &[&name, &dir.display()]),
                 );
             }
             Err(err) => app.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Плата «{0}» не установлена: {1}", &[&name, &err]),
+                crate::i18n::msg("Плата «{0}» не установлена: {1}", &[&name, &err]),
             ),
         }
     }

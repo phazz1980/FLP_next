@@ -145,6 +145,65 @@ pub fn fmt(template: &str, args: &[&dyn Display]) -> String {
     out
 }
 
+/// A message kept as its Russian template and arguments, translated when it is shown, so a
+/// line written before a language switch follows the switch. Arguments that are themselves
+/// phrases of the dictionary are translated too.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Msg {
+    template: String,
+    args: Vec<String>,
+}
+
+impl Display for Msg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let translated: Vec<&str> = self.args.iter().map(|a| tr(a)).collect();
+        let args: Vec<&dyn Display> = translated.iter().map(|a| a as &dyn Display).collect();
+        f.write_str(&fmt(&self.template, &args))
+    }
+}
+
+/// Builds a [`Msg`] from a template and its arguments (see [`fmt`]).
+pub fn msg(template: &str, args: &[&dyn Display]) -> Msg {
+    Msg {
+        template: template.to_owned(),
+        args: args.iter().map(|a| a.to_string()).collect(),
+    }
+}
+
+/// Text of a log line: either ready (dynamic text, shown as is) or a [`Msg`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogText {
+    Plain(String),
+    Msg(Msg),
+}
+
+impl Display for LogText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LogText::Plain(s) => f.write_str(s),
+            LogText::Msg(m) => m.fmt(f),
+        }
+    }
+}
+
+impl From<String> for LogText {
+    fn from(s: String) -> Self {
+        LogText::Plain(s)
+    }
+}
+
+impl From<&str> for LogText {
+    fn from(s: &str) -> Self {
+        LogText::Msg(msg(s, &[]))
+    }
+}
+
+impl From<Msg> for LogText {
+    fn from(m: Msg) -> Self {
+        LogText::Msg(m)
+    }
+}
+
 /// Adds system fonts with the scripts the Russian/Latin default fonts of egui lack.
 pub fn install_fonts(ctx: &egui::Context) {
     // Chinese, then Devanagari and Bengali (Nirmala UI covers both).
@@ -172,6 +231,13 @@ pub fn install_fonts(ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_text_is_filled_from_its_template() {
+        let line = LogText::from(msg("Открыт проект {0}", &[&"x"]));
+        set(Lang::Ru);
+        assert_eq!(line.to_string(), "Открыт проект x");
+    }
 
     #[test]
     fn fmt_fills_placeholders_and_keeps_braces() {

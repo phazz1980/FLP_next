@@ -2164,7 +2164,7 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
         Err(e) => {
             app.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Блок не сохранён: {0}", &[&e]),
+                crate::i18n::msg("Блок не сохранён: {0}", &[&e]),
             );
             return false;
         }
@@ -2180,7 +2180,7 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
     if ed.read_only || app.lib.is_builtin(kind) {
         app.info(
             LogLevel::Error,
-            crate::i18n::fmt(
+            crate::i18n::msg(
                 "Блок не сохранён: тип «{0}» занят встроенным блоком, его менять нельзя",
                 &[&kind],
             ),
@@ -2191,7 +2191,7 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
     if new && (app.lib.get(kind).is_some() || lib_dir.join(kind).exists()) {
         app.info(
             LogLevel::Error,
-            crate::i18n::fmt(
+            crate::i18n::msg(
                 "Блок не сохранён: тип «{0}» уже есть, выберите другое имя",
                 &[&kind],
             ),
@@ -2211,7 +2211,7 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
                 if let Err(e) = flp_core::pack::PackInfo::new(&name).write(&pack_dir) {
                     app.info(
                         LogLevel::Error,
-                        crate::i18n::fmt("Блок не сохранён: {0}", &[&e]),
+                        crate::i18n::msg("Блок не сохранён: {0}", &[&e]),
                     );
                     return false;
                 }
@@ -2222,7 +2222,7 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
         Ok(dir) => {
             app.info(
                 LogLevel::Ok,
-                crate::i18n::fmt(
+                crate::i18n::msg(
                     "Блок «{0}» сохранён в {1}",
                     &[&def.info.name, &dir.display()],
                 ),
@@ -2230,7 +2230,7 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
             if let Err(e) = ed.form.attach.apply(&dir, &ed.form.docs) {
                 app.info(
                     LogLevel::Error,
-                    crate::i18n::fmt("Библиотека или пример не сохранены: {0}", &[&e]),
+                    crate::i18n::msg("Библиотека или пример не сохранены: {0}", &[&e]),
                 );
             }
             ed.original = Some(kind.clone());
@@ -2241,7 +2241,7 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
         Err(e) => {
             app.info(
                 LogLevel::Error,
-                crate::i18n::fmt("Блок не сохранён: {0}", &[&e]),
+                crate::i18n::msg("Блок не сохранён: {0}", &[&e]),
             );
             false
         }
@@ -2316,7 +2316,7 @@ pub fn delete_dialog(app: &mut EditorApp, ctx: &egui::Context) {
                 Ok(()) => {
                     app.info(
                         LogLevel::Ok,
-                        crate::i18n::fmt("Блок «{0}» удалён", &[&kind]),
+                        crate::i18n::msg("Блок «{0}» удалён", &[&kind]),
                     );
                     if app
                         .block_editor
@@ -2329,7 +2329,7 @@ pub fn delete_dialog(app: &mut EditorApp, ctx: &egui::Context) {
                 }
                 Err(e) => app.info(
                     LogLevel::Error,
-                    crate::i18n::fmt("Блок не удалён: {0}", &[&e]),
+                    crate::i18n::msg("Блок не удалён: {0}", &[&e]),
                 ),
             }
         }

@@ -412,9 +412,10 @@ fn widget_body(app: &EditorApp, ui: &mut Ui, d: &mut WidgetDialog) {
     let pages = crate::netpanel::page_names(&doc.project.logic);
     let kinds = crate::netpanel::widget_kinds(&app.lib);
     let name_of = |kind: &str| {
-        app.lib
-            .get(kind)
-            .map_or_else(|| kind.to_owned(), |b| b.def.info.name.clone())
+        app.lib.get(kind).map_or_else(
+            || kind.to_owned(),
+            |b| crate::i18n::tr(&b.def.info.name).to_owned(),
+        )
     };
     egui::Grid::new("widget_props")
         .num_columns(2)
@@ -460,7 +461,7 @@ fn widget_body(app: &EditorApp, ui: &mut Ui, d: &mut WidgetDialog) {
         return;
     };
     ui.add_space(6.0);
-    ui.add(egui::Label::new(RichText::new(&def.info.description).weak()).wrap());
+    ui.add(egui::Label::new(RichText::new(crate::i18n::tr(&def.info.description)).weak()).wrap());
     ui.add_space(6.0);
     let current: BTreeMap<String, ParamValue> = d
         .form
@@ -478,7 +479,8 @@ fn widget_body(app: &EditorApp, ui: &mut Ui, d: &mut WidgetDialog) {
         .spacing([10.0, 6.0])
         .show(ui, |ui| {
             for &p in &params {
-                ui.label(p.title()).on_hover_text(p.description.trim());
+                ui.label(crate::i18n::tr(p.title()))
+                    .on_hover_text(crate::i18n::tr(p.description.trim()));
                 ui.horizontal(|ui| param_editor(ui, p, &mut d.form, def, &app.local, &pins));
                 ui.end_row();
             }
@@ -542,7 +544,7 @@ fn block_settings(
     lib_block: &flp_core::LibraryBlock,
 ) {
     let def = &lib_block.def;
-    ui.label(RichText::new(&def.info.name).strong());
+    ui.label(RichText::new(crate::i18n::tr(&def.info.name)).strong());
     ui.add(egui::Label::new(RichText::new(&def.info.description).weak()).wrap());
     ui.add_space(6.0);
     // Parameters and ports switched off by `when` follow the values being edited.
@@ -597,7 +599,8 @@ fn block_settings(
                     Some(_) => format!("{} ({})", p.description, p.name),
                     None => p.description.clone(),
                 };
-                ui.label(p.title()).on_hover_text(hint.trim());
+                ui.label(crate::i18n::tr(p.title()))
+                    .on_hover_text(crate::i18n::tr(hint.trim()));
                 ui.horizontal(|ui| {
                     param_editor(ui, p, d, def, &app.local, &pins);
                     let set = d.values.get(&p.name).is_some_and(Option::is_some);
@@ -743,15 +746,16 @@ fn param_editor(
         return;
     }
     if !p.choices.is_empty() {
-        let selected = current
-            .as_ref()
-            .map_or_else(|| "не задан".to_owned(), |v| p.value_label(v));
+        let selected = current.as_ref().map_or_else(
+            || crate::i18n::tr("не задан").to_owned(),
+            |v| crate::i18n::tr(&p.value_label(v)).to_owned(),
+        );
         egui::ComboBox::from_id_salt(("param_choice", &p.name))
             .selected_text(selected)
             .show_ui(ui, |ui| {
                 for c in &p.choices {
                     let on = current.as_ref() == Some(&c.value);
-                    if ui.selectable_label(on, &c.label).clicked() {
+                    if ui.selectable_label(on, crate::i18n::tr(&c.label)).clicked() {
                         if let ParamValue::Text(s) = &c.value {
                             d.texts.insert(p.name.clone(), s.clone());
                         }
@@ -1547,13 +1551,13 @@ fn sheet_body(ui: &mut Ui, d: &mut SheetDialog) {
             ui.add(egui::TextEdit::multiline(&mut d.comment).desired_rows(3));
             ui.end_row();
             ui.label(crate::i18n::tr("Отключение"));
-            ui.checkbox(&mut d.disabled, crate::i18n::tr("плата отключена"))
+            ui.checkbox(&mut d.disabled, "")
                 .on_hover_text(
                     crate::i18n::tr("Блоки отключённой платы не входят в сборку, а ошибки в них не проверяются.                      Блоки других плат, которые брали от них значения, останутся без источника."),
                 );
             ui.end_row();
             ui.label(crate::i18n::tr("Фоновая задача"));
-            ui.checkbox(&mut d.background, crate::i18n::tr("блоки платы работают на втором ядре"))
+            ui.checkbox(&mut d.background, "")
                 .on_hover_text(
                     crate::i18n::tr("Блоки этой платы выполняются в отдельной задаче FreeRTOS на ядре 0 (на ESP32 с двумя ядрами), \
                      не замедляя основной цикл: медленные датчики, запись во флеш. Сетевые блоки (Wi-Fi, MQTT, веб, Modbus) \
