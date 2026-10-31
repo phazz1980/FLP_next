@@ -2,8 +2,8 @@
 //!
 //! The drawing follows the editor canvas (block boxes, variable tags, orthogonal
 //! wires) in a fixed light palette, so the schema can be viewed and printed
-//! without the editor. Under the drawing of every sheet goes a table of the
-//! parameters of its blocks. The page is written as Typst markup and compiled
+//! without the editor. After the drawing of every sheet goes a page with the
+//! parameters of its blocks; a click on a block opens its row. The page is written as Typst markup and compiled
 //! by Typst in the `crablogic-pdf` helper (`flp-pdf-render`); it is stored in the project archive on every save.
 
 use std::collections::{BTreeSet, HashMap};
@@ -28,8 +28,6 @@ const SHEET_HEADER: f32 = 40.0;
 const SHEET_MIN_BODY: f32 = 300.0;
 const SHEET_MIN_W: f32 = 1200.0;
 const SHEET_PAD: f32 = 60.0;
-/// Width of the parameter table to the right of the drawing.
-const TABLE_W: f32 = 560.0;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PdfError {
@@ -224,85 +222,132 @@ pub fn source(project: &Project, lib: &Library) -> String {
             };
             draw_block(&mut c, item, origin(item.rect), fed);
         }
-        // The table goes to the right of the drawing; the page grows downwards if it is longer.
-        let table = param_table(&on_sheet);
-        let side = if table.is_empty() { 0.0 } else { TABLE_W };
+        // Links go over the blocks, on top of the drawing: a click opens the parameters.
+        for item in &on_sheet {
+            c.out.push_str(&block_link(item, origin(item.rect)));
+        }
         let _ = write!(
             out,
-            "#set page(width: {total:.1} * u, height: auto, margin: 0pt)\n\
-             #grid(columns: ({w:.1} * u, {side} * u),\n\
-             box(width: {w:.1} * u, height: {h:.1} * u, {{\n{drawing}}}),\n{table})\n",
-            total = w + side,
+            "#set page(width: {w:.1} * u, height: auto, margin: 0pt)
+             #box(width: {w:.1} * u, height: {h:.1} * u, {{
+{drawing}}})
+{}",
+            param_page(&on_sheet),
         );
     }
     out
 }
 
-/// One table per sheet: every block with its parameters and their values.
+/// Parameters of a block with their values, passwords hidden. Empty when it has none.
+fn block_params<'a>(item: &Item<'a>) -> Vec<(&'a str, String)> {
+    let (Some(def), true) = (item.def, kind_of(item) == Kind::Box) else {
+        return Vec::new();
+    };
+    def.active_params(&item.block.params)
+        .filter(|p| !p.fixed)
+        .map(|p| {
+            let value = item.block.params.get(&p.name).or(p.default.as_ref());
+            let text = match value {
+                // The PDF is easy to pass around: keep passwords out of it entirely.
+                Some(_) if p.show == ParamShow::Secret || p.name.contains("password") => {
+                    "***".to_owned()
+                }
+                Some(v) => p.value_label(v),
+                None => String::new(),
+            };
+            (
+                p.title(),
+                if text.is_empty() {
+                    "—".to_owned()
+                } else {
+                    text
+                },
+            )
+        })
+        .collect()
+}
+
+/// A viewer puts the target of a link at the top of the screen; the anchors lie this
+/// much (canvas units) above their block so that the block ends up nearer the middle.
+const ANCHOR_LEAD: f32 = 300.0;
+
+/// Link over a block that opens its row on the parameter page, and the anchor
+/// the row links back to. Internal links work in every viewer, unlike PDF notes.
+fn block_link(item: &Item, r: Bounds) -> String {
+    if block_params(item).is_empty() {
+        return String::new();
+    }
+    let n = item.num;
+    format!(
+        "place(top + left, dx: {x:.2} * u, dy: {anchor_y:.2} * u, [#metadata(none)#label(\"b{n}\")])
+         place(top + left, dx: {x:.2} * u, dy: {y:.2} * u, link(label(\"p{n}\"),          rect(width: {w:.2} * u, height: {h:.2} * u, fill: none, stroke: none)))
+",
+        x = r.x,
+        y = r.y,
+        anchor_y = (r.y - ANCHOR_LEAD).max(0.0),
+        w = r.w,
+        h = r.h
+    )
+}
+
+/// The page after the drawing of a sheet: every block with its parameters.
 /// Empty when no block of the sheet has parameters.
-fn param_table(on_sheet: &[&Item]) -> String {
+fn param_page(on_sheet: &[&Item]) -> String {
     let mut rows: Vec<&Item> = on_sheet
         .iter()
         .copied()
-        .filter(|i| kind_of(i) == Kind::Box)
+        .filter(|i| !block_params(i).is_empty())
         .collect();
     rows.sort_by_key(|i| i.num);
+    if rows.is_empty() {
+        return String::new();
+    }
     let mut body = String::new();
-    for item in rows {
-        let Some(def) = item.def else { continue };
-        let block = item.block;
-        let params: Vec<(&str, String)> = def
-            .active_params(&block.params)
-            .filter(|p| !p.fixed)
-            .map(|p| {
-                let value = block.params.get(&p.name).or(p.default.as_ref());
-                let text = match value {
-                    // The PDF is easy to pass around: keep passwords out of it entirely.
-                    Some(_) if p.show == ParamShow::Secret || p.name.contains("password") => {
-                        "***".to_owned()
-                    }
-                    Some(v) => p.value_label(v),
-                    None => String::new(),
-                };
-                (
-                    p.title(),
-                    if text.is_empty() {
-                        "—".to_owned()
-                    } else {
-                        text
-                    },
-                )
-            })
-            .collect();
-        if params.is_empty() {
-            continue;
+    let mut stripe = 0;
+    for (k, item) in rows.into_iter().enumerate() {
+        let params = block_params(item);
+        let n = params.len();
+        // A double line (two thin lines with a gap) separates the blocks.
+        if k > 0 {
+            body.push_str(
+                "table.cell(colspan: 5, inset: 0pt, fill: white,                  stroke: (y: 0.5 * u + luma(60)), box(height: 2.5 * u)),",
+            );
         }
         let _ = write!(
             body,
-            "table.cell(rowspan: {n}, \"{num}\"), table.cell(rowspan: {n}, {id}), table.cell(rowspan: {n}, {name}),",
-            n = params.len(),
+            "table.cell(rowspan: {n})[#place(top + left, dy: -{ANCHOR_LEAD} * u, [#metadata(none)#label(\"p{num}\")])#link(label(\"b{num}\"))[#underline[{num}]]], \
+             table.cell(rowspan: {n}, {id}), table.cell(rowspan: {n}, {name}),",
             num = item.num,
-            id = quote(&block.id),
-            name = quote(&def.info.name),
+            id = quote(&item.block.id),
+            name = quote(item.def.map_or("", |d| d.info.name.as_str())),
         );
         for (title, value) in params {
-            let _ = write!(body, "{},{},", quote(title), quote(&value));
+            // Parameter rows alternate in colour, like stripes of a Markdown table.
+            let fill = if stripe % 2 == 1 { "luma(205)" } else { "none" };
+            stripe += 1;
+            let _ = write!(
+                body,
+                "table.cell(fill: {fill}, {}), table.cell(fill: {fill}, {}),",
+                quote(title),
+                quote(&value)
+            );
         }
         body.push('\n');
     }
-    if body.is_empty() {
-        return String::new();
-    }
-    // A grid cell: content mode inside brackets.
     format!(
-        "pad(left: 8 * u, right: 16 * u, top: 4 * u, bottom: 24 * u)[\n\
-         #text(size: 12 * u, weight: \"bold\")[Параметры блоков]\n\
-         #v(4 * u)\n\
-         #set text(size: 9.5 * u)\n\
-         #table(columns: (auto, auto, auto, auto, auto), inset: 4 * u, stroke: 0.4 * u + luma(160),\n\
-         fill: (_, y) => if y == 0 {{ rgb(\"{HEADER_HEX}\") }},\n\
-         table.header([*№*], [*Блок*], [*Тип*], [*Параметр*], [*Значение*]),\n\
-         {body})]",
+        "#pagebreak()
+         #pad(x: 16 * u, y: 16 * u)[
+         #text(size: 12 * u, weight: \"bold\")[Параметры блоков]
+         #v(2 * u)
+         #text(size: 9 * u, fill: rgb(\"{WEAK_HEX}\"))[Номер блока — ссылка на него на схеме; нажатие на блок на схеме приводит сюда.]
+         #v(6 * u)
+         #set text(size: 9.5 * u)
+         #table(columns: (auto, auto, auto, auto, auto), inset: 4 * u, stroke: 0.4 * u + luma(160),
+         fill: (_, y) => if y == 0 {{ rgb(\"{HEADER_HEX}\") }},
+         table.header([*№*], [*Блок*], [*Тип*], [*Параметр*], [*Значение*]),
+         {body})]
+",
+        WEAK_HEX = hex(WEAK),
         HEADER_HEX = hex(HEADER),
     )
 }
@@ -701,7 +746,8 @@ mod tests {
         let (project, lib) = pump();
         let src = source(&project, &lib);
         assert!(src.contains("Параметры блоков"));
-        assert!(!src.contains("password"));
+        assert!(src.contains("link(label(\"p1\")"));
+        assert!(!src.to_lowercase().contains("password"));
     }
 
     #[test]
