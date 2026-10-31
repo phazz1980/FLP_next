@@ -431,7 +431,6 @@ impl Form {
                 symbol: optional(&self.symbol),
                 group: self.group.trim().to_owned(),
                 shared: String::new(),
-                version: 1,
                 description: self.description.trim().to_owned(),
                 memory: self.memory,
                 includes: list(&self.includes),
@@ -614,8 +613,13 @@ pub struct BlockEditor {
 }
 
 impl BlockEditor {
-    /// A new block in a section or folder of the user library (`""` — the root).
+    /// A new block in a pack or folder of the user library (`""` — the default pack).
     pub fn new_block(app: &EditorApp, group: &str) -> Self {
+        let group = if group.is_empty() {
+            flp_core::pack::DEFAULT_PACK
+        } else {
+            group
+        };
         let mut form = Form::new_block(String::new(), group.to_owned());
         form.kind = free_kind(app, &ident_from_name(&form.name));
         Self {
@@ -635,11 +639,11 @@ impl BlockEditor {
     }
 
     /// A new block based on an existing one.
-    /// A copy of a user block lands next to it, of a built-in one in the root.
+    /// A copy of a user block lands next to it, of a built-in one in the default pack.
     pub fn copy_of(app: &EditorApp, block: &LibraryBlock) -> Self {
         let mut form = Form::from_block(block);
         if !app.lib.is_user(&block.def.info.kind) {
-            form.group.clear();
+            form.group = flp_core::pack::DEFAULT_PACK.to_owned();
         }
         form.attach = Attach::copied_from(&block.dir);
         form.name = crate::i18n::fmt("{0} (копия)", &[&form.name]);
@@ -903,8 +907,14 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
     close
 }
 
+/// Folders a new block can go into: the existing ones and the default pack.
 fn user_folders(app: &EditorApp) -> Vec<String> {
-    app.lib.user_folders().map(str::to_owned).collect()
+    let mut folders: Vec<String> = app.lib.user_folders().map(str::to_owned).collect();
+    if !folders.iter().any(|f| f == flp_core::pack::DEFAULT_PACK) {
+        folders.push(flp_core::pack::DEFAULT_PACK.to_owned());
+        folders.sort();
+    }
+    folders
 }
 
 fn header(ui: &mut Ui, ed: &mut BlockEditor) {
@@ -932,21 +942,14 @@ fn header(ui: &mut Ui, ed: &mut BlockEditor) {
             ui.label(crate::i18n::tr("Где лежит"));
             let place = if read_only {
                 crate::i18n::fmt("Встроенные / {0}", &[&f.group])
-            } else if f.group.is_empty() {
-                crate::i18n::tr("Блоки пользователей").to_owned()
             } else {
                 crate::i18n::fmt("Блоки пользователей / {0}", &[&f.group.replace('/', " / ")])
             };
-            if ed.original.is_none() && !read_only && !ed.folders.is_empty() {
-                // A new block: choose the pack (section or folder) it goes into.
+            if ed.original.is_none() && !read_only {
+                // A new block: choose the pack (or a folder in it) it goes into.
                 egui::ComboBox::from_id_salt("block_place")
                     .selected_text(place)
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut f.group,
-                            String::new(),
-                            crate::i18n::tr("Блоки пользователей"),
-                        );
                         for folder in &ed.folders {
                             ui.selectable_value(
                                 &mut f.group,
@@ -1931,7 +1934,7 @@ fn files_tab(ui: &mut Ui, f: &mut Form) {
     let attach = &mut f.attach;
     ui.weak(crate::i18n::tr(
         "Библиотека Arduino и пример лежат в папке блока и едут вместе с ним \
-         в файле .crabblock и в проекте. Сборка подхватывает библиотеки сама, \
+         в наборе .crabblocks и в проекте. Сборка подхватывает библиотеки сама, \
          а главный заголовок прикреплённой библиотеки попадает в поле «Заголовки» \
          на вкладке «Код ESP32».",
     ));
@@ -2194,6 +2197,26 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
             ),
         );
         return false;
+    }
+    // A block always lives in a pack: the first save into a new one creates it.
+    if let Some(user) = app.user_lib_dir() {
+        if let Some(name) = lib_dir
+            .strip_prefix(&user)
+            .ok()
+            .and_then(|p| p.components().next())
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        {
+            let pack_dir = user.join(&name);
+            if !pack_dir.join(flp_core::pack::PACK_FILE).is_file() {
+                if let Err(e) = flp_core::pack::PackInfo::new(&name).write(&pack_dir) {
+                    app.info(
+                        LogLevel::Error,
+                        crate::i18n::fmt("Блок не сохранён: {0}", &[&e]),
+                    );
+                    return false;
+                }
+            }
+        }
     }
     match flp_core::save_block(&lib_dir, def, &ed.form.template, &ed.form.docs) {
         Ok(dir) => {

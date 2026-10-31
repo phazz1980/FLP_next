@@ -788,84 +788,41 @@ impl EditorApp {
         }
     }
 
-    /// Offers to sync user blocks whose revision differs between the project and the
-    /// program: take the project's newer copy, or save the project with the program's.
-    fn block_versions_window(&mut self, ctx: &egui::Context) {
+    /// Offers to sync user blocks whose contents differ between the project and the
+    /// program: take the project's copy, or save the project with the program's.
+    fn block_diffs_window(&mut self, ctx: &egui::Context) {
         if self.block_diffs.is_empty() {
             return;
         }
         let mut take: Vec<String> = Vec::new();
         let mut repack = false;
         let mut close = false;
-        egui::Window::new(crate::i18n::tr("Версии блоков"))
+        egui::Window::new(crate::i18n::tr("Блоки проекта и программы"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.label(crate::i18n::tr(
-                    "Пользовательские блоки в проекте и в программе отличаются версией.",
+                    "Пользовательские блоки в проекте и в программе отличаются содержимым.",
                 ));
                 ui.add_space(6.0);
-                let (newer_project, newer_program): (Vec<_>, Vec<_>) = self
-                    .block_diffs
-                    .iter()
-                    .filter(|d| !d.diverged())
-                    .partition(|d| d.project > d.program);
-                let diverged: Vec<_> = self.block_diffs.iter().filter(|d| d.diverged()).collect();
-                if !diverged.is_empty() {
-                    ui.strong(crate::i18n::tr(
-                        "Версия одна, а содержимое разное (правили на разных компьютерах)",
-                    ));
-                    for d in &diverged {
-                        ui.label(format!("{} (v{})", d.kind, d.project));
-                    }
-                    ui.horizontal(|ui| {
-                        if ui.button(crate::i18n::tr("Взять из проекта")).clicked() {
-                            take.extend(diverged.iter().map(|d| d.kind.clone()));
-                        }
-                        if ui
-                            .button(crate::i18n::tr(
-                                "Оставить блоки программы и сохранить проект",
-                            ))
-                            .clicked()
-                        {
-                            repack = true;
-                        }
-                    });
-                    ui.add_space(6.0);
+                for d in &self.block_diffs {
+                    ui.label(&d.kind);
                 }
-                if !newer_project.is_empty() {
-                    ui.strong(crate::i18n::tr("В проекте блоки новее, чем в программе"));
-                    for d in &newer_project {
-                        ui.label(crate::i18n::fmt(
-                            "{0}: в проекте v{1}, в программе v{2}",
-                            &[&d.kind, &d.project, &d.program],
-                        ));
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui.button(crate::i18n::tr("Взять из проекта")).clicked() {
+                        take = self.block_diffs.iter().map(|d| d.kind.clone()).collect();
                     }
                     if ui
-                        .button(crate::i18n::tr("Обновить блоки программы из проекта"))
-                        .clicked()
-                    {
-                        take = newer_project.iter().map(|d| d.kind.clone()).collect();
-                    }
-                    ui.add_space(6.0);
-                }
-                if !newer_program.is_empty() {
-                    ui.strong(crate::i18n::tr("В программе блоки новее, чем в проекте"));
-                    for d in &newer_program {
-                        ui.label(crate::i18n::fmt(
-                            "{0}: в проекте v{1}, в программе v{2}",
-                            &[&d.kind, &d.project, &d.program],
-                        ));
-                    }
-                    if ui
-                        .button(crate::i18n::tr("Обновить блоки проекта из программы"))
+                        .button(crate::i18n::tr(
+                            "Оставить блоки программы и сохранить проект",
+                        ))
                         .clicked()
                     {
                         repack = true;
                     }
-                    ui.add_space(6.0);
-                }
+                });
                 if ui.button(crate::i18n::tr("Оставить как есть")).clicked() {
                     close = true;
                 }
@@ -893,8 +850,7 @@ impl EditorApp {
                     crate::i18n::tr("Блоки проекта обновлены из программы"),
                 );
             }
-            self.block_diffs
-                .retain(|d| d.program <= d.project && !d.diverged());
+            self.block_diffs.clear();
         }
         if close {
             self.block_diffs.clear();
@@ -2743,7 +2699,7 @@ impl eframe::App for EditorApp {
         }
         self.watch_library();
         self.watch_project();
-        self.block_versions_window(&ctx);
+        self.block_diffs_window(&ctx);
         ctx.request_repaint_after(Duration::from_secs(1));
         self.autosave(&ctx);
         self.shortcuts(&ctx);

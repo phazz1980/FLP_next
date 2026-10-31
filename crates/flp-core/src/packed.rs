@@ -9,7 +9,7 @@ use std::path::Path;
 
 use zip::ZipArchive;
 
-use crate::library::{BlockDef, Library};
+use crate::library::Library;
 use crate::logic::Logic;
 
 /// File name and contents of a packed block file.
@@ -215,21 +215,10 @@ pub fn unpack_missing_blocks(project: &Path, user_dir: &Path, lib: &Library) -> 
         .collect()
 }
 
-/// A user block whose copy in the project and in the program differ in revision.
+/// A user block whose copy in the project differs from the one in the program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VersionDiff {
     pub kind: String,
-    /// Revision packed in the project.
-    pub project: u32,
-    /// Revision in the program's `user_library/`.
-    pub program: u32,
-}
-
-impl VersionDiff {
-    /// Same revision but different contents: the block was edited on two computers.
-    pub fn diverged(&self) -> bool {
-        self.project == self.program
-    }
 }
 
 /// Whether the packed files equal the files in `dir` (line endings are ignored).
@@ -249,28 +238,15 @@ fn same_files(files: &[PackedFile], dir: &Path) -> bool {
     local == packed
 }
 
-/// Revision of a packed `block.toml`; `None` when it cannot be read.
-fn packed_version(files: &[PackedFile]) -> Option<u32> {
-    let (_, data) = files.iter().find(|(n, _)| n == "block.toml")?;
-    let def: BlockDef = toml::from_str(std::str::from_utf8(data).ok()?).ok()?;
-    Some(def.info.version)
-}
-
 /// User blocks that exist both in the project file and in `lib` with different
-/// revisions or, at the same revision, different contents. A larger `project` revision means the project carries a newer block;
-/// a larger `program` revision means the program's block is newer.
+/// contents. Blocks have no versions of their own, so which copy is newer is for the
+/// user to say.
 pub fn version_diffs(project: &Path, lib: &Library) -> Vec<VersionDiff> {
     read_packed(project)
         .into_iter()
         .filter_map(|((_, kind), files)| {
             let local = lib.get(&kind).filter(|_| lib.is_user(&kind))?;
-            let packed = packed_version(&files)?;
-            let program = local.def.info.version;
-            (packed != program || !same_files(&files, &local.dir)).then_some(VersionDiff {
-                kind,
-                project: packed,
-                program,
-            })
+            (!same_files(&files, &local.dir)).then_some(VersionDiff { kind })
         })
         .collect()
 }
@@ -375,7 +351,7 @@ fqbn = \"x:y:z\"
         assert!(unpack_missing_blocks(&project.path, &user, &lib).is_empty());
         assert!(version_diffs(&project.path, &lib).is_empty());
 
-        // The program's block is edited: its revision rises above the packed one.
+        // The program's block is edited: its contents differ from the packed copy.
         let mut def = lib.get("mine").unwrap().def.clone();
         def.info.description = "changed".into();
         let dir = lib.get("mine").unwrap().dir.parent().unwrap().to_owned();
@@ -384,26 +360,24 @@ fqbn = \"x:y:z\"
         assert_eq!(
             version_diffs(&project.path, &lib),
             [VersionDiff {
-                kind: "mine".into(),
-                project: 1,
-                program: 2
+                kind: "mine".into()
             }]
         );
-        // Taking the project's copy brings the old revision back.
+        // Taking the project's copy brings the old contents back.
         assert_eq!(
             adopt_project_blocks(&project.path, &user, &["mine".to_owned()]),
             ["mine"]
         );
         let (lib, _) = Library::load_with_user(&builtin).unwrap();
         assert!(version_diffs(&project.path, &lib).is_empty());
-        // Same revision, edited by hand elsewhere: reported as diverged.
+        // Edited by hand elsewhere: reported again.
         fs::write(
             lib.get("mine").unwrap().dir.join("esp32.cpp.tmpl"),
             "// other",
         )
         .unwrap();
         let diffs = version_diffs(&project.path, &lib);
-        assert!(diffs.len() == 1 && diffs[0].diverged());
+        assert_eq!(diffs.len(), 1);
         fs::remove_dir_all(&root).unwrap();
     }
 

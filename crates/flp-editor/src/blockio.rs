@@ -224,14 +224,8 @@ pub fn window(app: &mut EditorApp, ctx: &egui::Context) {
                             crate::i18n::tr("Тип занят встроенным блоком — импорт невозможен"),
                         );
                     }
-                    Conflict::User(have) => {
-                        ui.colored_label(
-                            warn,
-                            crate::i18n::fmt(
-                                "Такой блок уже есть (версия {0}, в файле {1}).",
-                                &[&have, &e.block.def.info.version],
-                            ),
-                        );
+                    Conflict::User => {
+                        ui.colored_label(warn, crate::i18n::tr("Такой блок уже есть."));
                         ui.checkbox(&mut e.replace, crate::i18n::tr("Заменить существующий"));
                     }
                 }
@@ -270,7 +264,7 @@ fn install(app: &mut EditorApp, entries: &[Entry], conflicts: &[Conflict]) {
             continue;
         }
         let name = &e.block.def.info.name;
-        if matches!(conflict, Conflict::User(_)) && !e.replace {
+        if matches!(conflict, Conflict::User) && !e.replace {
             app.info(
                 LogLevel::Warning,
                 crate::i18n::fmt("Блок «{0}» оставлен как был (замена не выбрана)", &[&name]),

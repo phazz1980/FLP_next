@@ -1,28 +1,19 @@
-//! A user block as one file: `<type>.crabblock` is a ZIP with the files of the block folder
-//! (`block.toml`, templates, `docs.md`), the Arduino libraries it uses (`lib/<Name>/…`)
-//! and an example project (`example.flpn`).
+//! A user block as a set of files: the block folder (`block.toml`, templates, `docs.md`),
+//! the Arduino libraries it uses (`lib/<Name>/…`) and an example project (`example.flpn`).
+//! Blocks travel inside a pack (see `pack`) or inside a project (see `packed`).
 
 use std::fs;
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use zip::write::SimpleFileOptions;
-use zip::{ZipArchive, ZipWriter};
-
 use crate::library::{BlockDef, Library};
+use crate::pack::{self, PackInfo};
 
-/// Extension of a block file.
-pub const EXTENSION: &str = "crabblock";
-/// Extension used before the rename; still opened.
-pub const LEGACY_EXTENSION: &str = "flpblock";
 /// Example project inside the block folder.
 pub const EXAMPLE_FILE: &str = "example.flpn";
 /// Folder with the Arduino libraries of the block; every subfolder is one library.
 pub const LIB_DIR: &str = "lib";
 /// Folder with the pictures of `docs.md`; the docs refer to them as `images/<name>`.
 pub const IMAGES_DIR: &str = "images";
-/// Upper bound of the unpacked size, against archives that blow up.
-const MAX_BYTES: u64 = 128 * 1024 * 1024;
 
 /// A block read from a file or from a project, not yet in the library.
 #[derive(Debug, Clone)]
@@ -38,8 +29,8 @@ pub enum Conflict {
     None,
     /// A built-in block has this type: it cannot be replaced.
     Builtin,
-    /// A user block with this type exists; its revision.
-    User(u32),
+    /// A user block with this type exists.
+    User,
 }
 
 impl Incoming {
@@ -102,7 +93,7 @@ impl Incoming {
     pub fn conflict(&self, lib: &Library) -> Conflict {
         match lib.get(self.kind()) {
             None => Conflict::None,
-            Some(b) if lib.is_user(self.kind()) => Conflict::User(b.def.info.version),
+            Some(_) if lib.is_user(self.kind()) => Conflict::User,
             Some(_) => Conflict::Builtin,
         }
     }
@@ -121,53 +112,23 @@ impl Incoming {
         if let Some(old) = lib.get(self.kind()).filter(|_| lib.is_user(self.kind())) {
             let _ = fs::remove_dir_all(&old.dir);
         }
-        let dir = user_dir.join(self.group()).join(self.kind());
+        let group = self.group();
+        let pack_name = group.split('/').next().filter(|p| !p.is_empty());
+        let pack_name = pack_name.unwrap_or(pack::DEFAULT_PACK);
+        // A block always lives in a pack: make one if the folder is not a pack yet.
+        let pack_dir = user_dir.join(pack_name);
+        if !pack_dir.join(pack::PACK_FILE).is_file() {
+            PackInfo::new(pack_name).write(&pack_dir)?;
+        }
+        let dir = if group.is_empty() {
+            pack_dir.join(self.kind())
+        } else {
+            user_dir.join(&group).join(self.kind())
+        };
         let _ = fs::remove_dir_all(&dir);
         write_files(&dir, &self.files)?;
         Ok(dir)
     }
-}
-
-/// Reads a `.crabblock` file.
-pub fn read_block_file(path: &Path) -> Result<Incoming, String> {
-    let file = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut zip = ZipArchive::new(std::io::BufReader::new(file))
-        .map_err(|e| format!("{}: не архив блока ({e})", path.display()))?;
-    let mut files = Vec::new();
-    let mut total = 0u64;
-    for i in 0..zip.len() {
-        let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
-        if entry.is_dir() {
-            continue;
-        }
-        total += entry.size();
-        if total > MAX_BYTES {
-            return Err("файл блока слишком велик".into());
-        }
-        let name = entry.name().replace('\\', "/");
-        let mut data = Vec::new();
-        entry.read_to_end(&mut data).map_err(|e| e.to_string())?;
-        files.push((name, data));
-    }
-    Incoming::from_files(files)
-}
-
-/// Saves the user block `kind` as one file.
-pub fn export_block(lib: &Library, kind: &str, dest: &Path) -> Result<(), String> {
-    let block = lib
-        .get(kind)
-        .filter(|_| lib.is_user(kind))
-        .ok_or_else(|| format!("«{kind}» — не пользовательский блок"))?;
-    let files = read_files(&block.dir)?;
-    let out = fs::File::create(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
-    let mut zip = ZipWriter::new(out);
-    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    for (name, data) in files {
-        zip.start_file(name, options).map_err(|e| e.to_string())?;
-        zip.write_all(&data).map_err(|e| e.to_string())?;
-    }
-    zip.finish().map_err(|e| e.to_string())?;
-    Ok(())
 }
 
 /// Folder with the attached Arduino libraries of the block, to pass to arduino-cli as
@@ -239,20 +200,22 @@ mod tests {
     }
 
     #[test]
-    fn export_import_keeps_library_and_example() {
+    fn install_keeps_library_and_example_and_makes_a_pack() {
         let (root, builtin) = setup("roundtrip");
         let user = user_library_dir(&builtin);
-        let def: BlockDef =
-            toml::from_str("[block]\ntype = \"mine\"\nname = \"N\"\ngroup = \"Раздел\"\n").unwrap();
+        let def: BlockDef = toml::from_str(
+            "[block]
+type = \"mine\"
+name = \"N\"
+group = \"Раздел\"
+",
+        )
+        .unwrap();
         let dir = save_block(&user.join("Раздел"), &def, "// code", "docs").unwrap();
         fs::create_dir_all(dir.join("lib/Fancy/src")).unwrap();
         fs::write(dir.join("lib/Fancy/src/Fancy.h"), "// lib").unwrap();
         fs::write(dir.join(EXAMPLE_FILE), "zip").unwrap();
-        let (lib, _) = Library::load_with_user(&builtin).unwrap();
-
-        let file = root.join("mine.crabblock");
-        export_block(&lib, "mine", &file).unwrap();
-        let inc = read_block_file(&file).unwrap();
+        let inc = Incoming::from_files(read_files(&dir).unwrap()).unwrap();
         assert_eq!(inc.libraries(), ["Fancy"]);
         assert!(inc.has_example());
 
@@ -261,6 +224,7 @@ mod tests {
         let (empty, _) = Library::load_with_user(&builtin).unwrap();
         assert_eq!(inc.conflict(&empty), Conflict::None);
         inc.install(&user, &empty).unwrap();
+        assert!(user.join("Раздел").join(pack::PACK_FILE).is_file());
         let (lib, _) = Library::load_with_user(&builtin).unwrap();
         assert!(lib.is_user("mine"));
         let dir = &lib.get("mine").unwrap().dir;
@@ -269,7 +233,7 @@ mod tests {
             "// lib"
         );
         assert_eq!(library_dirs(dir), Some(dir.join(LIB_DIR)));
-        assert_eq!(inc.conflict(&lib), Conflict::User(1));
+        assert_eq!(inc.conflict(&lib), Conflict::User);
         let _ = fs::remove_dir_all(&root);
     }
 

@@ -297,7 +297,6 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                     .to_owned(),
                     group: "Переменные".to_owned(),
                     shared: String::new(),
-                    version: 1,
                     description: if get {
                         "Выдаёт текущее значение переменной."
                     } else {

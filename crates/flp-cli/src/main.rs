@@ -84,7 +84,7 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
-    /// Блок одним файлом .flpblock (с библиотекой и примером): экспорт и импорт
+    /// Наборы пользовательских блоков: список, экспорт и импорт файлом .crabblocks
     Block {
         #[command(subcommand)]
         action: BlockAction,
@@ -99,18 +99,20 @@ enum Command {
 
 #[derive(Subcommand)]
 enum BlockAction {
-    /// Сохранить пользовательский блок в файл
+    /// Показать наборы и блоки пользовательской библиотеки
+    List,
+    /// Сохранить набор блоков в файл
     Export {
-        /// Тип блока, например `my_pump`
-        kind: String,
-        /// Куда сохранить (по умолчанию `<тип>.flpblock` в текущей папке)
+        /// Имя набора (папка в `user_library/`), например `Мои блоки`
+        pack: String,
+        /// Куда сохранить (по умолчанию `<набор>.crabblocks` в текущей папке)
         file: Option<PathBuf>,
     },
-    /// Добавить блок из файла в пользовательскую библиотеку
+    /// Добавить набор из файла в пользовательскую библиотеку
     Import {
-        /// Файл .flpblock
+        /// Файл .crabblocks
         file: PathBuf,
-        /// Заменить существующий пользовательский блок с тем же типом
+        /// Заменить установленный набор, даже если он не старше
         #[arg(long)]
         replace: bool,
     },
@@ -143,7 +145,7 @@ fn main() -> ExitCode {
 }
 
 fn run_block(action: BlockAction, library: Option<&Path>) -> ExitCode {
-    use flp_core::blockfile::{self, Conflict};
+    use flp_core::pack::{self, PackImport};
     let here = Path::new(".");
     let Some(dir) = library
         .map(Path::to_path_buf)
@@ -161,31 +163,39 @@ fn run_block(action: BlockAction, library: Option<&Path>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let user = flp_core::user_library_dir(&dir);
     let result = match action {
-        BlockAction::Export { kind, file } => {
-            let file = file.unwrap_or_else(|| {
-                PathBuf::from(format!("{kind}.{}", blockfile::EXTENSION))
-            });
-            blockfile::export_block(&lib, &kind, &file)
-                .map(|()| println!("блок «{kind}» сохранён: {}", file.display()))
+        BlockAction::List => {
+            for (folder, info) in pack::list(&user) {
+                println!("{folder} · версия {} · {}", info.version, info.description);
+                for block in lib.iter().filter(|b| lib.is_user(&b.def.info.kind)) {
+                    if block.dir.starts_with(user.join(&folder)) {
+                        println!("  {} — {}", block.def.info.kind, block.def.info.name);
+                    }
+                }
+            }
+            Ok(())
         }
-        BlockAction::Import { file, replace } => blockfile::read_block_file(&file).and_then(|inc| {
-            if let Conflict::User(rev) = inc.conflict(&lib) {
+        BlockAction::Export { pack: name, file } => {
+            let file = file.unwrap_or_else(|| PathBuf::from(format!("{name}.{}", pack::EXTENSION)));
+            pack::export_pack(&user, &name, &file)
+                .map(|()| println!("набор «{name}» сохранён: {}", file.display()))
+        }
+        BlockAction::Import { file, replace } => pack::read_pack_file(&file).and_then(|inc| {
+            if let PackImport::NotNewer(have) = inc.status(&user) {
                 if !replace {
                     return Err(format!(
-                        "блок «{}» уже есть (ревизия {rev}, в файле {}); добавьте --replace, чтобы заменить",
-                        inc.kind(),
-                        inc.def.info.version
+                        "набор «{}» уже есть (версия {have}, в файле {}); добавьте --replace, чтобы заменить",
+                        inc.info.name, inc.info.version
                     ));
                 }
             }
-            let user = flp_core::user_library_dir(&dir);
             inc.install(&user, &lib).map(|_| {
                 println!(
-                    "блок «{}» добавлен; библиотек: {}, пример: {}",
-                    inc.kind(),
-                    inc.libraries().len(),
-                    if inc.has_example() { "есть" } else { "нет" }
+                    "набор «{}» (версия {}) добавлен; блоков: {}",
+                    inc.info.name,
+                    inc.info.version,
+                    inc.kinds().len()
                 )
             })
         }),
