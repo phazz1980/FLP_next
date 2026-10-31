@@ -15,6 +15,8 @@ use crate::{Error, ParamValue, Result};
 pub const BLOCK_FILE: &str = "block.toml";
 pub const ESP32_CPP_TEMPLATE: &str = "esp32.cpp.tmpl";
 pub const DOCS_FILE: &str = "docs.md";
+/// WASM module that simulates the block on the PC (any source language).
+pub const WASM_FILE: &str = "block.wasm";
 /// Folder of user blocks, next to the built-in `library/`.
 pub const USER_LIBRARY_DIR: &str = "user_library";
 
@@ -768,6 +770,11 @@ impl LibraryBlock {
 
     pub fn docs_path(&self) -> Option<PathBuf> {
         self.template_path(DOCS_FILE)
+    }
+
+    /// The simulation module `block.wasm`, if the block has one.
+    pub fn wasm_path(&self) -> Option<PathBuf> {
+        self.template_path(WASM_FILE)
     }
 
     pub fn load(dir: &Path) -> Result<Self> {

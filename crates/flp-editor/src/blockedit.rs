@@ -585,6 +585,7 @@ enum Tab {
     Docs,
     Files,
     Sketch,
+    Trial,
 }
 
 /// Trial generation for one state of the form.
@@ -601,6 +602,7 @@ pub struct BlockEditor {
     /// The form as last loaded or saved.
     clean: Form,
     tab: Tab,
+    trial: crate::trialrun::TrialRun,
     generated: Option<Generated>,
     /// Closing with unsaved changes: asking what to do.
     confirm_close: bool,
@@ -660,6 +662,7 @@ impl BlockEditor {
             clean: form.clone(),
             form,
             tab: Tab::Ports,
+            trial: Default::default(),
             generated: None,
             confirm_close: false,
             read_only: false,
@@ -856,6 +859,7 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
                 (Tab::Docs, crate::i18n::tr("Описание")),
                 (Tab::Files, crate::i18n::tr("Библиотека и пример")),
                 (Tab::Sketch, crate::i18n::tr("Пробная генерация")),
+                (Tab::Trial, crate::i18n::tr("Пробный прогон")),
             ];
             for (tab, text) in tabs {
                 ui.selectable_value(&mut ed.tab, tab, text);
@@ -875,6 +879,7 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
                         Tab::Docs => crate::i18n::tr("описание"),
                         Tab::Files => crate::i18n::tr("библиотека-и-пример"),
                         Tab::Sketch => crate::i18n::tr("пробная-генерация"),
+                        Tab::Trial => crate::i18n::tr("пробный-прогон"),
                     };
                     help = Some(format!("{}#{anchor}", crate::help::BLOCK_EDITOR));
                 }
@@ -882,6 +887,11 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
         });
     });
     let editable = !ed.read_only;
+    let trial_dir = ed
+        .original
+        .as_deref()
+        .and_then(|k| app.lib.get(k))
+        .map(|b| b.dir.clone());
     egui::CentralPanel::default().show(ui, |ui| {
         ScrollArea::both()
             .id_salt("block_editor_tab")
@@ -899,6 +909,7 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
                     ui.add_enabled_ui(editable, |ui| files_tab(ui, &mut ed.form));
                 }
                 Tab::Sketch => sketch_tab(ui, ed, &pal),
+                Tab::Trial => trial_tab(ui, ed, trial_dir.as_deref(), &pal),
             });
     });
     if let Some(target) = help {
@@ -2031,6 +2042,27 @@ fn files_tab(ui: &mut Ui, f: &mut Form) {
             attach.example = Example::None;
         }
     });
+}
+
+/// Runs the block's `block.wasm` with hand-typed inputs and parameters.
+fn trial_tab(ui: &mut Ui, ed: &mut BlockEditor, dir: Option<&Path>, pal: &Palette) {
+    let start = |t: &str| parse_float(t.trim()).unwrap_or(0.0);
+    let shape = crate::trialrun::Shape {
+        inputs: ed
+            .form
+            .inputs
+            .iter()
+            .map(|p| (p.name.as_str(), start(&p.default)))
+            .collect(),
+        params: ed
+            .form
+            .params
+            .iter()
+            .map(|p| (p.name.as_str(), start(&p.default)))
+            .collect(),
+        outputs: ed.form.outputs.iter().map(|p| p.name.as_str()).collect(),
+    };
+    crate::trialrun::show(ui, &mut ed.trial, dir, &shape, pal);
 }
 
 fn sketch_tab(ui: &mut Ui, ed: &BlockEditor, pal: &Palette) {

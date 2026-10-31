@@ -1,0 +1,11 @@
+[package]
+name = "flp-sim"
+version.workspace = true
+edition.workspace = true
+description = "Runs WASM block modules (wasmi) to simulate a block on the PC"
+
+[dependencies]
+wasmi = "2.0.0"
+
+[dev-dependencies]
+wat = "1.263.0"

@@ -1,0 +1,9 @@
+// @global
+float {{ id }}_y = 0.0f;
+uint32_t {{ id }}_t = 0;
+// @loop
+uint32_t {{ id }}_now = millis();
+float {{ id }}_k = (float)({{ id }}_now - {{ id }}_t) / ((float){{ param.tau }} + (float)({{ id }}_now - {{ id }}_t));
+{{ id }}_t = {{ id }}_now;
+{{ id }}_y += {{ id }}_k * ({{ input.in }} - {{ id }}_y);
+{{ output.out }} = {{ id }}_y;

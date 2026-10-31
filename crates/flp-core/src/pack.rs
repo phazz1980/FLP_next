@@ -382,6 +382,24 @@ mod tests {
     }
 
     #[test]
+    fn simulation_module_travels_with_the_pack() {
+        let (root, builtin) = setup("wasm");
+        let user = user_library_dir(&builtin);
+        create(&user, &PackInfo::new("Мои")).unwrap();
+        block(&user, "Мои", "a", "N");
+        let module = user.join("Мои").join("a").join(crate::library::WASM_FILE);
+        fs::write(&module, b" asm   ").unwrap();
+        let file = root.join("my.crabblocks");
+        export_pack(&user, "Мои", &file).unwrap();
+        let pack = read_pack_file(&file).unwrap();
+        assert!(pack
+            .files
+            .iter()
+            .any(|(n, d)| n == "a/block.wasm" && d.starts_with(b" asm")));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn type_of_another_pack_is_refused() {
         let (root, builtin) = setup("conflict");
         let user = user_library_dir(&builtin);

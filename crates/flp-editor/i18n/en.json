@@ -1187,5 +1187,16 @@
  "Модель": "Model",
  "Адрес API": "API address",
  "Комментарии в скетче:": "Sketch comments:",
- "Язык комментариев в сгенерированном скетче (project.toml, comment_lang). Не зависит от языка интерфейса": "Language of the comments in the generated sketch (project.toml, comment_lang). Independent of the interface language"
+ "Язык комментариев в сгенерированном скетче (project.toml, comment_lang). Не зависит от языка интерфейса": "Language of the comments in the generated sketch (project.toml, comment_lang). Independent of the interface language",
+ "Пробный прогон": "Trial run",
+ "пробный-прогон": "trial-run",
+ "Модуль загружен": "Module loaded",
+ "Сначала сохраните блок: модуль block.wasm кладётся в папку блока.": "Save the block first: the block.wasm module goes into the block folder.",
+ "Положите {0} в папку блока — он загрузится сам и перезагрузится при каждой пересборке.": "Put {0} into the block folder — it loads by itself and reloads after every rebuild.",
+ "Шаг, мс": "Step, ms",
+ "Стоп": "Stop",
+ "Пуск": "Run",
+ "Сначала": "Restart",
+ "Время: {0} мс": "Time: {0} ms",
+ "Журнал модуля": "Module log"
 }

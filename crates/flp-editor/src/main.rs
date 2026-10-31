@@ -37,6 +37,7 @@ mod splash;
 mod textmenu;
 mod theme;
 mod themeedit;
+mod trialrun;
 mod update;
 mod userlib;
 
