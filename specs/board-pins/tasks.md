@@ -16,4 +16,4 @@
 - [x] 10. Документы очереди 2.
 
 ## Конец
-- [ ] 11. `cargo fmt`, `clippy --workspace --all-targets`, `cargo test --workspace`; сверка с критериями спеки, в ответе — что не проверено (железо, окна глазами).
+- [x] 11. (fmt, clippy, test по workspace зелёные; не проверено: железо, окна редактора глазами) `cargo fmt`, `clippy --workspace --all-targets`, `cargo test --workspace`; сверка с критериями спеки, в ответе — что не проверено (железо, окна глазами).
