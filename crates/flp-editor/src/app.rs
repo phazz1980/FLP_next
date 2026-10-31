@@ -1404,13 +1404,23 @@ impl EditorApp {
     pub fn start_job(&mut self, kind: JobKind, ctx: &egui::Context) {
         if let Some(job) = &self.job {
             // The user's build waits for precompilation, which shares the build folder.
-            // It is raised to normal priority: the user waits for it now.
             if job.background && !matches!(kind, JobKind::Precompile) && self.queued.is_none() {
-                job.raise_priority();
-                self.info(
-                    LogLevel::Info,
-                    crate::i18n::tr("Ждём окончания фоновой сборки..."),
-                );
+                let current = self
+                    .doc
+                    .as_ref()
+                    .map(|d| (d.project.path.clone(), d.revision, self.debug_firmware));
+                // A direct build of an older schema takes seconds to redo: drop it.
+                if job.is_direct() && self.job_rev != current {
+                    job.cancel();
+                }
+                // Otherwise it is raised to normal priority: the user waits for it now.
+                if !job.is_cancelled() {
+                    job.raise_priority();
+                    self.info(
+                        LogLevel::Info,
+                        crate::i18n::tr("Ждём окончания фоновой сборки..."),
+                    );
+                }
                 self.queued = Some(kind);
             }
             return;
@@ -1474,6 +1484,14 @@ impl EditorApp {
         }
         let current = Some((doc.project.path.clone(), rev, self.debug_firmware));
         let quiet = self.seen_rev.is_some_and(|(_, t)| now - t >= PAUSE);
+        // A direct build of an older schema is cancelled, and the latest one starts after
+        // the pause. An arduino-cli build is left to finish: it compiles the core and
+        // libraries, which the next build reuses whatever the schema.
+        if let Some(job) = &self.job {
+            if job.background && job.is_direct() && !job.is_cancelled() && self.job_rev != current {
+                job.cancel();
+            }
+        }
         if self.job.is_some()
             || self.debug.is_some()
             || !quiet
@@ -1497,6 +1515,10 @@ impl EditorApp {
         for event in job.poll() {
             match event {
                 JobEvent::Line(..) if background || cancelled => {}
+                JobEvent::Note(..) if cancelled => {}
+                JobEvent::Line(level, text) | JobEvent::Note(level, text) => self.info(level, text),
+                // Precompilation of an outdated schema is cancelled quietly.
+                JobEvent::Done(Err(_)) if cancelled && background => done = true,
                 JobEvent::Done(Err(_)) if cancelled => {
                     self.info(
                         LogLevel::Warning,
@@ -1504,7 +1526,6 @@ impl EditorApp {
                     );
                     done = true;
                 }
-                JobEvent::Line(level, text) => self.info(level, text),
                 JobEvent::Done(Ok(_)) if background => done = true,
                 JobEvent::Done(Err(_)) if background => {
                     self.info(

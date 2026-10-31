@@ -906,5 +906,14 @@
  "← Назад": "← Back",
  "→ П{0}: {1}.{2}": "→ B{0}: {1}.{2}",
  "✔ Применить": "✔ Apply",
- "✕ Отмена": "✕ Cancel"
+ "✕ Отмена": "✕ Cancel",
+ "Сборка через arduino-cli: {0}": "Building with arduino-cli: {0}",
+ "выбрано «Пересобрать полностью»": "“Rebuild completely” was chosen",
+ "нет прошлой полной сборки": "no previous full build",
+ "в папке скетча есть другие файлы": "the sketch folder has other files",
+ "обновился arduino-cli": "arduino-cli was updated",
+ "изменились плата или её настройки": "the board or its settings changed",
+ "изменился список библиотек": "the library list changed",
+ "изменились #include скетча": "the sketch #includes changed",
+ "изменились файлы ядра или библиотек": "core or library files changed"
 }

@@ -906,5 +906,14 @@
  "Сохранить PDF...": "Guardar PDF...",
  "Схема всех плат и таблицы параметров блоков": "Esquema de todas las placas y tablas de parámetros de los bloques",
  "PDF сохранён: {0}": "PDF guardado: {0}",
- "Не удалось сохранить PDF: {0}": "No se pudo guardar el PDF: {0}"
+ "Не удалось сохранить PDF: {0}": "No se pudo guardar el PDF: {0}",
+ "Сборка через arduino-cli: {0}": "Compilando con arduino-cli: {0}",
+ "выбрано «Пересобрать полностью»": "se eligió «Recompilar por completo»",
+ "нет прошлой полной сборки": "no hay una compilación completa anterior",
+ "в папке скетча есть другие файлы": "la carpeta del sketch tiene otros archivos",
+ "обновился arduino-cli": "se actualizó arduino-cli",
+ "изменились плата или её настройки": "cambió la placa o su configuración",
+ "изменился список библиотек": "cambió la lista de bibliotecas",
+ "изменились #include скетча": "cambiaron los #include del sketch",
+ "изменились файлы ядра или библиотек": "cambiaron archivos del núcleo o de bibliotecas"
 }

@@ -13,7 +13,7 @@ use std::process::Command;
 use serde::{Deserialize, Serialize};
 
 use crate::{board_options, build_dir, sketch_dir, uses_web_ui, BoardConfig, CompileOptions};
-use crate::{Fnv64, WEBUI_RESPONSE_DEFINE};
+use crate::{CliReason, Fnv64, WEBUI_RESPONSE_DEFINE};
 
 /// File in the build folder with the recipe of the last full build.
 pub const RECIPE: &str = "flp-direct.json";
@@ -27,7 +27,7 @@ const MAX_COMMAND_LINE: usize = 8000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Recipe {
-    pub key: String,
+    pub key: RecipeKey,
     /// Compiles `sketch/sketch.ino.cpp` into its object file.
     pub compile: Vec<String>,
     /// Link, firmware image, partition table, size.
@@ -205,17 +205,47 @@ pub(crate) fn sketch_compile_command(work_dir: &Path) -> Option<Vec<String>> {
         .map(|e| e.arguments)
 }
 
-/// Fingerprint of everything but the sketch body: arduino-cli (its file, so an update
-/// shows), board and options, library folders, the `#include` lines, the sketch file
-/// names, and the files in the include folders of the compile command (core and the
-/// libraries the sketch uses). `None` when the sketch is not a single `sketch.ino`.
+/// Fingerprint of everything but the sketch body, in parts so a mismatch can say what
+/// changed. Only the sketch file names and its body are left out of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct RecipeKey {
+    /// arduino-cli: its path and file, so an update shows.
+    pub tool: String,
+    /// FQBN and board options.
+    pub board: String,
+    /// Library folders passed to arduino-cli.
+    pub libraries: String,
+    /// The `#include` lines and the flags chosen from the sketch.
+    pub sketch: String,
+    /// Files in the include folders of the compile command (core and used libraries).
+    pub files: String,
+}
+
+impl RecipeKey {
+    /// The first part that differs in `now`, as the reason to run arduino-cli.
+    pub fn mismatch(&self, now: &RecipeKey) -> Option<CliReason> {
+        [
+            (&self.tool, &now.tool, CliReason::Tool),
+            (&self.board, &now.board, CliReason::Board),
+            (&self.libraries, &now.libraries, CliReason::Libraries),
+            (&self.sketch, &now.sketch, CliReason::Includes),
+            (&self.files, &now.files, CliReason::LibraryFiles),
+        ]
+        .into_iter()
+        .find(|(old, new, _)| old != new)
+        .map(|(_, _, reason)| reason)
+    }
+}
+
+/// Key of the sketch written to `work_dir`. `None` when the sketch is not a single
+/// `sketch.ino`.
 pub(crate) fn recipe_key(
     exe: &Path,
     work_dir: &Path,
     board: &BoardConfig,
     opts: &CompileOptions,
     compile: &[String],
-) -> Option<String> {
+) -> Option<RecipeKey> {
     let names: Vec<OsString> = std::fs::read_dir(sketch_dir(work_dir))
         .ok()?
         .filter_map(|e| e.ok().map(|e| e.file_name()))
@@ -224,33 +254,49 @@ pub(crate) fn recipe_key(
         return None;
     }
     let sketch = std::fs::read_to_string(sketch_dir(work_dir).join("sketch.ino")).ok()?;
-    let mut h = Fnv64::new();
-    h.write(exe.as_os_str().as_encoded_bytes());
-    write_meta(&mut h, exe);
-    h.write(board.fqbn.as_bytes());
+    let hex = |h: Fnv64| format!("{:016x}", h.0);
+
+    let mut tool = Fnv64::new();
+    tool.write(exe.as_os_str().as_encoded_bytes());
+    write_meta(&mut tool, exe);
+
+    let mut boards = Fnv64::new();
+    boards.write(board.fqbn.as_bytes());
     for (k, v) in board_options(board) {
-        h.write(k.as_bytes());
-        h.write(v.as_bytes());
+        boards.write(k.as_bytes());
+        boards.write(v.as_bytes());
     }
+
+    let mut libraries = Fnv64::new();
     for dir in &opts.libraries {
-        h.write(dir.as_os_str().as_encoded_bytes());
+        libraries.write(dir.as_os_str().as_encoded_bytes());
     }
+
+    let mut includes = Fnv64::new();
     for line in include_lines(&sketch) {
-        h.write(line.as_bytes());
+        includes.write(line.as_bytes());
     }
     if uses_web_ui(work_dir) {
-        h.write(WEBUI_RESPONSE_DEFINE.as_bytes());
+        includes.write(WEBUI_RESPONSE_DEFINE.as_bytes());
     }
+
+    let mut files = Fnv64::new();
     for dir in include_dirs(compile) {
-        let mut files = Vec::new();
-        list_files(&dir, &mut files);
-        files.sort();
-        for file in files {
-            h.write(file.as_os_str().as_encoded_bytes());
-            write_meta(&mut h, &file);
+        let mut found = Vec::new();
+        list_files(&dir, &mut found);
+        found.sort();
+        for file in found {
+            files.write(file.as_os_str().as_encoded_bytes());
+            write_meta(&mut files, &file);
         }
     }
-    Some(format!("{:016x}", h.0))
+    Some(RecipeKey {
+        tool: hex(tool),
+        board: hex(boards),
+        libraries: hex(libraries),
+        sketch: hex(includes),
+        files: hex(files),
+    })
 }
 
 /// Size and modification time; a missing file hashes as empty.
@@ -435,20 +481,44 @@ mod tests {
 
         std::fs::write(&ino, "#include <A.h>\nvoid loop() { int x = 2; }").unwrap();
         assert_eq!(key(&board).unwrap(), base, "body edit keeps the key");
+        assert_eq!(base.mismatch(&base), None);
 
         let mut optioned = board.clone();
         optioned.options.insert("FlashSize".into(), "8M".into());
-        assert_ne!(key(&optioned).unwrap(), base, "board option");
+        assert_eq!(
+            base.mismatch(&key(&optioned).unwrap()),
+            Some(CliReason::Board)
+        );
 
         std::fs::write(&ino, "#include <A.h>\n#define FLP_WEBUI\n").unwrap();
-        assert_ne!(key(&board).unwrap(), base, "web_ui");
+        assert_eq!(
+            base.mismatch(&key(&board).unwrap()),
+            Some(CliReason::Includes),
+            "web_ui"
+        );
 
         std::fs::write(&ino, "#include <A.h>\n#include <B.h>\nvoid loop() {}").unwrap();
-        assert_ne!(key(&board).unwrap(), base, "new include");
+        assert_eq!(
+            base.mismatch(&key(&board).unwrap()),
+            Some(CliReason::Includes),
+            "new include"
+        );
 
         std::fs::write(&ino, "#include <A.h>\nvoid loop() {}").unwrap();
         std::fs::write(lib.join("lib.h"), "int a, b;").unwrap();
-        assert_ne!(key(&board).unwrap(), base, "library edit");
+        assert_eq!(
+            base.mismatch(&key(&board).unwrap()),
+            Some(CliReason::LibraryFiles)
+        );
+
+        let more = CompileOptions {
+            libraries: vec![lib.clone()],
+            ..Default::default()
+        };
+        let with_lib = recipe_key(exe, &root, &board, &more, &compile).unwrap();
+        assert_eq!(base.mismatch(&with_lib), Some(CliReason::Libraries));
+        let other_cli = recipe_key(Path::new("arduino-cli-2"), &root, &board, &opts, &compile);
+        assert_eq!(base.mismatch(&other_cli.unwrap()), Some(CliReason::Tool));
 
         std::fs::write(sketch.join("extra.h"), "").unwrap();
         assert_eq!(key(&board), None, "second sketch file");

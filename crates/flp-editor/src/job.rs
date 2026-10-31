@@ -1,10 +1,13 @@
 //! Background build and upload, so the editor stays responsive.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::thread;
 
-use flp_build::{ArduinoCli, BuildControl, BuildMode, CompileOptions, Compiled, OutputLine};
+use flp_build::{
+    ArduinoCli, BuildControl, BuildMode, CliReason, CompileOptions, Compiled, OutputLine,
+};
 use flp_codegen::{ArduinoCpp, Backend, Program};
 use flp_core::{Library, Project};
 
@@ -14,7 +17,8 @@ pub enum JobKind {
     Build,
     /// Build even if the last build is up to date (library or core changed).
     Rebuild,
-    /// Quiet low-priority build that warms the build cache after edits.
+    /// Quiet low-priority build after edits, so the user's build finds the firmware
+    /// ready (or at least the core and libraries compiled).
     Precompile,
     Upload {
         port: Option<String>,
@@ -30,6 +34,8 @@ pub struct Done {
 
 pub enum JobEvent {
     Line(LogLevel, String),
+    /// Shown even for a background job.
+    Note(LogLevel, String),
     Done(Result<Done, String>),
 }
 
@@ -40,6 +46,8 @@ pub struct Job {
     /// Upload: the serial port must stay free.
     pub uses_port: bool,
     control: Arc<BuildControl>,
+    /// The build goes without arduino-cli (or is up to date).
+    direct: Arc<AtomicBool>,
     rx: Receiver<JobEvent>,
 }
 
@@ -66,15 +74,20 @@ impl Job {
         let uses_port = matches!(kind, JobKind::Upload { .. });
         let control = Arc::new(BuildControl::default());
         let worker = control.clone();
+        let direct = Arc::new(AtomicBool::new(false));
+        let direct_flag = direct.clone();
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
             let send = |e: JobEvent| {
                 let _ = tx.send(e);
                 wake();
             };
-            let result = run(kind, debug, &project, &lib, worker, &mut |level, line| {
-                send(JobEvent::Line(level, line.to_owned()))
-            });
+            let report = Report {
+                out: &mut |level, line| send(JobEvent::Line(level, line.to_owned())),
+                note: &mut |level, line| send(JobEvent::Note(level, line.to_owned())),
+                direct: &direct_flag,
+            };
+            let result = run(kind, debug, &project, &lib, worker, report);
             send(JobEvent::Done(result));
         });
         Self {
@@ -82,6 +95,7 @@ impl Job {
             background,
             uses_port,
             control,
+            direct,
             rx,
         }
     }
@@ -89,6 +103,11 @@ impl Job {
     /// Stops the job; it ends with an error soon after.
     pub fn cancel(&self) {
         self.control.cancel();
+    }
+
+    /// Compiles without arduino-cli: cheap to cancel and start again.
+    pub fn is_direct(&self) -> bool {
+        self.direct.load(Ordering::Relaxed)
     }
 
     pub fn is_cancelled(&self) -> bool {
@@ -106,14 +125,23 @@ impl Job {
     }
 }
 
+/// Where a job reports: the log (hidden for a background job), lines shown anyway,
+/// and whether the build goes without arduino-cli.
+struct Report<'a> {
+    out: &'a mut dyn FnMut(LogLevel, &str),
+    note: &'a mut dyn FnMut(LogLevel, &str),
+    direct: &'a AtomicBool,
+}
+
 fn run(
     kind: JobKind,
     debug: bool,
     project: &Project,
     lib: &Library,
     control: Arc<BuildControl>,
-    out: &mut dyn FnMut(LogLevel, &str),
+    report: Report,
 ) -> Result<Done, String> {
+    let Report { out, note, direct } = report;
     let background = matches!(kind, JobKind::Precompile);
     let program = Program::build(project, lib).map_err(|e| e.to_string())?;
     let code = ArduinoCpp { debug }
@@ -142,14 +170,12 @@ fn run(
         libraries: program.attached_libraries(),
         ..Default::default()
     };
-    // Only the sketch body changed: the user's build takes seconds without arduino-cli,
-    // so precompiling after every edit would only load the computer.
-    if background && !cli.needs_cli(&project.work_dir(), board, &opts) {
-        return Ok(Done {
-            message: crate::i18n::tr("Сборка готова").into(),
-            port: None,
-            debug,
-        });
+    match cli.cli_reason(&project.work_dir(), board, &opts) {
+        Some(reason) => note(
+            LogLevel::Info,
+            &crate::i18n::fmt("Сборка через arduino-cli: {0}", &[&reason_text(reason)]),
+        ),
+        None => direct.store(true, Ordering::Relaxed),
     }
     let installed = cli
         .ensure_libraries(&program.libraries(), &mut |l| out(LogLevel::Info, l))
@@ -260,6 +286,19 @@ fn run(
             })
         }
     }
+}
+
+fn reason_text(reason: CliReason) -> &'static str {
+    crate::i18n::tr(match reason {
+        CliReason::Forced => "выбрано «Пересобрать полностью»",
+        CliReason::NoFullBuild => "нет прошлой полной сборки",
+        CliReason::SketchFiles => "в папке скетча есть другие файлы",
+        CliReason::Tool => "обновился arduino-cli",
+        CliReason::Board => "изменились плата или её настройки",
+        CliReason::Libraries => "изменился список библиотек",
+        CliReason::Includes => "изменились #include скетча",
+        CliReason::LibraryFiles => "изменились файлы ядра или библиотек",
+    })
 }
 
 /// What a compiler error means and which block's code it is in.

@@ -331,6 +331,9 @@ fn run_build(
         Err(e) => return build_failed(e),
     }
     println!("Сборка для {}...", board.fqbn);
+    if let Some(reason) = cli.cli_reason(&project.work_dir(), board, &opts) {
+        println!("Сборка через arduino-cli: {reason}");
+    }
     match cli.compile(&project.work_dir(), board, &opts, &mut print) {
         Ok(Compiled::UpToDate) => println!("Прошивка уже собрана, скетч не менялся"),
         Ok(Compiled::Direct) => {

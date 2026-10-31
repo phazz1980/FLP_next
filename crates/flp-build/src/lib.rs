@@ -102,6 +102,27 @@ pub enum Compiled {
     UpToDate,
 }
 
+/// Why the next build runs arduino-cli instead of a direct rebuild.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum CliReason {
+    #[error("выбрано «Пересобрать полностью»")]
+    Forced,
+    #[error("нет прошлой полной сборки")]
+    NoFullBuild,
+    #[error("в папке скетча есть другие файлы")]
+    SketchFiles,
+    #[error("обновился arduino-cli")]
+    Tool,
+    #[error("изменились плата или её настройки")]
+    Board,
+    #[error("изменился список библиотек")]
+    Libraries,
+    #[error("изменились #include скетча")]
+    Includes,
+    #[error("изменились файлы ядра или библиотек")]
+    LibraryFiles,
+}
+
 /// Serial port found by `arduino-cli board list`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SerialPort {
@@ -454,15 +475,23 @@ impl ArduinoCli {
         Ok(Compiled::Built)
     }
 
-    /// The next [`compile`](Self::compile) of the sketch written to `work_dir` would run
-    /// arduino-cli: libraries, includes, board or options changed since the last full
-    /// build, or there was none. Otherwise the build is up to date or a direct rebuild
-    /// of a few seconds, so a background build can leave it to the user's build.
-    pub fn needs_cli(&self, work_dir: &Path, board: &BoardConfig, opts: &CompileOptions) -> bool {
+    /// Why the next [`compile`](Self::compile) of the sketch written to `work_dir` would
+    /// run arduino-cli. `None`: the build is up to date or a direct rebuild of a few
+    /// seconds (unless that fails and falls back to arduino-cli).
+    pub fn cli_reason(
+        &self,
+        work_dir: &Path,
+        board: &BoardConfig,
+        opts: &CompileOptions,
+    ) -> Option<CliReason> {
         let (work_dir, opts) = &with_bundled(work_dir, opts);
-        opts.force
-            || !self.is_up_to_date(work_dir, board, opts)
-                && self.fitting_recipe(work_dir, board, opts).is_none()
+        if opts.force {
+            return Some(CliReason::Forced);
+        }
+        if self.is_up_to_date(work_dir, board, opts) {
+            return None;
+        }
+        self.fitting_recipe(work_dir, board, opts).err()
     }
 
     fn is_up_to_date(&self, work_dir: &Path, board: &BoardConfig, opts: &CompileOptions) -> bool {
@@ -478,12 +507,16 @@ impl ArduinoCli {
         work_dir: &Path,
         board: &BoardConfig,
         opts: &CompileOptions,
-    ) -> Option<direct::Recipe> {
-        let recipe = direct::Recipe::load(work_dir)?;
-        let key = direct::recipe_key(&self.exe, work_dir, board, opts, &recipe.compile);
-        (key.as_deref() == Some(recipe.key.as_str())
-            && build_dir(work_dir).join("sketch.ino.elf").is_file())
-        .then_some(recipe)
+    ) -> Result<direct::Recipe, CliReason> {
+        let recipe = direct::Recipe::load(work_dir)
+            .filter(|_| build_dir(work_dir).join("sketch.ino.elf").is_file())
+            .ok_or(CliReason::NoFullBuild)?;
+        let key = direct::recipe_key(&self.exe, work_dir, board, opts, &recipe.compile)
+            .ok_or(CliReason::SketchFiles)?;
+        match recipe.key.mismatch(&key) {
+            Some(reason) => Err(reason),
+            None => Ok(recipe),
+        }
     }
 
     /// Rebuilds with the recipe of the last full build when it still fits. `false` means
@@ -496,7 +529,7 @@ impl ArduinoCli {
         opts: &CompileOptions,
         on_line: &mut dyn FnMut(&str),
     ) -> Result<bool, BuildError> {
-        let Some(recipe) = self.fitting_recipe(work_dir, board, opts) else {
+        let Ok(recipe) = self.fitting_recipe(work_dir, board, opts) else {
             return Ok(false);
         };
         let Ok(commands) =
@@ -1105,7 +1138,7 @@ mod tests {
     }
 
     #[test]
-    fn background_build_needs_cli_only_for_new_includes() {
+    fn cli_reason_names_what_changed() {
         let root = env::temp_dir().join(format!("flp-needs-cli-{}", std::process::id()));
         let sketch = sketch_dir(&root);
         let build = build_dir(&root);
@@ -1115,7 +1148,10 @@ mod tests {
         std::fs::write(&ino, "#include <A.h>\nvoid loop() {}").unwrap();
         let cli = ArduinoCli::new("arduino-cli");
         let opts = CompileOptions::default();
-        assert!(cli.needs_cli(&root, &board(), &opts), "no full build yet");
+        assert_eq!(
+            cli.cli_reason(&root, &board(), &opts),
+            Some(CliReason::NoFullBuild)
+        );
 
         let compile = vec!["g++".to_owned()];
         let (_, bundled) = with_bundled(&root, &opts);
@@ -1124,15 +1160,26 @@ mod tests {
         direct::Recipe { key, compile, post }.save(&root);
         std::fs::write(build.join("sketch.ino.elf"), "").unwrap();
         std::fs::write(&ino, "#include <A.h>\nvoid loop() { int x = 2; }").unwrap();
-        assert!(!cli.needs_cli(&root, &board(), &opts), "body edit");
+        assert_eq!(cli.cli_reason(&root, &board(), &opts), None, "body edit");
         let forced = CompileOptions {
             force: true,
             ..Default::default()
         };
-        assert!(cli.needs_cli(&root, &board(), &forced), "rebuild");
+        assert_eq!(
+            cli.cli_reason(&root, &board(), &forced),
+            Some(CliReason::Forced)
+        );
 
         std::fs::write(&ino, "#include <A.h>\n#include <B.h>\nvoid loop() {}").unwrap();
-        assert!(cli.needs_cli(&root, &board(), &opts), "new include");
+        assert_eq!(
+            cli.cli_reason(&root, &board(), &opts),
+            Some(CliReason::Includes)
+        );
+        std::fs::write(sketch.join("extra.h"), "").unwrap();
+        assert_eq!(
+            cli.cli_reason(&root, &board(), &opts),
+            Some(CliReason::SketchFiles)
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
