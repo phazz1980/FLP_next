@@ -1,4 +1,4 @@
-//! Working area: numbered sheets stacked top to bottom, as in FLProg.
+//! Working area: numbered sheets stacked top to bottom.
 //!
 //! `layout.toml` stores block positions relative to their sheet; here the sheets
 //! are laid out one under another and share one pan and zoom.
@@ -326,7 +326,7 @@ fn paint_box(
                 pal.weak,
             );
         }
-        // Parameter values under the box, like constants in FLProg.
+        // Parameter values under the box, like constants.
         let summary: Vec<String> = def
             .params
             .iter()
@@ -924,7 +924,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         };
         let sheet_of = |id: &str| project.layout.blocks.get(id).map(|p| p.sheet);
         let (from_sheet, to_sheet) = (sheet_of(&link.from.block), sheet_of(&link.to.block));
-        // Links between sheets are broken into two labelled stubs, as in FLProg.
+        // Links between sheets are broken into two labelled stubs.
         let key = flp_core::Layout::wire_key(&link.to);
         let route_cfg = project.layout.wires.get(&key).copied().unwrap_or_default();
         let cross = from_sheet != to_sheet;
@@ -1307,7 +1307,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 }
                 .contains(&q.name);
             if inverted {
-                // Small circle on the outer side of the port, as in FLProg.
+                // Small circle on the outer side of the port.
                 let rr = 3.2 * z.sqrt();
                 let side = if output { rr } else { -rr };
                 painter.circle(
@@ -1321,7 +1321,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 .then(|| block.consts.get(&q.name))
                 .flatten()
             {
-                // Constant on an input: its value on a short stub, as in FLProg.
+                // Constant on an input: its value on a short stub.
                 let start = pos - Vec2::new(14.0 * z, 0.0);
                 painter.line_segment([start, pos], Stroke::new(1.4, pal.text));
                 painter.text(

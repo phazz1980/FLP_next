@@ -1,0 +1,17 @@
+# Встроенный светодиод мигает раз в секунду: 500 мс горит, 500 мс не горит.
+
+[[block]]
+id = "blink"
+type = "generator"
+time_on = "500ms"
+time_off = "500ms"
+
+# Встроенный светодиод DevKit.
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[link]]
+from = "blink.out"
+to   = "led.in"

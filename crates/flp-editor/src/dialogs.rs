@@ -378,7 +378,7 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
     }
 }
 
-/// ✓ / ✗ row at the top of the window, as in FLProg.
+/// ✓ / ✗ row at the top of the window.
 fn buttons(ui: &mut Ui, deletable: bool) -> Outcome {
     let mut outcome = Outcome::Open;
     ui.horizontal(|ui| {

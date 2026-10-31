@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "flp": {
-      "command": "D:/FLP_next/target/release/flp-mcp.exe",
+    "crablogic": {
+      "command": "D:/FLP_next/target/release/crablogic-mcp.exe",
       "args": ["--library", "D:/FLP_next/library"]
     }
   }

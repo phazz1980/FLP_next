@@ -141,7 +141,7 @@ pub fn tools() -> Vec<Tool> {
         },
         Tool {
             name: "invert_port",
-            description: "Инвертировать логический (bool) вход или выход блока, как кружок инверсии в FLProg. Инверсию выхода видят все его связи.",
+            description: "Инвертировать логический (bool) вход или выход блока (на схеме это кружок инверсии). Инверсию выхода видят все его связи.",
             input_schema: json!({"type": "object", "properties": {
                 "port": port,
                 "output": {"type": "boolean", "description": "true — выход, false — вход"},

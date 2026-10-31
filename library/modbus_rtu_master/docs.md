@@ -11,6 +11,6 @@
 Значения ведомых читают и пишут блоки «Чтение Modbus Master» и «Запись Modbus Master»
 по адресу ведомого. Запись в holding и coil уходит ведомому на ближайшем опросе.
 
-Нужна Arduino-библиотека FLProg_Utilites (`flprogUart.h`), её ставит FLProg.
+Нужна Arduino-библиотека FLProg_Utilites (`flprogUart.h`), она лежит в `libs/`.
 
 Пример: `examples/modbus_rtu`.

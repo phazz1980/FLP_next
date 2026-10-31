@@ -11,6 +11,6 @@
 Значения пишут и читают блоки «Запись Modbus» и «Чтение Modbus» с `slave = "rtu"`.
 UART0 занят USB и онлайн-отладкой, поэтому берите UART1 или UART2.
 
-Нужна Arduino-библиотека FLProg_Utilites (`flprogUart.h`), её ставит FLProg.
+Нужна Arduino-библиотека FLProg_Utilites (`flprogUart.h`), она лежит в `libs/`.
 
 Пример: `examples/modbus_rtu`.
