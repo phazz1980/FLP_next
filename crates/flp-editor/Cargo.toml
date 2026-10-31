@@ -19,6 +19,7 @@ flp-build = { path = "../flp-build" }
 flp-codegen = { path = "../flp-codegen" }
 flp-core = { path = "../flp-core" }
 flp-pdf = { path = "../flp-pdf" }
+flp-mcp = { path = "../flp-mcp" }
 flp-debug = { path = "../flp-debug", features = ["serial"] }
 rfd = "0.17"
 ureq = { version = "2", features = ["json"] }

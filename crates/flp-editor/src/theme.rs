@@ -100,7 +100,7 @@ pub fn light() -> Theme {
             error: rgb(186, 74, 66),
             warning: rgb(176, 128, 40),
             ok: rgb(72, 136, 88),
-            // FLProg default data-type colors.
+            // Default data-type colors.
             bool_signal: rgb(0, 0, 0),
             int_signal: rgb(0, 0, 255),
             float_signal: rgb(127, 63, 63),
@@ -133,7 +133,7 @@ pub fn dark() -> Theme {
             error: rgb(212, 104, 96),
             warning: rgb(206, 166, 82),
             ok: rgb(110, 176, 126),
-            // FLProg hues, lightened to stay visible on a dark sheet.
+            // The default hues, lightened to stay visible on a dark sheet.
             bool_signal: rgb(225, 225, 225),
             int_signal: rgb(96, 136, 255),
             float_signal: rgb(196, 120, 120),
@@ -277,6 +277,34 @@ struct Settings {
     update_repo: Option<String>,
     /// Name and contacts entered as the author of a block pack; offered for new packs.
     author: Option<Author>,
+    ai: Option<AiSettings>,
+}
+
+/// AI provider settings entered in the editor (see `aiconf`).
+#[derive(Serialize, Deserialize, Clone, Default, PartialEq, Eq, Debug)]
+#[serde(default)]
+pub struct AiSettings {
+    /// `claude` or `openai` (OpenAI-compatible service).
+    pub kind: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    /// Environment of `claude` (Claude Code) used in MCP mode, e.g. a DeepSeek endpoint.
+    pub cc_base_url: String,
+    pub cc_key: String,
+    pub cc_model: String,
+}
+
+pub fn ai_settings() -> AiSettings {
+    let mut s = load_settings().ai.unwrap_or_default();
+    if s.kind.is_empty() {
+        s.kind = crate::aiconf::KIND_CLAUDE.to_owned();
+    }
+    s
+}
+
+pub fn save_ai_settings(settings: &AiSettings) {
+    update_settings(|s| s.ai = Some(settings.clone()));
 }
 
 /// Who signs the packs created in this editor.

@@ -197,6 +197,8 @@ pub struct EditorApp {
     /// The window with the changes of the newer releases is shown.
     update_window: bool,
     changes_window: bool,
+    pub mcp: crate::mcp_host::McpHost,
+    pub ai_conf: crate::aiconf::AiConf,
     report: crate::report::Form,
     pub import: crate::blockio::Import,
     pub board_import: crate::boardio::Import,
@@ -288,6 +290,8 @@ impl EditorApp {
             new_release: None,
             update_window: false,
             changes_window: false,
+            mcp: Default::default(),
+            ai_conf: Default::default(),
             report: Default::default(),
             import: Default::default(),
             board_import: Default::default(),
@@ -339,6 +343,7 @@ impl EditorApp {
             app.start_update_check(&cc.egui_ctx, false);
         }
         app.lib_dir = find_library(project.as_deref());
+        crate::aiconf::apply(&theme::ai_settings());
         app.reload_library();
         // A block or board file given on the command line goes to the import window.
         let (project, block_file) = match project {
@@ -1604,6 +1609,12 @@ impl EditorApp {
 
     pub fn send_ai(&mut self, ctx: &egui::Context) {
         let Some(doc) = &self.doc else { return };
+        // MCP is on: the request goes to the external client, not to the API.
+        if let Some(endpoint) = self.mcp.endpoint() {
+            let env = crate::aiconf::claude_code_env(&theme::ai_settings());
+            self.ai.send_external(endpoint, env, ctx);
+            return;
+        }
         self.ai.send(
             &doc.project,
             &self.lib,
@@ -2643,6 +2654,8 @@ impl EditorApp {
 impl eframe::App for EditorApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        flp_core::local::editor_beat(self.doc.as_ref().map(|d| d.project.path.as_path()));
+        ctx.request_repaint_after(flp_core::local::EDITOR_BEAT);
         crate::textmenu::begin(&ctx);
         self.poll_job(&ctx);
         self.precompile(&ctx);
@@ -2658,6 +2671,10 @@ impl eframe::App for EditorApp {
             self.start_update_check(&ctx, false);
         }
         self.cli_window(&ctx);
+        self.mcp
+            .set_project(self.doc.as_ref().map(|d| d.project.path.as_path()));
+        self.mcp.window(&ctx);
+        self.ai_conf.window(&ctx);
         self.poll_self_update(&ctx);
         update::changes_window(&ctx, &mut self.changes_window);
         crate::blockio::handle_drops(self, &ctx);

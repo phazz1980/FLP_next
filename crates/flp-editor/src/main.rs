@@ -1,6 +1,6 @@
 //! `crablogic-editor` — graphical FBD editor of CrabLogic.
 //!
-//! Layout follows FLProg: menu and toolbar on top, project tree and tags on the left,
+//! Layout: menu and toolbar on top, project tree and tags on the left,
 //! block library and the AI tab on the right, numbered sheets in the centre,
 //! messages and the port monitor at the bottom.
 
@@ -8,6 +8,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod ai;
+mod aiconf;
 mod app;
 mod assoc;
 mod blockedit;
@@ -26,6 +27,7 @@ mod help;
 mod i18n;
 mod job;
 mod markdown;
+mod mcp_host;
 mod netpanel;
 mod panels;
 mod pictures;

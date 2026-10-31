@@ -567,7 +567,7 @@ pub(crate) fn group(
     }
 }
 
-/// Project tree as in FLProg: controller → tags (inputs, outputs, variables) → sheets.
+/// Project tree: controller → tags (inputs, outputs, variables) → sheets.
 pub fn left(app: &mut EditorApp, ui: &mut Ui) {
     let pal = app.theme.palette;
     // The tree is read more than edited: slightly larger text and looser rows.
@@ -966,6 +966,30 @@ pub fn right(app: &mut EditorApp, ui: &mut Ui) {
         RightTab::Ai => {
             let pal = app.theme.palette;
             let has_project = app.doc.is_some();
+            ui.horizontal(|ui| {
+                let running = app.mcp.running();
+                let label = if running {
+                    "Выключить внешний ИИ (MCP)"
+                } else {
+                    "Включить внешний ИИ (MCP)"
+                };
+                if ui
+                    .selectable_label(running, crate::i18n::tr(label))
+                    .on_hover_text(crate::i18n::tr(
+                        "Сервер MCP для внешнего ИИ (Claude Code и др.): он работает с проектом, открытым здесь",
+                    ))
+                    .clicked()
+                {
+                    app.mcp.toggle(app.lib_dir.clone());
+                }
+                if running && ui.button(crate::i18n::tr("Промпт...")).clicked() {
+                    app.mcp.show_window();
+                }
+                if ui.button(crate::i18n::tr("Настройки ИИ...")).clicked() {
+                    app.ai_conf.show();
+                }
+            });
+            ui.separator();
             if crate::ai::show(&mut app.ai, &pal, ui, has_project) {
                 app.send_ai(ui.ctx());
             }

@@ -4,6 +4,10 @@ description = "MCP server of CrabLogic: the AI command set over stdio"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+name = "flp_mcp"
+path = "src/lib.rs"
+
 [[bin]]
 name = "crablogic-mcp"
 path = "src/main.rs"

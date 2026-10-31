@@ -36,6 +36,94 @@ pub fn config_dir() -> Option<PathBuf> {
     Some(dir)
 }
 
+/// A running editor window, as told by its heartbeat file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorInfo {
+    pub pid: u32,
+    /// Project open in that window; `None` while it has none.
+    pub project: Option<PathBuf>,
+}
+
+/// An editor whose heartbeat is older than this is considered closed.
+pub const EDITOR_ALIVE: std::time::Duration = std::time::Duration::from_secs(8);
+/// How often an editor refreshes its heartbeat.
+pub const EDITOR_BEAT: std::time::Duration = std::time::Duration::from_secs(2);
+
+fn editors_dir() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("editors"))
+}
+
+/// Called by the editor every frame: refreshes `editors/<pid>.toml` with the open
+/// project, at most once per [`EDITOR_BEAT`] unless the project changed.
+pub fn editor_beat(project: Option<&Path>) {
+    use std::sync::Mutex;
+    use std::time::Instant;
+    static LAST: Mutex<Option<(Instant, Option<PathBuf>)>> = Mutex::new(None);
+    let Ok(mut last) = LAST.lock() else { return };
+    let project = project.map(Path::to_path_buf);
+    if let Some((at, p)) = last.as_ref() {
+        if *p == project && at.elapsed() < EDITOR_BEAT {
+            return;
+        }
+    }
+    let Some(dir) = editors_dir() else { return };
+    let _ = fs::create_dir_all(&dir);
+    let mut table = toml::Table::new();
+    if let Some(p) = &project {
+        let path = std::path::absolute(p).unwrap_or_else(|_| p.clone());
+        table.insert("project".into(), path.display().to_string().into());
+    }
+    let file = dir.join(format!("{}.toml", std::process::id()));
+    if fs::write(file, table.to_string()).is_ok() {
+        *last = Some((Instant::now(), project));
+    }
+}
+
+/// Editors running now (fresh heartbeat), oldest pid first. Stale files are removed.
+pub fn live_editors() -> Vec<EditorInfo> {
+    let Some(dir) = editors_dir() else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let Some(pid) = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let age = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok());
+        if age.is_none_or(|a| a > EDITOR_ALIVE) {
+            let _ = fs::remove_file(&path);
+            continue;
+        }
+        let project = fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| t.parse::<toml::Table>().ok())
+            .and_then(|t| t.get("project")?.as_str().map(PathBuf::from));
+        found.push(EditorInfo { pid, project });
+    }
+    found.sort_by_key(|e| e.pid);
+    found
+}
+
+/// Project the editor opened last (its `editor.toml`), for tools that follow the
+/// editor, e.g. the MCP server. `None` if the editor never ran or saved none.
+pub fn editor_last_project() -> Option<PathBuf> {
+    let text = fs::read_to_string(config_dir()?.join("editor.toml")).ok()?;
+    let value: toml::Table = text.parse().ok()?;
+    let path = value.get("last_project")?.as_str()?;
+    // Older settings keep the Windows verbatim prefix.
+    let path = path.strip_prefix(r"\\?\").unwrap_or(path);
+    Some(PathBuf::from(path))
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LocalValues {
     /// Where [`LocalValues::save`] writes; `None` keeps the values in memory only.
