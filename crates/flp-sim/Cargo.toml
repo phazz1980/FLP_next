@@ -5,7 +5,11 @@ edition.workspace = true
 description = "Runs WASM block modules (wasmi) to simulate a block on the PC"
 
 [dependencies]
+flp-core = { path = "../flp-core" }
 wasmi = "2.0.0"
 
 [dev-dependencies]
 wat = "1.263.0"
+flp-build = { path = "../flp-build" }
+flp-codegen = { path = "../flp-codegen" }
+toml.workspace = true

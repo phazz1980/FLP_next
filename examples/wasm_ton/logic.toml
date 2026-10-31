@@ -1,0 +1,26 @@
+# Кнопка включает светодиод через 2 с: блок timer_on_rs написан на Rust (library/timer_on_rs)
+
+[[block]]
+id = "button"
+type = "digital_in"
+pin = 12
+pullup = true
+inverted = true
+
+[[block]]
+id = "delay"
+type = "timer_on_rs"
+time = "2s"
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 25
+
+[[link]]
+from = "button.out"
+to   = "delay.in"
+
+[[link]]
+from = "delay.out"
+to   = "led.in"

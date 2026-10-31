@@ -1,0 +1,23 @@
+[block]
+type = "timer_on_rs"
+name = "Задержка включения (Rust)"
+symbol = "TON"
+group = "Таймеры"
+description = "Таймер TON, написанный на Rust и собранный в WASM: выход включается, если вход держится true дольше заданного времени."
+memory = true
+
+[[input]]
+name = "in"
+type = "bool"
+description = "Запуск отсчёта"
+
+[[output]]
+name = "out"
+type = "bool"
+description = "true, когда вход непрерывно включён не меньше time"
+
+[[param]]
+name = "time"
+type = "duration"
+default = "1s"
+description = "Время задержки: 500ms, 5s, 2m, 1h"

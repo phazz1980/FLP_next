@@ -143,6 +143,11 @@ fn run(
 ) -> Result<Done, String> {
     let Report { out, note, direct } = report;
     let background = matches!(kind, JobKind::Precompile);
+    if let Some(w2c2) = crate::theme::w2c2() {
+        for problem in flp_build::wasm_c::translate_library(&w2c2, lib) {
+            out(LogLevel::Warning, &problem);
+        }
+    }
     let program = Program::build(project, lib).map_err(|e| e.to_string())?;
     let code = ArduinoCpp { debug }
         .generate(&program)

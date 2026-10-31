@@ -153,14 +153,24 @@ fn debug_strings_snapshot() {
     assert!(!code.contains("flp_dbg_text"));
 }
 
-/// Normal firmware measures cycle time only with `[diagnostics] enabled`.
+/// The `cycle_report` block of the given interval.
+fn cycle_report(interval: &str) -> flp_core::Block {
+    toml::from_str(&format!(
+        "id = \"cycle\"
+type = \"cycle_report\"
+interval = \"{interval}\"
+"
+    ))
+    .unwrap()
+}
+
+/// Normal firmware measures cycle time only when the schema has a `cycle_report` block.
 #[test]
 fn diagnostics_in_normal_build() {
     let mut project = Project::load(repo_path("examples/tags")).unwrap();
     let plain = generate(&project, &library(), &ArduinoCpp::RELEASE).unwrap();
     assert!(!plain.contains("flp_st_"), "{plain}");
-    project.config.diagnostics.enabled = true;
-    project.config.diagnostics.interval_ms = 2000;
+    project.logic.blocks.push(cycle_report("2s"));
     let code = generate(&project, &library(), &ArduinoCpp::RELEASE).unwrap();
     let snapshot =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/tags.diagnostics.ino");
@@ -781,7 +791,9 @@ fn generate_in(example: &str, lang: &str, diagnostics: bool, target: &ArduinoCpp
     let dir = repo_path(&format!("examples/{example}"));
     let mut project = Project::load(&dir).unwrap();
     project.config.project.comment_lang = lang.to_owned();
-    project.config.diagnostics.enabled = diagnostics;
+    if diagnostics {
+        project.logic.blocks.push(cycle_report("5s"));
+    }
     generate(&project, &library_for(&dir), target).unwrap()
 }
 

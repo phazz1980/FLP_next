@@ -3,10 +3,18 @@
 //! The module speaks plain core WASM (no WASI, no language runtime):
 //! - exports `step(dt_ms: i32)`; optional `init()` resets the state;
 //! - imports from module `flp`: `input(i: i32) -> f64`, `param(i: i32) -> f64`,
-//!   `output(i: i32, v: f64)` and `log(ptr: i32, len: i32)` (UTF-8 text in the module memory).
+//!   `output(i: i32, v: f64)` and `log(ptr: i32, len: i32)` (UTF-8 text in the module memory);
+//! - string ports and parameters (the same indexes as the numbers) go through the module
+//!   memory: `input_text(i, ptr, cap) -> len` and `param_text(i, ptr, cap) -> len` copy at
+//!   most `cap` bytes and return the full length; `output_text(i, ptr, len)` sets an output.
 //!
 //! bool, int and float all travel as `f64`; the module keeps its own state between steps.
 //! Indexes follow the order of ports and parameters in `block.toml`.
+
+pub mod builtin;
+pub mod schema;
+
+pub use schema::{Computed, Simulation};
 
 use wasmi::{
     Caller, Engine, Instance, Linker, Module, Store, StoreLimits, StoreLimitsBuilder, TypedFunc,
@@ -18,11 +26,16 @@ const FUEL_PER_CALL: u64 = 5_000_000;
 const MAX_MEMORY: usize = 16 * 1024 * 1024;
 /// Log lines kept between reads.
 const MAX_LOG_LINES: usize = 200;
+/// Longest text a module may set on an output, bytes.
+const MAX_TEXT: usize = 4096;
 
 struct Host {
     inputs: Vec<f64>,
     params: Vec<f64>,
     outputs: Vec<f64>,
+    input_texts: Vec<String>,
+    param_texts: Vec<String>,
+    output_texts: Vec<String>,
     log: Vec<String>,
     limits: StoreLimits,
 }
@@ -49,6 +62,9 @@ impl SimModule {
                 inputs: Vec::new(),
                 params: Vec::new(),
                 outputs: vec![0.0; n_outputs],
+                input_texts: Vec::new(),
+                param_texts: Vec::new(),
+                output_texts: vec![String::new(); n_outputs],
                 log: Vec::new(),
                 limits: StoreLimitsBuilder::new().memory_size(MAX_MEMORY).build(),
             },
@@ -72,6 +88,40 @@ impl SimModule {
                 |mut c: Caller<'_, Host>, i: i32, v: f64| {
                     if let Some(slot) = c.data_mut().outputs.get_mut(i as usize) {
                         *slot = v;
+                    }
+                },
+            )
+            .map_err(bad)?
+            .func_wrap(
+                "flp",
+                "input_text",
+                |mut c: Caller<'_, Host>, i: i32, ptr: i32, cap: i32| -> i32 {
+                    let text = c.data().input_texts.get(i as usize).cloned();
+                    copy_text(&mut c, text, ptr, cap)
+                },
+            )
+            .map_err(bad)?
+            .func_wrap(
+                "flp",
+                "param_text",
+                |mut c: Caller<'_, Host>, i: i32, ptr: i32, cap: i32| -> i32 {
+                    let text = c.data().param_texts.get(i as usize).cloned();
+                    copy_text(&mut c, text, ptr, cap)
+                },
+            )
+            .map_err(bad)?
+            .func_wrap(
+                "flp",
+                "output_text",
+                |mut c: Caller<'_, Host>, i: i32, ptr: i32, len: i32| {
+                    let Some(memory) = c.get_export("memory").and_then(|e| e.into_memory()) else {
+                        return;
+                    };
+                    let mut bytes = vec![0u8; (len.max(0) as usize).min(MAX_TEXT)];
+                    if memory.read(&c, ptr as usize, &mut bytes).is_ok() {
+                        if let Some(slot) = c.data_mut().output_texts.get_mut(i as usize) {
+                            *slot = String::from_utf8_lossy(&bytes).into_owned();
+                        }
                     }
                 },
             )
@@ -114,6 +164,11 @@ impl SimModule {
             .outputs
             .iter_mut()
             .for_each(|o| *o = 0.0);
+        self.store
+            .data_mut()
+            .output_texts
+            .iter_mut()
+            .for_each(String::clear);
         let Some(init) = self.init else {
             return Ok(());
         };
@@ -123,14 +178,31 @@ impl SimModule {
 
     /// One step of `dt_ms` milliseconds; returns the outputs of the block.
     pub fn step(&mut self, dt_ms: u32, inputs: &[f64], params: &[f64]) -> Result<Vec<f64>, String> {
+        self.step_text(dt_ms, inputs, params, &[], &[])
+            .map(|(outputs, _)| outputs)
+    }
+
+    /// Like [`SimModule::step`] for a block with string ports and parameters: the texts
+    /// are indexed like the numbers (empty for the other ports); returns the output texts too.
+    pub fn step_text(
+        &mut self,
+        dt_ms: u32,
+        inputs: &[f64],
+        params: &[f64],
+        input_texts: &[String],
+        param_texts: &[String],
+    ) -> Result<(Vec<f64>, Vec<String>), String> {
         let host = self.store.data_mut();
         host.inputs = inputs.to_vec();
         host.params = params.to_vec();
+        host.input_texts = input_texts.to_vec();
+        host.param_texts = param_texts.to_vec();
         self.refuel()?;
         self.step
             .call(&mut self.store, dt_ms as i32)
             .map_err(describe)?;
-        Ok(self.store.data().outputs.clone())
+        let host = self.store.data();
+        Ok((host.outputs.clone(), host.output_texts.clone()))
     }
 
     /// Lines the module wrote with `log` since the last call.
@@ -143,6 +215,20 @@ impl SimModule {
             .set_fuel(FUEL_PER_CALL)
             .map_err(|e| format!("ошибка лимита выполнения: {e}"))
     }
+}
+
+/// Copies `text` into the module memory (at most `cap` bytes); returns its full length.
+fn copy_text(c: &mut Caller<'_, Host>, text: Option<String>, ptr: i32, cap: i32) -> i32 {
+    let Some(text) = text else {
+        return 0;
+    };
+    let Some(memory) = c.get_export("memory").and_then(|e| e.into_memory()) else {
+        return 0;
+    };
+    let bytes = text.as_bytes();
+    let n = bytes.len().min(cap.max(0) as usize);
+    let _ = memory.write(&mut *c, ptr as usize, &bytes[..n]);
+    bytes.len() as i32
 }
 
 /// A trap of the module in plain Russian.

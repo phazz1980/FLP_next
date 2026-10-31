@@ -5,12 +5,15 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use flp_core::ident::c_ident;
-use flp_core::library::ESP32_CPP_TEMPLATE;
+use flp_core::library::{FirmwareSource, ESP32_CPP_TEMPLATE};
 use flp_core::uart::{UartAccess, UartConfig};
 use flp_core::value::parse_duration_ms;
 use flp_core::vars::VAR_SET;
 use flp_core::{ParamKind, ParamValue, PortRef, SignalType};
 use minijinja::{context, AutoEscape, Environment, UndefinedBehavior, Value};
+
+pub mod simsrc;
+mod wasm;
 
 use crate::tasks::Tasks;
 use crate::{Backend, GenError, Instance, Program, Source};
@@ -119,17 +122,22 @@ fn render_block(
         .lib
         .template_path(ESP32_CPP_TEMPLATE)
         .unwrap_or_else(|| PathBuf::from(format!("{kind}/{ESP32_CPP_TEMPLATE}")));
-    let source = inst
-        .lib
-        .template(ESP32_CPP_TEMPLATE)
-        .ok_or_else(|| GenError::MissingTemplate {
-            kind: kind.clone(),
-            file: ESP32_CPP_TEMPLATE,
-        })?
-        .map_err(|source| GenError::Io {
-            path: path.clone(),
-            source,
-        })?;
+    // A block without a template runs from its WASM module, translated to C.
+    let module = inst.lib.firmware_source() == FirmwareSource::Module;
+    let mut source = if module {
+        String::new()
+    } else {
+        inst.lib
+            .template(ESP32_CPP_TEMPLATE)
+            .ok_or_else(|| GenError::MissingTemplate {
+                kind: kind.clone(),
+                file: ESP32_CPP_TEMPLATE,
+            })?
+            .map_err(|source| GenError::Io {
+                path: path.clone(),
+                source,
+            })?
+    };
 
     let input: BTreeMap<&str, String> = inst
         .inputs
@@ -163,7 +171,7 @@ fn render_block(
         .iter()
         .map(|(&port, &s)| (port, program.signals[s].name.as_str()))
         .collect();
-    let mut param = BTreeMap::new();
+    let mut param: BTreeMap<&str, Value> = BTreeMap::new();
     let mut value = BTreeMap::new();
     for (&name, v) in &inst.params {
         let kind = inst.lib.def.param(name).expect("param from def").kind;
@@ -177,6 +185,37 @@ fn render_block(
         };
         param.insert(name, literal);
         value.insert(name, raw_value(kind, v));
+    }
+
+    // Parameters turned into inputs: the template gets the expression of the input,
+    // evaluated on every scan. A template that decides something while generating
+    // (`value.<name>`) cannot follow a value that is only known at run time.
+    let mut bound_inputs = BTreeMap::new();
+    for name in &inst.block.param_in {
+        let Some(expr) = input.get(name.as_str()) else {
+            continue;
+        };
+        let Some((&pname, _)) = inst.params.get_key_value(name.as_str()) else {
+            continue;
+        };
+        let kind = inst.lib.def.param(pname).expect("param from def").kind;
+        if source.contains(&format!("value.{pname}"))
+            || source.contains(&format!("value[\"{pname}\"]"))
+        {
+            return Err(GenError::ParamInputUnsupported {
+                block: inst.block.id.clone(),
+                param: pname.to_owned(),
+            });
+        }
+        source = strip_literal_suffix(&source, pname);
+        bound_inputs.insert(pname, (kind, expr.clone()));
+    }
+    for (&pname, (kind, expr)) in &bound_inputs {
+        let expr = match kind {
+            ParamKind::Duration => format!("(uint32_t)({expr})"),
+            _ => format!("({expr})"),
+        };
+        param.insert(pname, Value::from(expr));
     }
 
     let name = format!("{kind}/{ESP32_CPP_TEMPLATE}");
@@ -221,6 +260,11 @@ fn render_block(
     let mut param = param;
     let mut bound = bound;
     let mut flag = flag;
+    for (&pname, (_, expr)) in &bound_inputs {
+        if flag.contains_key(pname) {
+            flag.insert(pname, format!("({expr})"));
+        }
+    }
     let mut value = value;
     let mut input = input;
     if kind == "web_net" {
@@ -302,16 +346,20 @@ fn render_block(
         }
         None => Value::from(()),
     };
-    let ctx =
-        context! { id, input, input_type, output, param, value, bound, flag, var, uart, expander };
-    let text = env
-        .render_named_str(&name, &source, ctx)
-        .map_err(|source| GenError::Render {
-            block: inst.block.id.clone(),
-            source,
-        })?;
-    let mut sections =
-        split_sections(&text).map_err(|message| GenError::BadTemplate { path, message })?;
+    let mut sections = if module {
+        wasm::sections(program, inst, &input, &param)?
+    } else {
+        let ctx = context! {
+            id, input, input_type, output, param, value, bound, flag, var, uart, expander
+        };
+        let text = env
+            .render_named_str(&name, &source, ctx)
+            .map_err(|source| GenError::Render {
+                block: inst.block.id.clone(),
+                source,
+            })?;
+        split_sections(&text).map_err(|message| GenError::BadTemplate { path, message })?
+    };
     // Outputs bound to variables are copied right after the block.
     for (port, var) in &inst.output_vars {
         if let Some(name) = output.get(port) {
@@ -448,6 +496,30 @@ fn param_value(kind: ParamKind, value: &ParamValue) -> Value {
         }
         (_, ParamValue::Text(s)) => Value::from(string_literal(s)),
     }
+}
+
+/// Removes the `U` / `UL` suffix after `{{ param.<name> }}`: it makes sense for a
+/// literal only, an input expression already has its type.
+fn strip_literal_suffix(source: &str, name: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut rest = source;
+    while let Some(start) = rest.find("{{") {
+        let Some(len) = rest[start..].find("}}") else {
+            break;
+        };
+        let end = start + len + 2;
+        out.push_str(&rest[..end]);
+        let inner = rest[start + 2..end - 2].trim();
+        rest = &rest[end..];
+        if inner == format!("param.{name}") {
+            rest = rest
+                .strip_prefix("UL")
+                .or_else(|| rest.strip_prefix('U'))
+                .unwrap_or(rest);
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Parameter as a plain value for comparisons in templates (`{% if value.on > value.off %}`);
@@ -723,6 +795,9 @@ fn assemble(
     out.push_str(&crate::retain::globals(vars, lang));
     out.push_str(&crate::expander::globals(program));
 
+    if wasm::uses_modules(program) {
+        let _ = writeln!(out, "\n{}", wasm::runtime());
+    }
     for (kind, code) in shared(rendered, |s| &s.once_global) {
         let _ = writeln!(out, "\n{}\n{code}", shared_comment(kind, lang));
     }
@@ -742,8 +817,19 @@ fn assemble(
         }
     }
 
-    let diagnostics = &program.project.config.diagnostics;
-    let stats = debug || diagnostics.enabled;
+    // The `cycle_report` block turns the cycle time measurement on in normal firmware.
+    let report_interval = program
+        .blocks
+        .iter()
+        .find(|i| i.block.kind == "cycle_report")
+        .map(|i| match i.params.get("interval") {
+            Some(ParamValue::Int(ms)) => u32::try_from(*ms).unwrap_or(5000),
+            Some(ParamValue::Text(s)) => {
+                parse_duration_ms(s).map_or(5000, |ms| u32::try_from(ms).unwrap_or(u32::MAX))
+            }
+            _ => 5000,
+        });
+    let stats = debug || report_interval.is_some();
     let looped = rendered
         .iter()
         .filter(|(inst, sec)| !sec.looped.is_empty() && !tasks.is_background(inst))
@@ -751,12 +837,8 @@ fn assemble(
     let sheets = crate::stats::measured_sheets(program, looped);
     if stats {
         out.push_str(&crate::stats::runtime(&sheets, tasks.any(), lang));
-        if !debug {
-            out.push_str(&crate::stats::text_report(
-                diagnostics.interval_ms,
-                tasks.any(),
-                lang,
-            ));
+        if let (false, Some(interval_ms)) = (debug, report_interval) {
+            out.push_str(&crate::stats::text_report(interval_ms, tasks.any(), lang));
         }
     }
     let table = debug.then(|| crate::debug::debug_table(program));

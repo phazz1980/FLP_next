@@ -1,0 +1,6 @@
+[project]
+name = "param_inputs"
+description = "Параметры блоков как входы: задержку таймера задаёт потенциометр, верхний предел ограничителя — константа"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

@@ -395,6 +395,12 @@ fn generate(
     debug: bool,
 ) -> Result<(String, Vec<String>, Vec<PathBuf>), ExitCode> {
     let backend = ArduinoCpp { debug };
+    // Blocks written as WASM modules need their C translation next to the module.
+    if let Some(w2c2) = flp_build::wasm_c::find_w2c2(None) {
+        for problem in flp_build::wasm_c::translate_library(&w2c2, lib) {
+            eprintln!("предупреждение: {problem}");
+        }
+    }
     // Wi-Fi passwords and other `local` values are kept by the program, not in the file.
     let store = LocalValues::open_default().unwrap_or_else(|e| {
         eprintln!("предупреждение: {e}");

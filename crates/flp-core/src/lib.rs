@@ -33,13 +33,13 @@ pub use error::{Error, Result};
 pub use expander::{Expander, ExpanderChip};
 pub use layout::{BlockPos, Layout, SheetInfo, WireRoute};
 pub use library::{
-    save_block, user_library_dir, BlockDef, Choice, Library, LibraryBlock, ParamDef, ParamKind,
-    ParamShow, PinMode, PortDef, SignalType,
+    param_input_type, save_block, user_library_dir, BlockDef, Choice, Library, LibraryBlock,
+    ParamDef, ParamKind, ParamShow, PinMode, PortDef, SignalType,
 };
 pub use local::LocalValues;
 pub use logic::{Block, Link, Logic, PortRef, PortRefError};
 pub use pins::PinFunction;
-pub use project::{BoardConfig, Diagnostics, Project, ProjectConfig, ProjectInfo};
+pub use project::{BoardConfig, Project, ProjectConfig, ProjectInfo};
 pub use uart::{UartAccess, UartConfig, UartUse};
 pub use value::ParamValue;
 pub use vars::{Var, VarType};

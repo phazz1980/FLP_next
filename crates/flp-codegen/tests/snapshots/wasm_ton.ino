@@ -1,0 +1,2547 @@
+// Сгенерировано CrabLogic из проекта «wasm_ton». Ручные правки будут перезаписаны.
+// Порядок выполнения: button → delay → led
+
+#include <Arduino.h>
+
+// Выходы блоков
+bool button_out = false;
+bool delay_out = false;
+
+// WASM-блоки: среда выполнения w2c2 и функции хоста
+// In a namespace: the Arduino prototype generator leaves it alone.
+namespace flpwasm {
+#ifndef W2C2_BASE_H
+#define W2C2_BASE_H
+
+#ifndef W2C2_RUNTIME_CHECKS
+#define W2C2_RUNTIME_CHECKS 0
+#endif
+
+#include <stddef.h>
+#include <math.h>
+#include <string.h>
+#include <stdlib.h>
+#if !(defined(PLAN9) || defined(__NeXT__) || (defined(_MSC_VER) && _MSC_VER <= 1000))
+#include <stdint.h>
+#endif
+
+#include <assert.h>
+
+#include <errno.h>
+
+#ifdef WASM_THREADS_PTHREADS
+#include <pthread.h>
+#elif defined(WASM_THREADS_WIN32)
+#include <windows.h>
+#endif
+
+#ifdef __cplusplus
+#else
+
+/*
+ * Some system headers define bool as _Bool even in C89 mode.
+ * Use the C89-compatible enum consistently.
+ */
+#if !defined(__STDC_VERSION__) || __STDC_VERSION__ < 199901L
+#ifdef bool
+#undef bool
+#endif
+#ifdef false
+#undef false
+#endif
+#ifdef true
+#undef true
+#endif
+typedef enum bool {
+    false = 0,
+    true = 1
+} bool;
+#elif __STDC_VERSION__ < 202311L && !defined(__bool_true_false_are_defined)
+typedef enum bool {
+    false = 0,
+    true = 1
+} bool;
+#endif
+
+#endif
+
+typedef unsigned char U8;
+typedef signed char I8;
+
+typedef unsigned short U16;
+typedef signed short I16;
+
+typedef unsigned int U32;
+typedef signed int I32;
+
+#if defined(_MSC_VER) && _MSC_VER <= 1000
+typedef unsigned __int64 U64;
+typedef signed __int64 I64;
+#else
+typedef unsigned long long int U64;
+typedef signed long long int I64;
+#endif
+
+typedef float F32;
+typedef double F64;
+
+/* Only support for wasm32 for now */
+typedef U32 WasmPtr;
+
+#if W2C2_RUNTIME_CHECKS
+/* Preserve the carry when adding a Wasm32 address and instruction offset. */
+typedef U64 WasmMemoryAddress;
+#else
+typedef WasmPtr WasmMemoryAddress;
+#endif
+
+#if defined(_MSC_VER) && _MSC_VER <= 1000
+#define W2C2_LL(x) x ## i64
+#else
+#define W2C2_LL(x) x ## ll
+#endif
+
+/* Prevent infinite loops from being optimized out when compiled as C++ */
+#ifdef __cplusplus
+#define W2C2_LOOP_START __asm__ volatile("");
+#else
+#define W2C2_LOOP_START
+#endif
+
+/* Allow fixed-size copies to be inlined even with -fno-builtin-memcpy.
+ * Embedders can override this macro. */
+#ifndef W2C2_MEMCPY
+#if defined(__GNUC__) || defined(__clang__)
+#define W2C2_MEMCPY __builtin_memcpy
+#else
+#define W2C2_MEMCPY memcpy
+#endif
+#endif
+
+#define MUST(x) { if (!(x)) { return false; }; }
+#define MUST_OR_GOTO(LABEL, x) { if (!(x)) { goto LABEL; }; }
+
+#define WASM_LITTLE_ENDIAN  0
+#define WASM_BIG_ENDIAN     1
+
+/*
+ * Endianness detection courtesy of RapidJSON,
+ * extended for more architectures and operating systems
+ */
+#ifndef WASM_ENDIAN
+/* Detect with GCC 4.6's macro */
+#ifdef __BYTE_ORDER__
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#define WASM_ENDIAN WASM_LITTLE_ENDIAN
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define WASM_ENDIAN WASM_BIG_ENDIAN
+#else
+#error Unknown endianness. Please define WASM_ENDIAN.
+#endif /* __BYTE_ORDER__ */
+/* Detect with GLIBC's endian.h */
+#elif defined(__GLIBC__)
+#include <endian.h>
+#if (__BYTE_ORDER == __LITTLE_ENDIAN)
+#define WASM_ENDIAN WASM_LITTLE_ENDIAN
+#elif (__BYTE_ORDER == __BIG_ENDIAN)
+#define WASM_ENDIAN WASM_BIG_ENDIAN
+#else
+#error Unknown endianness. Please define WASM_ENDIAN.
+#endif /* __GLIBC__ */
+/* Detect with _LITTLE_ENDIAN and _BIG_ENDIAN macro */
+#elif defined(_LITTLE_ENDIAN) && !defined(_BIG_ENDIAN)
+#define WASM_ENDIAN WASM_LITTLE_ENDIAN
+#elif defined(_BIG_ENDIAN) && !defined(_LITTLE_ENDIAN)
+#define WASM_ENDIAN WASM_BIG_ENDIAN
+/* Detect with __LITTLE_ENDIAN__ and __BIG_ENDIAN__ macro */
+#elif defined(__LITTLE_ENDIAN__) && !defined(__BIG_ENDIAN__)
+#define WASM_ENDIAN WASM_LITTLE_ENDIAN
+#elif defined(__BIG_ENDIAN__) && !defined(__LITTLE_ENDIAN__)
+#define WASM_ENDIAN WASM_BIG_ENDIAN
+/* Detect with architecture and operating system macros */
+#elif defined(__sparc) || defined(__sparc__) \
+    || defined(_POWER) || defined(__powerpc__) || defined(__ppc__) || defined(_POWER) \
+    || defined(__hpux) || defined(__hppa) || defined(__hppa__) \
+    || defined(_MIPSEB) || defined(__MIPSEB) || defined(__MIPSEB__) \
+    || defined(__AARCH64EB__) || defined(__THUMBEB__) || defined(__ARMEB__) || defined(__ARM_BIG_ENDIAN) \
+    || defined(__s390__)
+#define WASM_ENDIAN WASM_BIG_ENDIAN
+#elif defined(__i386__) || defined(_M_IX86) \
+    || defined(__alpha__) || defined(__alpha) || defined(_M_ALPHA) \
+    || defined(__ia64) || defined(__ia64__) || defined(_M_IA64) \
+    || defined(__amd64) || defined(__amd64__) || defined(_M_AMD64) \
+    || defined(__x86_64) || defined(__x86_64__) || defined(_M_X64) \
+    || defined(_M_ARM) || defined(_M_ARM64) \
+    || defined(__AARCH64EL__) || defined(__THUMBEL__) || defined(__ARMEL__) \
+    || defined(_MIPSEL) || defined(__MIPSEL) || defined(__MIPSEL__) \
+    || defined(__bfin__)
+#define WASM_ENDIAN WASM_LITTLE_ENDIAN
+#else
+#error Unknown machine endianness detected. User needs to define WASM_ENDIAN.
+#endif
+#endif /* WASM_ENDIAN */
+
+#define swapU8(x) (x)
+
+#if WASM_ENDIAN == WASM_LITTLE_ENDIAN
+#define swapU16(x) (x)
+#define swapU32(x) (x)
+#define swapU64(x) (x)
+
+#elif WASM_ENDIAN == WASM_BIG_ENDIAN
+
+/*
+ * Use compiler byte-swapping intrinsics if they are available.
+ * 32-bit and 64-bit versions are available in Clang and GCC as of GCC 4.8.0.
+ */
+#if defined(__clang__) || (defined(__GNUC__) && ((__GNUC__ == 4 && __GNUC_MINOR__ >= 8) || __GNUC__ >= 5))
+
+#define swapU16(x) __builtin_bswap16(x)
+#define swapU32(x) __builtin_bswap32(x)
+#define swapU64(x) __builtin_bswap64(x)
+
+#elif defined(__APPLE__)
+
+#include <libkern/OSByteOrder.h>
+
+#define swapU16(x) OSSwapInt16(x)
+#define swapU32(x) OSSwapInt32(x)
+#define swapU64(x) OSSwapInt64(x)
+
+#else
+
+/*
+ * Mask, and then shift.
+ * Mask, and then shift.
+ * Mask, and then shift.
+ * Mask, and then shift.
+ */
+#define swapU16(x) ((((x) & 0xFF00) >> 8) \
+                  | (((x) & 0x00FF) << 8))
+#define swapU32(x) ((((x) & 0xFF000000) >> 24) \
+                  | (((x) & 0x00FF0000) >> 8 ) \
+                  | (((x) & 0x0000FF00) << 8 ) \
+                  | (((x) & 0x000000FF) << 24))
+#define swapU64(x) ((((x) & W2C2_LL(0xff00000000000000u)) >> 56) \
+                  | (((x) & W2C2_LL(0x00ff000000000000u)) >> 40) \
+                  | (((x) & W2C2_LL(0x0000ff0000000000u)) >> 24) \
+                  | (((x) & W2C2_LL(0x000000ff00000000u)) >> 8 ) \
+                  | (((x) & W2C2_LL(0x00000000ff000000u)) << 8 ) \
+                  | (((x) & W2C2_LL(0x0000000000ff0000u)) << 24) \
+                  | (((x) & W2C2_LL(0x000000000000ff00u)) << 40) \
+                  | (((x) & W2C2_LL(0x00000000000000ffu)) << 56))
+
+#endif
+
+#endif
+
+/* Empty: the Arduino prototype generator glues "inline" to the return type. */
+#define W2C2_INLINE
+
+#define GCC_VERSION (__GNUC__ * 10000 \
+                     + __GNUC_MINOR__ * 100 \
+                     + __GNUC_PATCHLEVEL__)
+
+#if defined(__GNUC__) && GCC_VERSION >= 30406
+#define WARN_UNUSED_RESULT __attribute__((warn_unused_result))
+#else
+#define WARN_UNUSED_RESULT
+#endif
+
+#if defined(__GNUC__) && GCC_VERSION >= 20905
+#define NORETURN __attribute__((noreturn))
+#else
+#define NORETURN
+#endif
+
+#define UNUSED_PARAMETER(value) ((void)(value))
+
+#ifndef LLONG_MIN
+#define LLONG_MIN (W2C2_LL(-0x7fffffffffffffff)-1)
+#endif
+
+#ifndef LLONG_MAX
+#define LLONG_MAX W2C2_LL(0x7fffffffffffffff)
+#endif
+
+#ifndef INT32_MAX
+#define INT32_MAX 2147483647
+#endif
+
+#ifndef INT32_MIN
+#define INT32_MIN (-INT32_MAX - 1)
+#endif
+
+#ifndef INT64_MAX
+#define INT64_MAX W2C2_LL(9223372036854775807)
+#endif
+
+#ifndef INT64_MIN
+#define INT64_MIN (-INT64_MAX - 1)
+#endif
+
+#ifndef UINT32_MAX
+#define UINT32_MAX 4294967295U
+#endif
+
+#ifndef UINT64_MAX
+#define UINT64_MAX W2C2_LL(18446744073709551615U)
+#endif
+
+#if defined(_MSC_VER) && _MSC_VER <= 1500
+
+/* disable warning C4756: overflow in constant arithmetic */
+#pragma warning(disable:4756 4056)
+
+#ifndef _HUGE_ENUF
+#define _HUGE_ENUF  1e+300  /* _HUGE_ENUF*_HUGE_ENUF must overflow */
+#endif
+
+#define INFINITY   ((float)(_HUGE_ENUF * _HUGE_ENUF))
+#define HUGE_VALF  ((float)INFINITY)
+#define HUGE_VALL  ((long double)INFINITY)
+#define NAN        ((float)(INFINITY * 0.0F))
+#endif
+
+#ifndef INFINITY
+#define INFINITY (1.0/0.0)
+#endif
+
+static
+W2C2_INLINE
+U32
+assertSizeU32(
+    const size_t size
+) {
+    assert(size <= UINT32_MAX);
+    return (U32) size;
+}
+
+typedef enum Trap {
+    trapUnreachable,
+    trapDivByZero,
+    trapIntOverflow,
+    trapInvalidConversion,
+    trapAllocationFailed,
+    trapUnsharedMemoryWait,
+    trapMemoryOutOfBounds,
+    trapTableOutOfBounds,
+    trapUninitializedElement,
+    trapIndirectCallTypeMismatch,
+    trapUnalignedAtomic
+} Trap;
+
+static
+W2C2_INLINE
+const char*
+trapDescription(
+    const Trap trap
+) {
+    switch (trap) {
+        case trapUnreachable:
+            return "unreachable";
+        case trapDivByZero:
+            return "div by zero";
+        case trapIntOverflow:
+            return "int overflow";
+        case trapInvalidConversion:
+            return "invalid conversion";
+        case trapAllocationFailed:
+            return "allocation failed";
+        case trapUnsharedMemoryWait:
+            return "wait on unshared memory";
+        case trapMemoryOutOfBounds:
+            return "out of bounds memory access";
+        case trapTableOutOfBounds:
+            return "out of bounds table access";
+        case trapUninitializedElement:
+            return "uninitialized element";
+        case trapIndirectCallTypeMismatch:
+            return "indirect call type mismatch";
+        case trapUnalignedAtomic:
+            return "unaligned atomic access";
+        default:
+            return "unknown";
+    }
+}
+
+extern void trap(Trap) NORETURN;
+
+#define TRAP(x) (trap(x), 0)
+
+#define UNREACHABLE TRAP(trapUnreachable)
+
+#define DIV_S(ut, min, x, y)                            \
+   (((y) == 0)                  ? TRAP(trapDivByZero)   \
+  : ((x) == (min) && (y) == -1) ? TRAP(trapIntOverflow) \
+  : (ut)((x) / (y)))
+
+#define REM_S(ut, min, x, y)                          \
+   (((y) == 0)                  ? TRAP(trapDivByZero) \
+  : ((x) == (min) && (y) == -1) ? 0                   \
+  : (ut)((x) % (y)))
+
+#define I32_DIV_S(x, y) DIV_S(U32, INT32_MIN, (I32)(x), (I32)(y))
+#define I64_DIV_S(x, y) DIV_S(U64, INT64_MIN, (I64)(x), (I64)(y))
+#define I32_REM_S(x, y) REM_S(U32, INT32_MIN, (I32)(x), (I32)(y))
+#define I64_REM_S(x, y) REM_S(U64, INT64_MIN, (I64)(x), (I64)(y))
+
+#define DIVREM_U(op, x, y)               \
+   (((y) == 0)    ? TRAP(trapDivByZero)   \
+  : ((x) op (y)))
+
+#define DIV_U(x, y) DIVREM_U(/, x, y)
+#define REM_U(x, y) DIVREM_U(%, x, y)
+
+#define ROTL(x, y, mask) \
+  (((x) << ((y) & (mask))) | ((x) >> (((mask) - (y) + 1) & (mask))))
+#define ROTR(x, y, mask) \
+  (((x) >> ((y) & (mask))) | ((x) << (((mask) - (y) + 1) & (mask))))
+
+#define I32_ROTL(x, y) ROTL(x, y, 31)
+#define I64_ROTL(x, y) ROTL(x, y, 63)
+#define I32_ROTR(x, y) ROTR(x, y, 31)
+#define I64_ROTR(x, y) ROTR(x, y, 63)
+
+#ifndef __has_builtin
+#define __has_builtin(x) 0
+#endif
+
+#if __has_builtin(__builtin_popcount)
+#define I32_POPCNT(x) __builtin_popcount(x)
+#else
+static
+W2C2_INLINE
+U32
+I32_POPCNT(
+    U32 x
+) {
+    x -= ((x >> 1) & 0x55555555u);
+    x = ((x >> 2) & 0x33333333u) + (x & 0x33333333u);
+    x = ((x >> 4) + x) & 0x0F0F0F0Fu;
+    x *= 0x01010101u;
+    return (x >> 24);
+}
+#endif
+
+#if __has_builtin(__builtin_popcountll)
+#define I64_POPCNT(x) __builtin_popcountll(x)
+#else
+static
+W2C2_INLINE
+U64 I64_POPCNT(U64 x) {
+    x -= ((x >> 1) & W2C2_LL(0x5555555555555555u));
+    x = ((x >> 2) & W2C2_LL(0x3333333333333333u)) + (x & W2C2_LL(0x3333333333333333u));
+    x = ((x >> 4) + x) & W2C2_LL(0xf0f0f0f0f0f0f0fu);
+    x *= W2C2_LL(0x101010101010101u);
+    return (x >> 56);
+}
+#endif
+
+#if __has_builtin(__builtin_clz)
+/* __builtin_clz(0) is undefined */
+#define I32_CLZ(x) ((x) ? __builtin_clz(x) : 32)
+#else
+/* From Hacker's Delight 2nd Edition */
+static
+W2C2_INLINE
+U32
+I32_CLZ(
+    U32 x
+) {
+    I32 n = 32;
+    U32 y = x >> 16;
+    if (y != 0) {
+        n -= 16;
+        x = y;
+    }
+    y = x >> 8;
+    if (y != 0) {
+        n -= 8;
+        x = y;
+    }
+    y = x >> 4;
+    if (y != 0) {
+        n -= 4;
+        x = y;
+    }
+    y = x >> 2;
+    if (y != 0) {
+        n -= 2;
+        x = y;
+    }
+    y = x >> 1;
+    if (y != 0) {
+        return n - 2;
+    }
+    return n - x;
+}
+#endif
+
+#if __has_builtin(__builtin_clzll)
+/* __builtin_clzll(0) is undefined */
+#define I64_CLZ(x) ((x) ? __builtin_clzll(x) : 64)
+#else
+/* From Hacker's Delight 2nd Edition */
+static
+W2C2_INLINE
+U64
+I64_CLZ(
+    U64 x
+) {
+    I64 n = 64;
+    U64 y = x >> 32;
+    if (y != 0) {
+        n -= 32;
+        x = y;
+    }
+    y = x >> 16;
+    if (y != 0) {
+        n -= 16;
+        x = y;
+    }
+    y = x >> 8;
+    if (y != 0) {
+        n -= 8;
+        x = y;
+    }
+    y = x >> 4;
+    if (y != 0) {
+        n -= 4;
+        x = y;
+    }
+    y = x >> 2;
+    if (y != 0) {
+        n -= 2;
+        x = y;
+    }
+    y = x >> 1;
+    if (y != 0) {
+        return n - 2;
+    }
+    return n - x;
+}
+#endif
+
+#if __has_builtin(__builtin_ctz)
+/* __builtin_ctz(0) is undefined */
+#define I32_CTZ(x) ((x) ? __builtin_ctz(x) : 32)
+#else
+/* From Hacker's Delight 2nd Edition */
+static
+W2C2_INLINE
+U32
+I32_CTZ(
+    const U32 x
+) {
+    return 32 - I32_CLZ(~x & (x - 1));
+}
+#endif
+
+#if __has_builtin(__builtin_ctzll)
+/* __builtin_ctzll(0) is undefined */
+#define I64_CTZ(x) ((x) ? __builtin_ctzll(x) : 64)
+#else
+/* From Hacker's Delight 2nd Edition */
+static
+W2C2_INLINE
+U64
+I64_CTZ(
+    const U64 x
+) {
+    return 64 - I64_CLZ(~x & (x - 1));
+}
+#endif
+
+#define FMIN(x, y)                                    \
+   (((x) != (x)) ? NAN                                \
+  : ((y) != (y)) ? NAN                                \
+  : ((x) == 0 && (y) == 0) ? (signbit(x) ? (x) : (y)) \
+  : ((x) < (y)) ? (x) : (y))
+
+#define FMAX(x, y)                                    \
+   (((x) != (x)) ? NAN                                \
+  : ((y) != (y)) ? NAN                                \
+  : ((x) == 0 && (y) == 0) ? (signbit(x) ? (y) : (x)) \
+  : ((x) > (y)) ? (x) : (y))
+
+#define TRUNC_S(ut, st, ft, min, minop, max, x)                     \
+   (((x) != (x))                      ? TRAP(trapInvalidConversion) \
+  : (!((x)minop(min) && (x) < (max))) ? TRAP(trapIntOverflow)       \
+  : (ut)(st)(x))
+
+#define I32_TRUNC_S_F32(x) TRUNC_S(U32, I32, F32, (F32)INT32_MIN, >=, 2147483648.f, x)
+#define I64_TRUNC_S_F32(x) TRUNC_S(U64, I64, F32, (F32)INT64_MIN, >=, (F32)INT64_MAX, x)
+#define I32_TRUNC_S_F64(x) TRUNC_S(U32, I32, F64, -2147483649., >, 2147483648., x)
+#define I64_TRUNC_S_F64(x) TRUNC_S(U64, I64, F64, (F64)INT64_MIN, >=, (F64)INT64_MAX, x)
+
+#define TRUNC_U(ut, ft, max, x)                                    \
+   (((x) != (x))                     ? TRAP(trapInvalidConversion) \
+  : (!((x) > (ft)-1 && (x) < (max))) ? TRAP(trapIntOverflow)       \
+  : (ut)(x))
+
+#define I32_TRUNC_U_F32(x) TRUNC_U(U32, F32, 4294967296.f, x)
+#define I64_TRUNC_U_F32(x) TRUNC_U(U64, F32, (F32)UINT64_MAX, x)
+#define I32_TRUNC_U_F64(x) TRUNC_U(U32, F64, 4294967296., x)
+#define I64_TRUNC_U_F64(x) TRUNC_U(U64, F64, (F64)UINT64_MAX, x)
+
+#define TRUNC_SAT_S(ut, st, ft, min, smin, minop, max, smax, x) \
+   (((x) != (x)) ? 0                                            \
+  : (!((x)minop(min))) ? smin                                   \
+  : (!((x) < (max))) ? smax                                     \
+  : (ut)(st)(x))
+
+#define I32_TRUNC_SAT_S_F32(x) \
+  TRUNC_SAT_S(U32, I32, f32, (F32)INT32_MIN, INT32_MIN, >=, 2147483648.f, INT32_MAX, x)
+#define I64_TRUNC_SAT_S_F32(x) \
+  TRUNC_SAT_S(U64, I64, F32, (F32)INT64_MIN, INT64_MIN, >=, (F32)INT64_MAX, INT64_MAX, x)
+#define I32_TRUNC_SAT_S_F64(x) \
+  TRUNC_SAT_S(U32, I32, F64, -2147483649., INT32_MIN, >, 2147483648., INT32_MAX, x)
+#define I64_TRUNC_SAT_S_F64(x) \
+  TRUNC_SAT_S(U64, I64, F64, (F64)INT64_MIN, INT64_MIN, >=, (F64)INT64_MAX, INT64_MAX, x)
+
+#define TRUNC_SAT_U(ut, ft, max, smax, x) \
+   (((x) != (x)) ? 0                      \
+  : (!((x) > (ft)-1)) ? 0                 \
+  : (!((x) < (max))) ? smax               \
+  : (ut)(x))
+
+#define I32_TRUNC_SAT_U_F32(x) \
+  TRUNC_SAT_U(U32, F32, 4294967296.f, UINT32_MAX, x)
+#define I64_TRUNC_SAT_U_F32(x) \
+  TRUNC_SAT_U(U64, F32, (F32)UINT64_MAX, UINT64_MAX, x)
+#define I32_TRUNC_SAT_U_F64(x) \
+  TRUNC_SAT_U(U32, F64, 4294967296., UINT32_MAX, x)
+#define I64_TRUNC_SAT_U_F64(x) \
+  TRUNC_SAT_U(U64, F64, (F64)UINT64_MAX, UINT64_MAX, x)
+
+#ifdef _WIN32
+#include <float.h>
+#define copysignf _copysignf
+#define copysign _copysign
+#endif
+
+#define DEFINE_REINTERPRET(name, t1, t2)  \
+  static W2C2_INLINE t2 name(t1 x) {      \
+    t2 result;                            \
+    W2C2_MEMCPY(&result, &x, sizeof(result)); \
+    return result;                        \
+  }
+
+DEFINE_REINTERPRET(f32_reinterpret_i32, U32, F32)
+DEFINE_REINTERPRET(i32_reinterpret_f32, F32, U32)
+DEFINE_REINTERPRET(f64_reinterpret_i64, U64, F64)
+DEFINE_REINTERPRET(i64_reinterpret_f64, F64, U64)
+
+static
+W2C2_INLINE
+F32
+f32_demote_f64(F64 value) {
+    const U64 magnitude = i64_reinterpret_f64(value) & W2C2_LL(0x7fffffffffffffffU);
+    /* Conversions must quiet NaNs,
+     * even when the compiler folds a promotion followed by a demotion. */
+    if (magnitude > W2C2_LL(0x7ff0000000000000U)) {
+        return f32_reinterpret_i32(0x7fc00000U);
+    }
+    return (F32)value;
+}
+
+static
+W2C2_INLINE
+F64
+f64_promote_f32(F32 value) {
+    const U32 magnitude = i32_reinterpret_f32(value) & 0x7fffffffU;
+    /* Conversions must quiet NaNs,
+     * even when the compiler folds a promotion followed by a demotion. */
+    if (magnitude > 0x7f800000U) {
+        return f64_reinterpret_i64(W2C2_LL(0x7ff8000000000000U));
+    }
+    return (F64)value;
+}
+
+#ifdef PLAN9
+/* APE lacks the C99 math operations used by generated code. */
+#ifndef NAN
+#define NAN f32_reinterpret_i32(0x7fc00000U)
+#endif
+#undef INFINITY
+#define INFINITY f32_reinterpret_i32(0x7f800000U)
+#undef signbit
+#define signbit(x) ((i64_reinterpret_f64((F64)(x)) >> 63) != 0)
+#define fabsf(x) f32_reinterpret_i32(i32_reinterpret_f32(x) & 0x7fffffffU)
+#define sqrtf(x) ((F32)sqrt((F64)(x)))
+#define ceilf(x) ((F32)ceil((F64)(x)))
+#define floorf(x) ((F32)floor((F64)(x)))
+
+static
+W2C2_INLINE
+F64
+wasmPlan9Copysign(F64 value, F64 sign) {
+    const U64 signMask = W2C2_LL(0x8000000000000000U);
+    return f64_reinterpret_i64(
+        (i64_reinterpret_f64(value) & ~signMask)
+        | (i64_reinterpret_f64(sign) & signMask)
+    );
+}
+
+static
+W2C2_INLINE
+F32
+wasmPlan9CopysignF32(F32 value, F32 sign) {
+    return f32_reinterpret_i32(
+        (i32_reinterpret_f32(value) & 0x7fffffffU)
+        | (i32_reinterpret_f32(sign) & 0x80000000U)
+    );
+}
+
+static
+W2C2_INLINE
+F64
+wasmPlan9Round(F64 value, bool nearest) {
+    U64 bits = i64_reinterpret_f64(value);
+    const U64 signMask = W2C2_LL(0x8000000000000000U);
+    const I32 exponent = (I32)((bits >> 52) & 0x7ffU) - 1023;
+    U64 unit;
+    U64 fraction;
+    if (exponent >= 52) {
+        /* Integers, infinities, and NaNs need no rounding. */
+        return value;
+    }
+    if (exponent < 0) {
+        const bool roundToOne = nearest
+            && (bits & ~signMask) > W2C2_LL(0x3fe0000000000000U);
+        return f64_reinterpret_i64(
+            (bits & signMask)
+            | (roundToOne ? W2C2_LL(0x3ff0000000000000U) : 0)
+        );
+    }
+    unit = W2C2_LL(1U) << (52 - exponent);
+    fraction = bits & (unit - 1);
+    bits &= ~(unit - 1);
+    /* Round ties to even without depending on the host rounding mode. */
+    if (nearest && (fraction > (unit >> 1)
+        || (fraction == (unit >> 1) && (bits & unit) != 0))) {
+        bits += unit;
+    }
+    return f64_reinterpret_i64(bits);
+}
+
+#undef copysign
+#define copysign(x, y) wasmPlan9Copysign(x, y)
+#undef copysignf
+#define copysignf(x, y) wasmPlan9CopysignF32(x, y)
+#define trunc(x) wasmPlan9Round(x, false)
+#define truncf(x) ((F32)wasmPlan9Round((F64)(x), false))
+#define nearbyint(x) wasmPlan9Round(x, true)
+#define nearbyintf(x) ((F32)wasmPlan9Round((F64)(x), true))
+#endif
+
+#ifdef WASM_THREADS_PTHREADS
+#define WASM_THREAD_TYPE pthread_t
+#define WASM_THREAD_CREATE(thread, func, arg) (pthread_create(thread, NULL, func, arg) == 0)
+#define WASM_THREAD_JOIN(thread) ((void)pthread_join(thread, NULL))
+#define WASM_THREAD_DETACH(thread) ((void)pthread_detach(thread))
+
+#define WASM_MUTEX_TYPE pthread_mutex_t
+#define WASM_MUTEX_INIT(mutex) (pthread_mutex_init(mutex, NULL) == 0)
+#define WASM_MUTEX_FREE(mutex) ((void)pthread_mutex_destroy(mutex))
+#define WASM_MUTEX_LOCK(mutex) ((void)pthread_mutex_lock(mutex))
+#define WASM_MUTEX_UNLOCK(mutex) ((void)pthread_mutex_unlock(mutex))
+
+#define WASM_COND_TYPE pthread_cond_t
+#define WASM_COND_INIT(cond) (pthread_cond_init(cond, NULL) == 0)
+#define WASM_COND_FREE(cond) ((void)pthread_cond_destroy(cond))
+#define WASM_COND_WAIT(cond, mutex) ((void)pthread_cond_wait(cond, mutex))
+#define WASM_COND_RELATIVE_WAIT(cond, signal, timeout) wasmCondRelativeWait(cond, signal, timeout)
+#define WASM_COND_SIGNAL(cond) ((void)pthread_cond_signal(cond))
+
+#define NS_PER_S 1000000000
+
+#include <unistd.h>
+#if defined(_POSIX_TIMERS) && (_POSIX_TIMERS > 0)
+#include <time.h>
+#else
+#include <sys/time.h>
+#endif
+
+static
+W2C2_INLINE
+bool
+WARN_UNUSED_RESULT
+wasmCondRelativeWait(
+    WASM_COND_TYPE* cond,
+    WASM_MUTEX_TYPE* mutex,
+    I64 relativeTimeout
+) {
+    struct timespec absoluteTimeout;
+#if defined(_POSIX_TIMERS) && (_POSIX_TIMERS > 0)
+    if (clock_gettime(CLOCK_REALTIME, &absoluteTimeout) != 0) {
+        return false;
+    }
+#else
+    struct timeval tv;
+    if (gettimeofday(&tv, NULL) != 0) {
+	    return false;
+    }
+    TIMEVAL_TO_TIMESPEC(&tv, &absoluteTimeout);
+#endif
+    absoluteTimeout.tv_sec += (time_t)relativeTimeout / NS_PER_S;
+    absoluteTimeout.tv_nsec += (long int)relativeTimeout % NS_PER_S;
+    if (absoluteTimeout.tv_nsec >= NS_PER_S) {
+        absoluteTimeout.tv_nsec -= NS_PER_S;
+        absoluteTimeout.tv_sec++;
+    }
+    return pthread_cond_timedwait(cond, mutex, &absoluteTimeout) != ETIMEDOUT;
+}
+
+#elif defined(WASM_THREADS_WIN32)
+
+#define NS_PER_MS 1000000
+
+#define WASM_THREAD_TYPE HANDLE
+#define WASM_THREAD_CREATE(thread, func, arg) wasmThreadCreate(thread, func, arg)
+#define WASM_THREAD_JOIN(thread) (WaitForSingleObject(thread, INFINITE), (void)CloseHandle(thread))
+#define WASM_THREAD_DETACH(thread) ((void)CloseHandle(thread))
+
+#define WASM_MUTEX_TYPE CRITICAL_SECTION
+#define WASM_MUTEX_INIT(mutex) (InitializeCriticalSection(mutex), true)
+#define WASM_MUTEX_FREE(mutex) DeleteCriticalSection(mutex)
+#define WASM_MUTEX_LOCK(mutex) EnterCriticalSection(mutex)
+#define WASM_MUTEX_UNLOCK(mutex) LeaveCriticalSection(mutex)
+
+#define WASM_COND_TYPE CONDITION_VARIABLE
+#define WASM_COND_INIT(cond) (InitializeConditionVariable(cond), true)
+#define WASM_COND_FREE(cond) ((void)cond) /* NO-OP */
+#define WASM_COND_WAIT(cond, mutex) ((void)SleepConditionVariableCS(cond, mutex, INFINITE))
+#define WASM_COND_RELATIVE_WAIT(cond, signal, timeout) \
+    SleepConditionVariableCS(cond, signal, (DWORD)((timeout) / NS_PER_MS))
+#define WASM_COND_SIGNAL(cond) WakeConditionVariable(cond)
+
+typedef struct wasmWin32ThreadStartArg {
+    void* (*startFunc)(void*);
+    void* startFuncArg;
+} wasmWin32ThreadStartArg;
+
+static
+DWORD
+__stdcall
+wasmWin32ThreadStart(
+    void *arg
+) {
+    wasmWin32ThreadStartArg* startArg = (wasmWin32ThreadStartArg*)arg;
+    void* (*startFunc)(void*) = startArg->startFunc;
+    void* startFuncArg = startArg->startFuncArg;
+
+    free(arg);
+
+    startFunc(startFuncArg);
+
+    return ERROR_SUCCESS;
+}
+
+static
+W2C2_INLINE
+bool
+WARN_UNUSED_RESULT
+wasmThreadCreate(
+    WASM_THREAD_TYPE* thread,
+    void* (*startFunc)(void*),
+    void* startFuncArg
+) {
+    wasmWin32ThreadStartArg* startArg = (wasmWin32ThreadStartArg*)calloc(1, sizeof(wasmWin32ThreadStartArg));
+    if (!startArg) {
+        return false;
+    }
+
+    startArg->startFunc = startFunc;
+    startArg->startFuncArg = startFuncArg;
+
+    *thread = CreateThread(NULL, 0, wasmWin32ThreadStart, startArg, 0, NULL);
+    if (*thread == NULL) {
+        free(startArg);
+        return false;
+    }
+
+    return true;
+}
+
+#endif
+
+typedef struct wasmMemory {
+    U8* data;
+    /* Shared size fields require the mutex;
+     * wasmMemorySize returns pages. */
+    U64 size;
+    U32 pages;
+    U32 maxPages;
+    bool shared;
+    void* futex;
+    void (*futexFree)(void* futex);
+#ifdef WASM_MUTEX_TYPE
+    WASM_MUTEX_TYPE mutex;
+#endif
+} wasmMemory;
+
+#define WASM_PAGE_SIZE 65536
+#define WASM_MAX_PAGES 65536
+
+static
+W2C2_INLINE
+wasmMemory*
+wasmMemoryAllocate(
+    const U32 initialPages,
+    const U32 maxPages,
+    const bool shared
+) {
+    const U64 allocationSize = (U64)(shared ? maxPages : initialPages) * WASM_PAGE_SIZE;
+    wasmMemory* memory;
+    if (allocationSize > (size_t)-1) {
+        abort();
+    }
+    memory = (wasmMemory*)calloc(1, sizeof(wasmMemory));
+    if (!memory) {
+        abort();
+    }
+    memory->data = (U8*)calloc((size_t)allocationSize, 1);
+    if (allocationSize != 0 && memory->data == NULL) {
+        free(memory);
+        abort();
+    }
+    memory->size = (U64)initialPages * WASM_PAGE_SIZE;
+    memory->pages = initialPages;
+    memory->maxPages = maxPages;
+    memory->shared = shared;
+    memory->futex = NULL;
+    memory->futexFree = NULL;
+    if (shared) {
+#ifdef WASM_MUTEX_TYPE
+        if (!WASM_MUTEX_INIT(&memory->mutex)) {
+            abort();
+        }
+#else
+        abort();
+#endif
+    }
+    return memory;
+}
+
+#ifdef WASM_MUTEX_TYPE
+#define WASM_MEMORY_ALLOCATE_SHARED(initialPages, maxPages) \
+    wasmMemoryAllocate(initialPages, maxPages, true)
+#else
+#define WASM_MEMORY_ALLOCATE_SHARED(initialPages, maxPages) \
+    (_Pragma ("GCC error \"Shared memory not supported. Please define a threads implementation to use (WASM_THREADS_*)\"") NULL)
+#endif
+
+static
+W2C2_INLINE
+void
+wasmMemoryFree(
+    wasmMemory* memory
+) {
+    if (memory == NULL) {
+        return;
+    }
+
+    free(memory->data);
+
+    memory->size = 0;
+    memory->pages = 0;
+
+#ifdef WASM_MUTEX_TYPE
+    if (memory->shared) {
+        WASM_MUTEX_FREE(&memory->mutex);
+    }
+#endif
+
+    if (memory->futexFree) {
+        memory->futexFree(memory->futex);
+    }
+    memory->futex = NULL;
+    memory->futexFree = NULL;
+
+    free(memory);
+}
+
+static
+W2C2_INLINE
+U32
+wasmMemorySize(
+    wasmMemory* memory
+) {
+    U32 pages;
+#ifdef WASM_MUTEX_TYPE
+    if (memory->shared) {
+        WASM_MUTEX_LOCK(&memory->mutex);
+    }
+#endif
+    pages = memory->pages;
+#ifdef WASM_MUTEX_TYPE
+    if (memory->shared) {
+        WASM_MUTEX_UNLOCK(&memory->mutex);
+    }
+#endif
+    return pages;
+}
+
+static
+W2C2_INLINE
+U32
+wasmMemoryGrow(
+    wasmMemory* memory,
+    const U32 delta
+) {
+    U32 result;
+    U64 newPages;
+    U64 newSize;
+
+#ifdef WASM_MUTEX_TYPE
+    if (memory->shared) {
+        WASM_MUTEX_LOCK(&memory->mutex);
+    }
+#endif
+
+    result = memory->pages;
+
+    if (delta == 0) {
+        goto done;
+    }
+
+    newPages = (U64)result + delta;
+    newSize = newPages * WASM_PAGE_SIZE;
+    if (newPages > memory->maxPages || newSize > (size_t)-1) {
+        result = (U32)-1;
+        goto done;
+    }
+
+    if (!memory->shared) {
+        const size_t oldSize = (size_t)((U64)result * WASM_PAGE_SIZE);
+        U8* newData = (U8*)realloc(memory->data, (size_t)newSize);
+        if (newData == NULL) {
+            result = (U32)-1;
+            goto done;
+        }
+
+        memset(newData + oldSize, 0, (size_t)newSize - oldSize);
+        memory->data = newData;
+    }
+
+    memory->pages = (U32)newPages;
+    memory->size = newSize;
+
+done:
+#ifdef WASM_MUTEX_TYPE
+    if (memory->shared) {
+        WASM_MUTEX_UNLOCK(&memory->mutex);
+    }
+#endif
+
+    return result;
+}
+
+#if W2C2_RUNTIME_CHECKS
+static
+W2C2_INLINE
+void
+wasmMemoryCheckRange(
+    const wasmMemory* memory,
+    const WasmMemoryAddress address,
+    const U64 count
+) {
+    U64 size;
+#ifdef WASM_MUTEX_TYPE
+    wasmMemory* mutableMemory = (wasmMemory*)memory;
+    if (memory->shared) {
+        WASM_MUTEX_LOCK(&mutableMemory->mutex);
+    }
+#endif
+    size = memory->size;
+#ifdef WASM_MUTEX_TYPE
+    if (memory->shared) {
+        WASM_MUTEX_UNLOCK(&mutableMemory->mutex);
+    }
+#endif
+    if (address > size || count > size - address) {
+        trap(trapMemoryOutOfBounds);
+    }
+}
+
+static
+W2C2_INLINE
+void
+wasmAtomicCheckAccess(
+    const wasmMemory* memory,
+    const WasmMemoryAddress address,
+    const U32 size
+) {
+    if ((address & (size - 1U)) != 0) {
+        trap(trapUnalignedAtomic);
+    }
+    wasmMemoryCheckRange(memory, address, size);
+}
+
+#else
+#define wasmMemoryCheckRange(memory, address, count) ((void)0)
+#define wasmAtomicCheckAccess(memory, address, size) ((void)0)
+#endif
+
+static
+W2C2_INLINE
+void
+wasmMemoryCopy(
+    const wasmMemory* destinationMemory,
+    const wasmMemory* sourceMemory,
+    const U32 destinationAddress,
+    const U32 sourceAddress,
+    const U32 count
+) {
+    wasmMemoryCheckRange(destinationMemory, destinationAddress, count);
+    wasmMemoryCheckRange(sourceMemory, sourceAddress, count);
+    if (count == 0) {
+        return;
+    }
+    memmove(
+        destinationMemory->data + destinationAddress,
+        sourceMemory->data + sourceAddress,
+        count
+    );
+}
+
+static
+W2C2_INLINE
+void
+wasmMemoryFill(
+    const wasmMemory* memory,
+    const U32 destinationAddress,
+    const U32 value,
+    const U32 count
+) {
+    wasmMemoryCheckRange(memory, destinationAddress, count);
+    if (count == 0) {
+        return;
+    }
+    memset(
+        memory->data + destinationAddress,
+        (int) value,
+        (size_t) count
+    );
+}
+
+static
+W2C2_INLINE
+void
+load_data(
+    wasmMemory* memory,
+    const WasmMemoryAddress offset,
+    const void *src,
+    const size_t n
+) {
+    wasmMemoryCheckRange(memory, offset, n);
+    if (n == 0) {
+        return;
+    }
+    memcpy(memory->data + offset, src, n);
+}
+
+static
+W2C2_INLINE
+void
+wasmMemoryInit(
+    wasmMemory* memory,
+    const U32 destination,
+    const U8* source,
+    const U32 sourceSize,
+    const U32 sourceOffset,
+    const U32 count
+) {
+    (void)sourceSize;
+    wasmMemoryCheckRange(memory, destination, count);
+#if W2C2_RUNTIME_CHECKS
+    if (sourceOffset > sourceSize || count > sourceSize - sourceOffset) {
+        trap(trapMemoryOutOfBounds);
+    }
+#endif
+    if (count != 0) {
+        memcpy(memory->data + destination, source + sourceOffset, count);
+    }
+}
+
+#if WASM_ENDIAN == WASM_BIG_ENDIAN
+
+#define readSwapU8(base, offset) (*((const U8*)(base) + (offset)))
+#define writeSwapU8(base, offset, value) (*((U8*)(base) + (offset)) = (value))
+
+#if defined(__APPLE__)
+
+#include <libkern/OSByteOrder.h>
+#define readSwapU16(base, offset) OSReadSwapInt16(base, offset)
+#define readSwapU32(base, offset) OSReadSwapInt32(base, offset)
+#define readSwapU64(base, offset) OSReadSwapInt64(base, offset)
+
+#define writeSwapU16(base, offset, value) OSWriteSwapInt16(base, offset, value)
+#define writeSwapU32(base, offset, value) OSWriteSwapInt32(base, offset, value)
+#define writeSwapU64(base, offset, value) OSWriteSwapInt64(base, offset, value)
+
+#else
+
+static W2C2_INLINE U16 readSwapU16(const void* address, WasmMemoryAddress offset) {
+    U16 result;
+    W2C2_MEMCPY(&result, (const U8*)address + offset, sizeof(U16));
+    return swapU16(result);
+}
+
+static W2C2_INLINE U32 readSwapU32(const void* address, WasmMemoryAddress offset) {
+    U32 result;
+    W2C2_MEMCPY(&result, (const U8*)address + offset, sizeof(U32));
+    return swapU32(result);
+}
+
+static W2C2_INLINE U64 readSwapU64(const void* address, WasmMemoryAddress offset) {
+    U64 result;
+    W2C2_MEMCPY(&result, (const U8*)address + offset, sizeof(U64));
+    return swapU64(result);
+}
+
+static W2C2_INLINE void writeSwapU16(void* address, WasmMemoryAddress offset, U16 v) {
+    v = swapU16(v);
+    W2C2_MEMCPY((U8*)address + offset, &v, sizeof(U16));
+}
+
+static W2C2_INLINE void writeSwapU32(void* address, WasmMemoryAddress offset, U32 v) {
+    v = swapU32(v);
+    W2C2_MEMCPY((U8*)address + offset, &v, sizeof(U32));
+}
+
+static W2C2_INLINE void writeSwapU64(void* address, WasmMemoryAddress offset, U64 v) {
+    v = swapU64(v);
+    W2C2_MEMCPY((U8*)address + offset, &v, sizeof(U64));
+}
+
+#endif
+
+#endif
+
+/* LOAD_DATA */
+
+#define LOAD_DATA(m, o, i, s) \
+    load_data(&(m), o, i, s)
+
+/* DEFINE_LOAD */
+
+#define DEFINE_LOAD(name, t1, t2, t3)                           \
+    static W2C2_INLINE t3 name(wasmMemory* mem, WasmMemoryAddress addr) { \
+        t1 result;                                              \
+        wasmMemoryCheckRange(mem, addr, sizeof(t1)); \
+        W2C2_MEMCPY(&result, &mem->data[addr], sizeof(t1));     \
+        return (t3)(t2)result;                                  \
+    }
+
+/* DEFINE_LOAD8 */
+
+#define DEFINE_LOAD8(name, t1, t2, t3) DEFINE_LOAD(name, t1, t2, t3)
+
+/* DEFINE_LOAD16 */
+
+#if WASM_ENDIAN == WASM_LITTLE_ENDIAN
+
+#define DEFINE_LOAD16(name, t1, t2, t3) DEFINE_LOAD(name, t1, t2, t3)
+
+#elif WASM_ENDIAN == WASM_BIG_ENDIAN
+
+#define DEFINE_LOAD16(name, t1, t2, t3)                         \
+    static W2C2_INLINE t3 name(wasmMemory* mem, WasmMemoryAddress addr) { \
+        t1 result;                                              \
+        U16 v; \
+        wasmMemoryCheckRange(mem, addr, sizeof(t1)); \
+        v = readSwapU16(mem->data, addr); \
+        W2C2_MEMCPY(&result, &v, sizeof(U16));                  \
+        return (t3)(t2)result;                                  \
+    }
+
+#endif
+
+/* DEFINE_LOAD32 */
+
+#if WASM_ENDIAN == WASM_LITTLE_ENDIAN
+
+#define DEFINE_LOAD32(name, t1, t2, t3) DEFINE_LOAD(name, t1, t2, t3)
+
+#elif WASM_ENDIAN == WASM_BIG_ENDIAN
+
+#define DEFINE_LOAD32(name, t1, t2, t3)                         \
+    static W2C2_INLINE t3 name(wasmMemory* mem, WasmMemoryAddress addr) { \
+        t1 result;                                              \
+        U32 v; \
+        wasmMemoryCheckRange(mem, addr, sizeof(t1)); \
+        v = readSwapU32(mem->data, addr); \
+        W2C2_MEMCPY(&result, &v, sizeof(U32));                  \
+        return (t3)(t2)result;                                  \
+    }
+
+#endif
+
+/* DEFINE_LOAD64 */
+
+#if WASM_ENDIAN == WASM_LITTLE_ENDIAN
+
+#define DEFINE_LOAD64(name, t1, t2, t3) DEFINE_LOAD(name, t1, t2, t3)
+
+#elif WASM_ENDIAN == WASM_BIG_ENDIAN
+
+#define DEFINE_LOAD64(name, t1, t2, t3)                         \
+    static W2C2_INLINE t3 name(wasmMemory* mem, WasmMemoryAddress addr) { \
+        t1 result;                                              \
+        U64 v; \
+        wasmMemoryCheckRange(mem, addr, sizeof(t1)); \
+        v = readSwapU64(mem->data, addr); \
+        W2C2_MEMCPY(&result, &v, sizeof(U64));                  \
+        return (t3)(t2)result;                                  \
+    }
+
+#endif
+
+/* DEFINE_STORE */
+
+#define DEFINE_STORE(name, t1, t2)                                          \
+    static W2C2_INLINE void name(wasmMemory* mem, WasmMemoryAddress addr, t2 value) { \
+        t1 wrapped = (t1)value;                                             \
+        wasmMemoryCheckRange(mem, addr, sizeof(t1)); \
+        W2C2_MEMCPY(&mem->data[addr], &wrapped, sizeof(t1));                \
+    }
+
+/* DEFINE_STORE8 */
+
+#define DEFINE_STORE8(name, t1, t2) DEFINE_STORE(name, t1, t2)
+
+/* DEFINE_STORE16 */
+
+#if WASM_ENDIAN == WASM_LITTLE_ENDIAN
+
+#define DEFINE_STORE16(name, t1, t2) DEFINE_STORE(name, t1, t2)
+
+#elif WASM_ENDIAN == WASM_BIG_ENDIAN
+
+#define DEFINE_STORE16(name, t1, t2)                                        \
+    static W2C2_INLINE void name(wasmMemory* mem, WasmMemoryAddress addr, t2 value) { \
+        t1 wrapped = (t1)value;                                             \
+        U16 v;                                                              \
+        wasmMemoryCheckRange(mem, addr, sizeof(t1)); \
+        W2C2_MEMCPY(&v, &wrapped, sizeof(U16));                             \
+        writeSwapU16(mem->data, addr, v);                                   \
+    }
+
+#endif
+
+/* DEFINE_STORE32 */
+
+#if WASM_ENDIAN == WASM_LITTLE_ENDIAN
+
+#define DEFINE_STORE32(name, t1, t2) DEFINE_STORE(name, t1, t2)
+
+#elif WASM_ENDIAN == WASM_BIG_ENDIAN
+
+#define DEFINE_STORE32(name, t1, t2)                                        \
+    static W2C2_INLINE void name(wasmMemory* mem, WasmMemoryAddress addr, t2 value) { \
+        t1 wrapped = (t1)value;                                             \
+        U32 v;                                                              \
+        wasmMemoryCheckRange(mem, addr, sizeof(t1)); \
+        W2C2_MEMCPY(&v, &wrapped, sizeof(U32));                             \
+        writeSwapU32(mem->data, addr, v);                                   \
+    }
+
+#endif
+
+/* DEFINE_STORE64 */
+
+#if WASM_ENDIAN == WASM_LITTLE_ENDIAN
+
+#define DEFINE_STORE64(name, t1, t2) DEFINE_STORE(name, t1, t2)
+
+#elif WASM_ENDIAN == WASM_BIG_ENDIAN
+
+#define DEFINE_STORE64(name, t1, t2)                                        \
+    static W2C2_INLINE void name(wasmMemory* mem, WasmMemoryAddress addr, t2 value) { \
+        t1 wrapped = (t1)value;                                             \
+        U64 v;                                                              \
+        wasmMemoryCheckRange(mem, addr, sizeof(t1)); \
+        W2C2_MEMCPY(&v, &wrapped, sizeof(U64));                             \
+        writeSwapU64(mem->data, addr, v);                                   \
+    }
+
+#endif
+
+
+DEFINE_LOAD32(i32_load, U32, U32, U32)
+DEFINE_LOAD64(i64_load, U64, U64, U64)
+DEFINE_LOAD32(f32_load, F32, F32, F32)
+DEFINE_LOAD64(f64_load, F64, F64, F64)
+DEFINE_LOAD8(i32_load8_s, I8, I32, U32)
+DEFINE_LOAD8(i64_load8_s, I8, I64, U64)
+DEFINE_LOAD8(i32_load8_u, U8, U32, U32)
+DEFINE_LOAD8(i64_load8_u, U8, U64, U64)
+DEFINE_LOAD16(i32_load16_s, I16, I32, U32)
+DEFINE_LOAD16(i64_load16_s, I16, I64, U64)
+DEFINE_LOAD16(i32_load16_u, U16, U32, U32)
+DEFINE_LOAD16(i64_load16_u, U16, U64, U64)
+DEFINE_LOAD32(i64_load32_s, I32, I64, U64)
+DEFINE_LOAD32(i64_load32_u, U32, U64, U64)
+DEFINE_STORE32(i32_store, U32, U32)
+DEFINE_STORE64(i64_store, U64, U64)
+DEFINE_STORE32(f32_store, F32, F32)
+DEFINE_STORE64(f64_store, F64, F64)
+DEFINE_STORE8(i32_store8, U8, U32)
+DEFINE_STORE16(i32_store16, U16, U32)
+DEFINE_STORE8(i64_store8, U8, U64)
+DEFINE_STORE16(i64_store16, U16, U64)
+DEFINE_STORE32(i64_store32, U32, U64)
+
+#if WASM_ENDIAN == WASM_LITTLE_ENDIAN
+
+#define DEFINE_SWAP(size, suffix, type) \
+    static W2C2_INLINE void swap_ ## suffix(type* v) { (void)v; }
+
+#elif WASM_ENDIAN == WASM_BIG_ENDIAN
+
+#define DEFINE_SWAP(size, suffix, type)                \
+    static W2C2_INLINE void swap_ ## suffix(type* v) { \
+        U ## size tmp;                                 \
+        W2C2_MEMCPY(&tmp, v, size / 8);                \
+        tmp = swapU ## size(tmp);                      \
+        W2C2_MEMCPY(v, &tmp, size / 8);                \
+    }
+
+#endif
+
+DEFINE_SWAP(16, s, short)
+DEFINE_SWAP(16, S, unsigned short)
+DEFINE_SWAP(32, i, int)
+DEFINE_SWAP(32, I, unsigned int)
+DEFINE_SWAP(32, l, long)
+DEFINE_SWAP(32, L, unsigned long)
+#if defined(_MSC_VER) && _MSC_VER <= 1000
+DEFINE_SWAP(64, q, signed __int64)
+DEFINE_SWAP(64, Q, unsigned __int64)
+#else
+DEFINE_SWAP(64, q, long long)
+DEFINE_SWAP(64, Q, unsigned long long)
+#endif
+DEFINE_SWAP(32, f, float)
+DEFINE_SWAP(64, d, double)
+
+typedef struct wasmModuleInstance wasmModuleInstance;
+
+/* Cast back to the function's signature with a wasmModuleInstance* instance parameter. */
+typedef void (*wasmFunc)(void);
+
+/* Type strings use one character per value:
+ * i = i32, j = i64, f = f32, d = f64, v = v128, r = funcref, e = externref. */
+typedef struct wasmFuncType {
+    U32 parameterCount;
+    const char* parameterTypes;
+    U32 resultCount;
+    const char* resultTypes;
+} wasmFuncType;
+
+typedef struct wasmTableEntry {
+    wasmFunc func;
+    /* Borrows the instance;
+     * copying an entry preserves its owner. */
+    wasmModuleInstance* instance;
+#if W2C2_RUNTIME_CHECKS
+    /* Borrows an immutable descriptor that outlives the entry. */
+    const wasmFuncType* type;
+#endif
+} wasmTableEntry;
+
+static const wasmTableEntry wasmNullFuncRef = {0};
+
+static
+W2C2_INLINE
+wasmTableEntry
+wasmFuncRef(
+    const wasmFunc func,
+    wasmModuleInstance* instance
+) {
+    wasmTableEntry ref = {0};
+    ref.func = func;
+    ref.instance = instance;
+    return ref;
+}
+
+#if W2C2_RUNTIME_CHECKS
+static
+W2C2_INLINE
+wasmTableEntry
+wasmFuncRefTyped(
+    const wasmFunc func,
+    wasmModuleInstance* instance,
+    const wasmFuncType* type
+) {
+    wasmTableEntry ref = wasmFuncRef(func, instance);
+    ref.type = type;
+    return ref;
+}
+#else
+#define wasmFuncRefTyped(func, instance, type) wasmFuncRef(func, instance)
+#endif
+
+typedef struct wasmTable {
+    wasmTableEntry* data;
+    U32 size, maxSize;
+} wasmTable;
+
+static
+W2C2_INLINE
+void
+wasmTableAllocate(
+    wasmTable* table,
+    const U32 size,
+    const U32 maxSize
+) {
+    table->size = size;
+    table->maxSize = maxSize;
+    table->data = (wasmTableEntry*)calloc(size, sizeof(wasmTableEntry));
+}
+
+#if W2C2_RUNTIME_CHECKS
+static
+W2C2_INLINE
+void
+wasmTableCheckRange(
+    const wasmTable* table,
+    const U32 index,
+    const U32 count
+) {
+    if (index > table->size || count > table->size - index) {
+        trap(trapTableOutOfBounds);
+    }
+}
+
+#else
+#define wasmTableCheckRange(table, index, count) ((void)0)
+#endif
+
+static
+W2C2_INLINE
+wasmTableEntry
+wasmTableGetRef(
+    const wasmTable* table,
+    const U32 index
+) {
+    wasmTableCheckRange(table, index, 1);
+    return table->data[index];
+}
+
+static
+W2C2_INLINE
+void
+wasmTableSetRef(
+    wasmTable* table,
+    const U32 index,
+    const wasmTableEntry ref
+) {
+    wasmTableCheckRange(table, index, 1);
+    table->data[index] = ref;
+}
+
+static
+W2C2_INLINE
+U32
+wasmTableSize(const wasmTable* table) {
+    return table->size;
+}
+
+static
+W2C2_INLINE
+U32
+wasmTableGrow(
+    wasmTable* table,
+    const wasmTableEntry ref,
+    const U32 delta
+) {
+    const U32 oldSize = table->size;
+    const U64 newSize = (U64)oldSize + delta;
+    wasmTableEntry* data;
+    U32 index;
+    if (delta == 0) {
+        return oldSize;
+    }
+    if (newSize > table->maxSize || newSize > (size_t)-1 / sizeof(wasmTableEntry)) {
+        return UINT32_MAX;
+    }
+    data = (wasmTableEntry*)realloc(table->data, (size_t)newSize * sizeof(wasmTableEntry));
+    if (data == NULL) {
+        return UINT32_MAX;
+    }
+    for (index = oldSize; index < (U32)newSize; index++) {
+        data[index] = ref;
+    }
+    table->data = data;
+    table->size = (U32)newSize;
+    return oldSize;
+}
+
+static
+W2C2_INLINE
+void
+wasmTableFill(
+    wasmTable* table,
+    const U32 offset,
+    const wasmTableEntry ref,
+    const U32 count
+) {
+    U32 index;
+    wasmTableCheckRange(table, offset, count);
+    for (index = 0; index < count; index++) {
+        table->data[offset + index] = ref;
+    }
+}
+
+static
+W2C2_INLINE
+void
+wasmTableCopy(
+    wasmTable* destination,
+    const wasmTable* source,
+    const U32 dest,
+    const U32 src,
+    const U32 count
+) {
+    wasmTableCheckRange(destination, dest, count);
+    wasmTableCheckRange(source, src, count);
+    if (count != 0) {
+        memmove(destination->data + dest, source->data + src, (size_t)count * sizeof(wasmTableEntry));
+    }
+}
+
+static
+W2C2_INLINE
+void
+wasmTableInitUnchecked(
+    wasmTable* table,
+    const wasmTableEntry* elements,
+    const U32 dest,
+    const U32 src,
+    const U32 count
+) {
+    if (count != 0) {
+        memcpy(table->data + dest, elements + src, (size_t)count * sizeof(wasmTableEntry));
+    }
+}
+
+#if W2C2_RUNTIME_CHECKS
+static
+W2C2_INLINE
+void
+wasmTableInit(
+    wasmTable* table,
+    const wasmTableEntry* elements,
+    const U32 size,
+    const U32 dest,
+    const U32 src,
+    const U32 count
+) {
+    wasmTableCheckRange(table, dest, count);
+    if (src > size || count > size - src) {
+        trap(trapTableOutOfBounds);
+    }
+    wasmTableInitUnchecked(table, elements, dest, src, count);
+}
+#else
+#define wasmTableInit(table, elements, size, dest, src, count) \
+    wasmTableInitUnchecked(table, elements, dest, src, count)
+#endif
+
+static
+W2C2_INLINE
+void
+wasmTableSet(
+    wasmTable* table,
+    const U32 index,
+    const wasmFunc func,
+    wasmModuleInstance* instance
+) {
+    wasmTableCheckRange(table, index, 1);
+    table->data[index].func = func;
+    table->data[index].instance = instance;
+#if W2C2_RUNTIME_CHECKS
+    table->data[index].type = NULL;
+#endif
+}
+
+#if W2C2_RUNTIME_CHECKS
+static
+W2C2_INLINE
+void
+wasmTableSetTyped(
+    wasmTable* table,
+    const U32 index,
+    const wasmFunc func,
+    wasmModuleInstance* instance,
+    const wasmFuncType* type
+) {
+    wasmTableSet(table, index, func, instance);
+    table->data[index].type = type;
+}
+
+static
+W2C2_INLINE
+wasmTableEntry
+wasmTableGet(
+    const wasmTable* table,
+    const U32 index,
+    const wasmFuncType* type
+) {
+    wasmTableEntry entry;
+    const wasmFuncType* actual;
+    wasmTableCheckRange(table, index, 1);
+    entry = table->data[index];
+    actual = entry.type;
+    if (entry.func == NULL) {
+        trap(trapUninitializedElement);
+    }
+    if (actual != type
+        && (actual == NULL
+            || actual->parameterCount != type->parameterCount
+            || actual->resultCount != type->resultCount
+            || (type->parameterCount != 0
+                && memcmp(actual->parameterTypes, type->parameterTypes, type->parameterCount) != 0)
+            || (type->resultCount != 0
+                && memcmp(actual->resultTypes, type->resultTypes, type->resultCount) != 0))) {
+        trap(trapIndirectCallTypeMismatch);
+    }
+    return entry;
+}
+#else
+#define wasmTableSetTyped(table, index, func, instance, type) \
+    wasmTableSet(table, index, func, instance)
+#define wasmTableGet(table, index, type) ((table)->data[index])
+#endif
+
+static
+W2C2_INLINE
+void
+wasmTableFree(
+    wasmTable* table
+) {
+    free(table->data);
+
+    table->data = NULL;
+    table->size = 0;
+    table->maxSize = 0;
+}
+
+/* External references borrow host objects.
+ * Table operations copy pointers without accessing their pointees. */
+typedef void* wasmExternRef;
+
+static const wasmExternRef wasmNullExternRef = NULL;
+
+typedef struct wasmExternTable {
+    wasmExternRef* data;
+    U32 size, maxSize;
+} wasmExternTable;
+
+static
+W2C2_INLINE
+void
+wasmExternTableAllocate(
+    wasmExternTable* table,
+    const U32 size,
+    const U32 maxSize
+) {
+    table->size = size;
+    table->maxSize = maxSize;
+    table->data = (wasmExternRef*)calloc(size, sizeof(wasmExternRef));
+}
+
+#if W2C2_RUNTIME_CHECKS
+static
+W2C2_INLINE
+void
+wasmExternTableCheckRange(
+    const wasmExternTable* table,
+    const U32 index,
+    const U32 count
+) {
+    if (index > table->size || count > table->size - index) {
+        trap(trapTableOutOfBounds);
+    }
+}
+
+#else
+#define wasmExternTableCheckRange(table, index, count) ((void)0)
+#endif
+
+static
+W2C2_INLINE
+wasmExternRef
+wasmExternTableGetRef(
+    const wasmExternTable* table,
+    const U32 index
+) {
+    wasmExternTableCheckRange(table, index, 1);
+    return table->data[index];
+}
+
+static
+W2C2_INLINE
+void
+wasmExternTableSetRef(
+    wasmExternTable* table,
+    const U32 index,
+    const wasmExternRef ref
+) {
+    wasmExternTableCheckRange(table, index, 1);
+    table->data[index] = ref;
+}
+
+static
+W2C2_INLINE
+U32
+wasmExternTableSize(const wasmExternTable* table) {
+    return table->size;
+}
+
+static
+W2C2_INLINE
+U32
+wasmExternTableGrow(
+    wasmExternTable* table,
+    const wasmExternRef ref,
+    const U32 delta
+) {
+    const U32 oldSize = table->size;
+    const U64 newSize = (U64)oldSize + delta;
+    wasmExternRef* data;
+    U32 index;
+    if (delta == 0) {
+        return oldSize;
+    }
+    if (newSize > table->maxSize || newSize > (size_t)-1 / sizeof(wasmExternRef)) {
+        return UINT32_MAX;
+    }
+    data = (wasmExternRef*)realloc(table->data, (size_t)newSize * sizeof(wasmExternRef));
+    if (data == NULL) {
+        return UINT32_MAX;
+    }
+    for (index = oldSize; index < (U32)newSize; index++) {
+        data[index] = ref;
+    }
+    table->data = data;
+    table->size = (U32)newSize;
+    return oldSize;
+}
+
+static
+W2C2_INLINE
+void
+wasmExternTableFill(
+    wasmExternTable* table,
+    const U32 offset,
+    const wasmExternRef ref,
+    const U32 count
+) {
+    U32 index;
+    wasmExternTableCheckRange(table, offset, count);
+    for (index = 0; index < count; index++) {
+        table->data[offset + index] = ref;
+    }
+}
+
+static
+W2C2_INLINE
+void
+wasmExternTableCopy(
+    wasmExternTable* destination,
+    const wasmExternTable* source,
+    const U32 dest,
+    const U32 src,
+    const U32 count
+) {
+    wasmExternTableCheckRange(destination, dest, count);
+    wasmExternTableCheckRange(source, src, count);
+    if (count != 0) {
+        memmove(destination->data + dest, source->data + src, (size_t)count * sizeof(wasmExternRef));
+    }
+}
+
+static
+W2C2_INLINE
+void
+wasmExternTableInitUnchecked(
+    wasmExternTable* table,
+    const wasmExternRef* elements,
+    const U32 dest,
+    const U32 src,
+    const U32 count
+) {
+    if (count != 0) {
+        memcpy(table->data + dest, elements + src, (size_t)count * sizeof(wasmExternRef));
+    }
+}
+
+#if W2C2_RUNTIME_CHECKS
+static
+W2C2_INLINE
+void
+wasmExternTableInit(
+    wasmExternTable* table,
+    const wasmExternRef* elements,
+    const U32 size,
+    const U32 dest,
+    const U32 src,
+    const U32 count
+) {
+    wasmExternTableCheckRange(table, dest, count);
+    if (src > size || count > size - src) {
+        trap(trapTableOutOfBounds);
+    }
+    wasmExternTableInitUnchecked(table, elements, dest, src, count);
+}
+#else
+#define wasmExternTableInit(table, elements, size, dest, src, count) \
+    wasmExternTableInitUnchecked(table, elements, dest, src, count)
+#endif
+
+static
+W2C2_INLINE
+void
+wasmExternTableFree(
+    wasmExternTable* table
+) {
+    free(table->data);
+
+    table->data = NULL;
+    table->size = 0;
+    table->maxSize = 0;
+}
+
+/*
+ * UTF-8 bytes with an explicit length.
+ * Parsed names own their storage and have an additional trailing NUL byte;
+ * embedded NUL bytes are part of the name.
+ */
+typedef struct WasmName {
+    const char* data;
+    /* Counts name bytes,
+     * including embedded NUL bytes but excluding the trailing terminator. */
+    size_t length;
+} WasmName;
+
+static const WasmName emptyWasmName = {NULL, 0};
+
+/* Borrows the byte storage. */
+static
+W2C2_INLINE
+WasmName
+wasmNameFromBytes(const char* data, size_t length) {
+    WasmName name;
+    name.data = data;
+    name.length = length;
+    return name;
+}
+
+static
+W2C2_INLINE
+int
+wasmNameCompare(const WasmName a, const WasmName b) {
+    const size_t length = a.length < b.length ? a.length : b.length;
+    const int result = length == 0 ? 0 : memcmp(a.data, b.data, length);
+    if (result != 0) {
+        return result;
+    }
+    return a.length < b.length ? -1 : a.length > b.length ? 1 : 0;
+}
+
+typedef struct wasmFuncExport {
+    wasmFunc func;
+    WasmName name;
+} wasmFuncExport;
+
+/* Name lengths include embedded NUL bytes and exclude the trailing terminator. */
+/* Resolver names borrow generated storage and must not be modified. */
+typedef void* (*wasmImportResolver)(WasmName module, WasmName name);
+
+struct wasmModuleInstance {
+    wasmFuncExport* funcExports;
+    wasmImportResolver resolveImports;
+    struct wasmModuleInstance* (*newChild)(struct wasmModuleInstance* self);
+    void (*freeChild)(struct wasmModuleInstance* child);
+};
+
+
+#ifndef __has_feature
+#define __has_feature(x) 0
+#endif
+#ifndef __has_extension
+#define __has_extension __has_feature
+#endif
+
+#if defined(_MSC_VER) && _MSC_VER >= 1500
+#define WASM_ATOMICS_MSVC
+#elif defined(__GNUC__) && (GCC_VERSION >= 40700 || __has_extension(c_atomic))
+#define WASM_ATOMICS_GCC
+#endif
+
+#ifdef WASM_ATOMICS_MSVC
+
+#include <intrin.h>
+
+#define atomic_load_U8(a) _InterlockedOr8((volatile char*)(a), 0)
+#define atomic_load_U16(a) _InterlockedOr16((volatile short*)(a), 0)
+#define atomic_load_U32(a) _InterlockedOr((volatile long*)(a), 0)
+#define atomic_load_U64(a) _InterlockedOr64((volatile __int64*)(a), 0)
+
+#define atomic_store_U8(a, v) _InterlockedExchange8((volatile char*)(a), (char)(v))
+#define atomic_store_U16(a, v) _InterlockedExchange16((volatile short*)(a), (short)(v))
+#define atomic_store_U32(a, v) _InterlockedExchange((volatile long*)(a), (long)(v))
+#define atomic_store_U64(a, v) _InterlockedExchange64((volatile __int64*)(a), (__int64)(v))
+
+static
+W2C2_INLINE
+void
+atomic_fence(void) {
+    volatile long value = 0;
+    /* Interlocked exchange provides compiler and hardware ordering. */
+    (void)_InterlockedExchange(&value, 0);
+}
+
+#elif defined(WASM_ATOMICS_GCC)
+
+/* Use gcc/clang/icc intrinsics */
+#define atomic_load_U8(a) __atomic_load_n((U8*)(a), __ATOMIC_SEQ_CST)
+#define atomic_load_U16(a) __atomic_load_n((U16*)(a), __ATOMIC_SEQ_CST)
+#define atomic_load_U32(a) __atomic_load_n((U32*)(a), __ATOMIC_SEQ_CST)
+#define atomic_load_U64(a) __atomic_load_n((U64*)(a), __ATOMIC_SEQ_CST)
+
+#define atomic_store_U8(a, v) __atomic_store_n((U8*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_store_U16(a, v) __atomic_store_n((U16*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_store_U32(a, v) __atomic_store_n((U32*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_store_U64(a, v) __atomic_store_n((U64*)(a), v, __ATOMIC_SEQ_CST)
+
+#define atomic_fence() __atomic_thread_fence(__ATOMIC_SEQ_CST)
+
+#endif
+
+#ifdef WASM_ATOMICS_MSVC
+
+#include <intrin.h>
+
+#define atomic_add_U8(a, v) _InterlockedExchangeAdd8((volatile char*)(a), (char)(v))
+#define atomic_add_U16(a, v) _InterlockedExchangeAdd16((volatile short*)(a), (short)(v))
+#define atomic_add_U32(a, v) _InterlockedExchangeAdd((volatile long*)(a), (long)(v))
+#define atomic_add_U64(a, v) _InterlockedExchangeAdd64((volatile __int64*)(a), (__int64)(v))
+
+#define atomic_sub_U8(a, v) _InterlockedExchangeAdd8((volatile char*)(a), (char)(U8)(0U - (U8)(v)))
+#define atomic_sub_U16(a, v) _InterlockedExchangeAdd16((volatile short*)(a), (short)(U16)(0U - (U16)(v)))
+#define atomic_sub_U32(a, v) _InterlockedExchangeAdd((volatile long*)(a), (long)(U32)(0U - (U32)(v)))
+#define atomic_sub_U64(a, v) _InterlockedExchangeAdd64((volatile __int64*)(a), (__int64)((U64)0 - (U64)(v)))
+
+#define atomic_and_U8(a, v) _InterlockedAnd8((volatile char*)(a), (char)(v))
+#define atomic_and_U16(a, v) _InterlockedAnd16((volatile short*)(a), (short)(v))
+#define atomic_and_U32(a, v) _InterlockedAnd((volatile long*)(a), (long)(v))
+#define atomic_and_U64(a, v) _InterlockedAnd64((volatile __int64*)(a), (__int64)(v))
+
+#define atomic_or_U8(a, v) _InterlockedOr8((volatile char*)(a), (char)(v))
+#define atomic_or_U16(a, v) _InterlockedOr16((volatile short*)(a), (short)(v))
+#define atomic_or_U32(a, v) _InterlockedOr((volatile long*)(a), (long)(v))
+#define atomic_or_U64(a, v) _InterlockedOr64((volatile __int64*)(a), (__int64)(v))
+
+#define atomic_xor_U8(a, v) _InterlockedXor8((volatile char*)(a), (char)(v))
+#define atomic_xor_U16(a, v) _InterlockedXor16((volatile short*)(a), (short)(v))
+#define atomic_xor_U32(a, v) _InterlockedXor((volatile long*)(a), (long)(v))
+#define atomic_xor_U64(a, v) _InterlockedXor64((volatile __int64*)(a), (__int64)(v))
+
+#define atomic_exchange_U8(a, v) _InterlockedExchange8((volatile char*)(a), (char)(v))
+#define atomic_exchange_U16(a, v) _InterlockedExchange16((volatile short*)(a), (short)(v))
+#define atomic_exchange_U32(a, v) _InterlockedExchange((volatile long*)(a), (long)(v))
+#define atomic_exchange_U64(a, v) _InterlockedExchange64((volatile __int64*)(a), (__int64)(v))
+
+#define atomic_compare_exchange_U8(a, expected_ptr, desired) \
+    _InterlockedCompareExchange8(\
+        (volatile char*)(a), (char)(desired), (char)(*(expected_ptr)))
+#define atomic_compare_exchange_U16(a, expected_ptr, desired) \
+    _InterlockedCompareExchange16(\
+        (volatile short*)(a), (short)(desired), (short)(*(expected_ptr)))
+#define atomic_compare_exchange_U32(a, expected_ptr, desired) \
+    _InterlockedCompareExchange(\
+        (volatile long*)(a), (long)(desired), (long)(*(expected_ptr)))
+#define atomic_compare_exchange_U64(a, expected_ptr, desired) \
+    _InterlockedCompareExchange64(\
+        (volatile __int64*)(a), (__int64)(desired), (__int64)(*(expected_ptr)))
+
+#elif defined(WASM_ATOMICS_GCC)
+
+/* Use gcc/clang/icc intrinsics */
+
+#define atomic_add_U8(a, v) __atomic_fetch_add((U8*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_add_U16(a, v) __atomic_fetch_add((U16*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_add_U32(a, v) __atomic_fetch_add((U32*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_add_U64(a, v) __atomic_fetch_add((U64*)(a), v, __ATOMIC_SEQ_CST)
+
+#define atomic_sub_U8(a, v) __atomic_fetch_sub((U8*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_sub_U16(a, v) __atomic_fetch_sub((U16*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_sub_U32(a, v) __atomic_fetch_sub((U32*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_sub_U64(a, v) __atomic_fetch_sub((U64*)(a), v, __ATOMIC_SEQ_CST)
+
+#define atomic_and_U8(a, v) __atomic_fetch_and((U8*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_and_U16(a, v) __atomic_fetch_and((U16*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_and_U32(a, v) __atomic_fetch_and((U32*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_and_U64(a, v) __atomic_fetch_and((U64*)(a), v, __ATOMIC_SEQ_CST)
+
+#define atomic_or_U8(a, v) __atomic_fetch_or((U8*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_or_U16(a, v) __atomic_fetch_or((U16*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_or_U32(a, v) __atomic_fetch_or((U32*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_or_U64(a, v) __atomic_fetch_or((U64*)(a), v, __ATOMIC_SEQ_CST)
+
+#define atomic_xor_U8(a, v) __atomic_fetch_xor((U8*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_xor_U16(a, v) __atomic_fetch_xor((U16*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_xor_U32(a, v) __atomic_fetch_xor((U32*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_xor_U64(a, v) __atomic_fetch_xor((U64*)(a), v, __ATOMIC_SEQ_CST)
+
+#define atomic_exchange_U8(a, v) __atomic_exchange_n((U8*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_exchange_U16(a, v) __atomic_exchange_n((U16*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_exchange_U32(a, v) __atomic_exchange_n((U32*)(a), v, __ATOMIC_SEQ_CST)
+#define atomic_exchange_U64(a, v) __atomic_exchange_n((U64*)(a), v, __ATOMIC_SEQ_CST)
+
+#define __atomic_compare_exchange_helper(a, expected_ptr, desired)        \
+  (__atomic_compare_exchange_n(a, expected_ptr, desired, 0 /* is_weak */, \
+                               __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST),       \
+   *(expected_ptr))
+
+#define atomic_compare_exchange_U8(a, expected_ptr, desired) \
+    __atomic_compare_exchange_helper((U8*)(a), expected_ptr, desired)
+#define atomic_compare_exchange_U16(a, expected_ptr, desired) \
+    __atomic_compare_exchange_helper((U16*)(a), expected_ptr, desired)
+#define atomic_compare_exchange_U32(a, expected_ptr, desired) \
+    __atomic_compare_exchange_helper((U32*)(a), expected_ptr, desired)
+#define atomic_compare_exchange_U64(a, expected_ptr, desired) \
+    __atomic_compare_exchange_helper((U64*)(a), expected_ptr, desired)
+
+#endif
+
+#if defined(WASM_ATOMICS_MSVC) || defined(WASM_ATOMICS_GCC)
+
+#define DEFINE_ATOMIC_LOAD(name, t1, t2)                        \
+    static W2C2_INLINE t2 name(wasmMemory* mem, WasmMemoryAddress addr) { \
+        t1 result;                                              \
+        wasmAtomicCheckAccess(mem, addr, sizeof(t1)); \
+        result = atomic_load_##t1(&mem->data[addr]);            \
+        return (t2)swap##t1(result);                            \
+    }
+
+DEFINE_ATOMIC_LOAD(i32_atomic_load8_u, U8, U32)
+DEFINE_ATOMIC_LOAD(i64_atomic_load8_u, U8, U64)
+DEFINE_ATOMIC_LOAD(i32_atomic_load16_u, U16, U32)
+DEFINE_ATOMIC_LOAD(i64_atomic_load16_u, U16, U64)
+DEFINE_ATOMIC_LOAD(i64_atomic_load32_u, U32, U64)
+DEFINE_ATOMIC_LOAD(i32_atomic_load, U32, U32)
+DEFINE_ATOMIC_LOAD(i64_atomic_load, U64, U64)
+
+#define DEFINE_ATOMIC_STORE(name, t1, t2)                                   \
+    static W2C2_INLINE void name(wasmMemory* mem, WasmMemoryAddress addr, t2 value) { \
+        t1 wrapped = swap##t1((t1)value);                                   \
+        wasmAtomicCheckAccess(mem, addr, sizeof(t1)); \
+        atomic_store_##t1(&mem->data[addr], wrapped);                       \
+    }
+
+DEFINE_ATOMIC_STORE(i32_atomic_store, U32, U32)
+DEFINE_ATOMIC_STORE(i64_atomic_store, U64, U64)
+DEFINE_ATOMIC_STORE(i32_atomic_store8, U8, U32)
+DEFINE_ATOMIC_STORE(i32_atomic_store16, U16, U32)
+DEFINE_ATOMIC_STORE(i64_atomic_store8, U8, U64)
+DEFINE_ATOMIC_STORE(i64_atomic_store16, U16, U64)
+DEFINE_ATOMIC_STORE(i64_atomic_store32, U32, U64)
+
+#define DEFINE_ATOMIC_RMW_NATIVE(name, op, size, t)                     \
+    static W2C2_INLINE t name(wasmMemory* mem, WasmMemoryAddress addr, t value) { \
+        U ## size wrapped = swapU##size((U ## size)value);              \
+        U ## size old; \
+        wasmAtomicCheckAccess(mem, addr, size / 8); \
+        old = atomic_##op##_U##size(&mem->data[addr], wrapped); \
+        return (t)swapU##size(old);                                     \
+    }
+
+#if WASM_ENDIAN == WASM_LITTLE_ENDIAN
+
+#define DEFINE_ATOMIC_RMW(name, op, op2, size, t) \
+    DEFINE_ATOMIC_RMW_NATIVE(name, op, size, t)
+
+#elif WASM_ENDIAN == WASM_BIG_ENDIAN
+
+/* Arithmetic must operate on little-endian values;
+ * retry if another atomic operation changed the stored representation. */
+#define DEFINE_ATOMIC_RMW(name, op, op2, size, t)                          \
+    static W2C2_INLINE t name(wasmMemory* mem, WasmMemoryAddress addr, t value) {    \
+        U ## size wrapped = (U ## size)value;                              \
+        U ## size old; \
+        wasmAtomicCheckAccess(mem, addr, size / 8); \
+        old = atomic_load_U##size(&mem->data[addr]);             \
+        for (;;) {                                                         \
+            U ## size expected = old;                                      \
+            U ## size desired = (U ## size)(swapU##size(old) op2 wrapped); \
+            U ## size observed = atomic_compare_exchange_U##size(          \
+                &mem->data[addr], &expected, swapU##size(desired));        \
+            if (observed == old) {                                         \
+                return (t)swapU##size(old);                                \
+            }                                                              \
+            old = observed;                                                \
+        }                                                                  \
+    }
+
+#endif
+
+DEFINE_ATOMIC_RMW(i32_atomic_rmw8_add_u, add, +, 8, U32)
+DEFINE_ATOMIC_RMW(i32_atomic_rmw16_add_u, add, +, 16, U32)
+DEFINE_ATOMIC_RMW(i32_atomic_rmw_add, add, +, 32, U32)
+DEFINE_ATOMIC_RMW(i64_atomic_rmw8_add_u, add, +, 8, U64)
+DEFINE_ATOMIC_RMW(i64_atomic_rmw16_add_u, add, +, 16, U64)
+DEFINE_ATOMIC_RMW(i64_atomic_rmw32_add_u, add, +, 32, U64)
+DEFINE_ATOMIC_RMW(i64_atomic_rmw_add, add, +, 64, U64)
+
+DEFINE_ATOMIC_RMW(i32_atomic_rmw8_sub_u, sub, -, 8, U32)
+DEFINE_ATOMIC_RMW(i32_atomic_rmw16_sub_u, sub, -, 16, U32)
+DEFINE_ATOMIC_RMW(i32_atomic_rmw_sub, sub, -, 32, U32)
+DEFINE_ATOMIC_RMW(i64_atomic_rmw8_sub_u, sub, -, 8, U64)
+DEFINE_ATOMIC_RMW(i64_atomic_rmw16_sub_u, sub, -, 16, U64)
+DEFINE_ATOMIC_RMW(i64_atomic_rmw32_sub_u, sub, -, 32, U64)
+DEFINE_ATOMIC_RMW(i64_atomic_rmw_sub, sub, -, 64, U64)
+
+DEFINE_ATOMIC_RMW_NATIVE(i32_atomic_rmw8_and_u, and, 8, U32)
+DEFINE_ATOMIC_RMW_NATIVE(i32_atomic_rmw16_and_u, and, 16, U32)
+DEFINE_ATOMIC_RMW_NATIVE(i32_atomic_rmw_and, and, 32, U32)
+DEFINE_ATOMIC_RMW_NATIVE(i64_atomic_rmw8_and_u, and, 8, U64)
+DEFINE_ATOMIC_RMW_NATIVE(i64_atomic_rmw16_and_u, and, 16, U64)
+DEFINE_ATOMIC_RMW_NATIVE(i64_atomic_rmw32_and_u, and, 32, U64)
+DEFINE_ATOMIC_RMW_NATIVE(i64_atomic_rmw_and, and, 64, U64)
+
+DEFINE_ATOMIC_RMW_NATIVE(i32_atomic_rmw8_or_u, or, 8, U32)
+DEFINE_ATOMIC_RMW_NATIVE(i32_atomic_rmw16_or_u, or, 16, U32)
+DEFINE_ATOMIC_RMW_NATIVE(i32_atomic_rmw_or, or, 32, U32)
+DEFINE_ATOMIC_RMW_NATIVE(i64_atomic_rmw8_or_u, or, 8, U64)
+DEFINE_ATOMIC_RMW_NATIVE(i64_atomic_rmw16_or_u, or, 16, U64)
+DEFINE_ATOMIC_RMW_NATIVE(i64_atomic_rmw32_or_u, or, 32, U64)
+DEFINE_ATOMIC_RMW_NATIVE(i64_atomic_rmw_or, or, 64, U64)
+
+DEFINE_ATOMIC_RMW_NATIVE(i32_atomic_rmw8_xor_u, xor, 8, U32)
+DEFINE_ATOMIC_RMW_NATIVE(i32_atomic_rmw16_xor_u, xor, 16, U32)
+DEFINE_ATOMIC_RMW_NATIVE(i32_atomic_rmw_xor, xor, 32, U32)
+DEFINE_ATOMIC_RMW_NATIVE(i64_atomic_rmw8_xor_u, xor, 8, U64)
+DEFINE_ATOMIC_RMW_NATIVE(i64_atomic_rmw16_xor_u, xor, 16, U64)
+DEFINE_ATOMIC_RMW_NATIVE(i64_atomic_rmw32_xor_u, xor, 32, U64)
+DEFINE_ATOMIC_RMW_NATIVE(i64_atomic_rmw_xor, xor, 64, U64)
+
+#define DEFINE_ATOMIC_RMW_XCHG(name, size, t) \
+    DEFINE_ATOMIC_RMW_NATIVE(name, exchange, size, t)
+
+DEFINE_ATOMIC_RMW_XCHG(i32_atomic_rmw8_xchg_u, 8, U32)
+DEFINE_ATOMIC_RMW_XCHG(i32_atomic_rmw16_xchg_u, 16, U32)
+DEFINE_ATOMIC_RMW_XCHG(i32_atomic_rmw_xchg, 32, U32)
+DEFINE_ATOMIC_RMW_XCHG(i64_atomic_rmw8_xchg_u, 8, U64)
+DEFINE_ATOMIC_RMW_XCHG(i64_atomic_rmw16_xchg_u, 16, U64)
+DEFINE_ATOMIC_RMW_XCHG(i64_atomic_rmw32_xchg_u, 32, U64)
+DEFINE_ATOMIC_RMW_XCHG(i64_atomic_rmw_xchg, 64, U64)
+
+#define DEFINE_ATOMIC_RMW_CMPXCHG(name, size, t)                                          \
+    static W2C2_INLINE t name(wasmMemory* mem, WasmMemoryAddress addr, t expected, t replacement) { \
+        U ## size expected_wrapped = swapU##size((U ## size)expected);                    \
+        U ## size replacement_wrapped = swapU##size((U ## size)replacement);              \
+        U ## size old; \
+        wasmAtomicCheckAccess(mem, addr, size / 8); \
+        old = atomic_compare_exchange_U##size(                                  \
+            &mem->data[addr],                                                             \
+            &expected_wrapped,                                                            \
+            replacement_wrapped                                                           \
+        );                                                                                \
+        return (t)swapU##size(old);                                                       \
+    }
+
+DEFINE_ATOMIC_RMW_CMPXCHG(i32_atomic_rmw8_cmpxchg_u, 8, U32)
+DEFINE_ATOMIC_RMW_CMPXCHG(i32_atomic_rmw16_cmpxchg_u, 16, U32)
+DEFINE_ATOMIC_RMW_CMPXCHG(i32_atomic_rmw_cmpxchg, 32, U32)
+DEFINE_ATOMIC_RMW_CMPXCHG(i64_atomic_rmw8_cmpxchg_u, 8, U64)
+DEFINE_ATOMIC_RMW_CMPXCHG(i64_atomic_rmw16_cmpxchg_u, 16, U64)
+DEFINE_ATOMIC_RMW_CMPXCHG(i64_atomic_rmw32_cmpxchg_u, 32, U64)
+DEFINE_ATOMIC_RMW_CMPXCHG(i64_atomic_rmw_cmpxchg, 64, U64)
+
+#endif /* WASM_ATOMICS_MSVC || WASM_ATOMICS_GCC */
+
+#if W2C2_RUNTIME_CHECKS
+#if defined(WASM_ATOMICS_MSVC) || defined(WASM_ATOMICS_GCC)
+#define WASM_DATA_SEGMENT_SIZE(instance, index, size) \
+    atomic_load_U32(&(instance)->dataSegmentSizes[index])
+#define WASM_DATA_DROP(instance, index) \
+    ((void)atomic_store_U32(&(instance)->dataSegmentSizes[index], 0))
+#define WASM_ELEMENT_SEGMENT_SIZE(instance, index, size) \
+    atomic_load_U32(&(instance)->elementSegmentSizes[index])
+#define WASM_ELEM_DROP(instance, index) \
+    ((void)atomic_store_U32(&(instance)->elementSegmentSizes[index], 0))
+#else
+#define WASM_DATA_SEGMENT_SIZE(instance, index, size) ((instance)->dataSegmentSizes[index])
+#define WASM_DATA_DROP(instance, index) ((void)((instance)->dataSegmentSizes[index] = 0))
+#define WASM_ELEMENT_SEGMENT_SIZE(instance, index, size) ((instance)->elementSegmentSizes[index])
+#define WASM_ELEM_DROP(instance, index) ((void)((instance)->elementSegmentSizes[index] = 0))
+#endif
+#else
+#define WASM_DATA_SEGMENT_SIZE(instance, index, size) (size)
+#define WASM_DATA_DROP(instance, index) ((void)0)
+#define WASM_ELEMENT_SEGMENT_SIZE(instance, index, size) (size)
+#define WASM_ELEM_DROP(instance, index) ((void)0)
+#endif
+
+U32
+wasmMemoryAtomicWait(
+    wasmMemory* mem,
+    WasmMemoryAddress address,
+    U64 expect,
+    I64 timeout,
+    bool wait64
+);
+
+U32
+wasmMemoryAtomicNotify(
+    wasmMemory *mem,
+    WasmMemoryAddress address,
+    U32 count
+);
+
+#endif /* W2C2_BASE_H */
+
+struct FlpWasmIo {
+  double in[16];
+  double param[16];
+  double out[16];
+};
+// Data of the block being stepped: modules reach it through the host functions.
+static FlpWasmIo *flpWasmIo;
+extern "C" F64 i3_flp5_input(wasmModuleInstance*, U32 i) { return i < 16 ? flpWasmIo->in[i] : 0; }
+extern "C" F64 i3_flp5_param(wasmModuleInstance*, U32 i) { return i < 16 ? flpWasmIo->param[i] : 0; }
+extern "C" void i3_flp6_output(wasmModuleInstance*, U32 i, F64 v) { if (i < 16) flpWasmIo->out[i] = v; }
+extern "C" void i3_flp3_log(wasmModuleInstance*, U32, U32) {}
+}
+using namespace flpwasm;
+
+// timer_on_rs: общий код
+namespace flpwasm {
+#ifndef m11_timerX5FonX5FrsHeader
+#define m11_timerX5FonX5FrsHeader
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
+#if W2C2_RUNTIME_CHECKS
+extern const wasmFuncType m11_timerX5FonX5FrsFuncType0;
+extern const wasmFuncType m11_timerX5FonX5FrsFuncType1;
+extern const wasmFuncType m11_timerX5FonX5FrsFuncType2;
+extern const wasmFuncType m11_timerX5FonX5FrsFuncType3;
+#endif
+
+typedef struct m11_timerX5FonX5FrsInstance {
+wasmModuleInstance common;
+wasmMemory* m0;
+} m11_timerX5FonX5FrsInstance;
+
+F64 i3_flp5_input(wasmModuleInstance*,U32);
+
+F64 i3_flp5_param(wasmModuleInstance*,U32);
+
+void i3_flp6_output(wasmModuleInstance*,U32,F64);
+
+void timer_on_rs_f3(wasmModuleInstance*);
+
+void timer_on_rs_f4(wasmModuleInstance*,U32);
+
+wasmMemory*m11_timerX5FonX5FrsExport6_memory(m11_timerX5FonX5FrsInstance* i);
+
+void m11_timerX5FonX5FrsExport4_init(m11_timerX5FonX5FrsInstance*i);
+
+void m11_timerX5FonX5FrsExport4_step(m11_timerX5FonX5FrsInstance*i,U32 l0);
+
+void m11_timerX5FonX5FrsInstantiate(m11_timerX5FonX5FrsInstance* instance, wasmImportResolver resolve);
+
+void m11_timerX5FonX5FrsFreeInstance(m11_timerX5FonX5FrsInstance* instance);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* m11_timerX5FonX5FrsHeader */
+
+
+
+void timer_on_rs_f3(wasmModuleInstance* instance) {
+m11_timerX5FonX5FrsInstance* i = (m11_timerX5FonX5FrsInstance*)instance;
+U32 si0,si1;
+U64 sj1;
+si0=0U;
+sj1=W2C2_LL(0U);
+i64_store(i->m0,(WasmMemoryAddress)si0+1024U,sj1);
+si0=0U;
+si1=0U;
+i32_store8(i->m0,(WasmMemoryAddress)si0+1032U,si1);
+L0:;
+}
+
+void timer_on_rs_f4(wasmModuleInstance* instance,U32 l0) {
+m11_timerX5FonX5FrsInstance* i = (m11_timerX5FonX5FrsInstance*)instance;
+F64 l1=0;
+U32 si0,si1,si2,si3;
+F64 sd0,sd1,sd2,sd3;
+sd0=f64_reinterpret_i64(W2C2_LL(0x0000000000000000U));
+l1=sd0;
+si0=0U;
+sd0=i3_flp5_input(instance,si0);
+sd1=f64_reinterpret_i64(W2C2_LL(0x0000000000000000U));
+si0=sd0 != sd1;
+if(si0){
+goto L2;
+}
+si0=0U;
+si1=0U;
+i32_store8(i->m0,(WasmMemoryAddress)si0+1032U,si1);
+goto L1;
+L2:;
+si0=0U;
+si0=i32_load8_u(i->m0,(WasmMemoryAddress)si0+1032U);
+if(si0){
+goto L4;
+}
+si0=0U;
+si1=1U;
+i32_store8(i->m0,(WasmMemoryAddress)si0+1032U,si1);
+sd0=f64_reinterpret_i64(W2C2_LL(0x0000000000000000U));
+l1=sd0;
+goto L3;
+L4:;
+si0=0U;
+sd0=f64_load(i->m0,(WasmMemoryAddress)si0+1024U);
+si1=l0;
+sd1=(F64)(I32)(si1);
+sd0+=sd1;
+l1=sd0;
+L3:;
+si0=0U;
+sd1=l1;
+f64_store(i->m0,(WasmMemoryAddress)si0+1024U,sd1);
+sd0=f64_reinterpret_i64(W2C2_LL(0x3FF0000000000000U));
+sd1=f64_reinterpret_i64(W2C2_LL(0x0000000000000000U));
+sd2=l1;
+si3=0U;
+sd3=i3_flp5_param(instance,si3);
+si2=sd2 >= sd3;
+sd0=si2?sd0:sd1;
+l1=sd0;
+L1:;
+si0=0U;
+sd1=l1;
+i3_flp6_output(instance,si0,sd1);
+L0:;
+}
+
+#if W2C2_RUNTIME_CHECKS
+const wasmFuncType m11_timerX5FonX5FrsFuncType0={1,"i",1,"d"};
+const wasmFuncType m11_timerX5FonX5FrsFuncType1={2,"id",0,""};
+const wasmFuncType m11_timerX5FonX5FrsFuncType2={0,"",0,""};
+const wasmFuncType m11_timerX5FonX5FrsFuncType3={1,"i",0,""};
+#endif
+
+wasmFuncExport m11_timerX5FonX5FrsFuncExports[3] = {
+{(wasmFunc)timer_on_rs_f3,{"init",4}},
+{(wasmFunc)timer_on_rs_f4,{"step",4}},
+{NULL,{NULL,0}}
+};
+
+static void m11_timerX5FonX5FrsInitMemories(m11_timerX5FonX5FrsInstance* i, m11_timerX5FonX5FrsInstance* parent) {
+i->m0 = wasmMemoryAllocate(1, 1, false);
+}
+
+static void m11_timerX5FonX5FrsInitImports(m11_timerX5FonX5FrsInstance* i, wasmImportResolver resolve) {
+if (resolve == NULL) { return; }
+}
+
+wasmMemory*m11_timerX5FonX5FrsExport6_memory(m11_timerX5FonX5FrsInstance* i){
+return i->m0;
+}
+
+void m11_timerX5FonX5FrsExport4_init(m11_timerX5FonX5FrsInstance*i){
+timer_on_rs_f3(&i->common);
+}
+
+void m11_timerX5FonX5FrsExport4_step(m11_timerX5FonX5FrsInstance*i,U32 l0){
+timer_on_rs_f4(&i->common,l0);
+}
+
+static void m11_timerX5FonX5FrsFreeChild(wasmModuleInstance* child) {
+m11_timerX5FonX5FrsInstance* i = (m11_timerX5FonX5FrsInstance*)child;
+wasmMemoryFree(i->m0);
+i->m0=NULL;
+free(i);
+}
+
+static wasmModuleInstance* m11_timerX5FonX5FrsNewChild(wasmModuleInstance* instance) {
+m11_timerX5FonX5FrsInstance* self = (m11_timerX5FonX5FrsInstance*)instance;
+m11_timerX5FonX5FrsInstance* child = (m11_timerX5FonX5FrsInstance*)calloc(1, sizeof(m11_timerX5FonX5FrsInstance));
+child->common.funcExports = self->common.funcExports;
+child->common.resolveImports = self->common.resolveImports;
+child->common.newChild = self->common.newChild;
+child->common.freeChild = self->common.freeChild;
+m11_timerX5FonX5FrsInitImports(child, self->common.resolveImports);
+m11_timerX5FonX5FrsInitMemories(child, self);
+return &child->common;
+}
+
+void m11_timerX5FonX5FrsInstantiate(m11_timerX5FonX5FrsInstance* i, wasmImportResolver resolveImports) {
+i->common.funcExports = m11_timerX5FonX5FrsFuncExports;
+i->common.resolveImports = resolveImports;
+i->common.newChild = m11_timerX5FonX5FrsNewChild;
+i->common.freeChild = m11_timerX5FonX5FrsFreeChild;
+m11_timerX5FonX5FrsInitImports(i, resolveImports);
+m11_timerX5FonX5FrsInitMemories(i, NULL);
+}
+
+void m11_timerX5FonX5FrsFreeInstance(m11_timerX5FonX5FrsInstance* i) {
+wasmMemoryFree(i->m0);
+i->m0=NULL;
+}
+}
+
+// delay: timer_on_rs
+static m11_timerX5FonX5FrsInstance delay_w;
+static FlpWasmIo delay_io;
+static uint32_t delay_t;
+
+void setup() {
+  // button: digital_in
+  pinMode(12, INPUT_PULLUP);
+
+  // delay: timer_on_rs
+  flpWasmIo = &delay_io;
+  m11_timerX5FonX5FrsInstantiate(&delay_w, NULL);
+  m11_timerX5FonX5FrsExport4_init(&delay_w);
+  delay_t = millis();
+
+  // led: digital_out
+  pinMode(25, OUTPUT);
+}
+
+void loop() {
+  // button: digital_in
+  button_out = !digitalRead(12);
+
+  // delay: timer_on_rs
+  {
+    uint32_t now = millis();
+    delay_io.in[0] = (double)(button_out);
+    delay_io.param[0] = (double)(2000);
+    flpWasmIo = &delay_io;
+    m11_timerX5FonX5FrsExport4_step(&delay_w, now - delay_t);
+    delay_t = now;
+    delay_out = delay_io.out[0] != 0.0;
+  }
+
+  // led: digital_out
+  digitalWrite(25, (delay_out) ? HIGH : LOW);
+}

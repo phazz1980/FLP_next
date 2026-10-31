@@ -7,3 +7,6 @@
 
 # Distribution archive
 /dist/
+
+# Local zig compiler for block simulation
+/tools/

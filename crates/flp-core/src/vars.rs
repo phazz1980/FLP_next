@@ -348,6 +348,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                         bus: String::new(),
                         fixed: false,
                         runtime: false,
+                        static_only: false,
                         choices: Vec::new(),
                     }];
                     if !get {
@@ -367,6 +368,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                             bus: String::new(),
                             fixed: false,
                             runtime: false,
+                            static_only: false,
                             choices: Vec::new(),
                         });
                     }

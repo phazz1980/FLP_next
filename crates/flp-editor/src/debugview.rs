@@ -459,13 +459,13 @@ pub fn value_label(
     forced: bool,
     zoom: f32,
     place: Place,
-) {
+) -> Rect {
     let text = if forced {
         format!("{value} F")
     } else {
         value.to_string()
     };
-    label(painter, pal, anchor, text, forced, zoom, place);
+    label(painter, pal, anchor, text, forced, zoom, place)
 }
 
 /// Live string next to a port, in quotes and cut to a readable length.
@@ -476,8 +476,8 @@ pub fn text_label(
     text: &str,
     zoom: f32,
     place: Place,
-) {
-    label(painter, pal, anchor, quoted(text), false, zoom, place);
+) -> Rect {
+    label(painter, pal, anchor, quoted(text), false, zoom, place)
 }
 
 /// `"text"` with control characters made visible, at most 24 characters.
@@ -504,7 +504,7 @@ fn label(
     forced: bool,
     zoom: f32,
     place: Place,
-) {
+) -> Rect {
     let font = egui::FontId::monospace(9.5 * zoom.clamp(0.6, 1.6));
     let galley = painter.layout_no_wrap(text, font, if forced { Color32::WHITE } else { pal.text });
     let size = galley.size() + Vec2::new(6.0, 2.0);
@@ -526,6 +526,7 @@ fn label(
         egui::StrokeKind::Inside,
     );
     painter.galley(rect.min + Vec2::new(3.0, 1.0), galley, pal.text);
+    rect
 }
 
 /// Window with a strip chart per selected value (last minute).

@@ -17,6 +17,8 @@ pub const ESP32_CPP_TEMPLATE: &str = "esp32.cpp.tmpl";
 pub const DOCS_FILE: &str = "docs.md";
 /// WASM module that simulates the block on the PC (any source language).
 pub const WASM_FILE: &str = "block.wasm";
+/// C translation of [`WASM_FILE`] for the firmware (made by `flp-build`).
+pub const FIRMWARE_C_FILE: &str = "block.wasm.c";
 /// Folder of user blocks, next to the built-in `library/`.
 pub const USER_LIBRARY_DIR: &str = "user_library";
 
@@ -190,6 +192,30 @@ pub enum ParamKind {
     Pin,
 }
 
+/// Signal type of the input a parameter becomes, or `None` when the parameter cannot
+/// be an input (pins, text, lists, values the generator needs while generating).
+pub fn param_input_type(p: &ParamDef) -> Option<SignalType> {
+    if p.static_only || p.fixed || !p.choices.is_empty() {
+        return None;
+    }
+    match p.kind {
+        ParamKind::Int => Some(SignalType::Int),
+        ParamKind::Float => Some(SignalType::Float),
+        ParamKind::Duration => Some(SignalType::Int),
+        ParamKind::Bool if p.runtime => Some(SignalType::Bool),
+        _ => None,
+    }
+}
+
+fn param_input_default(kind: ParamKind, v: &ParamValue) -> Option<ParamValue> {
+    match (kind, v) {
+        (ParamKind::Duration, ParamValue::Text(s)) => {
+            parse_duration_ms(s).map(|ms| ParamValue::Int(ms as i64))
+        }
+        (_, v) => Some(v.clone()),
+    }
+}
+
 impl ParamKind {
     pub fn accepts(self, value: &ParamValue) -> bool {
         match (self, value) {
@@ -355,6 +381,10 @@ pub struct ParamDef {
     /// run-time condition (`if (...)`), not to choose code while generating.
     #[serde(default, skip_serializing_if = "is_false")]
     pub runtime: bool,
+    /// The generated code needs the value while generating (array sizes, global
+    /// initializers): the parameter cannot become an input.
+    #[serde(rename = "static", default, skip_serializing_if = "is_false")]
+    pub static_only: bool,
     /// Allowed values with captions: the properties show a drop-down list
     /// instead of a field (`[[param.choice]]` in `block.toml`).
     #[serde(rename = "choice", default, skip_serializing_if = "Vec::is_empty")]
@@ -743,6 +773,17 @@ fn condition_value(kind: ParamKind, value: &ParamValue) -> minijinja::Value {
     }
 }
 
+/// Where the firmware code of a block comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FirmwareSource {
+    /// The Arduino template `esp32.cpp.tmpl`; it wins over the module.
+    Template,
+    /// The WASM module `block.wasm`, translated to C.
+    Module,
+    /// Neither: the block cannot be built into firmware.
+    None,
+}
+
 /// Block loaded from a library folder.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LibraryBlock {
@@ -775,6 +816,19 @@ impl LibraryBlock {
     /// The simulation module `block.wasm`, if the block has one.
     pub fn wasm_path(&self) -> Option<PathBuf> {
         self.template_path(WASM_FILE)
+    }
+
+    /// Source of the firmware code: the template if there is one, otherwise the module.
+    pub fn firmware_source(&self) -> FirmwareSource {
+        if self.inline_templates.contains_key(ESP32_CPP_TEMPLATE)
+            || self.template_path(ESP32_CPP_TEMPLATE).is_some()
+        {
+            FirmwareSource::Template
+        } else if self.wasm_path().is_some() {
+            FirmwareSource::Module
+        } else {
+            FirmwareSource::None
+        }
     }
 
     pub fn load(dir: &Path) -> Result<Self> {
@@ -850,6 +904,25 @@ pub struct Library {
     builtins: BTreeMap<String, LibraryBlock>,
     /// Boards of `user_library/boards/`.
     boards: Boards,
+    /// Definitions with parameters turned into inputs, see [`Library::resolve`].
+    derived: Derived,
+}
+
+/// Cache of derived block definitions. Entries are leaked on purpose: a few small
+/// structs, handed out as plain references. A clone starts with an empty cache.
+#[derive(Default)]
+struct Derived(std::sync::Mutex<std::collections::HashMap<String, &'static LibraryBlock>>);
+
+impl Clone for Derived {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl std::fmt::Debug for Derived {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Derived")
+    }
 }
 
 impl Default for Library {
@@ -860,6 +933,7 @@ impl Default for Library {
             user_folders: BTreeSet::new(),
             builtins: crate::vars::builtin_blocks(),
             boards: Boards::default(),
+            derived: Derived::default(),
         }
     }
 }
@@ -898,6 +972,7 @@ impl Library {
     /// with the device blocks of the boards. A device that cannot be made is skipped
     /// and its error returned.
     pub fn set_boards(&mut self, boards: Boards) -> Vec<Error> {
+        self.derived.0.get_mut().unwrap().clear();
         self.blocks.retain(|_, b| b.def.info.board.is_none());
         let mut errors = Vec::new();
         for board in boards.iter() {
@@ -913,6 +988,7 @@ impl Library {
 
     /// Adds built-in blocks from one more folder; blocks with the same type are replaced.
     pub fn add_dir(&mut self, dir: impl AsRef<Path>) -> Result<Vec<Error>> {
+        self.derived.0.get_mut().unwrap().clear();
         let (blocks, errors) = read_blocks(dir.as_ref())?;
         for block in blocks {
             self.blocks.insert(block.def.info.kind.clone(), block);
@@ -925,6 +1001,7 @@ impl Library {
     /// of its folder (`Раздел/Папка`, empty in the root). A block whose type is
     /// taken by a built-in block or by another user block is skipped with an error.
     pub fn add_user_dir(&mut self, dir: impl AsRef<Path>) -> Result<Vec<Error>> {
+        self.derived.0.get_mut().unwrap().clear();
         let mut blocks = Vec::new();
         let mut errors = Vec::new();
         read_user_tree(
@@ -975,6 +1052,7 @@ impl Library {
 
     /// Adds or replaces a block (e.g. one created by AI before it is written to disk).
     pub fn insert(&mut self, block: LibraryBlock) {
+        self.derived.0.get_mut().unwrap().clear();
         self.blocks.insert(block.def.info.kind.clone(), block);
     }
 
@@ -989,8 +1067,48 @@ impl Library {
     pub fn resolve(&self, logic: &crate::Logic, block: &crate::Block) -> Option<&LibraryBlock> {
         match crate::vars::builtin_kind(logic, block) {
             Some(kind) => self.builtins.get(&kind),
-            None => self.get(&block.kind),
+            None => {
+                let base = self.get(&block.kind)?;
+                if block.param_in.is_empty() {
+                    return Some(base);
+                }
+                Some(self.with_param_inputs(base, block))
+            }
         }
+    }
+
+    /// The block type with the parameters of `block.param_in` added as inputs. The
+    /// value of the parameter becomes the default of its input.
+    fn with_param_inputs(&self, base: &'_ LibraryBlock, block: &crate::Block) -> &LibraryBlock {
+        let mut key = block.kind.clone();
+        for name in &block.param_in {
+            key.push_str(&format!("|{name}={:?}", block.params.get(name)));
+        }
+        let mut cache = self.derived.0.lock().unwrap();
+        if cache.len() > 4096 {
+            cache.clear();
+        }
+        cache.entry(key).or_insert_with(|| {
+            let mut derived = base.clone();
+            for name in &block.param_in {
+                let Some(param) = base.def.param(name) else {
+                    continue;
+                };
+                let Some(ty) = param_input_type(param) else {
+                    continue;
+                };
+                let value = block.params.get(name).or(param.default.as_ref());
+                derived.def.inputs.push(PortDef {
+                    name: name.clone(),
+                    ty,
+                    default: value.and_then(|v| param_input_default(param.kind, v)),
+                    when: None,
+                    label: param.label.clone(),
+                    description: param.description.clone(),
+                });
+            }
+            Box::leak(Box::new(derived))
+        })
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &LibraryBlock> {

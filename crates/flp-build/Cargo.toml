@@ -10,3 +10,7 @@ flp-core = { path = "../flp-core" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+sha2 = "0.10"
+wasmparser = "0.263"
+ureq = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }

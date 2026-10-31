@@ -1,6 +1,6 @@
 ﻿# Release build of FLP_next and assembly of the distribution folder and archive.
 # Usage: build.cmd (double-click) or `powershell -File scripts\build-dist.ps1 [-NoZip]`.
-param([switch]$NoZip)
+param([switch]$NoZip, [switch]$WithCore)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -109,6 +109,26 @@ foreach ($dir in 'library', 'examples', 'libs') {
     if ($LASTEXITCODE -ge 8) { Fail "не удалось скопировать $dir (robocopy $LASTEXITCODE)." }
     # Excluded dirs are also kept from purging, so drop ones left from earlier copies.
     Get-ChildItem $dst -Recurse -Directory -Force -Filter .flp | Remove-Item -Recurse -Force
+}
+# -WithCore: the ESP32 core goes into esp32core (arduino-cli data folder) so builds work offline.
+if ($WithCore) {
+    $data = Join-Path $env:LOCALAPPDATA 'Arduino15'
+    if (-not (Test-Path (Join-Path $data 'packages\esp32'))) {
+        Fail 'ядро ESP32 не установлено (arduino-cli core install esp32:esp32) — нечего класть в esp32core.'
+    }
+    & robocopy $data (Join-Path $dist 'esp32core') /MIR /XD staging tmp /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { Fail "не удалось скопировать ядро (robocopy $LASTEXITCODE)." }
+}
+# arduino-cli is shipped next to the editor (flp-build looks for it beside the exe first).
+$cli = Get-Command arduino-cli.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
+if (-not $cli) {
+    $pf = Join-Path $env:ProgramFiles 'Arduino CLIrduino-cli.exe'
+    if (Test-Path $pf) { $cli = $pf }
+}
+if ($cli) {
+    Copy-Item $cli (Join-Path $dist 'arduino-cli.exe') -Force
+} else {
+    Write-Host 'Пропуск: arduino-cli.exe не найден (скачайте с github.com/arduino/arduino-cli/releases) — в архив он не попадёт.' -ForegroundColor Yellow
 }
 Copy-Item (Join-Path $PSScriptRoot 'dist-README.txt') (Join-Path $dist 'README.txt') -Force
 

@@ -1,0 +1,60 @@
+# Параметр блока можно сделать входом: значение читается на каждом скане.
+
+[[block]]
+id = "pot"
+type = "analog_in"
+pin = 34
+
+[[block]]
+id = "button"
+type = "digital_in"
+pin = 12
+pullup = true
+inverted = true
+
+# Задержка включения: время приходит со входа (в миллисекундах).
+
+[[block]]
+id = "delay"
+type = "timer_on"
+time = "1s"
+param_in = ["time"]
+
+[[block]]
+id = "lamp"
+type = "digital_out"
+pin = 2
+
+# Ограничитель: верхний предел — вход, нижний остаётся параметром.
+
+[[block]]
+id = "cap_value"
+type = "constant"
+value = 2000.0
+
+[[block]]
+id = "cap"
+type = "limit"
+lo = 100.0
+hi = 1000.0
+param_in = ["hi"]
+
+[[link]]
+from = "pot.out"
+to   = "delay.time"
+
+[[link]]
+from = "button.out"
+to   = "delay.in"
+
+[[link]]
+from = "delay.out"
+to   = "lamp.in"
+
+[[link]]
+from = "pot.out"
+to   = "cap.in"
+
+[[link]]
+from = "cap_value.out"
+to   = "cap.hi"

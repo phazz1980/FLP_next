@@ -10,7 +10,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -20,6 +20,8 @@ use serde::Deserialize;
 
 mod direct;
 mod output;
+pub mod wasm;
+pub mod wasm_c;
 pub use output::{
     classify, explain_compile, explain_upload, locate_block, parse_diagnostic, OutputLine,
 };
@@ -30,8 +32,8 @@ pub enum BuildError {
     Cancelled,
 
     #[error(
-        "arduino-cli не найден. Установите его (`winget install ArduinoSA.CLI`) \
-         или укажите путь в переменной FLP_ARDUINO_CLI"
+        "arduino-cli не найден. Положите arduino-cli.exe рядом с программой, \
+         добавьте его в PATH или укажите путь в переменной FLP_ARDUINO_CLI"
     )]
     NotFound,
 
@@ -344,28 +346,87 @@ fn parse_core_list(json: &str) -> Result<Vec<String>, BuildError> {
         .unwrap_or_default())
 }
 
-/// Installs arduino-cli with winget (Windows). Output lines go to `on_line`.
-pub fn install_cli(on_line: &mut dyn FnMut(&str)) -> Result<(), BuildError> {
-    let exe = PathBuf::from("winget");
-    let output = Command::new(&exe)
-        .args([
-            "install",
-            "--id",
-            "ArduinoSA.CLI",
-            "-e",
-            "--accept-package-agreements",
-            "--accept-source-agreements",
-        ])
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|source| BuildError::Spawn { exe, source })?;
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        // Skip the spinner and progress bar frames.
-        if line.trim().len() > 2 && !line.contains('█') {
-            on_line(line.trim());
-        }
+/// arduino-cli release downloaded when none is found (pinned for reproducible builds).
+pub const ARDUINO_CLI_VERSION: &str = "1.5.1";
+const ARDUINO_CLI_SHA256: &str = "fabe42e0eb04d00e776a66178299ff95a46c623dbc260f997e58fd514853dd40";
+/// ESP32 core installed when the board core is missing (pinned).
+pub const ESP32_CORE_VERSION: &str = "3.3.12";
+/// Folder next to the program that holds the arduino-cli data (the ESP32 core).
+pub const CORE_DIR: &str = "esp32core";
+
+/// Folder of the running program.
+fn app_dir() -> Option<PathBuf> {
+    env::current_exe().ok()?.parent().map(Path::to_path_buf)
+}
+
+/// `<program>/esp32core`, whether or not it exists yet.
+fn bundled_core_dir() -> Option<PathBuf> {
+    app_dir().map(|d| d.join(CORE_DIR))
+}
+
+/// The bundled data folder, if it already holds installed packages.
+fn bundled_core_in_use() -> Option<PathBuf> {
+    bundled_core_dir().filter(|d| d.join("packages").is_dir())
+}
+
+fn cli_file_name() -> &'static str {
+    if cfg!(windows) {
+        "arduino-cli.exe"
+    } else {
+        "arduino-cli"
     }
-    check_status("установка arduino-cli", output.status)
+}
+
+/// Downloads the pinned arduino-cli next to the program (Windows x64 build).
+pub fn install_cli(on_line: &mut dyn FnMut(&str)) -> Result<(), BuildError> {
+    use sha2::{Digest, Sha256};
+
+    let bad = BuildError::BadOutput;
+    let dir = app_dir().ok_or_else(|| bad("не найдена папка программы".into()))?;
+    let url = format!(
+        "https://github.com/arduino/arduino-cli/releases/download/v{v}/arduino-cli_{v}_Windows_64bit.zip",
+        v = ARDUINO_CLI_VERSION
+    );
+    on_line(&format!("Скачиваю arduino-cli {ARDUINO_CLI_VERSION}..."));
+    let mut data = Vec::new();
+    ureq::get(&url)
+        .call()
+        .map_err(|e| bad(format!("загрузка arduino-cli: {e}")))?
+        .into_reader()
+        .read_to_end(&mut data)
+        .map_err(|e| bad(format!("загрузка arduino-cli: {e}")))?;
+    let hash: String = Sha256::digest(&data)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    if hash != ARDUINO_CLI_SHA256 {
+        return Err(bad(
+            "контрольная сумма скачанного arduino-cli не совпала, файл отброшен".into(),
+        ));
+    }
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(data))
+        .map_err(|e| bad(format!("архив arduino-cli: {e}")))?;
+    let mut exe = zip
+        .by_name(cli_file_name())
+        .map_err(|e| bad(format!("в архиве нет {}: {e}", cli_file_name())))?;
+    let target = dir.join(cli_file_name());
+    let part = dir.join(format!("{}.part", cli_file_name()));
+    let mut out =
+        std::fs::File::create(&part).map_err(|e| bad(format!("{}: {e}", part.display())))?;
+    std::io::copy(&mut exe, &mut out).map_err(|e| bad(format!("{}: {e}", part.display())))?;
+    drop(out);
+    std::fs::rename(&part, &target).map_err(|e| bad(format!("{}: {e}", target.display())))?;
+    on_line("arduino-cli установлен");
+    Ok(())
+}
+
+/// Downloads arduino-cli when it is missing, then the ESP32 core into `esp32core`.
+pub fn install_toolchain(on_line: &mut dyn FnMut(&str)) -> Result<(), BuildError> {
+    if ArduinoCli::locate().is_err() {
+        install_cli(on_line)?;
+    }
+    ArduinoCli::locate()?.ensure_core("esp32:esp32:esp32", on_line)?;
+    Ok(())
 }
 
 /// Handle to the arduino-cli executable.
@@ -373,6 +434,9 @@ pub fn install_cli(on_line: &mut dyn FnMut(&str)) -> Result<(), BuildError> {
 pub struct ArduinoCli {
     exe: PathBuf,
     control: Option<Arc<BuildControl>>,
+    /// arduino-cli data folder (`ARDUINO_DIRECTORIES_DATA`); `None`: the system one.
+    /// Shared by clones, so a core installed mid-build is used by the following commands.
+    core_dir: Arc<Mutex<Option<PathBuf>>>,
 }
 
 impl ArduinoCli {
@@ -380,6 +444,7 @@ impl ArduinoCli {
         Self {
             exe: exe.into(),
             control: None,
+            core_dir: Arc::new(Mutex::new(bundled_core_in_use())),
         }
     }
 
@@ -389,20 +454,21 @@ impl ArduinoCli {
         self
     }
 
-    /// Finds arduino-cli: `FLP_ARDUINO_CLI`, then `PATH`, then the default
-    /// install folder (a terminal opened before installation has an old `PATH`).
+    /// Finds arduino-cli: `FLP_ARDUINO_CLI`, then the copy shipped next to the
+    /// running exe, then `PATH`, then the default install folder (a terminal opened
+    /// before installation has an old `PATH`).
     pub fn locate() -> Result<Self, BuildError> {
         if let Some(exe) = env::var_os("FLP_ARDUINO_CLI") {
             return Ok(Self::new(exe));
         }
-        let name = if cfg!(windows) {
-            "arduino-cli.exe"
-        } else {
-            "arduino-cli"
-        };
-        let mut candidates: Vec<PathBuf> = env::var_os("PATH")
-            .map(|paths| env::split_paths(&paths).map(|d| d.join(name)).collect())
-            .unwrap_or_default();
+        let name = cli_file_name();
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Some(dir) = app_dir() {
+            candidates.push(dir.join(name));
+        }
+        if let Some(paths) = env::var_os("PATH") {
+            candidates.extend(env::split_paths(&paths).map(|d| d.join(name)));
+        }
         if let Some(pf) = env::var_os("ProgramFiles") {
             candidates.push(Path::new(&pf).join("Arduino CLI").join(name));
         }
@@ -584,16 +650,20 @@ impl ArduinoCli {
         let Some(id) = core_id(fqbn) else {
             return Ok(None);
         };
-        let output = self
-            .command()
-            .args(["core", "list", "--format", "json"])
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|source| self.spawn_error(source))?;
-        check_status("список ядер", output.status)?;
-        if parse_core_list(&String::from_utf8_lossy(&output.stdout))?.contains(&id) {
+        if self.core_installed(&id)? {
             return Ok(None);
         }
+        // The bundled folder comes first; without the core there, the system one may have it.
+        if self.core_dir.lock().unwrap().is_some() {
+            self.set_core_dir(None);
+            if self.core_installed(&id)? {
+                return Ok(None);
+            }
+        }
+        let bundled = bundled_core_dir().ok_or(BuildError::NotFound)?;
+        std::fs::create_dir_all(&bundled)
+            .map_err(|e| BuildError::BadOutput(format!("{}: {e}", bundled.display())))?;
+        self.set_core_dir(Some(bundled));
         on_line(&format!(
             "Ядро {id} не установлено, устанавливаю (может занять несколько минут)..."
         ));
@@ -607,7 +677,12 @@ impl ArduinoCli {
         update.extend(extra.iter().cloned());
         let status = self.run(&update, false, on_line)?;
         check_status("обновление индекса ядер", status)?;
-        let mut install: Vec<OsString> = vec!["core".into(), "install".into(), id.clone().into()];
+        let target = if id == "esp32:esp32" {
+            format!("{id}@{ESP32_CORE_VERSION}")
+        } else {
+            id.clone()
+        };
+        let mut install: Vec<OsString> = vec!["core".into(), "install".into(), target.into()];
         install.extend(extra);
         let status = self.run(&install, false, on_line)?;
         check_status("установка ядра", status)?;
@@ -684,7 +759,29 @@ impl ArduinoCli {
     }
 
     fn command(&self) -> Command {
-        hidden_command(&self.exe)
+        let mut cmd = hidden_command(&self.exe);
+        if let Some(dir) = self.core_dir.lock().unwrap().as_ref() {
+            cmd.env("ARDUINO_DIRECTORIES_DATA", dir);
+        }
+        cmd
+    }
+
+    fn set_core_dir(&self, dir: Option<PathBuf>) {
+        *self.core_dir.lock().unwrap() = dir;
+    }
+
+    /// Whether core `id` is installed in the data folder in use.
+    fn core_installed(&self, id: &str) -> Result<bool, BuildError> {
+        let output = self
+            .command()
+            .args(["core", "list", "--format", "json"])
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|source| self.spawn_error(source))?;
+        check_status("список ядер", output.status)?;
+        Ok(parse_core_list(&String::from_utf8_lossy(&output.stdout))?
+            .iter()
+            .any(|c| c == id))
     }
 
     fn spawn_error(&self, source: std::io::Error) -> BuildError {

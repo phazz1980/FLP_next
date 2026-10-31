@@ -1161,6 +1161,15 @@ fn check_vars(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) ->
 /// Checks the ports and parameters a block takes from variables.
 fn check_bindings(logic: &Logic, block: &crate::Block, def: &BlockDef, report: &mut Report) {
     let id = block.id.as_str();
+    for name in &block.param_in {
+        if def.input(name).is_none() {
+            report.block_error(
+                DiagKind::UnknownParam,
+                id,
+                format!("блок «{id}»: параметр «{name}» нельзя сделать входом"),
+            );
+        }
+    }
     for (name, var) in &block.bound {
         let Some(v) = logic.var(var) else {
             report.block_error(
@@ -1519,6 +1528,17 @@ type = \"not\"
     #[test]
     fn bound_type_mismatch_is_error() {
         assert!(bound("float", "in").has_errors());
+    }
+
+    #[test]
+    fn param_input_of_unknown_param_is_error() {
+        let src = "[[block]]
+id = \"n\"
+type = \"not\"
+param_in = [\"zz\"]
+";
+        let logic: Logic = toml::from_str(src).unwrap();
+        assert!(check(&logic, &library(), None).has_errors());
     }
 
     #[test]

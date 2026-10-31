@@ -12,8 +12,17 @@ pub enum GenError {
     #[error("у блока «{kind}» нет шаблона {file} для выбранной платы")]
     MissingTemplate { kind: String, file: &'static str },
 
+    #[error("у блока «{kind}» есть block.wasm, но нет его перевода в C (block.wasm.c): соберите блок заново")]
+    MissingFirmwareC { kind: String },
+
+    #[error("блок «{block}» на модуле WASM: {message}")]
+    WasmBlock { block: String, message: String },
+
     #[error("ошибка в шаблоне {}: {message}", .path.display())]
     BadTemplate { path: PathBuf, message: String },
+
+    #[error("блок «{block}»: параметр «{param}» нельзя сделать входом: шаблон использует его при генерации кода")]
+    ParamInputUnsupported { block: String, param: String },
 
     #[error("блок «{block}»: ошибка шаблона: {source}")]
     Render {

@@ -1,0 +1,21 @@
+# Светодиод мигает, а раз в 2 секунды в последовательный порт печатается время цикла.
+
+[[block]]
+id = "blink"
+type = "generator"
+time_on = "500ms"
+time_off = "500ms"
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[block]]
+id = "cycle"
+type = "cycle_report"
+interval = "2s"
+
+[[link]]
+from = "blink.out"
+to   = "led.in"

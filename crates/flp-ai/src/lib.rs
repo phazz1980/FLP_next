@@ -140,6 +140,15 @@ pub fn tools() -> Vec<Tool> {
             }, "required": ["block", "name", "variable"]}),
         },
         Tool {
+            name: "set_param_input",
+            description: "Сделать параметр блока (целое, число, время) входом: значение приходит по связи и читается на каждом скане, а число параметра становится значением входа, пока он не подключён. on = false возвращает обычный параметр и убирает связи этого входа. Параметры, которые нужны при генерации кода (размер, шина, вывод), входами не бывают. Вход называется так же, как параметр; время приходит в миллисекундах.",
+            input_schema: json!({"type": "object", "properties": {
+                "block": {"type": "string", "description": "id блока"},
+                "param": {"type": "string", "description": "имя параметра"},
+                "on": {"type": "boolean", "description": "false возвращает параметр; по умолчанию true"}
+            }, "required": ["block", "param"]}),
+        },
+        Tool {
             name: "invert_port",
             description: "Инвертировать логический (bool) вход или выход блока (на схеме это кружок инверсии). Инверсию выхода видят все его связи.",
             input_schema: json!({"type": "object", "properties": {
@@ -452,6 +461,15 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
             };
             ctx.edit(&mut |p| {
                 p.bind(&block, &name, var.as_deref())
+                    .map_err(|e| e.to_string())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "set_param_input" => {
+            let (block, param) = (s("block")?, s("param")?);
+            let on = args.get("on").and_then(Value::as_bool).unwrap_or(true);
+            ctx.edit(&mut |p| {
+                p.set_param_input(&lib, &block, &param, on)
                     .map_err(|e| e.to_string())
             })?;
             Ok(ok(ctx, &lib))

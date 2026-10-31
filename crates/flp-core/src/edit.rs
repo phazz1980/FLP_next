@@ -32,8 +32,12 @@ pub enum EditError {
     NotBool(PortRef),
     #[error("у блока «{block}» нет параметра «{param}»")]
     NoParam { block: String, param: String },
+    #[error("параметр «{param}» блока «{block}» нельзя сделать входом")]
+    NotInputParam { block: String, param: String },
     #[error("значение не подходит к параметру «{0}»")]
     BadValue(String),
+    #[error("блок «{0}» нельзя заменить: переменные и копии тегов меняются другим способом")]
+    ReplaceUnsupported(String),
     #[error("нет переменной «{0}»")]
     NoVar(String),
     #[error("блок переменной «{0}» уже подключён с другой стороны: переменную в одном блоке можно либо читать, либо записывать")]
@@ -468,6 +472,164 @@ impl Project {
         Ok(())
     }
 
+    /// Changes the type of a block in place: id, position and links stay. Ports are
+    /// matched by name, then the remaining ones of the same direction in order when
+    /// their types fit; parameters keep their values when the new type has a
+    /// parameter of that name that accepts it. Returns the links that could not be
+    /// kept (`a.out -> b.in`), the parameters and the constants dropped.
+    pub fn replace_block(
+        &mut self,
+        lib: &Library,
+        id: &str,
+        kind: &str,
+    ) -> Result<Vec<String>, EditError> {
+        let index = self.block_index(id)?;
+        let old_block = self.logic.blocks[index].clone();
+        if old_block.var_name().is_some() || old_block.tag.is_some() {
+            return Err(EditError::ReplaceUnsupported(id.to_owned()));
+        }
+        let old_def = self.block_def(lib, id)?.clone();
+        let new_def = lib
+            .get(kind)
+            .ok_or_else(|| EditError::UnknownType(kind.to_owned()))?
+            .def
+            .clone();
+        if kind == VAR_GET || kind == VAR_SET {
+            return Err(EditError::ReplaceUnsupported(kind.to_owned()));
+        }
+
+        // Old port name -> new port name, per direction.
+        let map_ports = |old: &[crate::PortDef], new: &[crate::PortDef]| {
+            let mut map = std::collections::BTreeMap::new();
+            let mut used = std::collections::BTreeSet::new();
+            for p in old {
+                if new.iter().any(|q| q.name == p.name) {
+                    map.insert(p.name.clone(), p.name.clone());
+                    used.insert(p.name.clone());
+                }
+            }
+            for p in old {
+                if map.contains_key(&p.name) {
+                    continue;
+                }
+                if let Some(q) = new.iter().find(|q| !used.contains(&q.name) && p.ty == q.ty) {
+                    map.insert(p.name.clone(), q.name.clone());
+                    used.insert(q.name.clone());
+                }
+            }
+            map
+        };
+        let in_map = map_ports(&old_def.inputs, &new_def.inputs);
+        let out_map = map_ports(&old_def.outputs, &new_def.outputs);
+
+        let mut dropped = Vec::new();
+        let mut links = Vec::new();
+        for link in std::mem::take(&mut self.logic.links) {
+            let mut l = link.clone();
+            let mut keep = true;
+            if l.from.block == id {
+                match out_map.get(&l.from.port) {
+                    Some(p) => l.from.port = p.clone(),
+                    None => keep = false,
+                }
+            }
+            if l.to.block == id {
+                match in_map.get(&l.to.port) {
+                    Some(p) => l.to.port = p.clone(),
+                    None => keep = false,
+                }
+            }
+            if keep {
+                // Types of the new ends must still fit.
+                let out_ty = if l.from.block == id {
+                    new_def.output(&l.from.port).map(|p| p.ty)
+                } else {
+                    self.block_def(lib, &l.from.block)
+                        .ok()
+                        .and_then(|d| d.output(&l.from.port))
+                        .map(|p| p.ty)
+                };
+                let in_ty = if l.to.block == id {
+                    new_def.input(&l.to.port).map(|p| p.ty)
+                } else {
+                    self.block_def(lib, &l.to.block)
+                        .ok()
+                        .and_then(|d| d.input(&l.to.port))
+                        .map(|p| p.ty)
+                };
+                keep = matches!((out_ty, in_ty), (Some(a), Some(b)) if a.can_feed(b));
+            }
+            if keep {
+                links.push(l);
+            } else {
+                dropped.push(format!("{} -> {}", link.from, link.to));
+            }
+        }
+        self.logic.links = links;
+
+        // Routes of links into the block follow the renamed input ports.
+        let routes: Vec<(String, String)> = in_map
+            .iter()
+            .filter(|(a, b)| a != b)
+            .map(|(a, b)| (format!("{id}.{a}"), format!("{id}.{b}")))
+            .collect();
+        let moved: Vec<_> = routes
+            .iter()
+            .filter_map(|(a, b)| self.layout.wires.remove(a).map(|r| (b.clone(), r)))
+            .collect();
+        self.layout.wires.extend(moved);
+        let valid: std::collections::BTreeSet<String> = self
+            .logic
+            .links
+            .iter()
+            .map(|l| Layout::wire_key(&l.to))
+            .collect();
+        let prefix = format!("{id}.");
+        self.layout
+            .wires
+            .retain(|k, _| !k.starts_with(&prefix) || valid.contains(k));
+
+        let block = &mut self.logic.blocks[index];
+        block.kind = kind.to_owned();
+        let mut params = std::collections::BTreeMap::new();
+        for (name, value) in &old_block.params {
+            match new_def.param(name) {
+                Some(p) if p.kind.accepts(value) => {
+                    params.insert(name.clone(), value.clone());
+                }
+                _ => dropped.push(format!("{id}.{name}")),
+            }
+        }
+        block.params = params;
+        block.consts = old_block
+            .consts
+            .iter()
+            .filter_map(|(k, v)| in_map.get(k).map(|n| (n.clone(), v.clone())))
+            .collect();
+        block.inverted = old_block
+            .inverted
+            .iter()
+            .filter_map(|k| out_map.get(k).cloned())
+            .collect();
+        block.inverted_inputs = old_block
+            .inverted_inputs
+            .iter()
+            .filter_map(|k| in_map.get(k).cloned())
+            .collect();
+        block.bound = old_block
+            .bound
+            .iter()
+            .filter_map(|(k, v)| {
+                let n = in_map
+                    .get(k)
+                    .or_else(|| out_map.get(k))
+                    .or_else(|| new_def.param(k).map(|_| k))?;
+                Some((n.clone(), v.clone()))
+            })
+            .collect();
+        Ok(dropped)
+    }
+
     /// Connects an output to an input. An existing link into the same input is replaced.
     pub fn connect(&mut self, lib: &Library, from: PortRef, to: PortRef) -> Result<(), EditError> {
         // A variable block reads or writes depending on the side the link comes to.
@@ -719,6 +881,47 @@ impl Project {
             None => params.remove(name),
         };
         self.logic.sync_tags();
+        Ok(())
+    }
+
+    /// Turns a parameter into an input of the block (the value is then read on every
+    /// scan) or back. Going back drops the links and the constant of that input.
+    pub fn set_param_input(
+        &mut self,
+        lib: &Library,
+        id: &str,
+        name: &str,
+        on: bool,
+    ) -> Result<(), EditError> {
+        let index = self.block_index(id)?;
+        let block = &self.logic.blocks[index];
+        let base = lib
+            .get(&block.kind)
+            .ok_or_else(|| EditError::UnknownType(block.kind.clone()))?;
+        let param = base.def.param(name).ok_or_else(|| EditError::NoParam {
+            block: id.to_owned(),
+            param: name.to_owned(),
+        })?;
+        let clash = base.def.input(name).is_some() || base.def.output(name).is_some();
+        if on && (crate::library::param_input_type(param).is_none() || clash) {
+            return Err(EditError::NotInputParam {
+                block: id.to_owned(),
+                param: name.to_owned(),
+            });
+        }
+        if on {
+            let block = &mut self.logic.blocks[index];
+            block.param_in.insert(name.to_owned());
+            block.bound.remove(name);
+        } else {
+            let port = PortRef::new(id, name);
+            let block = &mut self.logic.blocks[index];
+            block.param_in.remove(name);
+            block.consts.remove(name);
+            block.inverted_inputs.remove(name);
+            self.logic.links.retain(|l| l.to != port);
+            self.layout.wires.remove(&Layout::wire_key(&port));
+        }
         Ok(())
     }
 
@@ -1044,6 +1247,135 @@ mod tests {
         x: 0.0,
         y: 0.0,
     };
+
+    #[test]
+    fn parameter_becomes_input_and_back() {
+        let mut lib = library();
+        let def: BlockDef = toml::from_str(
+            "[block]
+type = \"tmr\"
+name = \"tmr\"
+group = \"Тест\"
+[[input]]
+name = \"in\"
+type = \"bool\"
+[[output]]
+name = \"q\"
+type = \"bool\"
+[[param]]
+name = \"delay\"
+type = \"duration\"
+default = \"2s\"
+[[param]]
+name = \"size\"
+type = \"int\"
+default = 4
+static = true
+[[param]]
+name = \"pin\"
+type = \"pin\"
+",
+        )
+        .unwrap();
+        lib.insert(LibraryBlock {
+            def,
+            dir: Default::default(),
+            inline_templates: Default::default(),
+        });
+        let mut p = project();
+        let src = p.add_block(&lib, "src", POS).unwrap();
+        let tmr = p.add_block(&lib, "tmr", POS).unwrap();
+
+        assert!(p.set_param_input(&lib, &tmr, "size", true).is_err());
+        assert!(p.set_param_input(&lib, &tmr, "pin", true).is_err());
+        assert!(p.set_param_input(&lib, &tmr, "nope", true).is_err());
+
+        p.set_param_input(&lib, &tmr, "delay", true).unwrap();
+        let def = &lib
+            .resolve(&p.logic, p.logic.block(&tmr).unwrap())
+            .unwrap()
+            .def;
+        let input = def.input("delay").expect("input appeared");
+        assert_eq!(input.ty, SignalType::Int);
+        // The parameter value became the default, in milliseconds.
+        assert_eq!(input.default, Some(ParamValue::Int(2000)));
+        // Other blocks of the type are untouched.
+        assert!(lib.get("tmr").unwrap().def.input("delay").is_none());
+
+        p.connect(&lib, PortRef::new(&src, "out"), PortRef::new(&tmr, "delay"))
+            .ok();
+        p.set_param_input(&lib, &tmr, "delay", false).unwrap();
+        let def = &lib
+            .resolve(&p.logic, p.logic.block(&tmr).unwrap())
+            .unwrap()
+            .def;
+        assert!(def.input("delay").is_none());
+        assert!(p.logic.links.iter().all(|l| l.to.port != "delay"));
+        assert!(p.logic.block(&tmr).unwrap().param_in.is_empty());
+    }
+
+    #[test]
+    fn replace_keeps_links_and_matches_ports_by_order() {
+        let mut lib = library();
+        for (kind, body) in [
+            (
+                "sink2",
+                "[[input]]
+name = \"x\"
+type = \"bool\"
+[[param]]
+name = \"pin\"
+type = \"pin\"
+",
+            ),
+            (
+                "flt",
+                "[[input]]
+name = \"in\"
+type = \"float\"
+",
+            ),
+        ] {
+            let def: BlockDef = toml::from_str(&format!(
+                "[block]
+type = \"{kind}\"
+name = \"{kind}\"
+group = \"Тест\"
+{body}"
+            ))
+            .unwrap();
+            lib.insert(LibraryBlock {
+                def,
+                dir: Default::default(),
+                inline_templates: Default::default(),
+            });
+        }
+        let mut p = project();
+        let src = p.add_block(&lib, "src", POS).unwrap();
+        let sink = p.add_block(&lib, "sink", POS).unwrap();
+        p.connect(&lib, PortRef::new(&src, "out"), PortRef::new(&sink, "in"))
+            .unwrap();
+        p.logic.blocks[1]
+            .params
+            .insert("pin".into(), ParamValue::Int(5));
+        p.logic.blocks[1].inverted_inputs.insert("in".into());
+
+        // Different input name: the lone bool input takes the link over.
+        let dropped = p.replace_block(&lib, &sink, "sink2").unwrap();
+        assert!(dropped.is_empty());
+        let b = p.logic.block(&sink).unwrap();
+        assert_eq!(b.kind, "sink2");
+        assert_eq!(b.params.get("pin"), Some(&ParamValue::Int(5)));
+        assert!(b.inverted_inputs.contains("x"));
+        assert_eq!(p.logic.links[0].to, PortRef::new(&sink, "x"));
+        assert!(p.layout.blocks.contains_key(&sink));
+
+        // A float input does not take a bool: the link is reported and dropped.
+        let dropped = p.replace_block(&lib, &sink, "flt").unwrap();
+        assert_eq!(dropped.len(), 2, "{dropped:?}");
+        assert!(p.logic.links.is_empty());
+        assert!(p.replace_block(&lib, &sink, "nope").is_err());
+    }
 
     #[test]
     fn add_generates_ids() {

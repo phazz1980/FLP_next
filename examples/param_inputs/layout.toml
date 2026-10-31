@@ -1,0 +1,25 @@
+# Координаты блоков для редактора.
+
+[block.pot]
+x = 40.0
+y = 80.0
+
+[block.button]
+x = 40.0
+y = 200.0
+
+[block.delay]
+x = 260.0
+y = 120.0
+
+[block.lamp]
+x = 460.0
+y = 120.0
+
+[block.cap_value]
+x = 40.0
+y = 320.0
+
+[block.cap]
+x = 260.0
+y = 320.0

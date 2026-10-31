@@ -120,6 +120,8 @@ struct ParamRow {
     /// For pins: direction and sharing, edited next to the type.
     mode: PinMode,
     shared: bool,
+    /// The value is needed while generating code: no input can replace it.
+    static_only: bool,
     /// Bus of a pin, kept as it was (set in `block.toml`).
     bus: String,
 }
@@ -140,6 +142,7 @@ impl ParamRow {
             choices: Vec::new(),
             mode: PinMode::Io,
             shared: false,
+            static_only: false,
             bus: String::new(),
         }
     }
@@ -160,6 +163,7 @@ impl ParamRow {
             choices: p.choices.clone(),
             mode: p.mode,
             shared: p.shared,
+            static_only: p.static_only,
             bus: p.bus.clone(),
         }
     }
@@ -190,6 +194,7 @@ impl ParamRow {
             },
             fixed: false,
             runtime: false,
+            static_only: self.static_only,
             choices: self.choices.clone(),
         })
     }
@@ -595,6 +600,63 @@ struct Generated {
     result: Result<String, String>,
 }
 
+/// Background build of the simulation module made from the block code.
+#[derive(Default)]
+struct SimBuild {
+    rx: Option<std::sync::mpsc::Receiver<Result<flp_build::wasm::ModuleBuild, String>>>,
+    /// What to tell on the trial-run tab; empty when there is nothing to tell.
+    status: String,
+}
+
+impl SimBuild {
+    /// Starts the build after a save; nothing happens while the option is off or zig is
+    /// not found.
+    fn start(&mut self, dir: &Path, def: &BlockDef, template: &str) {
+        self.rx = None;
+        self.status.clear();
+        let Some(zig) = crate::theme::sim_compiler() else {
+            return;
+        };
+        match flp_codegen::sim_source(def, template) {
+            Err(e) => self.status = e.to_string(),
+            Ok(source) => {
+                let (tx, rx) = std::sync::mpsc::channel();
+                let dir = dir.to_owned();
+                std::thread::spawn(move || {
+                    let _ = tx.send(flp_build::wasm::build_module(&zig, &dir, &source));
+                });
+                self.rx = Some(rx);
+                self.status = crate::i18n::tr("Симуляция собирается...").to_owned();
+            }
+        }
+    }
+
+    /// Takes the result of a finished build; true while a build is running.
+    fn poll(&mut self) -> bool {
+        let Some(rx) = &self.rx else { return false };
+        match rx.try_recv() {
+            Ok(result) => {
+                self.rx = None;
+                self.status = match result {
+                    Ok(flp_build::wasm::ModuleBuild::Built) => {
+                        crate::i18n::tr("Симуляция собрана из кода блока").to_owned()
+                    }
+                    Ok(flp_build::wasm::ModuleBuild::KeptManual) => {
+                        crate::i18n::tr("Есть свой block.wasm без метки — он не заменён").to_owned()
+                    }
+                    Err(e) => crate::i18n::fmt("Симуляция не собрана: {0}", &[&e]),
+                };
+                false
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => true,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.rx = None;
+                false
+            }
+        }
+    }
+}
+
 pub struct BlockEditor {
     /// Type the form was loaded from; `None` for a block not saved yet.
     original: Option<String>,
@@ -603,6 +665,7 @@ pub struct BlockEditor {
     clean: Form,
     tab: Tab,
     trial: crate::trialrun::TrialRun,
+    sim_build: SimBuild,
     generated: Option<Generated>,
     /// Closing with unsaved changes: asking what to do.
     confirm_close: bool,
@@ -663,6 +726,7 @@ impl BlockEditor {
             form,
             tab: Tab::Ports,
             trial: Default::default(),
+            sim_build: SimBuild::default(),
             generated: None,
             confirm_close: false,
             read_only: false,
@@ -1253,6 +1317,14 @@ fn params_tab(ui: &mut Ui, f: &mut Form) {
                         });
                     if row.kind == ParamKind::Pin {
                         pin_mode_edit(ui, i, row);
+                    } else if matches!(
+                        row.kind,
+                        ParamKind::Int | ParamKind::Float | ParamKind::Duration
+                    ) {
+                        ui.checkbox(&mut row.static_only, crate::i18n::tr("статический"))
+                            .on_hover_text(crate::i18n::tr(
+                                "Значение нужно при генерации кода (размер массива, начальное значение): параметр нельзя сделать входом",
+                            ));
                     }
                 });
                 let hint = match row.kind {
@@ -2062,6 +2134,13 @@ fn trial_tab(ui: &mut Ui, ed: &mut BlockEditor, dir: Option<&Path>, pal: &Palett
             .collect(),
         outputs: ed.form.outputs.iter().map(|p| p.name.as_str()).collect(),
     };
+    if ed.sim_build.poll() {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(200));
+    }
+    if !ed.sim_build.status.is_empty() {
+        ui.weak(&ed.sim_build.status);
+    }
     crate::trialrun::show(ui, &mut ed.trial, dir, &shape, pal);
 }
 
@@ -2264,6 +2343,16 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
                     LogLevel::Error,
                     crate::i18n::msg("Библиотека или пример не сохранены: {0}", &[&e]),
                 );
+            }
+            ed.sim_build.start(&dir, def, &ed.form.template);
+            // A block without a template runs from its module: translate it for the firmware.
+            if ed.form.template.trim().is_empty() {
+                if let Some(w2c2) = crate::theme::w2c2() {
+                    let (dir, kind) = (dir.clone(), kind.clone());
+                    std::thread::spawn(move || {
+                        let _ = flp_build::wasm_c::translate_firmware(&w2c2, &dir, &kind);
+                    });
+                }
             }
             ed.original = Some(kind.clone());
             ed.clean = ed.form.clone();

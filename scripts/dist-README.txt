@@ -2,9 +2,12 @@
 
 Запуск: crablogic-editor.exe. Папки library и libs должны лежать рядом с exe.
 
-Для сборки и заливки прошивок нужны arduino-cli и ядро ESP32:
-  winget install ArduinoSA.CLI
-  arduino-cli core install esp32:esp32
-(после установки перезапустите программу)
+Сборка и заливка прошивок:
+  arduino-cli.exe (Arduino CLI, лицензия GPLv3, https://github.com/arduino/arduino-cli)
+  ищется в папке программы, затем в PATH.
+  Ядро ESP32 ищется в папке esp32core рядом с программой, затем в системной
+  (%LOCALAPPDATA%\Arduino15).
+Если чего-то нет, программа при запуске предложит скачать arduino-cli 1.5.1 и ядро
+ESP32 3.3.12 (несколько сотен МБ) в свою папку.
 
 Примеры схем — в папке examples.

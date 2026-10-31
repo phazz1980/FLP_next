@@ -1,0 +1,6 @@
+[project]
+name = "wasm_ton"
+description = "Задержка включения TON, написанная на Rust и собранная в прошивку через WASM"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

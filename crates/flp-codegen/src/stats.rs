@@ -3,7 +3,7 @@
 //! `loop()` calls `flp_st_begin()` first, `flp_st_sheet(k)` where the execution
 //! order moves to blocks of another sheet and `flp_st_end()` after the logic.
 //! Debug builds send the figures in `STATS` frames; normal builds with
-//! `[diagnostics] enabled = true` print them as text.
+//! a `cycle_report` block print them as text.
 
 use std::fmt::Write as _;
 
@@ -158,7 +158,7 @@ uint32_t flp_st_free_heap() {{
     )
 }
 
-/// Text report of normal firmware, printed every `interval_ms`.
+/// Text report of normal firmware, printed every `interval_ms` (set by the `cycle_report` block).
 pub fn text_report(interval_ms: u32, background: bool, lang: Lang) -> String {
     let t = |ru: &'static str, en: &'static str| lang.pick(ru, en);
     let bg_report = if background {

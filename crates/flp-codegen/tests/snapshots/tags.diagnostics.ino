@@ -1,5 +1,5 @@
 // Сгенерировано CrabLogic из проекта «tags». Ручные правки будут перезаписаны.
-// Порядок выполнения: adc → to_c → temp_w → temp_r → setpoint_r → error → cold → heating_w → heating_r → heater
+// Порядок выполнения: adc → to_c → temp_w → temp_r → setpoint_r → error → cold → heating_w → heating_r → heater → cycle
 
 #include <Arduino.h>
 

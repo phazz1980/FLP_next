@@ -10,8 +10,8 @@ use flp_core::expander::{free_expander_id, pin_param, taken_pins};
 use flp_core::pins::{pin_uses, BoardLayout, PinUse};
 use flp_core::value::parse_duration_ms;
 use flp_core::{
-    BlockDef, Expander, ExpanderChip, LocalValues, Logic, ParamDef, ParamKind, ParamShow,
-    ParamValue, PortDef, SheetInfo, SignalType, Var, VarType,
+    param_input_type, BlockDef, Expander, ExpanderChip, LocalValues, Logic, ParamDef, ParamKind,
+    ParamShow, ParamValue, PortDef, SheetInfo, SignalType, Var, VarType,
 };
 
 use crate::app::{EditorApp, LogLevel, Selection};
@@ -47,6 +47,8 @@ pub struct BlockDialog {
     /// Parameter values; `None` means "use the default". Values of `local`
     /// parameters (passwords) come from [`LocalValues`] and go back there.
     values: BTreeMap<String, Option<ParamValue>>,
+    /// Parameters that are inputs of the block instead of constants.
+    param_in: BTreeSet<String>,
     /// Text being typed for string and duration parameters.
     texts: BTreeMap<String, String>,
     /// Secret parameters shown as plain text (the eye button).
@@ -119,6 +121,7 @@ impl BlockDialog {
             new_id: String::new(),
             kind: kind.to_owned(),
             values,
+            param_in: BTreeSet::new(),
             texts,
             revealed: BTreeSet::new(),
             pages: Vec::new(),
@@ -182,6 +185,7 @@ impl Dialog {
             new_id: id.to_owned(),
             kind: block.kind.clone(),
             values,
+            param_in: block.param_in.clone(),
             texts,
             revealed: BTreeSet::new(),
             pages: if is_widget_kind(&block.kind) {
@@ -602,7 +606,27 @@ fn block_settings(
                 ui.label(crate::i18n::tr(p.title()))
                     .on_hover_text(crate::i18n::tr(hint.trim()));
                 ui.horizontal(|ui| {
-                    param_editor(ui, p, d, def, &app.local, &pins);
+                    let as_input = d.param_in.contains(&p.name);
+                    ui.add_enabled_ui(!as_input, |ui| {
+                        param_editor(ui, p, d, def, &app.local, &pins);
+                    });
+                    if as_input || (param_input_type(p).is_some() && def.input(&p.name).is_none())
+                    {
+                        let mut on = as_input;
+                        if ui
+                            .checkbox(&mut on, crate::i18n::tr("Вход"))
+                            .on_hover_text(crate::i18n::tr(
+                                "Значение приходит на вход блока и читается на каждом скане; число в поле — значение входа, пока он не подключён",
+                            ))
+                            .changed()
+                        {
+                            if on {
+                                d.param_in.insert(p.name.clone());
+                            } else {
+                                d.param_in.remove(&p.name);
+                            }
+                        }
+                    }
                     let set = d.values.get(&p.name).is_some_and(Option::is_some);
                     if set
                         && p.default.is_some()
@@ -1650,7 +1674,11 @@ fn apply(app: &mut EditorApp, dialog: &Dialog) -> Result<(), String> {
             let chip_pin = (def.info.expander && d.source != PinSource::Gpio)
                 .then(|| pin_param(&def).map(|q| q.name.clone()))
                 .flatten();
+            let before = block.param_in.clone();
             doc.edit(&lib, None, |p| {
+                for name in d.param_in.symmetric_difference(&before) {
+                    p.set_param_input(&lib, &d.id, name, d.param_in.contains(name))?;
+                }
                 // Back to a GPIO: drops the chip pin number the parameter still holds.
                 if d.source == PinSource::Gpio
                     && p.logic.block(&d.id).is_some_and(|b| b.expander.is_some())

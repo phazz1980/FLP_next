@@ -159,6 +159,8 @@ pub struct EditorApp {
     port_scan: Option<Receiver<Result<Vec<SerialPort>, String>>>,
     /// Online debugging session, when running.
     pub debug: Option<DebugState>,
+    /// Simulation of the schema on this computer, when running.
+    pub sim: Option<crate::simview::SimState>,
     /// Build firmware with the debugging module (all builds, precompilation too).
     pub debug_firmware: bool,
     /// Chat with the AI assistant.
@@ -188,6 +190,11 @@ pub struct EditorApp {
     auto_update: bool,
     /// Offer beta versions (GitHub pre-releases) as updates.
     update_beta: bool,
+    template_sim: bool,
+    zig_path: String,
+    zig_status: String,
+    w2c2_path: String,
+    w2c2_status: String,
     /// Running release check; the flag tells whether the user asked for it.
     update_rx: Option<Receiver<(bool, Result<Check, String>)>>,
     /// When the last update check was started (periodic re-check while the editor stays open).
@@ -227,7 +234,7 @@ enum SelfUpdate {
 enum CliPrompt {
     Hidden,
     Ask,
-    /// winget runs on a worker thread and sends its lines and the final result.
+    /// The download runs on a worker thread and sends its lines and the final result.
     Installing(Receiver<Result<String, String>>),
 }
 
@@ -269,6 +276,7 @@ impl EditorApp {
             ports: Vec::new(),
             port_scan: None,
             debug: None,
+            sim: None,
             debug_firmware: false,
             ai: Default::default(),
             ai_live: Default::default(),
@@ -284,6 +292,11 @@ impl EditorApp {
             local: LocalValues::default(),
             update_check: theme::update_check(),
             update_beta: theme::update_beta(),
+            template_sim: theme::template_sim(),
+            zig_path: theme::zig_path(),
+            zig_status: String::new(),
+            w2c2_path: theme::w2c2_path(),
+            w2c2_status: String::new(),
             auto_update: theme::auto_update(),
             update_rx: None,
             update_checked: Instant::now(),
@@ -424,7 +437,7 @@ impl EditorApp {
         self.update_rx = Some(rx);
     }
 
-    /// Offer to install arduino-cli (winget) when it is not found; shows the progress.
+    /// Offer to install arduino-cli (download) when it is not found; shows the progress.
     fn cli_window(&mut self, ctx: &egui::Context) {
         match &self.cli_prompt {
             CliPrompt::Hidden => {}
@@ -436,7 +449,7 @@ impl EditorApp {
                     .resizable(false)
                     .show(ctx, |ui| {
                         ui.label(crate::i18n::tr("Для сборки и заливки прошивки нужна программа arduino-cli."));
-                        ui.label(crate::i18n::tr("Установить её сейчас через winget? Ядро ESP32 докачается при первой сборке."));
+                        ui.label(crate::i18n::tr("Скачать сейчас? Будут загружены arduino-cli и ядро ESP32 (несколько сотен МБ) в папку программы."));
                         ui.horizontal(|ui| {
                             install = ui.button(crate::i18n::tr("Установить")).clicked();
                             later = ui.button(crate::i18n::tr("Позже")).clicked();
@@ -447,7 +460,8 @@ impl EditorApp {
                     let ctx = ctx.clone();
                     thread::spawn(move || {
                         let mut lines = Vec::new();
-                        let result = flp_build::install_cli(&mut |l| lines.push(l.to_owned()));
+                        let result =
+                            flp_build::install_toolchain(&mut |l| lines.push(l.to_owned()));
                         let text = lines.join("\n");
                         let _ = tx.send(match result {
                             Ok(()) => Ok(text),
@@ -457,7 +471,7 @@ impl EditorApp {
                     });
                     self.info(
                         LogLevel::Info,
-                        crate::i18n::tr("Устанавливаю arduino-cli через winget..."),
+                        crate::i18n::tr("Скачиваю arduino-cli и ядро ESP32..."),
                     );
                     self.cli_prompt = CliPrompt::Installing(rx);
                 } else if later {
@@ -872,6 +886,7 @@ impl EditorApp {
         }
         // Debugging belongs to the previous project's firmware.
         self.stop_debug();
+        self.sim = None;
         self.restore_packed_blocks(path);
         self.block_diffs = if flp_core::project::is_project_file(path) {
             flp_core::packed::version_diffs(path, &self.lib)
@@ -1035,7 +1050,6 @@ impl EditorApp {
                     port: None,
                     options: Default::default(),
                 },
-                diagnostics: Default::default(),
                 uart: Vec::new(),
             },
             logic: Default::default(),
@@ -1222,6 +1236,73 @@ impl EditorApp {
         self.autosave_minutes = minutes;
         self.last_autosave = Instant::now();
         theme::save_autosave_minutes(minutes);
+    }
+
+    /// Menu part: build simulation modules of user blocks with zig.
+    fn sim_settings_menu(&mut self, ui: &mut egui::Ui) {
+        if ui
+            .checkbox(
+                &mut self.template_sim,
+                crate::i18n::tr("Собирать симуляцию пользовательских блоков"),
+            )
+            .on_hover_text(crate::i18n::tr(
+                "При сохранении блока его код превращается в модуль симуляции; нужен компилятор zig",
+            ))
+            .changed()
+        {
+            theme::save_template_sim(self.template_sim);
+        }
+        ui.horizontal(|ui| {
+            ui.label(crate::i18n::tr("Путь к zig:"));
+            if ui.text_edit_singleline(&mut self.zig_path).changed() {
+                theme::save_zig_path(&self.zig_path);
+                self.zig_status.clear();
+            }
+            if ui.button(crate::i18n::tr("Обзор...")).clicked() {
+                if let Some(path) = rfd::FileDialog::new().pick_file() {
+                    self.zig_path = path.to_string_lossy().into_owned();
+                    theme::save_zig_path(&self.zig_path);
+                    self.zig_status.clear();
+                }
+            }
+        });
+        if ui.button(crate::i18n::tr("Проверить")).clicked() {
+            self.zig_status =
+                match flp_build::wasm::zig_version(std::path::Path::new(self.zig_path.trim())) {
+                    Ok(v) => crate::i18n::fmt("zig {0} найден", &[&v]),
+                    Err(e) => e,
+                };
+        }
+        if !self.zig_status.is_empty() {
+            ui.label(&self.zig_status);
+        }
+        ui.horizontal(|ui| {
+            ui.label(crate::i18n::tr("Путь к w2c2:"))
+                .on_hover_text(crate::i18n::tr(
+                "Нужен блокам на Rust/WASM без шаблона C++: переводит block.wasm в C для прошивки",
+            ));
+            if ui.text_edit_singleline(&mut self.w2c2_path).changed() {
+                theme::save_w2c2_path(&self.w2c2_path);
+                self.w2c2_status.clear();
+            }
+            if ui.button(crate::i18n::tr("Обзор...")).clicked() {
+                if let Some(path) = rfd::FileDialog::new().pick_file() {
+                    self.w2c2_path = path.to_string_lossy().into_owned();
+                    theme::save_w2c2_path(&self.w2c2_path);
+                    self.w2c2_status.clear();
+                }
+            }
+        });
+        if ui.button(crate::i18n::tr("Проверить w2c2")).clicked() {
+            self.w2c2_status =
+                match flp_build::wasm_c::w2c2_check(std::path::Path::new(self.w2c2_path.trim())) {
+                    Ok(()) => crate::i18n::tr("w2c2 найден").to_owned(),
+                    Err(e) => e,
+                };
+        }
+        if !self.w2c2_status.is_empty() {
+            ui.label(&self.w2c2_status);
+        }
     }
 
     pub fn undo(&mut self) {
@@ -1526,6 +1607,7 @@ impl EditorApp {
     /// Connects to a board that already runs debugging firmware.
     pub fn connect_debug(&mut self, port: Option<String>, ctx: &egui::Context) {
         self.stop_debug();
+        self.sim = None;
         self.console.release();
         let Some(doc) = &self.doc else { return };
         let Some(port) = port.or_else(|| self.board_port()) else {
@@ -1626,6 +1708,27 @@ impl EditorApp {
                 crate::ai::Request::ReloadLibrary => self.reload_library(),
             }
         }
+    }
+
+    /// Starts the simulation of the open schema (debugging, if any, is closed).
+    pub fn start_sim(&mut self) {
+        let Some(doc) = &self.doc else { return };
+        match crate::simview::SimState::start(&doc.project, &self.lib, doc.revision) {
+            Ok(state) => {
+                self.stop_debug();
+                self.sim = Some(state);
+            }
+            Err(e) => self.info(LogLevel::Error, e),
+        }
+    }
+
+    /// Keeps the simulation in step with the schema and plays the passed time.
+    fn poll_sim(&mut self, ctx: &egui::Context) {
+        let (Some(sim), Some(doc)) = (&mut self.sim, &self.doc) else {
+            return;
+        };
+        sim.follow(&doc.project, &self.lib, doc.revision);
+        sim.tick(ctx);
     }
 
     fn poll_debug(&mut self) {
@@ -2007,6 +2110,7 @@ impl EditorApp {
                     self.set_autosave(minutes);
                 }
             });
+            ui.menu_button(crate::i18n::tr("Симуляция блоков"), |ui| self.sim_settings_menu(ui));
             ui.separator();
             if ui.button(crate::i18n::tr("Выход")).clicked() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -2145,51 +2249,6 @@ impl EditorApp {
             {
                 self.open_web_designer();
             }
-            if let Some(doc) = self.doc.as_mut() {
-                let mut diag = doc.project.config.diagnostics.clone();
-                ui.checkbox(&mut diag.enabled, crate::i18n::tr("Время цикла в порт"))
-                    .on_hover_text(crate::i18n::tr(
-                        "Прошивка раз в несколько секунд печатает в последовательный порт \
-                         время цикла (всего и по листам). Режим отладки не нужен",
-                    ));
-                if diag.enabled {
-                    ui.horizontal(|ui| {
-                        ui.label(crate::i18n::tr("Период отчёта:"));
-                        ui.add(
-                            egui::DragValue::new(&mut diag.interval_ms)
-                                .range(500..=600_000)
-                                .speed(100)
-                                .suffix(crate::i18n::tr(" мс")),
-                        );
-                    });
-                }
-                if diag != doc.project.config.diagnostics {
-                    doc.project.config.diagnostics = diag;
-                    doc.dirty = true;
-                    doc.revision += 1;
-                }
-            }
-            if let Some(doc) = self.doc.as_mut() {
-                let mut lang = doc.project.config.project.comment_lang.clone();
-                ui.horizontal(|ui| {
-                    ui.label(crate::i18n::tr("Комментарии в скетче:"))
-                        .on_hover_text(crate::i18n::tr(
-                            "Язык комментариев в сгенерированном скетче (project.toml, comment_lang).                              Не зависит от языка интерфейса",
-                        ));
-                    let en = lang == "en";
-                    if ui.radio(!en, "Русский").clicked() {
-                        lang = String::new();
-                    }
-                    if ui.radio(en, "English").clicked() {
-                        lang = "en".to_owned();
-                    }
-                });
-                if lang != doc.project.config.project.comment_lang {
-                    doc.project.config.project.comment_lang = lang;
-                    doc.dirty = true;
-                    doc.revision += 1;
-                }
-            }
             ui.separator();
             if ui
                 .add_enabled(
@@ -2237,6 +2296,18 @@ impl EditorApp {
             {
                 let port = self.port_choice();
                 self.start_job(JobKind::Upload { port }, ui.ctx());
+            }
+            if ui
+                .add_enabled(
+                    has_doc,
+                    egui::Button::new(crate::i18n::tr("Симуляция схемы на ПК")),
+                )
+                .on_hover_text(crate::i18n::tr(
+                    "Запустить схему на компьютере без платы: входы задаются руками",
+                ))
+                .clicked()
+            {
+                self.start_sim();
             }
             if ui
                 .add_enabled(
@@ -2638,6 +2709,22 @@ impl EditorApp {
         }
     }
 
+    /// Comments of the generated sketch follow the interface: Russian for the Russian
+    /// interface, English for all others.
+    fn sync_comment_lang(&mut self) {
+        let want = if crate::i18n::current() == crate::i18n::Lang::Ru {
+            ""
+        } else {
+            "en"
+        };
+        if let Some(doc) = self.doc.as_mut() {
+            if doc.project.config.project.comment_lang != want {
+                doc.project.config.project.comment_lang = want.to_owned();
+                doc.revision += 1;
+            }
+        }
+    }
+
     fn update_title(&self, ctx: &egui::Context) {
         let title = self.window_title();
         // A viewport command always forces a repaint, so send it only on change;
@@ -2662,9 +2749,11 @@ impl eframe::App for EditorApp {
         flp_core::local::editor_beat(self.doc.as_ref().map(|d| d.project.path.as_path()));
         ctx.request_repaint_after(flp_core::local::EDITOR_BEAT);
         crate::textmenu::begin(&ctx);
+        self.sync_comment_lang();
         self.poll_job(&ctx);
         self.precompile(&ctx);
         self.poll_debug();
+        self.poll_sim(&ctx);
         self.poll_ai();
         self.poll_console(&ctx);
         self.poll_ports();
@@ -2791,6 +2880,11 @@ impl eframe::App for EditorApp {
         crate::blockedit::delete_dialog(self, &ctx);
         crate::canvas::sheet_delete_dialog(self, &ctx);
         let pal = self.theme.palette;
+        if let Some(mut s) = self.sim.take() {
+            if crate::simview::window(&mut s, &pal, &ctx) {
+                self.sim = Some(s);
+            }
+        }
         if let Some(d) = &mut self.debug {
             debugview::values_window(d, &pal, &ctx);
             debugview::chart_window(d, &pal, &ctx);

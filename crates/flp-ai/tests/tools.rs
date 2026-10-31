@@ -377,3 +377,43 @@ fn moves_a_block_and_reports_the_ports_in_view() {
     assert_eq!(schema["view"]["delay"]["inputs"][0]["name"], "in");
     assert!(run(&mut c, "move_block", json!({"id": "nope", "x": 1, "y": 1})).is_err());
 }
+
+#[test]
+fn parameter_becomes_an_input() {
+    let mut c = ctx("param_input");
+    run(&mut c, "add_block", json!({"type": "timer_on", "id": "t"})).unwrap();
+    // Pins and unknown parameters are not inputs.
+    assert!(run(
+        &mut c,
+        "set_param_input",
+        json!({"block": "t", "param": "nope"})
+    )
+    .is_err());
+    run(
+        &mut c,
+        "set_param_input",
+        json!({"block": "t", "param": "time"}),
+    )
+    .unwrap();
+    run(
+        &mut c,
+        "set_input_const",
+        json!({"input": "t.time", "value": 750}),
+    )
+    .unwrap();
+    run(
+        &mut c,
+        "set_input_const",
+        json!({"input": "t.in", "value": true}),
+    )
+    .unwrap();
+    let r = run(&mut c, "generate", json!({})).unwrap();
+    assert!(r["sketch"].as_str().unwrap().contains(">= (uint32_t)(750)"));
+    run(
+        &mut c,
+        "set_param_input",
+        json!({"block": "t", "param": "time", "on": false}),
+    )
+    .unwrap();
+    assert!(c.project.logic.block("t").unwrap().param_in.is_empty());
+}

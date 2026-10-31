@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use flp_core::library::ESP32_CPP_TEMPLATE;
 use flp_core::{
-    Block, BlockDef, BoardConfig, Diagnostics, Layout, Library, LibraryBlock, Logic, ParamKind,
-    ParamValue, Project, ProjectConfig, ProjectInfo, SignalType,
+    Block, BlockDef, BoardConfig, Layout, Library, LibraryBlock, Logic, ParamKind, ParamValue,
+    Project, ProjectConfig, ProjectInfo, SignalType,
 };
 
 use crate::{ArduinoCpp, GenError};
@@ -67,7 +67,6 @@ pub fn preview_block(def: &BlockDef, template: &str) -> Result<String, GenError>
                 port: None,
                 options: BTreeMap::new(),
             },
-            diagnostics: Diagnostics::default(),
             // A block on a UART finds its settings with the defaults.
             uart: vec![flp_core::UartConfig::new(1), flp_core::UartConfig::new(2)],
         },

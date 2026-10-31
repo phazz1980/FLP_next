@@ -920,6 +920,12 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     // Links.
     let selected = app.selection.clone();
     let dbg = app.debug.as_ref();
+    let sim = app.sim.as_ref();
+    // Live value of an output: from the board, else from the simulation.
+    let live_output = |port: &flp_core::PortRef| {
+        dbg.and_then(|d| d.output(port))
+            .or_else(|| sim.and_then(|s| s.output(port)))
+    };
     let click_pos = bg.clicked().then(|| bg.interact_pointer_pos()).flatten();
     let mut clicked_link = None;
     let mut wire_click = None;
@@ -931,6 +937,12 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     // Live values above the input end of each wire; drawn after the blocks to stay on top.
     let mut wire_labels = Vec::new();
+    // Value labels a click on which opens an editor: (label, output behind it).
+    let mut value_hits: Vec<(Rect, PortRef)> = Vec::new();
+    let editable = |port: &PortRef| {
+        dbg.is_some_and(|d| d.table.output_index(port).is_some())
+            || sim.is_some_and(|s| crate::simview::editable(s, port))
+    };
     let mut text_labels = Vec::new();
     for link in &logic.links {
         let (Some((a, ty)), Some((b, _))) =
@@ -990,8 +1002,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         let color = signal_color(&pal, ty);
         // Online: logical lines light up when true and fade when false.
         // An inverted output feeds the inverted value to its links.
-        let live = dbg
-            .and_then(|d| d.output(&link.from))
+        let live = live_output(&link.from)
             .map(|(v, forced)| (flip(v, inverted_output(logic, &link.from)), forced));
         let (width, color) = match live {
             Some((flp_debug::Value::Bool(true), _)) => (2.6, pal.ok),
@@ -999,9 +1010,12 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             _ => (1.6, color),
         };
         if let Some((v, forced)) = live {
-            wire_labels.push((b, v, forced));
+            wire_labels.push((b, v, forced, link.from.clone()));
         }
-        if let Some(text) = dbg.and_then(|d| d.text_output(&link.from)) {
+        if let Some(text) = dbg
+            .and_then(|d| d.text_output(&link.from))
+            .or_else(|| sim.and_then(|s| s.text_output(&link.from)))
+        {
             text_labels.push((b, text.to_owned()));
         }
         let stroke = Stroke::new(if is_sel { width + 1.4 } else { width }, color);
@@ -1357,15 +1371,23 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             {
                 if let Some((v, forced)) = dbg.and_then(|d| d.var(var)) {
                     debugview::value_label(&painter, &pal, pos, v, forced, z, Place::Right);
+                } else if let Some((v, forced)) = sim.and_then(|s| s.var(logic, var)) {
+                    let rect =
+                        debugview::value_label(&painter, &pal, pos, v, forced, z, Place::Right);
+                    value_hits.push((rect, PortRef::new(&block.id, &q.name)));
                 } else if let Some(text) = dbg.and_then(|d| d.text_var(var)) {
                     debugview::text_label(&painter, &pal, pos, text, z, Place::Right);
                 }
             }
             if output && kind == Kind::Box {
                 let port = PortRef::new(&block.id, &q.name);
-                if let Some((v, forced)) = dbg.and_then(|d| d.output(&port)) {
+                if let Some((v, forced)) = live_output(&port) {
                     let v = flip(v, inverted);
-                    debugview::value_label(&painter, &pal, pos, v, forced, z, Place::Right);
+                    let rect =
+                        debugview::value_label(&painter, &pal, pos, v, forced, z, Place::Right);
+                    if editable(&port) {
+                        value_hits.push((rect, port.clone()));
+                    }
                 } else if let Some(text) = dbg.and_then(|d| d.text_output(&port)) {
                     debugview::text_label(&painter, &pal, pos, text, z, Place::Right);
                 }
@@ -1399,8 +1421,28 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     for (anchor, text) in text_labels {
         debugview::text_label(&painter, &pal, anchor, &text, z, Place::Left);
     }
-    for (anchor, v, forced) in wire_labels {
-        debugview::value_label(&painter, &pal, anchor, v, forced, z, Place::Left);
+    for (anchor, v, forced, port) in wire_labels {
+        let rect = debugview::value_label(&painter, &pal, anchor, v, forced, z, Place::Left);
+        if editable(&port) {
+            value_hits.push((rect, port));
+        }
+    }
+    // A left click on a value: switch a bool, type a number.
+    for (n, (rect, port)) in value_hits.into_iter().enumerate() {
+        let resp = ui.interact(rect, Id::unique(("value_label", n)), Sense::click());
+        let index = app.debug.as_ref().and_then(|d| d.table.output_index(&port));
+        let mut debug = app.debug.take();
+        let mut sim = app.sim.take();
+        egui::Popup::menu(&resp).show(|ui| {
+            if let (Some(d), Some(i)) = (&mut debug, index) {
+                debugview::value_menu(ui, d, i);
+            }
+            if let Some(s) = &mut sim {
+                crate::simview::port_menu(ui, s, &port);
+            }
+        });
+        app.debug = debug;
+        app.sim = sim;
     }
 
     // Wire being drawn.
@@ -1915,11 +1957,16 @@ fn port_context_menu(
         }
     });
     let mut debug = app.debug.take();
+    let mut sim = app.sim.take();
     let mut set_const = None;
     let mut invert = None;
     let mut bad_const = false;
     let text = &mut app.canvas.const_text;
     resp.context_menu(|ui| {
+        if let (Some(s), true) = (&mut sim, output) {
+            crate::simview::port_menu(ui, s, port);
+            ui.separator();
+        }
         if let (Some(d), Some(index)) = (&mut debug, debug_index) {
             debugview::value_menu(ui, d, index);
             if !output {
@@ -1983,6 +2030,7 @@ fn port_context_menu(
         }
     });
     app.debug = debug;
+    app.sim = sim;
     if bad_const {
         let text = app.canvas.const_text.clone();
         app.info(
@@ -2022,6 +2070,7 @@ fn block_context_menu(app: &mut EditorApp, id: &str, resp: &egui::Response) {
     let mut props = false;
     let mut edit_var = false;
     let mut edit_type = false;
+    let mut replace_with: Option<String> = None;
     let library_kind = app
         .doc
         .as_ref()
@@ -2067,6 +2116,36 @@ fn block_context_menu(app: &mut EditorApp, id: &str, resp: &egui::Response) {
                 edit_type = true;
             }
         }
+        if let Some(block) = &library_kind {
+            let current = block.def.info.kind.clone();
+            ui.menu_button(crate::i18n::tr("Заменить блок на"), |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(360.0)
+                    .show(ui, |ui| {
+                        let mut blocks: Vec<_> = app
+                            .lib
+                            .iter()
+                            .map(|b| &b.def)
+                            .filter(|d| !d.info.hidden && d.info.kind != current)
+                            .filter(|d| d.info.kind != VAR_GET && d.info.kind != VAR_SET)
+                            .collect();
+                        blocks.sort_by(|a, b| {
+                            (&a.info.group, &a.info.name).cmp(&(&b.info.group, &b.info.name))
+                        });
+                        let mut group = None;
+                        for d in blocks {
+                            if group != Some(&d.info.group) {
+                                group = Some(&d.info.group);
+                                ui.weak(crate::i18n::tr(&d.info.group));
+                            }
+                            if ui.button(crate::i18n::tr(&d.info.name)).clicked() {
+                                replace_with = Some(d.info.kind.clone());
+                                ui.close();
+                            }
+                        }
+                    });
+            });
+        }
         ui.menu_button(crate::i18n::tr("Перенести на плату"), |ui| {
             let new = sheets.last().copied().unwrap_or(1) + 1;
             for s in sheets.iter().copied().chain([new]) {
@@ -2091,6 +2170,21 @@ fn block_context_menu(app: &mut EditorApp, id: &str, resp: &egui::Response) {
     }
     if let (true, Some(block)) = (edit_type, &library_kind) {
         app.block_editor = Some(crate::blockedit::BlockEditor::edit(app, block));
+    }
+    if let Some(kind) = replace_with {
+        let lib = app.lib.clone();
+        let result = app
+            .doc
+            .as_mut()
+            .map(|doc| doc.edit(&lib, None, |p| p.replace_block(&lib, id, &kind)));
+        match result {
+            Some(Ok(dropped)) if !dropped.is_empty() => app.info(
+                LogLevel::Warning,
+                crate::i18n::fmt("Блок заменён; не перенесено: {0}", &[&dropped.join(", ")]),
+            ),
+            Some(Err(e)) => app.info(LogLevel::Error, e.to_string()),
+            _ => {}
+        }
     }
     if let Some(sheet) = move_to {
         let lib = app.lib.clone();

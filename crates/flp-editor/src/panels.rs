@@ -282,6 +282,18 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
         crate::i18n::tr("С отладкой: собирать прошивку с модулем онлайн-отладки (и фоновую сборку тоже); после заливки редактор подключится к плате"),
     );
     ui.separator();
+    if app.sim.is_none() {
+        if icon(
+            ui,
+            has_doc,
+            "▶",
+            crate::i18n::tr("Симуляция схемы на ПК: запустить схему на компьютере без платы"),
+        ) {
+            app.start_sim();
+        }
+    } else if icon(ui, true, "⏹", crate::i18n::tr("Остановить симуляцию")) {
+        app.sim = None;
+    }
     if app.debug.is_none() {
         if icon(
             ui,
