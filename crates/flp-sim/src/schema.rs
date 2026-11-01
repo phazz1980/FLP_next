@@ -68,7 +68,17 @@ struct Node {
 
 /// Blocks whose outputs follow what the bench shows on their pin.
 fn reads_bench(kind: &str) -> bool {
-    matches!(kind, "digital_in" | "analog_in" | "dht22" | "ds18b20")
+    matches!(
+        kind,
+        "digital_in"
+            | "analog_in"
+            | "dht22"
+            | "ds18b20"
+            | "wifi"
+            | "ethernet"
+            | "mqtt"
+            | "modbus_master_read"
+    )
 }
 
 /// What the bench lets the user set for an output of a block.
@@ -80,6 +90,12 @@ pub enum BenchInput {
     Analog { pin: i64 },
     /// A sensor channel: a value that may change in time, or a fault.
     Sensor { pin: i64, channel: String },
+    /// The link of Wi-Fi or Ethernet.
+    Link,
+    /// The MQTT broker: reachable or not (the link is set on the network block).
+    Broker,
+    /// A register of a Modbus slave and whether the slave answers.
+    Modbus { slave: i64, table: String, reg: i64 },
 }
 
 impl Node {
@@ -515,8 +531,25 @@ impl Simulation {
         if node.computed() != Computed::Bench {
             return None;
         }
+        let kind = node.def.info.kind.as_str();
+        let net = match (kind, port) {
+            ("wifi", _) | ("ethernet", _) => Some(BenchInput::Link),
+            ("mqtt", _) => Some(BenchInput::Broker),
+            ("modbus_master_read", _) => {
+                let at = |name: &str| node.def.params.iter().position(|p| p.name == name);
+                Some(BenchInput::Modbus {
+                    slave: node.params[at("slave")?] as i64,
+                    table: node.param_texts[at("table")?].clone(),
+                    reg: node.params[at("reg")?] as i64,
+                })
+            }
+            _ => None,
+        };
+        if net.is_some() {
+            return net;
+        }
         let pin = node.pin()?;
-        match (node.def.info.kind.as_str(), port) {
+        match (kind, port) {
             ("digital_in", "out") => Some(BenchInput::Digital { pin }),
             ("analog_in", "out") => Some(BenchInput::Analog { pin }),
             ("dht22", "temp" | "humidity") => Some(BenchInput::Sensor {
@@ -542,6 +575,26 @@ impl Simulation {
         }
         let pin = node.pin()?;
         Some((pin, self.bench.driven(pin)?))
+    }
+
+    /// The network has no link (Wi-Fi or Ethernet).
+    pub fn set_offline(&mut self, offline: bool) {
+        self.bench.set_offline(offline);
+    }
+
+    /// The MQTT broker does not answer.
+    pub fn set_broker_down(&mut self, down: bool) {
+        self.bench.set_broker_down(down);
+    }
+
+    /// A Modbus slave answers or not.
+    pub fn set_silent(&mut self, slave: i64, silent: bool) {
+        self.bench.set_silent(slave, silent);
+    }
+
+    /// Sets a register of a Modbus slave.
+    pub fn set_register(&mut self, slave: i64, table: &str, reg: i64, value: f64) {
+        self.bench.set_register(slave, table, reg, value);
     }
 
     /// Sets the level of an input pin.

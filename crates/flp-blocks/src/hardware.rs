@@ -19,6 +19,10 @@ pub fn behavior(kind: &str) -> Option<Box<dyn Behavior>> {
         "pwm_out" => Some(Box::<PwmOut>::default()),
         "dht22" => Some(Box::<Dht22>::default()),
         "ds18b20" => Some(Box::<Ds18b20>::default()),
+        "wifi" => Some(Box::new(crate::netsim::Wifi)),
+        "ethernet" => Some(Box::new(crate::netsim::Ethernet)),
+        "mqtt" => Some(Box::new(crate::netsim::Mqtt)),
+        "modbus_master_read" => Some(Box::new(crate::netsim::ModbusMasterRead)),
         _ => None,
     }
 }

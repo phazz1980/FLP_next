@@ -201,6 +201,51 @@ fn bench_menu(ui: &mut Ui, sim: &mut SimState, port: &PortRef, input: BenchInput
                 sim.sim.set_pin_level(pin, counts.round());
             }
         }
+        BenchInput::Link => {
+            let mut offline = sim.sim.bench().offline();
+            if ui
+                .checkbox(&mut offline, crate::i18n::tr("Нет связи с сетью"))
+                .changed()
+            {
+                sim.sim.set_offline(offline);
+            }
+        }
+        BenchInput::Broker => {
+            let mut down = sim.sim.bench().broker_down();
+            if ui
+                .checkbox(&mut down, crate::i18n::tr("Брокер не отвечает"))
+                .changed()
+            {
+                sim.sim.set_broker_down(down);
+            }
+            let mut offline = sim.sim.bench().offline();
+            if ui
+                .checkbox(&mut offline, crate::i18n::tr("Нет связи с сетью"))
+                .changed()
+            {
+                sim.sim.set_offline(offline);
+            }
+        }
+        BenchInput::Modbus { slave, table, reg } => {
+            let mut value = sim.sim.bench().register(slave, &table, reg);
+            ui.label(crate::i18n::fmt(
+                "Устройство {0}, {1}, регистр {2}",
+                &[&slave, &table, &reg],
+            ));
+            if ui
+                .add(egui::DragValue::new(&mut value).speed(0.1))
+                .changed()
+            {
+                sim.sim.set_register(slave, &table, reg, value);
+            }
+            let mut silent = sim.sim.bench().silent(slave);
+            if ui
+                .checkbox(&mut silent, crate::i18n::tr("Нет ответа"))
+                .changed()
+            {
+                sim.sim.set_silent(slave, silent);
+            }
+        }
         BenchInput::Sensor { pin, channel } => {
             let mut sig = sim.sim.bench().signal(pin, &channel);
             let mut over_s = sig.duration_ms as f64 / 1000.0;

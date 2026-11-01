@@ -383,3 +383,39 @@ fn bench_button_lights_the_led_through_pullup_and_inversion() {
     s.step(10).unwrap();
     assert_eq!(s.bench().driven(2), Some(0.0));
 }
+
+#[test]
+fn bench_network_outage_reaches_the_outputs() {
+    let mut s = sim("mqtt");
+    assert_eq!(s.bench_input("wifi", "ready"), Some(BenchInput::Link));
+    assert_eq!(
+        s.bench_input("broker", "connected"),
+        Some(BenchInput::Broker)
+    );
+    s.step(10).unwrap();
+    assert_eq!(s.output("wifi", "ready"), Some(1.0));
+    assert_eq!(s.output("broker", "connected"), Some(1.0));
+    s.set_broker_down(true);
+    s.step(10).unwrap();
+    assert_eq!(s.output("wifi", "ready"), Some(1.0));
+    assert_eq!(s.output("broker", "connected"), Some(0.0));
+    s.set_offline(true);
+    s.step(10).unwrap();
+    assert_eq!(s.output("wifi", "ready"), Some(0.0));
+    assert_eq!(s.output_text("wifi", "address"), Some(""));
+}
+
+#[test]
+fn bench_modbus_master_reads_a_register_and_loses_the_slave() {
+    let mut s = sim("modbus_rtu");
+    let Some(BenchInput::Modbus { slave, table, reg }) = s.bench_input("temp", "out_f") else {
+        panic!("modbus_master_read reads the bench");
+    };
+    s.set_register(slave, &table, reg, 36.6);
+    s.step(10).unwrap();
+    assert_eq!(s.output("temp", "out_f"), Some(36.6));
+    assert_eq!(s.output("temp", "ok"), Some(1.0));
+    s.set_silent(slave, true);
+    s.step(10).unwrap();
+    assert_eq!(s.output("temp", "ok"), Some(0.0));
+}

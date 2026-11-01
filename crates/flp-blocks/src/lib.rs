@@ -6,6 +6,7 @@ mod cpp;
 mod hardware;
 mod more;
 mod net;
+mod netsim;
 mod network;
 mod text;
 mod uart;
