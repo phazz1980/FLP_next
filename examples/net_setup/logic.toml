@@ -1,0 +1,184 @@
+# Параметры сети с веб-страницы. Плата поднимает свою точку доступа FLP_ESP32 (пароль 12345678)
+# и открывает страницу http://192.168.4.1/ui. Введите имя сети, пароль, брокер, логин, Client ID
+# и пароль OTA: они применяются на лету, а ниже видно, подключилась ли плата и есть ли связь с брокером.
+
+[[block]]
+id = "wifi"
+type = "wifi"
+wifi_mode = 2
+ssid = ""
+ap_ssid = "FLP_ESP32"
+ap_password = "12345678"
+param_in = ["ssid", "password", "ota_password"]
+
+[[block]]
+id = "broker"
+type = "mqtt"
+broker = ""
+param_in = ["broker", "user", "password", "client_id"]
+
+[[block]]
+id = "ui"
+type = "web_ui"
+title = "Настройка сети"
+password = ""
+
+[[block]]
+id = "head"
+type = "web_label"
+caption = "Wi-Fi"
+col = 1
+row = 1
+w = 24
+h = 2
+
+[[block]]
+id = "ssid"
+type = "web_text_input"
+caption = "Имя сети (SSID)"
+col = 1
+row = 3
+w = 12
+h = 2
+
+[[block]]
+id = "pass"
+type = "web_text_input"
+caption = "Пароль сети"
+col = 13
+row = 3
+w = 12
+h = 2
+secret = true
+
+[[block]]
+id = "head2"
+type = "web_label"
+caption = "MQTT и обновление"
+col = 1
+row = 5
+w = 24
+h = 2
+
+[[block]]
+id = "host"
+type = "web_text_input"
+caption = "Брокер"
+col = 1
+row = 7
+w = 12
+h = 2
+
+[[block]]
+id = "user"
+type = "web_text_input"
+caption = "Логин"
+col = 13
+row = 7
+w = 12
+h = 2
+
+[[block]]
+id = "cid"
+type = "web_text_input"
+caption = "Client ID"
+col = 1
+row = 9
+w = 12
+h = 2
+
+[[block]]
+id = "mpass"
+type = "web_text_input"
+caption = "Пароль MQTT"
+col = 13
+row = 9
+w = 12
+h = 2
+secret = true
+
+[[block]]
+id = "ota"
+type = "web_text_input"
+caption = "Пароль OTA"
+col = 1
+row = 11
+w = 12
+h = 2
+secret = true
+
+[[block]]
+id = "head3"
+type = "web_label"
+caption = "Состояние"
+col = 1
+row = 13
+w = 24
+h = 2
+
+[[block]]
+id = "st_wifi"
+type = "web_led"
+caption = "Wi-Fi подключён"
+col = 1
+row = 15
+w = 8
+h = 2
+
+[[block]]
+id = "st_mqtt"
+type = "web_led"
+caption = "Брокер на связи"
+col = 9
+row = 15
+w = 8
+h = 2
+
+[[block]]
+id = "st_ip"
+type = "web_text"
+caption = "Адрес в сети"
+col = 17
+row = 15
+w = 8
+h = 2
+
+[[link]]
+from = "ssid.out"
+to = "wifi.ssid"
+
+[[link]]
+from = "pass.out"
+to = "wifi.password"
+
+[[link]]
+from = "host.out"
+to = "broker.broker"
+
+[[link]]
+from = "user.out"
+to = "broker.user"
+
+[[link]]
+from = "mpass.out"
+to = "broker.password"
+
+[[link]]
+from = "cid.out"
+to = "broker.client_id"
+
+[[link]]
+from = "ota.out"
+to = "wifi.ota_password"
+
+[[link]]
+from = "wifi.ready"
+to = "st_wifi.in"
+
+[[link]]
+from = "broker.connected"
+to = "st_mqtt.in"
+
+[[link]]
+from = "wifi.address"
+to = "st_ip.in"

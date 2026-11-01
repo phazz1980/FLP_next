@@ -287,3 +287,17 @@ col = 12
 row = 42
 w = 1
 h = 4
+
+[[block]]
+id = "cnt"
+type = "web_input"
+integer = true
+caption = "Целое"
+min = 0.0
+max = 100.0
+step = 1.0
+initial = 10.0
+col = 1
+row = 31
+w = 8
+h = 2

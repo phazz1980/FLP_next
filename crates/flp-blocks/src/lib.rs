@@ -501,6 +501,10 @@ static BLOCKS: &[Block] = &[
         emit: web::web_tank,
     },
     Block {
+        kind: "web_text_input",
+        emit: web::web_text_input,
+    },
+    Block {
         kind: "web_text",
         emit: web::web_text,
     },

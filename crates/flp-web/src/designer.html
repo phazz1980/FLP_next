@@ -30,7 +30,10 @@ input, select { font: inherit; color: var(--text); background: var(--bg); border
   border-radius: 5px; padding: 3px 6px; width: 100%; }
 input[type=checkbox] { width: auto; }
 aside { background: var(--panel); overflow: auto; padding: 10px; }
-#props { border-left: 1px solid var(--line); }
+#side { border-left: 1px solid var(--line); }
+#unpl .un { display: block; width: 100%; text-align: left; margin: 0 0 4px; cursor: grab; }
+#unpl .un span { color: var(--muted); font-size: 11px; }
+#grid.drop { border-color: var(--accent); }
 aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 14px 0 6px; }
 aside h2:first-child { margin-top: 0; }
 main { overflow: auto; padding: 12px; min-width: 0; max-width: 100vw; }
@@ -54,7 +57,7 @@ label.f { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--muted
 @media (max-width: 900px) {
   body { grid-template-columns: 1fr; grid-template-rows: auto auto auto auto; height: auto; }
   header, #status { grid-column: 1; }
-  #props { border: 0; border-bottom: 1px solid var(--line); }
+  #side { border: 0; border-bottom: 1px solid var(--line); }
 }
 </style>
 </head>
@@ -76,7 +79,7 @@ label.f { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--muted
   <iframe id="preview" title="Предпросмотр" hidden></iframe>
 </main>
 
-<aside id="props"></aside>
+<aside id="side"><div id="unpl"></div><div id="props"></div></aside>
 <div id="status"></div>
 <div id="version">v{{VERSION}}</div>
 
@@ -117,6 +120,7 @@ function widgetParam(b, name, d) {
   const p = (types[b.type]?.params || []).find((x) => x.name === name);
   return p ? val(b, p) : d;
 }
+const placed = (b) => num(widgetParam(b, "row", 0), 0) >= 1;
 const pageOf = (b) => Math.max(1, num(widgetParam(b, "page", 1), 1));
 function pageNames(host) {
   const n = host ? String(widgetParam(host, "pages", "Главная")).split(";").map((x) => x.trim()) : [];
@@ -124,7 +128,7 @@ function pageNames(host) {
 }
 function rect(b) {
   return {
-    c: num(widgetParam(b, "col", 1), 1), r: num(widgetParam(b, "row", 1), 1),
+    c: num(widgetParam(b, "col", 1), 1), r: Math.max(1, num(widgetParam(b, "row", 0), 0)),
     w: num(widgetParam(b, "w", 6), 6), h: num(widgetParam(b, "h", 2), 2),
   };
 }
@@ -139,7 +143,7 @@ function render() {
   const host = (schema.logic.block || []).find((b) => b.type === "web_ui");
   const names = pageNames(host);
   if (curPage > names.length) curPage = names.length;
-  const widgets = all.filter((b) => Math.min(pageOf(b), names.length) === curPage);
+  const widgets = all.filter((b) => placed(b) && Math.min(pageOf(b), names.length) === curPage);
   const wifi = (schema.logic.block || []).find((b) => b.type === "wifi");
   $("addHost").hidden = !!host;
   $("hostHint").textContent = !wifi
@@ -157,9 +161,58 @@ function render() {
   for (const b of widgets) g.appendChild(itemEl(b));
 
   renderTabs(names, host);
+  renderUnplaced(all);
   renderProps();
   renderPreview(all, host);
 }
+
+// widgets added in the editor (row 0) wait here until they are put on a page
+function bottomRow() {
+  return Math.max(0, ...(schema.logic.block || []).filter((b) => isWidget(b) && placed(b) && pageOf(b) === curPage).map((b) => rect(b).r + rect(b).h - 1));
+}
+function putWidget(b, c, r) {
+  const w = rect(b);
+  return act(async () => {
+    await api("set_params", { id: b.id, params: { page: curPage, col: Math.max(1, Math.min(COLS - w.w + 1, c)), row: Math.max(1, r) } });
+    selected = b.id;
+  });
+}
+function renderUnplaced(all) {
+  const el = $("unpl");
+  el.textContent = "";
+  const list = all.filter((b) => !placed(b));
+  if (!list.length) return;
+  const h = document.createElement("h2");
+  h.textContent = `Не размещённые (${list.length})`;
+  el.appendChild(h);
+  const hint = document.createElement("p");
+  hint.className = "hint";
+  hint.textContent = "Перетащите на страницу или щёлкните — виджет встанет в конец текущей страницы.";
+  el.appendChild(hint);
+  for (const b of list) {
+    const btn = document.createElement("button");
+    btn.className = "un";
+    btn.draggable = true;
+    const cap = document.createElement("b");
+    cap.textContent = String(widgetParam(b, "caption", b.id));
+    const sub = document.createElement("span");
+    sub.textContent = ` ${types[b.type] ? types[b.type].name : b.type} · ${b.id}`;
+    btn.append(cap, sub);
+    btn.onclick = () => putWidget(b, 1, bottomRow() + 1);
+    btn.ondragstart = (ev) => ev.dataTransfer.setData("text/plain", b.id);
+    el.appendChild(btn);
+  }
+}
+$("grid").addEventListener("dragover", (ev) => { ev.preventDefault(); $("grid").classList.add("drop"); });
+$("grid").addEventListener("dragleave", () => $("grid").classList.remove("drop"));
+$("grid").addEventListener("drop", (ev) => {
+  ev.preventDefault();
+  $("grid").classList.remove("drop");
+  const b = (schema.logic.block || []).find((x) => x.id === ev.dataTransfer.getData("text/plain") && isWidget(x));
+  if (!b) return;
+  const box = $("grid").getBoundingClientRect();
+  putWidget(b, Math.floor((ev.clientX - box.left) / (CW + GAP)) + 1, Math.floor((ev.clientY - box.top) / (CH + GAP)) + 1);
+});
 
 function renderTabs(names, host) {
   const t = $("tabs");
@@ -451,9 +504,8 @@ $("addWidget").onchange = (ev) => {
     const base = type.slice(4);
     let n = 1, id = base;
     while (used.has(id)) id = base + ++n;
-    const bottom = Math.max(0, ...(schema.logic.block || []).filter((b) => isWidget(b) && pageOf(b) === curPage).map((b) => rect(b).r + rect(b).h - 1));
     await api("add_block", { type, id });
-    await api("set_params", { id, params: { page: curPage, col: 1, row: bottom + 1 } });
+    await api("set_params", { id, params: { page: curPage, col: 1, row: bottomRow() + 1 } });
     selected = id;
   });
 };
@@ -473,7 +525,7 @@ $("addWidget").onchange = (ev) => {
 // the editor may change widgets too: pick up its changes
 let lastSchema = "";
 setInterval(async () => {
-  if (document.hidden || document.activeElement?.closest?.("#props")) return;
+  if (document.hidden || document.activeElement?.closest?.("#side")) return;
   try {
     const next = await api("get_schema");
     const text = JSON.stringify(next);

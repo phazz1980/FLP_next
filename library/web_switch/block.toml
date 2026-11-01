@@ -39,8 +39,8 @@ name = "row"
 show = "hidden"
 type = "int"
 label = "Строка"
-default = 1
-description = "Верхняя строка сетки страницы (1, 2, …)"
+default = 0
+description = "Верхняя строка сетки страницы (1, 2, …); 0 — виджет ещё не размещён в конструкторе"
 
 [[param]]
 name = "w"

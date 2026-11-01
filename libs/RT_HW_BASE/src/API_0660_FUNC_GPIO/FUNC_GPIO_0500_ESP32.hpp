@@ -328,8 +328,12 @@
 		if(bf==0){id.dir=52;return;}						//--Проверка допустимости номера канала;
 		id.channel=bf-1;									//--Захват свободного канала, если он не определен внешней настройкой; 
 		//id.freq=freq;										//--Сохранение частоты
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+		ledcAttachChannel(id.pin,id.freq,id.depth,id.channel);	//--Core 3.x: pin, frequency, resolution and channel in one call;
+#else
 		ledcSetup(id.channel,id.freq,id.depth);				//--Настройка канала на частоту;
 		ledcAttachPin(id.pin,id.channel);					//--Привязка пина к каналу; 
+#endif
 		id.dir=1;
 		//Serial.println(String("ESP32 PWM pin=")+String(id.pin)+String(" depth=") + String(id.depth) +String(" freq=") + String(id.freq) );
 	} 
@@ -337,13 +341,23 @@
 //									40.2. Запись пина (PWM)
 //-------------------------------------------------------------------------------------------------
 	if(id.dir==1){
-		if(id.cashFreq!=id.freq){id.cashFreq=id.freq; ledcChangeFrequency(id.channel,id.freq,id.depth);}
+		if(id.cashFreq!=id.freq){id.cashFreq=id.freq;
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+			ledcChangeFrequency(id.pin,id.freq,id.depth);
+#else
+			ledcChangeFrequency(id.channel,id.freq,id.depth);
+#endif
+		}
   // id.var=var;
   // id.duration=id.var;									//--Save duration variable; 
   // id.duty=normDepth(id.duration,id.depth); 			    //--Save duty mcs; 
   // ledcWrite(id.channel,id.duty); 						//--Вывод PWM ESP32;	
 		id.vPin=normPWM(var);
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+		ledcWrite(id.pin,id.vPin);							//--Core 3.x writes by pin;
+#else
 		ledcWrite(id.channel,id.vPin);
+#endif
 		return;
 	}
 //-------------------------------------------------------------------------------------------------

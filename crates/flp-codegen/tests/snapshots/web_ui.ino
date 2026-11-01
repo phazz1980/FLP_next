@@ -1,5 +1,5 @@
 // Сгенерировано CrabLogic из проекта «web_ui». Ручные правки будут перезаписаны.
-// Порядок выполнения: wifi → ui → head → sw → btn → sld → inp → val → bar → any → lamp → led → txt → info → line → box → trend → net → tank → clock → pic → fan → arrow → panel → sepv
+// Порядок выполнения: wifi → ui → head → sw → btn → sld → inp → val → bar → any → lamp → led → txt → info → line → box → trend → net → tank → clock → pic → fan → arrow → panel → sepv → cnt
 
 // Tells the web page block to add the network form handlers (/ui/net, /ui/scan).
 #define FLP_WEB_NET
@@ -29,6 +29,7 @@ String net_gateway = String();
 String net_subnet = String();
 int32_t net_mode = 0;
 bool net_changed = false;
+int32_t cnt_out_i = 0;
 
 // web_ui: общий код
 // Web interface registry: widget blocks register their items, the web_ui block serves them.
@@ -213,6 +214,11 @@ function mk(d,i){
   w.appendChild(h('small','',d.l));w.appendChild(o);w.appendChild(s);
   s.oninput=function(){o.textContent=s.value+u;S(i,s.value)};
   return[w,function(v){if(document.activeElement!=s){s.value=v;o.textContent=(+v)+u}}]}
+ if(k=='textin'){
+  var n=h('input');n.type=d.a>0?'password':'text';n.autocomplete='off';n.spellcheck=false;
+  w.appendChild(h('small','',d.l));w.appendChild(n);
+  n.onchange=function(){S(i,encodeURIComponent(n.value))};
+  return[w,function(v){if(document.activeElement!=n&&(d.a<=0||v!==''))n.value=v}]}
  if(k=='input'){
   var n=h('input');n.type='number';n.step=d.s;if(d.b>d.a){n.min=d.a;n.max=d.b}
   w.appendChild(h('small','',d.l+u));w.appendChild(n);
@@ -322,6 +328,8 @@ F('/ui/layout').then(function(r){if(r.status==403){lg(K!='');throw 0}return r.js
  nm.forEach(function(s){tab(s,h('div'))});
  if(d.y)tab('Система',sy());
  N.hidden=P.length<2;
+ var B={};d.i.forEach(function(x){if(x.r>0)B[x.g]=Math.max(B[x.g]||0,x.r+x.h-1)});
+ d.i.forEach(function(x){if(x.r<1){x.c=1;x.r=(B[x.g]||0)+1;B[x.g]=x.r+x.h-1}});
  d.i.forEach(function(x,i){var m=mk(x,i);P[Math.min(Math.max(x.g,1),nm.length)-1].appendChild(m[0]);E.push(m[1])});
  go(Math.min(Math.max(parseInt(location.hash.slice(1))||1,1),P.length)-1);poll()}).catch(function(){})
 </script></body></html>)FLPUI";
@@ -394,6 +402,9 @@ FlpUiItem panel_ui = {"web_shape", "Насос", "", 9, 41, 16, 6, 1, false, 0, 
 // sepv: web_shape
 // The shape code travels in `lo` and the thickness in `hi` (a shape has no value).
 FlpUiItem sepv_ui = {"web_shape", "", "", 12, 42, 1, 4, 1, false, 0, 9, 2, 0, 0};
+
+// cnt: web_input
+FlpUiItem cnt_ui = {"web_input", "Целое", "", 1, 31, 8, 2, 1, true, 10.0f, 0.0f, 100.0f, 1.0f, 0};
 
 // wifi: wifi
 void wifi_up_reply(const char *status, const char *text) {
@@ -579,6 +590,9 @@ void ui_state(FLProgNetworkHttpServer *server) {
     if (i) o += ',';
     if (!strcmp(it->kind, "web_text") || !strcmp(it->kind, "web_net")) {
       o += '"'; ui_esc(o, it->text.c_str()); o += '"';
+    } else if (!strcmp(it->kind, "web_textin")) {
+      // A secret field is never sent back to the page.
+      o += '"'; if (it->lo < 0.5f) ui_esc(o, it->text.c_str()); o += '"';
     } else {
       o += String(it->value, (unsigned int)it->dec);
     }
@@ -590,6 +604,14 @@ void ui_set(FLProgNetworkHttpServer *server) {
   if (!ui_allowed(server)) return;
   if (server->hasArgumentKey("i") && server->hasArgumentKey("v")) {
     int i = server->argumentValueAtKey("i").toInt();
+    if (i >= 0 && i < flpUiCount && flpUiItems[i]->rw && !strcmp(flpUiItems[i]->kind, "web_textin")) {
+      String t = server->argumentValueAtKey("v");
+      t.replace("\n", " ");
+      t.replace("\r", " ");
+      flpUiItems[i]->text = t;
+      server->send(200, "text/plain", "ok");
+      return;
+    }
     float v = server->argumentValueAtKey("v").toFloat();
     if (i >= 0 && i < flpUiCount && flpUiItems[i]->rw) {
       FlpUiItem *it = flpUiItems[i];
@@ -872,6 +894,11 @@ void setup() {
   flpUiAdd(&sepv_ui);
   sepv_ui.color = "";
   sepv_ui.back = "";
+
+  // cnt: web_input
+  flpUiAdd(&cnt_ui);
+  cnt_ui.color = "";
+  cnt_ui.back = "";
 }
 
 void loop() {
@@ -922,6 +949,9 @@ void loop() {
       mode = 0;
     }
     uint8_t state = (uint8_t)(mode + 1);
+    if (!String(flpNet.f[0].c_str()).length()) {
+      state &= ~1;
+    }
     if (state != wifi_state) {
       wifi_state = state;
       if (state & 1) {
@@ -1070,4 +1100,7 @@ void loop() {
 
   // fan: web_icon
   fan_ui.value = sw_out ? 1 : 0;
+
+  // cnt: web_input
+  cnt_out_i = (int32_t)lroundf(cnt_ui.value);
 }

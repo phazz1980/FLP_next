@@ -265,7 +265,7 @@ fn paint_box(
         border,
         StrokeKind::Inside,
     );
-    let head = Rect::from_min_size(r.min, Vec2::new(r.width(), HEAD_H * z)).shrink(1.0);
+    let head = Rect::from_min_size(r.min, Vec2::new(r.width(), HEAD_H * z)).shrink(border.width);
     painter.rect_filled(
         head,
         CornerRadius {

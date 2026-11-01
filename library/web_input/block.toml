@@ -10,6 +10,19 @@ memory = true
 [[output]]
 name = "out"
 type = "float"
+when = "not integer"
+
+[[output]]
+name = "out_i"
+type = "int"
+when = "integer"
+
+[[param]]
+name = "integer"
+type = "bool"
+label = "Целое число"
+default = false
+description = "Выход целый (int), значение на странице округляется до целого"
 
 [[param]]
 name = "caption"
@@ -67,8 +80,8 @@ name = "row"
 show = "hidden"
 type = "int"
 label = "Строка"
-default = 1
-description = "Верхняя строка сетки страницы (1, 2, …)"
+default = 0
+description = "Верхняя строка сетки страницы (1, 2, …); 0 — виджет ещё не размещён в конструкторе"
 
 [[param]]
 name = "w"

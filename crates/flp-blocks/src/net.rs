@@ -448,6 +448,12 @@ pub(crate) fn wifi(e: &CppCtx) -> CppParts {
     } else {
         l.line("  uint8_t state = (uint8_t)(mode + 1);");
     }
+    if e.is_bound("ssid") {
+        // A client without a network name keeps scanning and makes the own access point unreachable.
+        l.line(format!("  if (!String({}).length()) {{", e.param("ssid")))
+            .line("    state &= ~1;")
+            .line("  }");
+    }
     l.line(format!("  if (state != {id}_state) {{"))
         .line(format!("    {id}_state = state;"))
         .line("    if (state & 1) {")

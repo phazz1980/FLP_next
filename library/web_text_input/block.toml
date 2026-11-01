@@ -1,0 +1,88 @@
+[block]
+type = "web_text_input"
+name = "Веб-ввод текста"
+symbol = "TXT"
+group = "Веб-интерфейс"
+shared = "network"
+description = "Поле ввода текста на веб-странице (имя сети, пароль, адрес брокера): выход — введённая строка. Значение хранится до перезагрузки платы."
+memory = true
+
+[[output]]
+name = "out"
+type = "string"
+
+[[param]]
+name = "caption"
+type = "string"
+show = "value"
+label = "Подпись"
+default = "Веб-ввод текста"
+description = "Подпись виджета на странице"
+
+[[param]]
+name = "initial"
+type = "string"
+label = "Начальный текст"
+default = ""
+description = "Текст после включения питания"
+
+[[param]]
+name = "secret"
+type = "bool"
+label = "Скрыть ввод"
+default = false
+description = "Поле пароля: символы скрыты, плата не отдаёт введённое обратно на страницу"
+
+[[param]]
+name = "col"
+show = "hidden"
+type = "int"
+label = "Колонка"
+default = 1
+description = "Левая колонка сетки страницы (1–24)"
+
+[[param]]
+name = "row"
+show = "hidden"
+type = "int"
+label = "Строка"
+default = 0
+description = "Верхняя строка сетки страницы (1, 2, …); 0 — виджет ещё не размещён в конструкторе"
+
+[[param]]
+name = "w"
+show = "hidden"
+type = "int"
+label = "Ширина"
+default = 12
+description = "Ширина в колонках сетки (1–24)"
+
+[[param]]
+name = "h"
+show = "hidden"
+type = "int"
+label = "Высота"
+default = 2
+description = "Высота в строках сетки (строка — 24 px)"
+
+[[param]]
+name = "page"
+show = "hidden"
+type = "int"
+label = "Страница"
+default = 1
+description = "Номер страницы веб-интерфейса (1, 2, …); названия страниц задаются в блоке «Веб-интерфейс»"
+
+[[param]]
+name = "color"
+type = "string"
+label = "Цвет"
+default = ""
+description = "Основной цвет виджета (шкала, линия графика, включённое состояние): #rrggbb или название, например red. Пусто — цвет страницы по умолчанию"
+
+[[param]]
+name = "back"
+type = "string"
+label = "Цвет фона"
+default = ""
+description = "Цвет фона плитки виджета: #rrggbb или название. Пусто — по умолчанию"

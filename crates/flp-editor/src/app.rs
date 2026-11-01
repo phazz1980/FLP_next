@@ -108,6 +108,8 @@ pub struct EditorApp {
     pub lib_dir: Option<PathBuf>,
     /// `crablogic-web` started from the "Конструктор веб-интерфейса" menu item.
     web_editor: Option<std::process::Child>,
+    /// Web widgets of the project as last seen; a change is saved at once for the constructor.
+    web_sig: String,
     lib_stamp: Option<SystemTime>,
     lib_checked: Instant,
     /// Modification time of the project file as the editor last read or wrote it; a
@@ -244,6 +246,7 @@ impl EditorApp {
             lib: Library::default(),
             lib_dir: None,
             web_editor: None,
+            web_sig: String::new(),
             lib_stamp: None,
             lib_checked: Instant::now(),
             disk_stamp: None,
@@ -1211,6 +1214,33 @@ impl EditorApp {
                 LogLevel::Error,
                 crate::i18n::msg("Не удалось сохранить PDF: {0}", &[&e]),
             ),
+        }
+    }
+
+    /// The web constructor reads the project file, so while it runs, a change of the web
+    /// widgets (added, removed, edited) is saved at once instead of waiting for autosave.
+    fn sync_web_designer(&mut self) {
+        let Some(doc) = &self.doc else { return };
+        let sig = serde_json::to_string(
+            &doc.project
+                .logic
+                .blocks
+                .iter()
+                .filter(|b| b.kind.starts_with("web_"))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_default();
+        if sig == self.web_sig {
+            return;
+        }
+        let first = self.web_sig.is_empty();
+        self.web_sig = sig;
+        let running = self
+            .web_editor
+            .as_mut()
+            .is_some_and(|c| matches!(c.try_wait(), Ok(None)));
+        if running && !first && doc.dirty {
+            self.save();
         }
     }
 
@@ -2880,6 +2910,7 @@ impl eframe::App for EditorApp {
         self.block_diffs_window(&ctx);
         ctx.request_repaint_after(Duration::from_secs(1));
         self.autosave(&ctx);
+        self.sync_web_designer();
         self.shortcuts(&ctx);
         self.handle_close(&ctx);
         self.update_title(&ctx);

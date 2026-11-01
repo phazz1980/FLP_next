@@ -232,6 +232,9 @@ void flp_bg_task(void *) {
       // Client and access point follow the inputs; switched only when they change.
       int32_t mode = 0;
       uint8_t state = var_Wi_Fi_vklyuchen_4f8fe0 ? (uint8_t)(mode + 1) : 0;
+      if (!String(var_Set_d8006b.c_str()).length()) {
+        state &= ~1;
+      }
       if (state != wifi_state) {
         wifi_state = state;
         if (state & 1) {

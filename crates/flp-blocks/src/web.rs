@@ -142,6 +142,11 @@ function mk(d,i){
   w.appendChild(h('small','',d.l));w.appendChild(o);w.appendChild(s);
   s.oninput=function(){o.textContent=s.value+u;S(i,s.value)};
   return[w,function(v){if(document.activeElement!=s){s.value=v;o.textContent=(+v)+u}}]}
+ if(k=='textin'){
+  var n=h('input');n.type=d.a>0?'password':'text';n.autocomplete='off';n.spellcheck=false;
+  w.appendChild(h('small','',d.l));w.appendChild(n);
+  n.onchange=function(){S(i,encodeURIComponent(n.value))};
+  return[w,function(v){if(document.activeElement!=n&&(d.a<=0||v!==''))n.value=v}]}
  if(k=='input'){
   var n=h('input');n.type='number';n.step=d.s;if(d.b>d.a){n.min=d.a;n.max=d.b}
   w.appendChild(h('small','',d.l+u));w.appendChild(n);
@@ -251,6 +256,8 @@ F('/ui/layout').then(function(r){if(r.status==403){lg(K!='');throw 0}return r.js
  nm.forEach(function(s){tab(s,h('div'))});
  if(d.y)tab('Система',sy());
  N.hidden=P.length<2;
+ var B={};d.i.forEach(function(x){if(x.r>0)B[x.g]=Math.max(B[x.g]||0,x.r+x.h-1)});
+ d.i.forEach(function(x){if(x.r<1){x.c=1;x.r=(B[x.g]||0)+1;B[x.g]=x.r+x.h-1}});
  d.i.forEach(function(x,i){var m=mk(x,i);P[Math.min(Math.max(x.g,1),nm.length)-1].appendChild(m[0]);E.push(m[1])});
  go(Math.min(Math.max(parseInt(location.hash.slice(1))||1,1),P.length)-1);poll()}).catch(function(){})
 </script></body></html>)FLPUI";"##;
@@ -318,6 +325,9 @@ void @ID@_state(FLProgNetworkHttpServer *server) {
     if (i) o += ',';
     if (!strcmp(it->kind, "web_text") || !strcmp(it->kind, "web_net")) {
       o += '"'; @ID@_esc(o, it->text.c_str()); o += '"';
+    } else if (!strcmp(it->kind, "web_textin")) {
+      // A secret field is never sent back to the page.
+      o += '"'; if (it->lo < 0.5f) @ID@_esc(o, it->text.c_str()); o += '"';
     } else {
       o += String(it->value, (unsigned int)it->dec);
     }
@@ -329,6 +339,14 @@ void @ID@_set(FLProgNetworkHttpServer *server) {
   if (!@ID@_allowed(server)) return;
   if (server->hasArgumentKey("i") && server->hasArgumentKey("v")) {
     int i = server->argumentValueAtKey("i").toInt();
+    if (i >= 0 && i < flpUiCount && flpUiItems[i]->rw && !strcmp(flpUiItems[i]->kind, "web_textin")) {
+      String t = server->argumentValueAtKey("v");
+      t.replace("\n", " ");
+      t.replace("\r", " ");
+      flpUiItems[i]->text = t;
+      server->send(200, "text/plain", "ok");
+      return;
+    }
     float v = server->argumentValueAtKey("v").toFloat();
     if (i >= 0 && i < flpUiCount && flpUiItems[i]->rw) {
       FlpUiItem *it = flpUiItems[i];
@@ -853,7 +871,7 @@ pub(crate) fn web_value(e: &CppCtx) -> CppParts {
 }
 
 /// A slider or a number field: the page writes the value.
-fn adjustable(e: &CppCtx, kind: &str) -> CppParts {
+fn adjustable(e: &CppCtx, kind: &str, dec: u8) -> CppParts {
     register(
         e,
         "",
@@ -862,7 +880,7 @@ fn adjustable(e: &CppCtx, kind: &str) -> CppParts {
             kind,
             e.param("unit"),
             &format!(
-                "true, {}, {}, {}, {}, 3",
+                "true, {}, {}, {}, {}, {dec}",
                 e.param("initial"),
                 e.param("min"),
                 e.param("max"),
@@ -874,11 +892,41 @@ fn adjustable(e: &CppCtx, kind: &str) -> CppParts {
 }
 
 pub(crate) fn web_slider(e: &CppCtx) -> CppParts {
-    adjustable(e, "slider")
+    adjustable(e, "slider", 3)
+}
+
+pub(crate) fn web_text_input(e: &CppCtx) -> CppParts {
+    let id = &e.id;
+    let mut parts = register(
+        e,
+        "// The `lo` field marks a secret (password) field; the text lives in `text`.",
+        item(
+            e,
+            "textin",
+            "\"\"",
+            &format!("true, 0, {}, 0, 0, 0", u8::from(e.flag("secret"))),
+        ),
+        format!("{} = {id}_ui.text;", e.output("out")),
+    );
+    parts.setup.push_str(&format!(
+        "
+{id}_ui.text = {};",
+        e.param("initial")
+    ));
+    parts
 }
 
 pub(crate) fn web_input(e: &CppCtx) -> CppParts {
-    adjustable(e, "input")
+    if e.flag("integer") {
+        let mut parts = adjustable(e, "input", 0);
+        parts.looped = format!(
+            "{} = (int32_t)lroundf({}_ui.value);",
+            e.output("out_i"),
+            e.id
+        );
+        return parts;
+    }
+    adjustable(e, "input", 3)
 }
 
 pub(crate) fn web_chart(e: &CppCtx) -> CppParts {
