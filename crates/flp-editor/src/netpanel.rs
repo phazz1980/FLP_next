@@ -40,6 +40,10 @@ pub enum NetAction {
     /// Removes the page (0-based); its widgets move to the previous page.
     DeletePage(usize),
     Focus(String),
+    /// Virtual bench in simulation: the network link is lost or back.
+    BenchOffline(bool),
+    /// Virtual bench in simulation: the MQTT broker stops answering or comes back.
+    BenchBrokerDown(bool),
 }
 
 pub fn show(app: &EditorApp, ui: &mut Ui) -> Vec<NetAction> {
@@ -65,8 +69,35 @@ pub fn show(app: &EditorApp, ui: &mut Ui) -> Vec<NetAction> {
             &mut actions,
         );
         service(app, ui, MQTT, "MQTT", true, &mut actions);
+        bench_section(app, ui, &mut actions);
     }
     actions
+}
+
+/// Faults of the virtual bench for the hidden network blocks, which have no ports on a sheet.
+fn bench_section(app: &EditorApp, ui: &mut Ui, actions: &mut Vec<NetAction>) {
+    let (Some(sim), Some(doc)) = (&app.sim, &app.doc) else {
+        return;
+    };
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new(crate::i18n::tr("Виртуальный стенд")).strong());
+    let mut offline = sim.offline();
+    if ui
+        .checkbox(&mut offline, crate::i18n::tr("Нет связи с сетью"))
+        .changed()
+    {
+        actions.push(NetAction::BenchOffline(offline));
+    }
+    if doc.project.logic.blocks.iter().any(|b| b.kind == MQTT) {
+        let mut down = sim.broker_down();
+        if ui
+            .checkbox(&mut down, crate::i18n::tr("Брокер не отвечает"))
+            .changed()
+        {
+            actions.push(NetAction::BenchBrokerDown(down));
+        }
+    }
+    ui.separator();
 }
 
 fn service(
@@ -735,6 +766,16 @@ pub fn apply(app: &mut EditorApp, actions: Vec<NetAction>) {
         let pos = crate::panels::free_spot(app);
         match action {
             NetAction::Focus(id) => app.focus_block(&id),
+            NetAction::BenchOffline(on) => {
+                if let Some(s) = &mut app.sim {
+                    s.set_offline(on);
+                }
+            }
+            NetAction::BenchBrokerDown(on) => {
+                if let Some(s) = &mut app.sim {
+                    s.set_broker_down(on);
+                }
+            }
             NetAction::NewWidget(page) => app.dialog = Dialog::for_widget(app, page),
             NetAction::AddPage => {
                 let Some(doc) = &mut app.doc else { return };

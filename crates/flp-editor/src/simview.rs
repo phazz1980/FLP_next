@@ -140,6 +140,23 @@ impl SimState {
         self.sim.output_pin(block)
     }
 
+    /// Network faults of the virtual bench.
+    pub fn offline(&self) -> bool {
+        self.sim.bench().offline()
+    }
+
+    pub fn broker_down(&self) -> bool {
+        self.sim.bench().broker_down()
+    }
+
+    pub fn set_offline(&mut self, on: bool) {
+        self.sim.set_offline(on);
+    }
+
+    pub fn set_broker_down(&mut self, on: bool) {
+        self.sim.set_broker_down(on);
+    }
+
     /// Live text of a string output.
     pub fn text_output(&self, port: &PortRef) -> Option<&str> {
         self.sim.output_text(&port.block, &port.port)
