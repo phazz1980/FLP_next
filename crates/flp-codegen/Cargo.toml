@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+flp-blocks = { path = "../flp-blocks" }
 flp-core = { path = "../flp-core" }
 flp-debug = { path = "../flp-debug" }
 minijinja = { version = "2", features = ["unicode"] }

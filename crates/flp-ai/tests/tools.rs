@@ -306,9 +306,13 @@ fn library_queries() {
         .map(|b| b["type"].as_str().unwrap())
         .collect();
     assert!(kinds.contains(&"timer_on"), "{kinds:?}");
-    let t = run(&mut c, "get_block_type", json!({"type": "timer_on"})).unwrap();
+    let t = run(&mut c, "get_block_type", json!({"type": "bit_and"})).unwrap();
     assert!(t["template"].as_str().unwrap().contains("@loop"));
+    let t = run(&mut c, "get_block_type", json!({"type": "timer_on"})).unwrap();
     assert!(t["docs"].as_str().unwrap().contains("TON"));
+    // Written in Rust: the C++ comes from the generator.
+    let cpp = t["template"].as_str().unwrap();
+    assert!(cpp.contains("@loop") && cpp.contains("millis()"), "{cpp}");
 }
 
 #[test]

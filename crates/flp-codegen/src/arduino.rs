@@ -10,6 +10,7 @@ use flp_core::uart::{UartAccess, UartConfig};
 use flp_core::value::parse_duration_ms;
 use flp_core::vars::VAR_SET;
 use flp_core::{ParamKind, ParamValue, PortRef, SignalType};
+use minijinja::value::ValueKind;
 use minijinja::{context, AutoEscape, Environment, UndefinedBehavior, Value};
 
 pub mod simsrc;
@@ -85,6 +86,70 @@ struct Sections {
     includes: Vec<String>,
 }
 
+impl From<flp_blocks::CppParts> for Sections {
+    fn from(p: flp_blocks::CppParts) -> Self {
+        Self {
+            defines: p.defines,
+            global: p.global,
+            setup: p.setup,
+            looped: p.looped,
+            functions: p.functions,
+            once_global: p.once_global,
+            once_setup: p.once_setup,
+            once_functions: p.once_functions,
+            includes: p.includes,
+        }
+    }
+}
+
+/// What a Rust block gets while generating: the maps built for templates, as plain strings.
+fn cpp_ctx(
+    id: &str,
+    input: &BTreeMap<&str, String>,
+    input_type: &BTreeMap<&str, &str>,
+    output: &BTreeMap<&str, &str>,
+    param: &BTreeMap<&str, Value>,
+    bound_inputs: &BTreeMap<&str, (ParamKind, String)>,
+    value: &BTreeMap<&str, Value>,
+) -> flp_blocks::CppCtx {
+    use flp_blocks::Raw;
+    let text = |v: &Value| v.as_str().map_or_else(|| v.to_string(), str::to_owned);
+    flp_blocks::CppCtx {
+        id: id.to_owned(),
+        input: input
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), v.clone()))
+            .collect(),
+        input_type: input_type
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect(),
+        output: output
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect(),
+        param: param
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), text(v)))
+            .collect(),
+        param_bound: bound_inputs.keys().map(|k| (*k).to_owned()).collect(),
+        value: value
+            .iter()
+            .map(|(k, v)| {
+                let raw = match v.kind() {
+                    ValueKind::Bool => Raw::Bool(v.is_true()),
+                    ValueKind::String => Raw::Text(text(v)),
+                    _ => i64::try_from(v.clone()).map_or_else(
+                        |_| Raw::Float(f64::try_from(v.clone()).unwrap_or(0.0)),
+                        Raw::Int,
+                    ),
+                };
+                ((*k).to_owned(), raw)
+            })
+            .collect(),
+    }
+}
+
 const SECTION_LIST: &str = "// @defines, // @global, // @setup, // @loop, // @functions";
 
 /// A copy of an input reads nothing itself: it takes the values of its tag, which
@@ -123,8 +188,14 @@ fn render_block(
         .template_path(ESP32_CPP_TEMPLATE)
         .unwrap_or_else(|| PathBuf::from(format!("{kind}/{ESP32_CPP_TEMPLATE}")));
     // A block without a template runs from its WASM module, translated to C.
-    let module = inst.lib.firmware_source() == FirmwareSource::Module;
-    let mut source = if module {
+    let from = inst.lib.firmware_source();
+    // A template in the library folder wins over the Rust code of a built-in block.
+    let builtin = match from {
+        FirmwareSource::Template => None,
+        _ => flp_blocks::get(kind),
+    };
+    let module = builtin.is_none() && from == FirmwareSource::Module;
+    let mut source = if module || builtin.is_some() {
         String::new()
     } else {
         inst.lib
@@ -346,7 +417,18 @@ fn render_block(
         }
         None => Value::from(()),
     };
-    let mut sections = if module {
+    let mut sections = if let Some(block) = builtin {
+        let cpp = cpp_ctx(
+            &id,
+            &input,
+            &input_type,
+            &output,
+            &param,
+            &bound_inputs,
+            &value,
+        );
+        Sections::from(block.emit_cpp(&cpp))
+    } else if module {
         wasm::sections(program, inst, &input, &param)?
     } else {
         let ctx = context! {

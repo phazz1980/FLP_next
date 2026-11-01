@@ -18,7 +18,7 @@ pub mod tasks;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub use arduino::simsrc::{sim_source, SimSourceError};
+pub use arduino::simsrc::{builtin_cpp_preview, sim_source, sim_source_builtin, SimSourceError};
 pub use arduino::ArduinoCpp;
 pub use error::GenError;
 pub use lang::Lang;

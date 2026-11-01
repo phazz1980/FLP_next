@@ -198,6 +198,7 @@ static unsigned long micros() { return flp_now_ms * 1000UL; }
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define abs(x) ((x) > 0 ? (x) : -(x))
 #define sqrt(x) __builtin_sqrt(x)
+static float fmodf(float a, float b) { return (float)((double)a - (double)(long long)((double)a / b) * b); }
 #define PI 3.1415926535897932384626433832795
 "#;
 
@@ -267,6 +268,101 @@ pub fn sim_source(def: &BlockDef, template: &str) -> Result<String, SimSourceErr
         .map_err(|e| SimSourceError::Template(e.to_string()))?;
     let sections = split_sections(&text).map_err(SimSourceError::Template)?;
     Ok(assemble(def, &sections))
+}
+
+/// Source of the simulation module of `def` made from the Rust code of a built-in
+/// block: the same wrapper as for a template, so the firmware code of the block can be
+/// run on a computer and compared with its `Behavior`.
+pub fn sim_source_builtin(
+    def: &BlockDef,
+    block: &dyn flp_blocks::BuiltinBlock,
+) -> Result<String, SimSourceError> {
+    use flp_blocks::{CppCtx, Raw};
+    let var = |prefix: &str, name: &str| format!("flp_{prefix}_{}", c_ident(name));
+    let mut ctx = CppCtx {
+        id: "blk".to_owned(),
+        ..Default::default()
+    };
+    for p in &def.inputs {
+        ctx.input.insert(p.name.clone(), var("in", &p.name));
+        ctx.input_type
+            .insert(p.name.clone(), p.ty.name().to_owned());
+    }
+    for p in &def.outputs {
+        ctx.output.insert(p.name.clone(), var("out", &p.name));
+    }
+    for p in &def.params {
+        ctx.param.insert(p.name.clone(), var("param", &p.name));
+        // Run-time variables: no literal suffixes.
+        ctx.param_bound.insert(p.name.clone());
+        if let Some(v) = p.default.as_ref() {
+            let raw = match raw_value(p.kind, v) {
+                v if v.kind() == minijinja::value::ValueKind::Bool => {
+                    // Flags pick code at generation time, as in the firmware.
+                    ctx.param.insert(p.name.clone(), v.is_true().to_string());
+                    Raw::Bool(v.is_true())
+                }
+                v => i64::try_from(v.clone())
+                    .map_or_else(|_| Raw::Float(f64::try_from(v).unwrap_or(0.0)), Raw::Int),
+            };
+            ctx.value.insert(p.name.clone(), raw);
+        }
+    }
+    let parts = block.emit_cpp(&ctx);
+    Ok(assemble(def, &Sections::from(parts)))
+}
+
+/// Readable C++ of a Rust block for the block editor and the AI: the fragments of the
+/// firmware with ports and parameters named after the block type, such as `in_x`.
+pub fn builtin_cpp_preview(def: &BlockDef) -> Option<String> {
+    use flp_blocks::{CppCtx, Raw};
+    let block = flp_blocks::get(&def.info.kind)?;
+    let mut ctx = CppCtx {
+        id: def.info.kind.clone(),
+        ..Default::default()
+    };
+    for p in &def.inputs {
+        ctx.input.insert(p.name.clone(), format!("in_{}", p.name));
+        ctx.input_type
+            .insert(p.name.clone(), p.ty.name().to_owned());
+    }
+    for p in &def.outputs {
+        ctx.output.insert(p.name.clone(), format!("out_{}", p.name));
+    }
+    for p in &def.params {
+        ctx.param
+            .insert(p.name.clone(), format!("param_{}", p.name));
+        ctx.param_bound.insert(p.name.clone());
+        if let Some(v) = p.default.as_ref() {
+            let raw = match raw_value(p.kind, v) {
+                v if v.kind() == minijinja::value::ValueKind::Bool => {
+                    ctx.param.insert(p.name.clone(), v.is_true().to_string());
+                    Raw::Bool(v.is_true())
+                }
+                v => i64::try_from(v.clone())
+                    .map_or_else(|_| Raw::Float(f64::try_from(v).unwrap_or(0.0)), Raw::Int),
+            };
+            ctx.value.insert(p.name.clone(), raw);
+        }
+    }
+    let parts = block.emit_cpp(&ctx);
+    let mut out = String::new();
+    for (title, code) in [
+        ("defines", &parts.defines),
+        ("global", &parts.global),
+        ("setup", &parts.setup),
+        ("loop", &parts.looped),
+        ("functions", &parts.functions),
+    ] {
+        if !code.is_empty() {
+            out.push_str(&format!(
+                "// @{title}
+{code}
+"
+            ));
+        }
+    }
+    Some(out)
 }
 
 /// Indents every non-empty line by two spaces.
@@ -445,8 +541,8 @@ if ({{ id }}_active && millis() - {{ id }}_start >= {{ param.time }}UL) {
     }
 
     #[test]
-    fn library_pulse_template_is_supported() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../library/pulse");
+    fn library_template_is_supported() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../library/bit_and");
         let def = def(&std::fs::read_to_string(dir.join("block.toml")).unwrap());
         let tmpl = std::fs::read_to_string(dir.join("esp32.cpp.tmpl")).unwrap();
         assert!(sim_source(&def, &tmpl).is_ok());

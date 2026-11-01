@@ -320,7 +320,11 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
                 .ok_or_else(|| format!("нет типа блока «{kind}»"))?;
             let mut v = block_summary(b);
             let docs = b.docs_path().and_then(|p| fs::read_to_string(p).ok());
-            let template = b.template(ESP32_CPP_TEMPLATE).and_then(Result::ok);
+            let template = b
+                .template(ESP32_CPP_TEMPLATE)
+                .and_then(Result::ok)
+                // Built-in blocks without a template are written in Rust.
+                .or_else(|| flp_codegen::builtin_cpp_preview(&b.def));
             v["docs"] = json!(docs);
             v["template"] = json!(template);
             Ok(v)

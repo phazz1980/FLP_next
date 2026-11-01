@@ -1,5 +1,5 @@
-//! A simulation module built from a block template must behave like the built-in
-//! implementation of the same block. Needs a real compiler:
+//! A simulation module built from a text block template must behave like the built-in
+//! implementation of the same block (blocks written in Rust are checked in `builtin_cpp`). Needs a real compiler:
 //! `FLP_ZIG=<path to zig> cargo test -p flp-sim --test template`.
 
 use std::path::{Path, PathBuf};
@@ -24,66 +24,6 @@ fn number(kind: ParamKind, value: &ParamValue) -> f64 {
             parse_duration_ms(s).unwrap_or(0) as f64
         }
         ParamValue::Text(_) => 0.0,
-    }
-}
-
-/// Steps of 10 ms with inputs flipped by a fixed pseudo-random sequence.
-fn compare(zig: &Path, kind: &str) {
-    let dir = repo("library").join(kind);
-    let def: BlockDef =
-        toml::from_str(&std::fs::read_to_string(dir.join("block.toml")).unwrap()).unwrap();
-    let template = std::fs::read_to_string(dir.join("esp32.cpp.tmpl")).unwrap();
-    let source = flp_codegen::sim_source(&def, &template).unwrap();
-
-    let out = std::env::temp_dir().join(format!("flp-sim-{kind}-{}", std::process::id()));
-    std::fs::create_dir_all(&out).unwrap();
-    flp_build::wasm::build_module(zig, &out, &source).unwrap();
-    let wasm = std::fs::read(out.join("block.wasm")).unwrap();
-
-    let mut module = SimModule::load(&wasm, def.outputs.len()).unwrap();
-    let mut expected = behavior(kind).expect("built-in behaviour");
-    let params: Vec<f64> = def
-        .params
-        .iter()
-        .map(|p| number(p.kind, p.default.as_ref().expect("default")))
-        .collect();
-    let active = vec![true; def.inputs.len()];
-    let mut inputs = vec![0.0; def.inputs.len()];
-    let mut outputs = vec![0.0; def.outputs.len()];
-    let mut seed = 12345_u32;
-    let mut now = 0_u64;
-    for step in 0..2000 {
-        seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345);
-        // Flip one input now and then, so that long holds and short blips both occur.
-        if (seed >> 16).is_multiple_of(40) {
-            let i = ((seed >> 8) as usize) % inputs.len();
-            inputs[i] = 1.0 - inputs[i];
-        }
-        now += 10;
-        expected.step(
-            &Ctx {
-                now_ms: now,
-                inputs: &inputs,
-                active: &active,
-                params: &params,
-                texts: &[],
-                param_texts: &[],
-            },
-            &mut outputs,
-        );
-        let got = module.step(10, &inputs, &params).unwrap();
-        assert_eq!(got, outputs, "{kind}: step {step}, inputs {inputs:?}");
-    }
-}
-
-#[test]
-fn template_modules_match_the_built_in_blocks() {
-    let Some(zig) = std::env::var_os("FLP_ZIG") else {
-        eprintln!("FLP_ZIG is not set: skipped");
-        return;
-    };
-    for kind in ["pulse", "timer_on", "counter"] {
-        compare(Path::new(&zig), kind);
     }
 }
 

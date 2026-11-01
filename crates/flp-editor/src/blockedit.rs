@@ -374,6 +374,8 @@ impl Form {
         let template = block
             .template(ESP32_CPP_TEMPLATE)
             .and_then(Result::ok)
+            // Blocks written in Rust show their generated C++ as a starting point.
+            .or_else(|| flp_codegen::builtin_cpp_preview(def))
             .unwrap_or_default();
         let docs = block
             .docs_path()

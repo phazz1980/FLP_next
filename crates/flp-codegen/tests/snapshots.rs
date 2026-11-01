@@ -834,3 +834,200 @@ fn english_sketch_snapshot() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/background.en.ino");
     assert_snapshot(&snapshot, &code);
 }
+
+/// Several instances of one module block and a second module type in one sketch: the
+/// code of every type is there once, every instance has its own state and I/O arrays.
+#[test]
+fn module_blocks_of_several_types_share_one_sketch() {
+    let dir = std::env::temp_dir().join(format!("flp-wasm-types-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let lib_dir = dir.join("library");
+    let src = repo_path("library");
+    for name in ["digital_in", "digital_out", "timer_on_rs"] {
+        copy_dir(&src.join(name), &lib_dir.join(name));
+    }
+    // A second type: the same module under a name of the same length, so that the
+    // prefix of its symbols (`m11_...`) stays valid.
+    let second = lib_dir.join("timer_on_r2");
+    copy_dir(&src.join("timer_on_rs"), &second);
+    let rename = |file: &str| {
+        let path = second.join(file);
+        let text = fs::read_to_string(&path).unwrap();
+        fs::write(
+            path,
+            text.replace("timerX5FonX5Frs", "timerX5FonX5Fr2")
+                .replace("timer_on_rs", "timer_on_r2"),
+        )
+        .unwrap();
+    };
+    rename("block.toml");
+    rename("block.wasm.c");
+
+    let project_dir = dir.join("project");
+    fs::create_dir_all(&project_dir).unwrap();
+    fs::copy(
+        repo_path("examples/wasm_ton/project.toml"),
+        project_dir.join("project.toml"),
+    )
+    .unwrap();
+    fs::write(
+        project_dir.join("logic.toml"),
+        r#"
+[[block]]
+id = "button"
+type = "digital_in"
+pin = 12
+
+[[block]]
+id = "a"
+type = "timer_on_rs"
+time = "1s"
+
+[[block]]
+id = "b"
+type = "timer_on_rs"
+time = "2s"
+
+[[block]]
+id = "c"
+type = "timer_on_r2"
+time = "3s"
+
+[[block]]
+id = "led_a"
+type = "digital_out"
+pin = 25
+
+[[block]]
+id = "led_b"
+type = "digital_out"
+pin = 26
+
+[[block]]
+id = "led_c"
+type = "digital_out"
+pin = 27
+
+[[link]]
+from = "button.out"
+to = "a.in"
+[[link]]
+from = "button.out"
+to = "b.in"
+[[link]]
+from = "button.out"
+to = "c.in"
+[[link]]
+from = "a.out"
+to = "led_a.in"
+[[link]]
+from = "b.out"
+to = "led_b.in"
+[[link]]
+from = "c.out"
+to = "led_c.in"
+"#,
+    )
+    .unwrap();
+
+    let (lib, errors) = Library::load(lib_dir).unwrap();
+    assert!(errors.is_empty(), "{errors:?}");
+    let project = Project::load(&project_dir).unwrap();
+    let code = generate(&project, &lib, &ArduinoCpp::RELEASE).unwrap();
+
+    let count = |needle: &str| code.matches(needle).count();
+    // The runtime and the code of each type are in the sketch once.
+    assert_eq!(count("namespace flpwasm {"), 3, "runtime + two types");
+    assert_eq!(count("struct FlpWasmIo {"), 1);
+    assert_eq!(count("void m11_timerX5FonX5FrsInstantiate(m11_timerX5FonX5FrsInstance* i, wasmImportResolver resolveImports) {"), 1);
+    assert_eq!(count("void m11_timerX5FonX5Fr2Instantiate(m11_timerX5FonX5Fr2Instance* i, wasmImportResolver resolveImports) {"), 1);
+    // Every instance has its own state, arrays and time stamp.
+    for (id, ty) in [
+        ("a", "timerX5FonX5Frs"),
+        ("b", "timerX5FonX5Frs"),
+        ("c", "timerX5FonX5Fr2"),
+    ] {
+        assert!(
+            code.contains(&format!("static m11_{ty}Instance {id}_w;")),
+            "{id}"
+        );
+        assert!(code.contains(&format!("static FlpWasmIo {id}_io;")), "{id}");
+        assert!(
+            code.contains(&format!("Instantiate(&{id}_w, NULL);")),
+            "{id}"
+        );
+        assert!(code.contains(&format!("{id}_io.param[0]")), "{id}");
+    }
+    // The three timers have their own settings.
+    assert!(code.contains("a_io.param[0] = (double)(1000)"), "{code}");
+    assert!(code.contains("b_io.param[0] = (double)(2000)"), "{code}");
+    assert!(code.contains("c_io.param[0] = (double)(3000)"), "{code}");
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+/// Source of a block's code: a template wins over the Rust code of a built-in block,
+/// which is used when there is no template; a block with neither is an error.
+#[test]
+fn firmware_source_order() {
+    let project = Project::load(repo_path("examples/pump")).unwrap();
+    let ton = project
+        .logic
+        .blocks
+        .iter()
+        .find(|b| b.kind == "timer_on")
+        .unwrap()
+        .id
+        .clone();
+
+    // No template in the folder: the Rust code of `timer_on` writes the block.
+    let code = generate(&project, &library(), &ArduinoCpp::RELEASE).unwrap();
+    assert!(
+        code.contains(&format!("bool {ton}_running = false;")),
+        "{code}"
+    );
+
+    // A template next to `block.toml` takes over.
+    let mut lib = library();
+    let mut block = lib.get("timer_on").unwrap().clone();
+    block.inline_templates.insert(
+        flp_core::library::ESP32_CPP_TEMPLATE,
+        "// @loop\n// custom\n".into(),
+    );
+    lib.insert(block);
+    let code = generate(&project, &lib, &ArduinoCpp::RELEASE).unwrap();
+    assert!(
+        code.contains("// custom") && !code.contains("_running"),
+        "{code}"
+    );
+
+    // A type without a template and without Rust code.
+    let mut lib = library();
+    let mut block = lib.get("timer_on").unwrap().clone();
+    block.def.info.kind = "my_ton".to_owned();
+    lib.insert(block);
+    let mut project = project;
+    for b in project
+        .logic
+        .blocks
+        .iter_mut()
+        .filter(|b| b.kind == "timer_on")
+    {
+        b.kind = "my_ton".to_owned();
+    }
+    match generate(&project, &lib, &ArduinoCpp::RELEASE) {
+        Err(GenError::MissingTemplate { kind, .. }) => assert_eq!(kind, "my_ton"),
+        other => panic!("ожидалась ошибка «нет шаблона», получено {other:?}"),
+    }
+}
