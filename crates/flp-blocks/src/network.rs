@@ -90,9 +90,13 @@ pub(crate) fn mqtt(e: &CppCtx) -> CppParts {
     .line("    flpMqtt.setAutoReconnect(true);")
     .line("    flpMqtt.connect();")
     .line("  }")
-    .line("}")
-    .line(format!("{} = flpMqtt.connected();", e.output("connected")))
-    .line(format!("{} = flpMqtt.error();", e.output("error")));
+    .line("}");
+    if e.flag("out_connected") && e.output.contains_key("connected") {
+        l.line(format!("{} = flpMqtt.connected();", e.output("connected")));
+    }
+    if e.flag("out_error") && e.output.contains_key("error") {
+        l.line(format!("{} = flpMqtt.error();", e.output("error")));
+    }
     CppParts {
         defines: format!(
             "#define FLPROG_MQTT_MAX_SUBSCRIPTIONS {}U",

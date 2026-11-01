@@ -1,0 +1,6 @@
+[project]
+name = "net_params"
+description = "SSID и пароль Wi-Fi приходят со входов (из переменных) и применяются на лету"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

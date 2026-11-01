@@ -41,6 +41,12 @@ pub enum NetAction {
     DeletePage(usize),
     Focus(String),
     /// Virtual bench in simulation: the network link is lost or back.
+    /// Turns a parameter into an input of the block, or back.
+    ParamInput {
+        id: String,
+        name: String,
+        on: bool,
+    },
     BenchOffline(bool),
     /// Virtual bench in simulation: the MQTT broker stops answering or comes back.
     BenchBrokerDown(bool),
@@ -127,6 +133,28 @@ fn service(
                 actions.push(NetAction::Toggle { kind, on });
             }
             if let Some(b) = block {
+                // The whole block with its ports goes to the board, like a topic.
+                let pullable = app
+                    .lib
+                    .resolve(logic, b)
+                    .is_some_and(|l| l.def.info.pullable);
+                let placed = doc.project.layout.blocks.contains_key(&b.id);
+                if pullable {
+                    ui.horizontal(|ui| {
+                        ui.dnd_drag_source(
+                            Id::unique(("service", &b.id)),
+                            DragItem::Topic(b.id.clone()),
+                            |ui| ui.label(if placed { "▣" } else { "▢" }),
+                        )
+                        .response
+                        .on_hover_text(if placed {
+                            crate::i18n::tr("Блок уже на плате; перетащите, чтобы переставить")
+                        } else {
+                            crate::i18n::tr("Перетащите весь блок на плату")
+                        });
+                        ui.label(crate::i18n::tr("Блок целиком"));
+                    });
+                }
                 settings(app, ui, b, kind, actions);
             }
             if kind == MQTT {
@@ -378,6 +406,26 @@ fn settings(
                     true,
                     None,
                 );
+                // A parameter that may change while running can be an input of the block.
+                if flp_core::param_input_type(p).is_some() {
+                    let mut input = b.param_in.contains(&p.name);
+                    if ui
+                        .checkbox(&mut input, crate::i18n::tr("Вход"))
+                        .on_hover_text(crate::i18n::tr(
+                            "Значение приходит на вход блока и применяется на лету",
+                        ))
+                        .changed()
+                    {
+                        actions.push(NetAction::ParamInput {
+                            id: b.id.clone(),
+                            name: p.name.clone(),
+                            on: input,
+                        });
+                    }
+                    if input {
+                        return;
+                    }
+                }
                 let set = |value| NetAction::SetParam {
                     id: b.id.clone(),
                     name: p.name.clone(),
@@ -766,6 +814,12 @@ pub fn apply(app: &mut EditorApp, actions: Vec<NetAction>) {
         let pos = crate::panels::free_spot(app);
         match action {
             NetAction::Focus(id) => app.focus_block(&id),
+            NetAction::ParamInput { id, name, on } => {
+                let Some(doc) = &mut app.doc else { return };
+                if let Err(e) = doc.edit(&lib, None, |p| p.set_param_input(&lib, &id, &name, on)) {
+                    app.info(LogLevel::Error, e.to_string());
+                }
+            }
             NetAction::BenchOffline(on) => {
                 if let Some(s) = &mut app.sim {
                     s.set_offline(on);

@@ -444,6 +444,7 @@ fn render_block(
             .iter()
             .filter(|(_, b)| **b)
             .map(|(n, _)| (*n).to_owned())
+            .chain(bound_inputs.keys().map(|n| (*n).to_owned()))
             .collect();
         cpp.flag_code = flag
             .iter()

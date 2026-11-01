@@ -17,6 +17,8 @@
 // Выходы блоков
 bool wifi_ready = false;
 String wifi_address = String();
+int32_t wifi_status = 0;
+int32_t wifi_error = 0;
 bool broker_connected = false;
 int32_t broker_error = 0;
 float sensor_temp = 0.0f;
@@ -270,7 +272,7 @@ void flp_bg_task(void *) {
     }
     {
       uint32_t now = millis();
-      wifi_net_due = (uint32_t)(now - wifi_net_t) >= 5;
+      wifi_net_due = (uint32_t)(now - wifi_net_t) >= (5);
       if (wifi_net_due) {
         wifi_net_t = now;
       }
@@ -279,6 +281,8 @@ void flp_bg_task(void *) {
       flpWifi.pool();
     }
     wifi_ready = flpWifi.clientIsReady();
+    wifi_status = flpWifi.getStatus();
+    wifi_error = flpWifi.getError();
     {
       uint32_t ip = 0;
       if (flpWifi.clientIsReady()) {
@@ -291,13 +295,13 @@ void flp_bg_task(void *) {
         wifi_address = ip ? IPAddress(ip).toString() : String();
       }
     }
-    if (wifi_net_due && true) {
+    if (wifi_net_due && (true)) {
       wifi_web.pool();
     }
-    if (wifi_net_due && true && true) {
+    if (wifi_net_due && (true) && (true)) {
       wifi_up_poll();
     }
-    if (wifi_net_due && true) {
+    if (wifi_net_due && (true)) {
       if (!wifi_ota_on) {
         wifi_ota_on = true;
         if (""[0] != 0) {
@@ -397,7 +401,7 @@ void setup() {
   wifi_address.reserve(32);
 
   // wifi: wifi
-  flpWifi.setClientSsid("MyNetwork");
+  flpWifi.setClientSsid("Xiaomi_76D1");
   flpWifi.setClientPassword("");
   if (true) {
     flpWifi.setDhcp();

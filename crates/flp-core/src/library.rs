@@ -203,6 +203,8 @@ pub fn param_input_type(p: &ParamDef) -> Option<SignalType> {
         ParamKind::Float => Some(SignalType::Float),
         ParamKind::Duration => Some(SignalType::Int),
         ParamKind::Bool if p.runtime => Some(SignalType::Bool),
+        // A text read while running (SSID, password, address): the block applies it when it changes.
+        ParamKind::Text if p.runtime => Some(SignalType::String),
         _ => None,
     }
 }

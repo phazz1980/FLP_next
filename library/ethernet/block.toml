@@ -7,6 +7,7 @@ shared = "network"
 description = "Проводная сеть на модуле W5500 (W5100, W5200) по SPI (библиотека FLProg_Network)."
 single = true
 hidden = true
+pullable = true
 includes = ["flprogNetwork.h", "flprogWebServer.h", "service/flprogNetworkOta.h", "Update.h"]
 
 [[output]]

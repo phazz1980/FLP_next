@@ -419,3 +419,18 @@ fn bench_modbus_master_reads_a_register_and_loses_the_slave() {
     s.step(10).unwrap();
     assert_eq!(s.output("temp", "ok"), Some(0.0));
 }
+
+#[test]
+fn mqtt_publish_waits_for_the_broker() {
+    let mut s = sim("mqtt");
+    s.step(10).unwrap();
+    s.step(1000).unwrap();
+    assert_eq!(s.output("button_pub", "sent"), Some(0.0));
+    s.set_broker_down(true);
+    s.set_pin_level(13, 0.0);
+    s.step(10).unwrap();
+    assert_eq!(s.output("button_pub", "sent"), Some(0.0));
+    s.set_broker_down(false);
+    s.step(10).unwrap();
+    assert_eq!(s.output("button_pub", "sent"), Some(1.0));
+}

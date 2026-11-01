@@ -7,6 +7,7 @@ shared = "network"
 description = "Подключение ESP32 к сети Wi-Fi и/или своя точка доступа (библиотека FLProg_Network). Входы и выходы включаются в свойствах блока."
 single = true
 hidden = true
+pullable = true
 includes = ["flprogNetwork.h", "flprogWebServer.h", "service/flprogNetworkOta.h", "Update.h"]
 
 [[input]]
@@ -81,6 +82,7 @@ label = "Задаётся входом «Режим»"
 [[param]]
 name = "ssid"
 type = "string"
+runtime = true
 when = "wifi_mode != 1"
 show = "value"
 description = "Имя сети (SSID), к которой подключаться"
@@ -88,6 +90,7 @@ description = "Имя сети (SSID), к которой подключатьс�
 [[param]]
 name = "password"
 type = "string"
+runtime = true
 default = ""
 when = "wifi_mode != 1"
 show = "secret"
@@ -105,6 +108,7 @@ description = "Получать адрес автоматически (DHCP)"
 [[param]]
 name = "ip"
 type = "string"
+runtime = true
 default = "192.168.1.177"
 when = "not dhcp and (wifi_mode != 1)"
 description = "Постоянный IP-адрес"
@@ -112,6 +116,7 @@ description = "Постоянный IP-адрес"
 [[param]]
 name = "gateway"
 type = "string"
+runtime = true
 default = "192.168.1.1"
 when = "not dhcp and (wifi_mode != 1)"
 description = "Шлюз (он же DNS)"
@@ -119,6 +124,7 @@ description = "Шлюз (он же DNS)"
 [[param]]
 name = "subnet"
 type = "string"
+runtime = true
 default = "255.255.255.0"
 when = "not dhcp and (wifi_mode != 1)"
 description = "Маска подсети"
@@ -126,6 +132,7 @@ description = "Маска подсети"
 [[param]]
 name = "ap_ssid"
 type = "string"
+runtime = true
 label = "SSID точки"
 default = "FLP_ESP32"
 when = "wifi_mode != 0"
@@ -135,6 +142,7 @@ description = "Имя своей точки доступа"
 [[param]]
 name = "ap_password"
 type = "string"
+runtime = true
 label = "Пароль точки"
 default = ""
 when = "wifi_mode != 0"

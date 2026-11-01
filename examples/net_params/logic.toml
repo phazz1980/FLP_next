@@ -1,0 +1,31 @@
+[[var]]
+name = "Сеть"
+type = "string"
+
+[[var]]
+name = "Пароль"
+type = "string"
+
+[[block]]
+id = "wifi"
+type = "wifi"
+ssid = "MyNetwork"
+param_in = ["ssid", "password"]
+
+[[block]]
+id = "net_r"
+type = "var_get"
+var = "Сеть"
+
+[[link]]
+from = "net_r.out"
+to = "wifi.ssid"
+
+[[block]]
+id = "pass_r"
+type = "var_get"
+var = "Пароль"
+
+[[link]]
+from = "pass_r.out"
+to = "wifi.password"

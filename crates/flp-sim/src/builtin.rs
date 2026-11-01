@@ -19,6 +19,11 @@ struct MqttPublish {
 
 impl Behavior for MqttPublish {
     fn step(&mut self, c: &Ctx, o: &mut [f64]) {
+        // Nothing leaves without the network and the broker; the value waits for them.
+        if c.bench.offline() || c.bench.broker_down() {
+            o[0] = b(c.now_ms < self.until_ms);
+            return;
+        }
         let value = c.input(1);
         if c.flag(0) && self.last != Some(value) {
             self.until_ms = c.now_ms + PULSE_MS;
