@@ -16,6 +16,7 @@ pub use bench::{Bench, Signal, NO_BENCH};
 pub use cpp::{CppCtx, CppParts, Raw, UartCtx};
 pub use hardware::ds18b20_channel;
 pub use more::{next_random, RANDOM_SEED};
+pub use netsim::OWN_SLAVE;
 pub use web::device_page;
 
 /// A built-in block: one Rust type that both simulates the block and writes its firmware code.

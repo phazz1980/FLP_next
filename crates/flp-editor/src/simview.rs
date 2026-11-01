@@ -245,10 +245,18 @@ fn bench_menu(ui: &mut Ui, sim: &mut SimState, port: &PortRef, input: BenchInput
         }
         BenchInput::Modbus { slave, table, reg } => {
             let mut value = sim.sim.bench().register(slave, &table, reg);
-            ui.label(crate::i18n::fmt(
-                "Устройство {0}, {1}, регистр {2}",
-                &[&slave, &table, &reg],
-            ));
+            let own = slave == flp_sim::OWN_SLAVE;
+            if own {
+                ui.label(crate::i18n::fmt(
+                    "Запись мастера: {0}, регистр {1}",
+                    &[&table, &reg],
+                ));
+            } else {
+                ui.label(crate::i18n::fmt(
+                    "Устройство {0}, {1}, регистр {2}",
+                    &[&slave, &table, &reg],
+                ));
+            }
             if ui
                 .add(egui::DragValue::new(&mut value).speed(0.1))
                 .changed()
@@ -256,12 +264,24 @@ fn bench_menu(ui: &mut Ui, sim: &mut SimState, port: &PortRef, input: BenchInput
                 sim.sim.set_register(slave, &table, reg, value);
             }
             let mut silent = sim.sim.bench().silent(slave);
-            if ui
-                .checkbox(&mut silent, crate::i18n::tr("Нет ответа"))
-                .changed()
+            if !own
+                && ui
+                    .checkbox(&mut silent, crate::i18n::tr("Нет ответа"))
+                    .changed()
             {
                 sim.sim.set_silent(slave, silent);
             }
+        }
+        BenchInput::Uart { port } => {
+            let id = ui.make_persistent_id(("uart_feed", port));
+            let mut text: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_default());
+            ui.label(crate::i18n::fmt("Ввод в порт {0}", &[&port]));
+            let edit = ui.text_edit_singleline(&mut text);
+            let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if ui.button(crate::i18n::tr("Отправить")).clicked() || enter {
+                sim.sim.send_uart(port, &text);
+            }
+            ui.data_mut(|d| d.insert_temp(id, text));
         }
         BenchInput::Sensor { pin, channel } => {
             let mut sig = sim.sim.bench().signal(pin, &channel);

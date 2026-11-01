@@ -50,6 +50,8 @@ pub struct Bench {
     broker_down: bool,
     silent: BTreeSet<i64>,
     registers: BTreeMap<(i64, String, i64), f64>,
+    /// What was typed into a UART port by hand: a serial number and the text.
+    uart_rx: BTreeMap<i64, (u64, String)>,
 }
 
 impl Bench {
@@ -62,6 +64,7 @@ impl Bench {
             broker_down: false,
             silent: BTreeSet::new(),
             registers: BTreeMap::new(),
+            uart_rx: BTreeMap::new(),
         }
     }
 
@@ -104,6 +107,19 @@ impl Bench {
 
     pub fn set_register(&mut self, slave: i64, table: &str, reg: i64, value: f64) {
         self.registers.insert((slave, table.to_owned(), reg), value);
+    }
+
+    /// The last text sent into a UART port by hand, with a serial number that grows on
+    /// every send (so the same text sent twice is two lines).
+    pub fn uart_rx(&self, port: i64) -> (u64, &str) {
+        self.uart_rx
+            .get(&port)
+            .map_or((0, ""), |(n, t)| (*n, t.as_str()))
+    }
+
+    pub fn send_uart(&mut self, port: i64, text: &str) {
+        let n = self.uart_rx(port).0 + 1;
+        self.uart_rx.insert(port, (n, text.to_owned()));
     }
 
     /// Level set on an input pin: `0`/`1` for a digital pin, counts for an analog one.

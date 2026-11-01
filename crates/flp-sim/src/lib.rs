@@ -14,7 +14,7 @@
 pub mod builtin;
 pub mod schema;
 
-pub use flp_blocks::{Bench, Signal};
+pub use flp_blocks::{Bench, Signal, OWN_SLAVE};
 pub use schema::{BenchInput, Computed, Simulation};
 
 use wasmi::{

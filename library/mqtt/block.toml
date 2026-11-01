@@ -39,6 +39,7 @@ label = "Ethernet"
 [[param]]
 name = "broker"
 type = "string"
+runtime = true
 default = "broker.hivemq.com"
 description = "Адрес брокера: имя или IP"
 
@@ -59,12 +60,14 @@ description = "Идентификатор клиента; пусто — flp-<н
 [[param]]
 name = "user"
 type = "string"
+runtime = true
 default = ""
 description = "Логин; пусто — подключение без авторизации"
 
 [[param]]
 name = "password"
 type = "string"
+runtime = true
 default = ""
 when = 'user != ""'
 show = "secret"

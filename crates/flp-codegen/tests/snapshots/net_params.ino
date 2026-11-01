@@ -1,5 +1,7 @@
 // Сгенерировано CrabLogic из проекта «net_params». Ручные правки будут перезаписаны.
-// Порядок выполнения: net_r → pass_r → wifi
+// Порядок выполнения: net_r → pass_r → wifi → broker_r → login_r → broker
+
+#define FLPROG_MQTT_MAX_SUBSCRIPTIONS 4U
 
 #include <Arduino.h>
 #include <flprogNetwork.h>
@@ -15,6 +17,10 @@ String net_r_out = String();
 String pass_r_out = String();
 bool wifi_ready = false;
 String wifi_address = String();
+String broker_r_out = String();
+String login_r_out = String();
+bool broker_connected = false;
+int32_t broker_error = 0;
 
 // Обмен сигналами между основной и фоновой задачами
 SemaphoreHandle_t flp_bg_lock;
@@ -22,10 +28,16 @@ String net_r_out_pub = String();
 String net_r_out_in = String();
 String pass_r_out_pub = String();
 String pass_r_out_in = String();
+String broker_r_out_pub = String();
+String broker_r_out_in = String();
+String login_r_out_pub = String();
+String login_r_out_in = String();
 
 // Переменные
 String var_Set_d8006b = String();
 String var_Parol_23764f = String();
+String var_Broker_a91631 = String();
+String var_Login_498544 = String();
 
 // wifi: wifi
 // Shared network interface: Modbus TCP and other network blocks use it.
@@ -62,6 +74,65 @@ char wifi_up_line[160];
 uint8_t wifi_up_ll = 0;
 uint32_t wifi_up_len = 0, wifi_up_got = 0, wifi_up_t = 0, wifi_up_try = 0;
 bool wifi_up_auth = false;
+
+// broker: mqtt
+// Settings signature (FNV-1a): compared every cycle without building a String.
+uint32_t broker_cfg = 0;
+bool broker_cfg_set = false;
+static void broker_mix(uint32_t &h, const char *s) {
+  for (; *s; s++) h = (h ^ (uint8_t)*s) * 16777619u;
+  h = (h ^ '|') * 16777619u;
+}
+static void broker_mix(uint32_t &h, const String &s) { broker_mix(h, s.c_str()); }
+uint32_t broker_sig = 0;
+// Shared MQTT client: mqtt_publish / mqtt_subscribe blocks use it.
+FLProgNetworkMqttClient flpMqtt;
+bool broker_bound = false;
+// The last received message, shared by all subscriptions.
+String flpMqttTopic;
+String flpMqttPayload;
+uint32_t flpMqttSeq = 0;
+
+// mqtt: общий код
+void flp_mqtt_receive(const char *topic, const uint8_t *payload, size_t length, bool retained) {
+  (void)retained;
+  flpMqttTopic = topic;
+  flpMqttPayload = "";
+  flpMqttPayload.reserve(length);
+  for (size_t i = 0; i < length; i++) {
+    flpMqttPayload += (char)payload[i];
+  }
+  flpMqttSeq++;
+}
+
+// Topic against a filter with + (one level) and # (the rest).
+bool flp_mqtt_match(const char *f, const char *t) {
+  for (;;) {
+    const char *fe = strchr(f, '/');
+    const char *te = strchr(t, '/');
+    size_t fn = fe ? (size_t)(fe - f) : strlen(f);
+    size_t tn = te ? (size_t)(te - t) : strlen(t);
+    if (fn == 1 && *f == '#') {
+      return true;
+    }
+    if (!(fn == 1 && *f == '+') && (fn != tn || strncmp(f, t, fn) != 0)) {
+      return false;
+    }
+    if (!fe || !te) {
+      return !fe && !te;
+    }
+    f = fe + 1;
+    t = te + 1;
+  }
+}
+static uint32_t broker_signature() {
+  uint32_t cfg = 2166136261u;
+  broker_mix(cfg, (broker_r_out_in));
+  broker_mix(cfg, (login_r_out_in));
+  broker_mix(cfg, (login_r_out_in));
+  cfg = (cfg ^ (uint32_t)(1883)) * 16777619u;
+  return cfg;
+}
 
 // wifi: wifi
 void wifi_up_reply(const char *status, const char *text) {
@@ -190,6 +261,8 @@ void flp_bg_task(void *) {
     xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
     net_r_out_in = net_r_out_pub;
     pass_r_out_in = pass_r_out_pub;
+    broker_r_out_in = broker_r_out_pub;
+    login_r_out_in = login_r_out_pub;
     xSemaphoreGive(flp_bg_lock);
 
     // wifi: wifi
@@ -288,6 +361,35 @@ void flp_bg_task(void *) {
       wifi_ota.pool();
     }
 
+    // broker: mqtt
+    if (!broker_bound) {
+      // Attach once; the client reconnects by itself after that.
+      broker_bound = flpMqtt.begin(flpWifi);
+      if (broker_bound) {
+        flpMqtt.setBroker(String((broker_r_out_in)).c_str());
+        flpMqtt.setPort(1883);
+        if (String((login_r_out_in)).length()) flpMqtt.setCredentials(String((login_r_out_in)).c_str(), String((login_r_out_in)).c_str()); else flpMqtt.clearCredentials();
+        char cid[24];
+        snprintf(cid, sizeof(cid), "flp-%08lx", (unsigned long)ESP.getEfuseMac());
+        flpMqtt.setClientId(cid);
+        flpMqtt.setKeepAlive(60);
+        flpMqtt.setMessageCallback(flp_mqtt_receive);
+        flpMqtt.setAutoReconnect(true);
+        broker_sig = broker_signature();
+        flpMqtt.connect();
+      }
+    } else if (broker_signature() != broker_sig) {
+      // Settings written while running: reconnect with the new ones.
+      broker_sig = broker_signature();
+      flpMqtt.disconnect();
+      flpMqtt.setBroker(String((broker_r_out_in)).c_str());
+      flpMqtt.setPort(1883);
+      if (String((login_r_out_in)).length()) flpMqtt.setCredentials(String((login_r_out_in)).c_str(), String((login_r_out_in)).c_str()); else flpMqtt.clearCredentials();
+      flpMqtt.connect();
+    }
+    broker_connected = flpMqtt.connected();
+    broker_error = flpMqtt.error();
+
     vTaskDelay(1);
   }
 }
@@ -299,8 +401,12 @@ void setup() {
   net_r_out.reserve(32);
   pass_r_out.reserve(32);
   wifi_address.reserve(32);
+  broker_r_out.reserve(32);
+  login_r_out.reserve(32);
   var_Set_d8006b.reserve(32);
   var_Parol_23764f.reserve(32);
+  var_Broker_a91631.reserve(32);
+  var_Login_498544.reserve(32);
 
   // wifi: wifi
   wifi_ota.setHostname("wifi");
@@ -316,8 +422,16 @@ void loop() {
   // pass_r: var_get
   pass_r_out = var_Parol_23764f;
 
+  // broker_r: var_get
+  broker_r_out = var_Broker_a91631;
+
+  // login_r: var_get
+  login_r_out = var_Login_498544;
+
   xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
   net_r_out_pub = net_r_out;
   pass_r_out_pub = pass_r_out;
+  broker_r_out_pub = broker_r_out;
+  login_r_out_pub = login_r_out;
   xSemaphoreGive(flp_bg_lock);
 }

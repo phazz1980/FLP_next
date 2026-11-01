@@ -151,7 +151,7 @@ impl Services {
     }
 }
 
-const MIX: &str = "\
+pub(crate) const MIX: &str = "\
 // Settings signature (FNV-1a): compared every cycle without building a String.
 uint32_t @ID@_cfg = 0;
 bool @ID@_cfg_set = false;
@@ -289,7 +289,7 @@ fn address(l: &mut Lines, net: &str, e: &CppCtx) {
         .line("}");
 }
 
-fn indent(text: &str, by: usize) -> String {
+pub(crate) fn indent(text: &str, by: usize) -> String {
     let pad = " ".repeat(by);
     text.lines()
         .map(|t| format!("{pad}{t}"))

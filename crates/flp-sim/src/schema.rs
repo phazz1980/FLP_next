@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use flp_blocks::{ds18b20_channel, Bench, Signal};
+use flp_blocks::{ds18b20_channel, Bench, Signal, OWN_SLAVE};
 use flp_core::value::{parse_duration_ms, ParamValue};
 use flp_core::vars::{VAR_GET, VAR_SET};
 use flp_core::{check, Library, Logic, Severity};
@@ -78,6 +78,8 @@ fn reads_bench(kind: &str) -> bool {
             | "ethernet"
             | "mqtt"
             | "modbus_master_read"
+            | "modbus_read"
+            | "uart_read"
     )
 }
 
@@ -96,6 +98,8 @@ pub enum BenchInput {
     Broker,
     /// A register of a Modbus slave and whether the slave answers.
     Modbus { slave: i64, table: String, reg: i64 },
+    /// Text typed into a UART port: a line, or bytes one by one.
+    Uart { port: i64 },
 }
 
 impl Node {
@@ -452,6 +456,18 @@ impl Simulation {
                 b.step_text(&ctx, &mut node.outputs, &mut node.texts_out);
                 if let (Some(pin), Some(state)) = (pin, b.drive()) {
                     self.bench.set_driven(pin, state);
+                } else if let (Some(state), "modbus_write") =
+                    (b.drive(), node.def.info.kind.as_str())
+                {
+                    let at = |name: &str| node.def.params.iter().position(|p| p.name == name);
+                    if let (Some(t), Some(r)) = (at("table"), at("reg")) {
+                        self.bench.set_register(
+                            OWN_SLAVE,
+                            &node.param_texts[t],
+                            node.params[r] as i64,
+                            state,
+                        );
+                    }
                 }
             }
         }
@@ -535,6 +551,20 @@ impl Simulation {
         let net = match (kind, port) {
             ("wifi", _) | ("ethernet", _) => Some(BenchInput::Link),
             ("mqtt", _) => Some(BenchInput::Broker),
+            ("uart_read", _) => {
+                let at = node.def.params.iter().position(|p| p.name == "port")?;
+                Some(BenchInput::Uart {
+                    port: node.params[at] as i64,
+                })
+            }
+            ("modbus_read", _) => {
+                let at = |name: &str| node.def.params.iter().position(|p| p.name == name);
+                Some(BenchInput::Modbus {
+                    slave: OWN_SLAVE,
+                    table: node.param_texts[at("table")?].clone(),
+                    reg: node.params[at("reg")?] as i64,
+                })
+            }
             ("modbus_master_read", _) => {
                 let at = |name: &str| node.def.params.iter().position(|p| p.name == name);
                 Some(BenchInput::Modbus {
@@ -595,6 +625,11 @@ impl Simulation {
     /// Sets a register of a Modbus slave.
     pub fn set_register(&mut self, slave: i64, table: &str, reg: i64, value: f64) {
         self.bench.set_register(slave, table, reg, value);
+    }
+
+    /// Types text into a UART port (a line for `uart_read`).
+    pub fn send_uart(&mut self, port: i64, text: &str) {
+        self.bench.send_uart(port, text);
     }
 
     /// Sets the level of an input pin.

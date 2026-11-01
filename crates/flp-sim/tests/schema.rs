@@ -434,3 +434,41 @@ fn mqtt_publish_waits_for_the_broker() {
     s.step(10).unwrap();
     assert_eq!(s.output("button_pub", "sent"), Some(1.0));
 }
+
+#[test]
+fn bench_own_modbus_slave_meets_the_master_and_the_program() {
+    let mut s = sim("modbus_wifi");
+    let Some(BenchInput::Modbus { slave, table, reg }) = s.bench_input("led_reg", "out_b") else {
+        panic!("modbus_read reads the bench");
+    };
+    s.step(10).unwrap();
+    assert_eq!(s.output("led_reg", "out_b"), Some(0.0));
+    // The master writes a coil, the program reads it.
+    s.set_register(slave, &table, reg, 1.0);
+    s.step(10).unwrap();
+    assert_eq!(s.output("led_reg", "out_b"), Some(1.0));
+    // The program writes a discrete input, the master would read it.
+    put(&mut s, "button", 1.0);
+    s.step(10).unwrap();
+    let on = s.bench().register(slave, "discrete", 0);
+    put(&mut s, "button", 0.0);
+    s.step(10).unwrap();
+    assert_ne!(on, s.bench().register(slave, "discrete", 0));
+}
+
+#[test]
+fn bench_uart_read_gets_the_typed_line() {
+    let mut s = sim("text_commands");
+    let Some(BenchInput::Uart { port }) = s.bench_input("rx", "line") else {
+        panic!("uart_read reads the bench");
+    };
+    s.step(10).unwrap();
+    assert_eq!(s.output("rx", "ready"), Some(0.0));
+    s.send_uart(port, "hello");
+    s.step(10).unwrap();
+    assert_eq!(s.output("rx", "ready"), Some(1.0));
+    assert_eq!(s.output_text("rx", "line"), Some("hello"));
+    s.step(10).unwrap();
+    assert_eq!(s.output("rx", "ready"), Some(0.0));
+    assert_eq!(s.output_text("rx", "line"), Some("hello"));
+}

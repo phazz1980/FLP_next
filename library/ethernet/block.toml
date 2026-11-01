@@ -40,6 +40,7 @@ description = "Получать адрес автоматически (DHCP)"
 [[param]]
 name = "ip"
 type = "string"
+runtime = true
 default = "192.168.1.177"
 when = "not dhcp"
 description = "Постоянный IP-адрес"
@@ -47,6 +48,7 @@ description = "Постоянный IP-адрес"
 [[param]]
 name = "gateway"
 type = "string"
+runtime = true
 default = "192.168.1.1"
 when = "not dhcp"
 description = "Шлюз (он же DNS)"
@@ -54,6 +56,7 @@ description = "Шлюз (он же DNS)"
 [[param]]
 name = "subnet"
 type = "string"
+runtime = true
 default = "255.255.255.0"
 when = "not dhcp"
 description = "Маска подсети"

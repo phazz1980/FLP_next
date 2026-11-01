@@ -29,3 +29,39 @@ var = "Пароль"
 [[link]]
 from = "pass_r.out"
 to = "wifi.password"
+
+[[var]]
+name = "Брокер"
+type = "string"
+
+[[var]]
+name = "Логин"
+type = "string"
+
+[[block]]
+id = "broker"
+type = "mqtt"
+param_in = ["broker", "user", "password"]
+port = 1883
+
+[[block]]
+id = "broker_r"
+type = "var_get"
+var = "Брокер"
+
+[[block]]
+id = "login_r"
+type = "var_get"
+var = "Логин"
+
+[[link]]
+from = "broker_r.out"
+to = "broker.broker"
+
+[[link]]
+from = "login_r.out"
+to = "broker.user"
+
+[[link]]
+from = "login_r.out"
+to = "broker.password"

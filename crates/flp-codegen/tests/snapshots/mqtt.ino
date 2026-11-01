@@ -319,10 +319,10 @@ void flp_bg_task(void *) {
       if (broker_bound) {
         flpMqtt.setBroker("broker.hivemq.com");
         flpMqtt.setPort(1883);
+        flpMqtt.setCredentials("device", "");
         char cid[24];
         snprintf(cid, sizeof(cid), "flp-%08lx", (unsigned long)ESP.getEfuseMac());
         flpMqtt.setClientId(cid);
-        flpMqtt.setCredentials("device", "");
         flpMqtt.setKeepAlive(60);
         flpMqtt.setMessageCallback(flp_mqtt_receive);
         flpMqtt.setAutoReconnect(true);

@@ -45,9 +45,27 @@ bool flp_mqtt_match(const char *f, const char *t) {
   }
 }";
 
+/// A text setting as a C string for the client: a literal as it is, a value taken from
+/// an input or a variable through a temporary `String`.
+fn c_text(e: &CppCtx, name: &str) -> String {
+    if e.is_bound(name) {
+        format!("String({}).c_str()", e.param(name))
+    } else {
+        e.param(name).to_owned()
+    }
+}
+
 pub(crate) fn mqtt(e: &CppCtx) -> CppParts {
     let id = &e.id;
+    // Broker, port or credentials come from inputs or variables: re-applied when they change.
+    let dynamic = ["broker", "port", "user", "password"]
+        .iter()
+        .any(|n| e.is_bound(n));
     let mut g = Lines::default();
+    if dynamic {
+        g.line(crate::net::MIX.replace("@ID@", id))
+            .line(format!("uint32_t {id}_sig = 0;"));
+    }
     g.line("// Shared MQTT client: mqtt_publish / mqtt_subscribe blocks use it.")
         .line("FLProgNetworkMqttClient flpMqtt;")
         .line(format!("bool {id}_bound = false;"))
@@ -56,13 +74,32 @@ pub(crate) fn mqtt(e: &CppCtx) -> CppParts {
         .line("String flpMqttPayload;")
         .line("uint32_t flpMqttSeq = 0;")
         .line("");
+    // Broker address and credentials, applied before every (re)connection.
+    let mut apply = Lines::default();
+    apply
+        .line(format!("flpMqtt.setBroker({});", c_text(e, "broker")))
+        .line(format!("flpMqtt.setPort({});", e.param("port")));
+    if dynamic && e.is_bound("user") {
+        apply.line(format!(
+            "if (String({}).length()) flpMqtt.setCredentials({}, {}); else flpMqtt.clearCredentials();",
+            e.param("user"),
+            c_text(e, "user"),
+            c_text(e, "password")
+        ));
+    } else if !e.text("user").is_empty() || e.is_bound("user") {
+        apply.line(format!(
+            "flpMqtt.setCredentials({}, {});",
+            c_text(e, "user"),
+            c_text(e, "password")
+        ));
+    }
+    let apply = apply.finish();
     let mut l = Lines::default();
     l.line(format!("if (!{id}_bound) {{"))
         .line("  // Attach once; the client reconnects by itself after that.")
         .line(format!("  {id}_bound = flpMqtt.begin({});", interface(e)))
         .line(format!("  if ({id}_bound) {{"))
-        .line(format!("    flpMqtt.setBroker({});", e.param("broker")))
-        .line(format!("    flpMqtt.setPort({});", e.param("port")));
+        .line(crate::net::indent(&apply, 4));
     if e.text("client_id").is_empty() {
         l.line("    char cid[24];")
             .line(
@@ -75,27 +112,49 @@ pub(crate) fn mqtt(e: &CppCtx) -> CppParts {
             e.param("client_id")
         ));
     }
-    if !e.text("user").is_empty() {
-        l.line(format!(
-            "    flpMqtt.setCredentials({}, {});",
-            e.param("user"),
-            e.param("password")
-        ));
-    }
     l.line(format!(
         "    flpMqtt.setKeepAlive({});",
         e.param("keepalive")
     ))
     .line("    flpMqtt.setMessageCallback(flp_mqtt_receive);")
-    .line("    flpMqtt.setAutoReconnect(true);")
-    .line("    flpMqtt.connect();")
-    .line("  }")
-    .line("}");
+    .line("    flpMqtt.setAutoReconnect(true);");
+    if dynamic {
+        l.line(format!("    {id}_sig = {id}_signature();"));
+    }
+    l.line("    flpMqtt.connect();").line("  }");
+    if dynamic {
+        l.line(format!("}} else if ({id}_signature() != {id}_sig) {{"))
+            .line("  // Settings written while running: reconnect with the new ones.")
+            .line(format!("  {id}_sig = {id}_signature();"))
+            .line("  flpMqtt.disconnect();")
+            .line(crate::net::indent(&apply, 2))
+            .line("  flpMqtt.connect();")
+            .line("}");
+    } else {
+        l.line("}");
+    }
     if e.flag("out_connected") && e.output.contains_key("connected") {
         l.line(format!("{} = flpMqtt.connected();", e.output("connected")));
     }
     if e.flag("out_error") && e.output.contains_key("error") {
         l.line(format!("{} = flpMqtt.error();", e.output("error")));
+    }
+    let mut functions = MQTT_FUNCTIONS.to_owned();
+    if dynamic {
+        let mut sig = Lines::default();
+        sig.line(format!("static uint32_t {id}_signature() {{"))
+            .line("  uint32_t cfg = 2166136261u;");
+        for n in ["broker", "user", "password"] {
+            sig.line(format!("  {id}_mix(cfg, {});", e.param(n)));
+        }
+        sig.line(format!(
+            "  cfg = (cfg ^ (uint32_t)({})) * 16777619u;",
+            e.param("port")
+        ))
+        .line("  return cfg;")
+        .line("}");
+        functions.push('\n');
+        functions.push_str(&sig.finish());
     }
     CppParts {
         defines: format!(
@@ -103,7 +162,7 @@ pub(crate) fn mqtt(e: &CppCtx) -> CppParts {
             e.param("max_subscriptions")
         ),
         global: g.finish(),
-        once_functions: MQTT_FUNCTIONS.to_owned(),
+        once_functions: functions,
         looped: l.finish(),
         ..Default::default()
     }

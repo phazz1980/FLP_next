@@ -23,6 +23,9 @@ pub fn behavior(kind: &str) -> Option<Box<dyn Behavior>> {
         "ethernet" => Some(Box::new(crate::netsim::Ethernet)),
         "mqtt" => Some(Box::new(crate::netsim::Mqtt)),
         "modbus_master_read" => Some(Box::new(crate::netsim::ModbusMasterRead)),
+        "uart_read" => Some(Box::<crate::netsim::UartRead>::default()),
+        "modbus_read" => Some(Box::new(crate::netsim::ModbusRead)),
+        "modbus_write" => Some(Box::<crate::netsim::ModbusWrite>::default()),
         _ => None,
     }
 }

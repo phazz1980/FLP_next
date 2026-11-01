@@ -108,6 +108,103 @@ impl Behavior for ModbusMasterRead {
     }
 }
 
+/// Read from a UART port: what was sent into the port on the bench comes as a line with a
+/// `ready` pulse, or byte by byte (one per scan, `new` on each).
+#[derive(Default)]
+pub struct UartRead {
+    seen: u64,
+    pending: std::collections::VecDeque<u8>,
+    bytes: bool,
+}
+
+impl Behavior for UartRead {
+    // The simulation calls `step` and then `step_text`; the state moves in the latter only.
+    fn step(&mut self, _: &Ctx, _: &mut [f64]) {}
+
+    fn step_text(&mut self, c: &Ctx, out: &mut [f64], text: &mut [String]) {
+        let bytes = c.param(1) != 0.0;
+        let (serial, sent) = c.bench.uart_rx(c.param(0) as i64);
+        if bytes != self.bytes {
+            self.bytes = bytes;
+            self.pending.clear();
+        }
+        let fresh = serial != self.seen;
+        self.seen = serial;
+        let ready = fresh && !bytes;
+        if fresh && bytes {
+            self.pending.extend(sent.bytes());
+        }
+        let next = if bytes {
+            self.pending.pop_front()
+        } else {
+            None
+        };
+        // The outputs follow the mode: `line`, `ready`, `available` or `byte`, `new`,
+        // `available`.
+        if out.len() >= 3 {
+            if bytes {
+                out[1] = b(next.is_some());
+                if let Some(byte) = next {
+                    out[0] = f64::from(byte);
+                }
+            } else {
+                out[1] = b(ready);
+            }
+            out[2] = self.pending.len() as f64;
+        }
+        if ready {
+            if let Some(t) = text.first_mut() {
+                *t = sent.to_owned();
+            }
+        }
+    }
+}
+
+/// The device the Modbus slave blocks of the board belong to: its tables live on the bench
+/// under this number, where the master (set by hand) and the program meet.
+pub const OWN_SLAVE: i64 = 0;
+
+/// Read of a table of the own Modbus slave: what the master wrote, or the program itself.
+pub struct ModbusRead;
+
+impl Behavior for ModbusRead {
+    fn step(&mut self, c: &Ctx, out: &mut [f64]) {
+        let v = c
+            .bench
+            .register(OWN_SLAVE, c.param_text(1), c.param(3) as i64);
+        // The three ports are `out`, `out_f` and `out_b`, as in the master read.
+        if out.len() >= 3 {
+            out[0] = v.round();
+            out[1] = v;
+            out[2] = b(v != 0.0);
+        }
+    }
+}
+
+/// Write into a table of the own Modbus slave: the value the master would read.
+#[derive(Default)]
+pub struct ModbusWrite {
+    value: f64,
+}
+
+impl Behavior for ModbusWrite {
+    fn step(&mut self, c: &Ctx, _: &mut [f64]) {
+        // The inputs are `in`, `in_f` and `in_b`, all present or only the one of the kind.
+        let kind = c.param_text(2);
+        let all = c.inputs.len() >= 3;
+        let at = |i: usize| if all { i } else { 0 };
+        self.value = match kind {
+            "bool" => b(c.flag(at(2))),
+            "float" => c.input(at(1)),
+            _ => c.input(at(0)).round(),
+        };
+    }
+
+    fn drive(&self) -> Option<f64> {
+        Some(self.value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
