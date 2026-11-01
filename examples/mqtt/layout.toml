@@ -1,0 +1,54 @@
+[block.temp_pub]
+sheet = 1
+x = 320.0
+y = 150.0
+
+[block.button_pub]
+sheet = 1
+x = 640.0
+y = 160.0
+
+[block.led_sub]
+sheet = 1
+x = 840.0
+y = 160.0
+
+[block.sensor]
+sheet = 1
+x = 40.0
+y = 330.0
+
+[block.temp_w]
+sheet = 1
+x = 240.0
+y = 330.0
+
+[block.button]
+sheet = 1
+x = 40.0
+y = 430.0
+
+[block.button_w]
+sheet = 1
+x = 240.0
+y = 430.0
+
+[block.led_r]
+sheet = 1
+x = 40.0
+y = 530.0
+
+[block.led]
+sheet = 1
+x = 240.0
+y = 530.0
+
+[block.wifi]
+sheet = 1
+x = 40.0
+y = 160.0
+
+[block.broker]
+sheet = 1
+x = 240.0
+y = 160.0

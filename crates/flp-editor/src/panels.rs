@@ -258,7 +258,16 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
     ) {
         app.start_job(JobKind::Build, ui.ctx());
     }
-    if icon(
+    if app.has_job() {
+        if icon(
+            ui,
+            true,
+            "🛑",
+            crate::i18n::tr("Стоп: отменить сборку или заливку"),
+        ) {
+            app.cancel_job();
+        }
+    } else if icon(
         ui,
         has_doc && idle,
         "⬆",
@@ -266,14 +275,6 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
     ) {
         let port = app.port_choice();
         app.start_job(JobKind::Upload { port }, ui.ctx());
-    }
-    if icon(
-        ui,
-        app.has_job(),
-        "⏹",
-        crate::i18n::tr("Стоп: отменить сборку или заливку"),
-    ) {
-        app.cancel_job();
     }
     icon_toggle(
         ui,
