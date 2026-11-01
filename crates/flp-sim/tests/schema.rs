@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use flp_core::{Library, Project};
-use flp_sim::{Computed, Simulation};
+use flp_sim::{BenchInput, Computed, Simulation};
 
 fn repo(path: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -15,6 +15,16 @@ fn sim(example: &str) -> Simulation {
     Simulation::new(&project.logic, &lib).unwrap()
 }
 
+/// Feeds a board input of the examples (buttons on the ground with a pull-up and inversion,
+/// analog pots) so that the block reads `value`.
+fn put(s: &mut Simulation, block: &str, value: f64) {
+    match s.bench_input(block, "out").unwrap() {
+        BenchInput::Digital { pin } => s.set_pin_level(pin, 1.0 - value),
+        BenchInput::Analog { pin } => s.set_pin_level(pin, value),
+        other => panic!("{other:?}"),
+    }
+}
+
 fn on(s: &Simulation, block: &str, port: &str) -> bool {
     s.output(block, port).unwrap() != 0.0
 }
@@ -22,7 +32,7 @@ fn on(s: &Simulation, block: &str, port: &str) -> bool {
 #[test]
 fn start_stop_runs_the_motor_fan_bell_and_counter() {
     let mut s = sim("start_stop");
-    assert_eq!(s.computed("start"), Some(Computed::Manual));
+    assert_eq!(s.computed("start"), Some(Computed::Bench));
     assert_eq!(s.computed("run"), Some(Computed::Builtin));
 
     assert!(
@@ -33,18 +43,18 @@ fn start_stop_runs_the_motor_fan_bell_and_counter() {
     assert!(!on(&s, "run", "q"));
 
     // Start pressed: the motor runs, the counter sees one start.
-    s.set_output("start", "out", 1.0);
+    put(&mut s, "start", 1.0);
     s.step(100).unwrap();
-    s.set_output("start", "out", 0.0);
+    put(&mut s, "start", 0.0);
     s.step(100).unwrap();
     assert!(on(&s, "run", "q"));
     assert_eq!(s.input("motor", "in"), Some(1.0));
     assert_eq!(s.output("starts", "count"), Some(1.0));
 
     // Stop pressed: the bell rings 2 s, the fan keeps running 30 s.
-    s.set_output("stop", "out", 1.0);
+    put(&mut s, "stop", 1.0);
     s.step(100).unwrap();
-    s.set_output("stop", "out", 0.0);
+    put(&mut s, "stop", 0.0);
     assert!(!on(&s, "run", "q"));
     assert!(on(&s, "bell", "out"));
     for _ in 0..19 {
@@ -64,7 +74,7 @@ fn start_stop_runs_the_motor_fan_bell_and_counter() {
 #[test]
 fn reset_clears_state_and_time() {
     let mut s = sim("start_stop");
-    s.set_output("start", "out", 1.0);
+    put(&mut s, "start", 1.0);
     s.step(100).unwrap();
     assert!(on(&s, "run", "q"));
     s.reset().unwrap();
@@ -99,11 +109,11 @@ fn toggle_flips_on_each_clean_press() {
     let mut s = sim("toggle");
     for _ in 0..2 {
         let before = on(&s, "toggle", "out");
-        s.set_output("button", "out", 1.0);
+        put(&mut s, "button", 1.0);
         for _ in 0..5 {
             s.step(20).unwrap();
         }
-        s.set_output("button", "out", 0.0);
+        put(&mut s, "button", 0.0);
         for _ in 0..5 {
             s.step(20).unwrap();
         }
@@ -117,9 +127,9 @@ fn variables_are_written_on_enable_and_read_back() {
     assert_eq!(s.var("Порог"), Some(10.0));
     assert_eq!(s.block_var("total_r"), Some("Нажатий всего"));
     // The button is inverted (pull-up): 0 means pressed.
-    s.set_output("button", "out", 1.0);
+    put(&mut s, "button", 1.0);
     s.step(100).unwrap();
-    s.set_output("button", "out", 0.0);
+    put(&mut s, "button", 0.0);
     s.step(100).unwrap();
     s.step(100).unwrap();
     assert_eq!(s.var("Нажатий всего"), Some(1.0));
@@ -133,8 +143,8 @@ fn variables_are_written_on_enable_and_read_back() {
 fn parameter_read_from_an_input_follows_it_every_scan() {
     let mut s = sim("param_inputs");
     // The potentiometer sets the delay of the timer, in milliseconds.
-    s.set_output("pot", "out", 500.0);
-    s.set_output("button", "out", 1.0);
+    put(&mut s, "pot", 500.0);
+    put(&mut s, "button", 1.0);
     s.step(100).unwrap();
     s.step(300).unwrap();
     assert!(!on(&s, "delay", "out"), "400 ms < 500 ms");
@@ -142,12 +152,12 @@ fn parameter_read_from_an_input_follows_it_every_scan() {
     assert!(on(&s, "delay", "out"), "600 ms >= 500 ms");
 
     // Raising the delay on the fly switches the output off again.
-    s.set_output("pot", "out", 3000.0);
+    put(&mut s, "pot", 3000.0);
     s.step(100).unwrap();
     assert!(!on(&s, "delay", "out"));
 
     // The limit takes its upper bound from the constant block (2000).
-    s.set_output("pot", "out", 1500.0);
+    put(&mut s, "pot", 1500.0);
     s.step(100).unwrap();
     assert_eq!(s.output("cap", "out"), Some(1500.0));
 }
@@ -261,6 +271,10 @@ type = "web_led"
 id = "pub"
 type = "mqtt_publish"
 
+[[block]]
+id = "sub"
+type = "mqtt_subscribe"
+
 [[link]]
 from = "sw.out"
 to = "led.in"
@@ -280,10 +294,19 @@ to = "pub.value"
     assert_eq!(s.input("led", "in"), Some(1.0));
     assert!(on(&s, "pub", "sent"), "first value is published");
     s.step(10).unwrap();
+    assert!(on(&s, "pub", "sent"), "the pulse is long enough to be seen");
+    s.step(400).unwrap();
     assert!(!on(&s, "pub", "sent"));
     assert!(s.set_output("sl", "out", 55.0));
     s.step(10).unwrap();
     assert!(on(&s, "pub", "sent"), "a changed value is published");
+    // A message fed by hand raises `received` for a while.
+    assert!(s.set_output_text("sub", "out", "on"));
+    assert!(on(&s, "sub", "received"));
+    s.step(100).unwrap();
+    assert!(on(&s, "sub", "received"));
+    s.step(300).unwrap();
+    assert!(!on(&s, "sub", "received"));
     s.reset().unwrap();
     assert_eq!(s.output("sl", "out"), Some(40.0));
 }
@@ -338,4 +361,25 @@ to = "w.in"
     assert_eq!(s.output_text("r", "out"), Some("changed"));
     s.reset().unwrap();
     assert_eq!(s.var_text("msg"), Some("start"));
+}
+
+#[test]
+fn bench_button_lights_the_led_through_pullup_and_inversion() {
+    let mut s = sim("button");
+    assert_eq!(s.computed("button"), Some(Computed::Bench));
+    assert_eq!(
+        s.bench_input("button", "out"),
+        Some(BenchInput::Digital { pin: 13 })
+    );
+    // Released: the pull-up holds the pin high, the inverted input reads false.
+    s.step(10).unwrap();
+    assert_eq!(s.bench().driven(2), Some(0.0));
+    // Pressed: the pin goes to ground.
+    s.set_pin_level(13, 0.0);
+    s.step(10).unwrap();
+    assert_eq!(s.bench().driven(2), Some(1.0));
+    assert_eq!(s.output_pin("led"), Some((2, 1.0)));
+    s.set_pin_level(13, 1.0);
+    s.step(10).unwrap();
+    assert_eq!(s.bench().driven(2), Some(0.0));
 }

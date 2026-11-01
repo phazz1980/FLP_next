@@ -105,6 +105,7 @@ fn compare(zig: &Path, sc: &Scenario) {
                 params: &params,
                 texts: &[],
                 param_texts: &[],
+                bench: &flp_blocks::NO_BENCH,
             },
             &mut outputs,
         );

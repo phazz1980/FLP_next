@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Ui};
 use flp_core::{Library, PortRef, Project, SignalType};
 use flp_debug::Value;
-use flp_sim::{Computed, Simulation};
+use flp_sim::{BenchInput, Computed, Signal, Simulation};
 
 use crate::theme::Palette;
 
@@ -78,6 +78,7 @@ impl SimState {
                     sim.set_output_text(&block, &port, &text);
                 }
                 sim.keep_vars(&self.sim);
+                sim.keep_bench(&self.sim);
                 self.notes = sim.notes.clone();
                 self.sim = sim;
             }
@@ -134,6 +135,11 @@ impl SimState {
         ))
     }
 
+    /// The pin an output block drives on the virtual bench and its state.
+    pub fn output_pin(&self, block: &str) -> Option<(i64, f64)> {
+        self.sim.output_pin(block)
+    }
+
     /// Live text of a string output.
     pub fn text_output(&self, port: &PortRef) -> Option<&str> {
         self.sim.output_text(&port.block, &port.port)
@@ -159,10 +165,90 @@ impl SimState {
 pub fn editable(sim: &SimState, port: &PortRef) -> bool {
     sim.sim.computed(&port.block) == Some(Computed::Manual)
         || sim.sim.block_var(&port.block).is_some()
+        || sim.sim.bench_input(&port.block, &port.port).is_some()
+}
+
+/// Menu of an output that reads the virtual bench: the pin level or the sensor signal.
+fn bench_menu(ui: &mut Ui, sim: &mut SimState, port: &PortRef, input: BenchInput) {
+    ui.label(egui::RichText::new(port.to_string()).strong());
+    match input {
+        BenchInput::Digital { pin } => {
+            let high = sim.sim.bench().level(pin).map(|v| v != 0.0);
+            ui.label(crate::i18n::fmt("Пин {0}", &[&pin]));
+            for (level, name) in [(1.0, "Высокий уровень"), (0.0, "Низкий уровень")]
+            {
+                let current = high == Some(level != 0.0);
+                if ui
+                    .selectable_label(current, crate::i18n::tr(name))
+                    .clicked()
+                {
+                    sim.sim.set_pin_level(pin, level);
+                    ui.close();
+                }
+            }
+        }
+        BenchInput::Analog { pin } => {
+            let mut counts = sim.sim.bench().level(pin).unwrap_or(0.0);
+            ui.label(crate::i18n::fmt("Пин {0}: отсчёты АЦП", &[&pin]));
+            if ui
+                .add(
+                    egui::DragValue::new(&mut counts)
+                        .range(0.0..=4095.0)
+                        .speed(10.0),
+                )
+                .changed()
+            {
+                sim.sim.set_pin_level(pin, counts.round());
+            }
+        }
+        BenchInput::Sensor { pin, channel } => {
+            let mut sig = sim.sim.bench().signal(pin, &channel);
+            let mut over_s = sig.duration_ms as f64 / 1000.0;
+            let mut changed = false;
+            ui.label(crate::i18n::fmt("Пин {0}", &[&pin]));
+            ui.horizontal(|ui| {
+                ui.label(crate::i18n::tr("От"));
+                changed |= ui
+                    .add(egui::DragValue::new(&mut sig.from).speed(0.1))
+                    .changed();
+                ui.label(crate::i18n::tr("до"));
+                changed |= ui
+                    .add(egui::DragValue::new(&mut sig.to).speed(0.1))
+                    .changed();
+            });
+            ui.horizontal(|ui| {
+                ui.label(crate::i18n::tr("За, с"));
+                changed |= ui
+                    .add(
+                        egui::DragValue::new(&mut over_s)
+                            .range(0.0..=86_400.0)
+                            .speed(0.5),
+                    )
+                    .changed();
+            });
+            changed |= ui
+                .checkbox(&mut sig.fault, crate::i18n::tr("Ошибка датчика"))
+                .changed();
+            if changed {
+                sim.sim.set_signal(
+                    pin,
+                    &channel,
+                    Signal {
+                        duration_ms: (over_s * 1000.0).round() as u64,
+                        ..sig
+                    },
+                );
+            }
+        }
+    }
 }
 
 /// Menu of a port in simulation: set the value of a hand-driven output.
 pub fn port_menu(ui: &mut Ui, sim: &mut SimState, port: &PortRef) {
+    if let Some(input) = sim.sim.bench_input(&port.block, &port.port) {
+        bench_menu(ui, sim, port, input);
+        return;
+    }
     let var = sim.sim.block_var(&port.block).map(str::to_owned);
     if var.is_none() && sim.sim.computed(&port.block) != Some(Computed::Manual) {
         return;

@@ -1,6 +1,7 @@
 //! Built-in blocks without hardware, computed by Rust code. Every value is `f64`: bool is `0`/`1`,
 //! int is a whole number; strings travel beside them (see `text`). Port and parameter indexes follow `block.toml` order.
 
+mod bench;
 mod cpp;
 mod hardware;
 mod more;
@@ -10,7 +11,9 @@ mod text;
 mod uart;
 mod web;
 
+pub use bench::{Bench, Signal, NO_BENCH};
 pub use cpp::{CppCtx, CppParts, Raw, UartCtx};
+pub use hardware::ds18b20_channel;
 pub use more::{next_random, RANDOM_SEED};
 pub use web::device_page;
 
@@ -526,6 +529,8 @@ pub struct Ctx<'a> {
     pub texts: &'a [String],
     /// Texts of the parameters; empty for those that are not strings.
     pub param_texts: &'a [String],
+    /// The world outside the board: input pin levels, sensor signals.
+    pub bench: &'a Bench,
 }
 
 impl Ctx<'_> {
@@ -566,6 +571,11 @@ pub trait Behavior {
     /// Blocks with string ports: `out` is the same slice `step` got, `out_text` the
     /// texts of the outputs (only string ports are written).
     fn step_text(&mut self, _ctx: &Ctx, _out: &mut [f64], _out_text: &mut [String]) {}
+
+    /// What an output block puts on its pin after the last step: `0`/`1` or a duty in percent.
+    fn drive(&self) -> Option<f64> {
+        None
+    }
 }
 
 pub fn b(v: bool) -> f64 {

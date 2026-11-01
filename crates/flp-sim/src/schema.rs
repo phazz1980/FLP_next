@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+use flp_blocks::{ds18b20_channel, Bench, Signal};
 use flp_core::value::{parse_duration_ms, ParamValue};
 use flp_core::vars::{VAR_GET, VAR_SET};
 use flp_core::{check, Library, Logic, Severity};
@@ -22,6 +23,8 @@ pub enum Computed {
     Builtin,
     /// The block's own `block.wasm`.
     Module,
+    /// Rust code of the program, fed by the virtual bench (pin levels, sensor signals).
+    Bench,
     /// Nobody: the outputs are set by hand (hardware blocks, blocks without a module).
     Manual,
 }
@@ -59,9 +62,48 @@ struct Node {
     /// Text of string ports (empty for the others), in port order.
     texts_in: Vec<String>,
     texts_out: Vec<String>,
+    /// Simulated time left until the `received` pulse of a hand-fed MQTT block ends.
+    pulse_ms: u64,
+}
+
+/// Blocks whose outputs follow what the bench shows on their pin.
+fn reads_bench(kind: &str) -> bool {
+    matches!(kind, "digital_in" | "analog_in" | "dht22" | "ds18b20")
+}
+
+/// What the bench lets the user set for an output of a block.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BenchInput {
+    /// Level of a digital pin: `0`/`1`.
+    Digital { pin: i64 },
+    /// Counts of an analog pin: `0…4095`.
+    Analog { pin: i64 },
+    /// A sensor channel: a value that may change in time, or a fault.
+    Sensor { pin: i64, channel: String },
 }
 
 impl Node {
+    /// The pin the block works with.
+    fn pin(&self) -> Option<i64> {
+        let p = self.def.params.iter().position(|p| p.name == "pin")?;
+        Some(self.params[p] as i64)
+    }
+
+    /// A value was fed to an MQTT subscription by hand: `received` is on for a while,
+    /// long enough to be seen.
+    fn message_arrived(&mut self) {
+        if self.def.info.kind == "mqtt_subscribe" {
+            self.set_received(1.0);
+            self.pulse_ms = builtin::PULSE_MS;
+        }
+    }
+
+    fn set_received(&mut self, value: f64) {
+        if let Some(p) = self.def.outputs.iter().position(|o| o.name == "received") {
+            self.outputs[p] = value;
+        }
+    }
+
     /// Web controls (switch, slider, number input) start at their `initial` parameter
     /// and are then changed by hand like any other input of the board.
     fn apply_initial(&mut self) {
@@ -81,6 +123,8 @@ impl Node {
     fn computed(&self) -> Computed {
         if self.module.is_some() {
             Computed::Module
+        } else if self.behavior.is_some() && reads_bench(&self.def.info.kind) {
+            Computed::Bench
         } else if self.behavior.is_some() || self.var.is_some() {
             Computed::Builtin
         } else {
@@ -101,6 +145,8 @@ pub struct Simulation {
     var_texts: HashMap<String, String>,
     var_text_init: HashMap<String, String>,
     time_ms: u64,
+    /// The world outside the board.
+    bench: Bench,
     /// Load problems of modules: the block falls back to manual outputs.
     pub notes: Vec<String>,
 }
@@ -211,6 +257,7 @@ impl Simulation {
                 outputs: vec![0.0; def.outputs.len()],
                 texts_in: vec![String::new(); def.inputs.len()],
                 texts_out: vec![String::new(); def.outputs.len()],
+                pulse_ms: 0,
                 active,
                 params,
                 param_texts,
@@ -290,6 +337,7 @@ impl Simulation {
             var_texts: var_text_init.clone(),
             var_text_init,
             time_ms: 0,
+            bench: Bench::new(),
             notes,
         })
     }
@@ -304,7 +352,9 @@ impl Simulation {
         self.time_ms = 0;
         self.vars = self.var_init.clone();
         self.var_texts = self.var_text_init.clone();
+        self.bench.clear_driven();
         for node in &mut self.nodes {
+            node.pulse_ms = 0;
             node.outputs.iter_mut().for_each(|v| *v = 0.0);
             node.texts_out.iter_mut().for_each(String::clear);
             node.inputs.iter_mut().for_each(|v| *v = 0.0);
@@ -325,10 +375,19 @@ impl Simulation {
     /// the scan with its error; the outputs computed so far stay visible.
     pub fn step(&mut self, dt_ms: u32) -> Result<(), String> {
         self.time_ms += u64::from(dt_ms);
+        for node in &mut self.nodes {
+            if node.pulse_ms > 0 {
+                node.pulse_ms = node.pulse_ms.saturating_sub(u64::from(dt_ms));
+                if node.pulse_ms == 0 {
+                    node.set_received(0.0);
+                }
+            }
+        }
         for &i in &self.order.clone() {
             self.read_inputs(i);
             let now_ms = self.time_ms;
             let node = &mut self.nodes[i];
+            let pin = node.pin();
             for &(p, input) in &node.param_inputs {
                 node.params[p] = node.inputs[input];
             }
@@ -371,9 +430,13 @@ impl Simulation {
                     params: &node.params,
                     texts: &node.texts_in,
                     param_texts: &node.param_texts,
+                    bench: &self.bench,
                 };
                 b.step(&ctx, &mut node.outputs);
                 b.step_text(&ctx, &mut node.outputs, &mut node.texts_out);
+                if let (Some(pin), Some(state)) = (pin, b.drive()) {
+                    self.bench.set_driven(pin, state);
+                }
             }
         }
         Ok(())
@@ -430,7 +493,66 @@ impl Simulation {
             return false;
         }
         node.outputs[p] = value;
+        if node.def.outputs[p].name != "received" {
+            node.message_arrived();
+        }
         true
+    }
+
+    /// The virtual bench: pin levels, sensor signals and the state of output pins.
+    pub fn bench(&self) -> &Bench {
+        &self.bench
+    }
+
+    /// Takes over the bench settings of an older simulation of the same project.
+    pub fn keep_bench(&mut self, old: &Simulation) {
+        self.bench = old.bench.clone();
+    }
+
+    /// What the bench can feed into this output, if the block reads it.
+    pub fn bench_input(&self, block: &str, port: &str) -> Option<BenchInput> {
+        let node = &self.nodes[*self.index.get(block)?];
+        if node.computed() != Computed::Bench {
+            return None;
+        }
+        let pin = node.pin()?;
+        match (node.def.info.kind.as_str(), port) {
+            ("digital_in", "out") => Some(BenchInput::Digital { pin }),
+            ("analog_in", "out") => Some(BenchInput::Analog { pin }),
+            ("dht22", "temp" | "humidity") => Some(BenchInput::Sensor {
+                pin,
+                channel: port.to_owned(),
+            }),
+            ("ds18b20", "temp") => {
+                let index = node.def.params.iter().position(|p| p.name == "index")?;
+                Some(BenchInput::Sensor {
+                    pin,
+                    channel: ds18b20_channel(node.params[index] as i64),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// The pin an output block drives and its state (`None` while the block does not write).
+    pub fn output_pin(&self, block: &str) -> Option<(i64, f64)> {
+        let node = &self.nodes[*self.index.get(block)?];
+        if !matches!(node.def.info.kind.as_str(), "digital_out" | "pwm_out") {
+            return None;
+        }
+        let pin = node.pin()?;
+        Some((pin, self.bench.driven(pin)?))
+    }
+
+    /// Sets the level of an input pin.
+    pub fn set_pin_level(&mut self, pin: i64, value: f64) {
+        self.bench.set_level(pin, value);
+    }
+
+    /// Sets a sensor reading; a change over time starts now.
+    pub fn set_signal(&mut self, pin: i64, channel: &str, mut signal: Signal) {
+        signal.start_ms = self.time_ms;
+        self.bench.set_signal(pin, channel, signal);
     }
 
     /// Takes over the variable values of an older simulation of the same project.
@@ -501,6 +623,7 @@ impl Simulation {
             return false;
         }
         node.texts_out[p] = text.to_owned();
+        node.message_arrived();
         true
     }
 

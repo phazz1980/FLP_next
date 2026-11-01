@@ -398,6 +398,7 @@ mod tests {
             params,
             texts: &texts,
             param_texts: &ptexts,
+            bench: &crate::NO_BENCH,
         };
         let mut out = vec![0.0; 5];
         let mut text = vec![String::new(); 1];

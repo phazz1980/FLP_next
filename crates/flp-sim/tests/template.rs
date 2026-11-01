@@ -81,6 +81,7 @@ fn compare_text(zig: &Path, kind: &str, samples: &[&[&str]]) {
             params: &params,
             texts: &texts,
             param_texts: &param_texts,
+            bench: &flp_blocks::NO_BENCH,
         };
         expected.step(&ctx, &mut num);
         expected.step_text(&ctx, &mut num, &mut txt);

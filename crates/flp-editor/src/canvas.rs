@@ -1256,6 +1256,23 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 }
             }
         }
+        // The virtual bench: the state of the pin an output block drives.
+        if let Some((pin, state)) = sim.and_then(|s| s.output_pin(&block.id)) {
+            let text = if block.kind == "pwm_out" {
+                format!("GPIO{pin}: {state:.0} %")
+            } else if state != 0.0 {
+                format!("GPIO{pin}: HIGH")
+            } else {
+                format!("GPIO{pin}: LOW")
+            };
+            painter.text(
+                r.center_bottom() + Vec2::new(0.0, 3.0 * z),
+                Align2::CENTER_TOP,
+                text,
+                font(9.5),
+                pal.text,
+            );
+        }
         responses.push((id.to_owned(), resp));
     }
     // Cut parameter lines open in full, with a background, over everything else.

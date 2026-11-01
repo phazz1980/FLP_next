@@ -40,7 +40,6 @@ impl Behavior for Sink {
 /// (user blocks): their outputs are set by hand or by `block.wasm`.
 pub fn behavior(kind: &str) -> Option<Box<dyn Behavior>> {
     match kind {
-        "digital_out" | "pwm_out" => Some(Box::new(Sink)),
         // Web page widgets that only show a value: nothing to compute.
         "web_button" | "web_chart" | "web_clock" | "web_gauge" | "web_icon" | "web_image"
         | "web_label" | "web_led" | "web_shape" | "web_tank" | "web_text" | "web_value" => {

@@ -14,7 +14,8 @@
 pub mod builtin;
 pub mod schema;
 
-pub use schema::{Computed, Simulation};
+pub use flp_blocks::{Bench, Signal};
+pub use schema::{BenchInput, Computed, Simulation};
 
 use wasmi::{
     Caller, Engine, Instance, Linker, Module, Store, StoreLimits, StoreLimitsBuilder, TypedFunc,
