@@ -1319,6 +1319,64 @@ impl EditorApp {
         }
     }
 
+    /// Arrow keys move the selected blocks by one grid step (five with Shift) on their sheets.
+    fn nudge_selection(&mut self, ctx: &egui::Context) {
+        let step = if ctx.input(|i| i.modifiers.shift) {
+            50.0
+        } else {
+            10.0
+        };
+        let mut delta = (0.0f32, 0.0f32);
+        ctx.input_mut(|i| {
+            for (key, d) in [
+                (Key::ArrowLeft, (-step, 0.0)),
+                (Key::ArrowRight, (step, 0.0)),
+                (Key::ArrowUp, (0.0, -step)),
+                (Key::ArrowDown, (0.0, step)),
+            ] {
+                let mods = if i.modifiers.shift {
+                    Modifiers::SHIFT
+                } else {
+                    Modifiers::NONE
+                };
+                while i.consume_key(mods, key) {
+                    delta = (delta.0 + d.0, delta.1 + d.1);
+                }
+            }
+        });
+        if delta == (0.0, 0.0) {
+            return;
+        }
+        let (Some(doc), Some(Selection::Block(_) | Selection::Blocks(_))) =
+            (&mut self.doc, &self.selection)
+        else {
+            return;
+        };
+        let ids = self
+            .selection
+            .as_ref()
+            .map(|s| s.blocks().to_vec())
+            .unwrap_or_default();
+        let result = doc.edit(&self.lib, Some("nudge".to_owned()), |p| {
+            for id in &ids {
+                if let Some(&pos) = p.layout.blocks.get(id) {
+                    p.move_block(
+                        id,
+                        flp_core::layout::BlockPos {
+                            x: (pos.x + delta.0).max(0.0),
+                            y: (pos.y + delta.1).max(0.0),
+                            ..pos
+                        },
+                    )?;
+                }
+            }
+            Ok::<_, flp_core::EditError>(())
+        });
+        if let Err(e) = result {
+            self.info(LogLevel::Error, e.to_string());
+        }
+    }
+
     pub fn delete_selection(&mut self) {
         let (Some(doc), Some(sel)) = (&mut self.doc, self.selection.take()) else {
             return;
@@ -1844,6 +1902,9 @@ impl EditorApp {
             && pressed(shortcut(Modifiers::NONE, Key::Delete))
         {
             self.delete_selection();
+        }
+        if self.dialog.is_none() && !ctx.egui_wants_keyboard_input() {
+            self.nudge_selection(ctx);
         }
         if self.dialog.is_none() && !ctx.egui_wants_keyboard_input() {
             let (copy, cut, paste) = ctx.input(|i| {

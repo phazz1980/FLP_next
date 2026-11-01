@@ -564,6 +564,8 @@ fn block_settings(
                 && !(is_widget_kind(&d.kind)
                     && matches!(p.name.as_str(), "col" | "row" | "w" | "h"))
                 && !(d.kind == "web_ui" && p.name == "pages")
+                // The web server follows the web page block; the network panel switches it.
+                && !(matches!(d.kind.as_str(), "wifi" | "ethernet") && p.name == "web")
         })
         .collect();
     let inputs: Vec<&PortDef> = def.active_inputs(&current).collect();
@@ -592,11 +594,12 @@ fn block_settings(
         free_id: free_expander_id(&doc.project.logic),
     };
     egui::Grid::new("block_props")
-        .num_columns(2)
+        .num_columns(3)
         .spacing([10.0, 6.0])
         .show(ui, |ui| {
             ui.label(crate::i18n::tr("Надпись (id)"));
             ui.text_edit_singleline(&mut d.new_id);
+            ui.label(RichText::new(crate::i18n::tr("Вход")).weak());
             ui.end_row();
             for &p in &params {
                 let hint = match &p.label {
@@ -605,39 +608,46 @@ fn block_settings(
                 };
                 ui.label(crate::i18n::tr(p.title()))
                     .on_hover_text(crate::i18n::tr(hint.trim()));
+                let as_input = d.param_in.contains(&p.name);
                 ui.horizontal(|ui| {
-                    let as_input = d.param_in.contains(&p.name);
                     ui.add_enabled_ui(!as_input, |ui| {
                         param_editor(ui, p, d, def, &app.local, &pins);
                     });
-                    if as_input || (param_input_type(p).is_some() && def.input(&p.name).is_none())
-                    {
-                        let mut on = as_input;
-                        if ui
-                            .checkbox(&mut on, crate::i18n::tr("Вход"))
-                            .on_hover_text(crate::i18n::tr(
-                                "Значение приходит на вход блока и читается на каждом скане; число в поле — значение входа, пока он не подключён",
-                            ))
-                            .changed()
-                        {
-                            if on {
-                                d.param_in.insert(p.name.clone());
-                            } else {
-                                d.param_in.remove(&p.name);
-                            }
-                        }
-                    }
-                    let set = d.values.get(&p.name).is_some_and(Option::is_some);
-                    if set
-                        && p.default.is_some()
-                        && ui.small_button(crate::i18n::tr("по умолч.")).clicked()
-                    {
-                        d.values.insert(p.name.clone(), None);
-                        if let Some(ParamValue::Text(s)) = &p.default {
-                            d.texts.insert(p.name.clone(), s.clone());
-                        }
-                    }
                 });
+                if p.name == "wifi_mode" {
+                    // The mode comes from the «Mode» input when the last choice is set.
+                    let mut on = matches!(d.values.get(&p.name), Some(Some(ParamValue::Int(3))));
+                    if ui
+                        .checkbox(&mut on, "")
+                        .on_hover_text(crate::i18n::tr(
+                            "Режим приходит на вход «Режим»: 0 клиент, 1 точка доступа, 2 клиент и точка доступа",
+                        ))
+                        .changed()
+                    {
+                        d.values
+                            .insert(p.name.clone(), Some(ParamValue::Int(if on { 3 } else { 0 })));
+                    }
+                } else if as_input
+                    || (param_input_type(p).is_some() && def.input(&p.name).is_none())
+                {
+                    let mut on = as_input;
+                    if ui
+                        .checkbox(&mut on, "")
+                        .on_hover_text(crate::i18n::tr(
+                            "Значение приходит на вход блока и читается на каждом скане; число в поле — значение входа, пока он не подключён",
+                        ))
+                        .changed()
+                    {
+                        if on {
+                            d.param_in.insert(p.name.clone());
+                        } else {
+                            d.param_in.remove(&p.name);
+                        }
+                    }
+                }
+                else {
+                    ui.label("");
+                }
                 ui.end_row();
             }
         });
@@ -680,6 +690,32 @@ fn block_settings(
                 }
             });
     }
+}
+
+/// An on / off switch: a rounded track with a knob that slides to the side of the state.
+fn toggle_switch(ui: &mut Ui, on: &mut bool) -> egui::Response {
+    let size = egui::vec2(34.0, 18.0);
+    let (rect, mut response) = ui.allocate_exact_size(size, egui::Sense::click());
+    if response.clicked() {
+        *on = !*on;
+        response.mark_changed();
+    }
+    let t = ui.ctx().animate_bool_responsive(response.id, *on);
+    let visuals = ui.style().interact_selectable(&response, *on);
+    let track = if *on {
+        Color32::from_rgb(70, 140, 90)
+    } else {
+        visuals.bg_fill
+    };
+    let radius = rect.height() / 2.0;
+    ui.painter().rect_filled(rect, radius, track);
+    let x = egui::lerp((rect.left() + radius)..=(rect.right() - radius), t);
+    ui.painter().circle_filled(
+        egui::pos2(x, rect.center().y),
+        radius - 2.5,
+        Color32::from_gray(235),
+    );
+    response
 }
 
 /// Board pins and the pins other blocks of the schema take, for the pin list.
@@ -795,7 +831,7 @@ fn param_editor(
     match p.kind {
         ParamKind::Bool => {
             let mut v = matches!(current, Some(ParamValue::Bool(true)));
-            if ui.checkbox(&mut v, "").changed() {
+            if toggle_switch(ui, &mut v).changed() {
                 set(ParamValue::Bool(v));
             }
         }

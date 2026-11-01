@@ -533,8 +533,10 @@ fn near_polyline(points: &[Pos2], p: Pos2, tolerance: f32) -> bool {
     })
 }
 
-/// Sheets stacked top to bottom; heights follow their content.
-fn bands(app: &EditorApp, sizes: &HashMap<&str, Vec2>) -> Vec<Band> {
+/// Sheets stacked top to bottom; heights follow their content. A block being dragged is
+/// left out (it may be on its way to another sheet) unless `grow` is set: with Shift held it
+/// stays on its sheet and the sheet stretches after it.
+fn bands(app: &EditorApp, sizes: &HashMap<&str, Vec2>, grow: bool) -> Vec<Band> {
     let doc = app.doc.as_ref().expect("canvas shown with a document");
     // The "add sheet" strip takes the top.
     let mut top = ADD_SHEET_H + SHEET_GAP;
@@ -546,7 +548,9 @@ fn bands(app: &EditorApp, sizes: &HashMap<&str, Vec2>) -> Vec<Band> {
                 .layout
                 .blocks
                 .iter()
-                .filter(|(id, p)| p.sheet == sheet && app.canvas.moving.as_deref() != Some(id))
+                .filter(|(id, p)| {
+                    p.sheet == sheet && (grow || app.canvas.moving.as_deref() != Some(id))
+                })
                 .map(|(id, p)| p.y + sizes.get(id.as_str()).map_or(0.0, |s| s.y))
                 .fold(0.0, f32::max);
             let collapsed = app.canvas.collapsed.contains(&sheet);
@@ -596,7 +600,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         .iter()
         .map(|b| (b.id.as_str(), size(b, defs[b.id.as_str()])))
         .collect();
-    let bands = bands(app, &sizes);
+    let bands = bands(app, &sizes, ui.input(|i| i.modifiers.shift));
     let band_of = |sheet: u32| bands.iter().find(|b| b.sheet == sheet).copied();
     let width = project
         .layout
@@ -1547,16 +1551,28 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         }
     }
     let drop = dropped.and_then(|item| Some(((*item).clone(), drop_at(pointer?)?)));
-    // Where a moved block ends up: the sheet under its top-left corner.
+    // Where a moved block ends up: the sheet under its top-left corner, or the sheet it
+    // already stands on when Shift is held.
+    let shift = ui.input(|i| i.modifiers.shift);
     let landing = drag_end.as_ref().and_then(|id| {
         let r = world_rect.get(id.as_str())?;
         let open = || bands.iter().filter(|b| !b.collapsed);
-        let band = open()
-            .find(|b| r.min.y >= b.top && r.min.y < b.top + b.height)
-            .or(if r.min.y < 0.0 {
-                open().next()
-            } else {
-                open().next_back()
+        let home = app
+            .doc
+            .as_ref()
+            .and_then(|d| d.project.layout.blocks.get(id.as_str()))
+            .map(|p| p.sheet)
+            .filter(|_| shift);
+        let band = home
+            .and_then(|sheet| open().find(|b| b.sheet == sheet))
+            .or_else(|| {
+                open()
+                    .find(|b| r.min.y >= b.top && r.min.y < b.top + b.height)
+                    .or(if r.min.y < 0.0 {
+                        open().next()
+                    } else {
+                        open().next_back()
+                    })
             })?;
         Some(BlockPos {
             sheet: band.sheet,
