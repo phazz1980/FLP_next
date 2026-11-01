@@ -1256,21 +1256,23 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 }
             }
         }
-        // The virtual bench: the state of the pin an output block drives.
-        if let Some((pin, state)) = sim.and_then(|s| s.output_pin(&block.id)) {
+        // The virtual bench: the state of the pin an output block drives, inside the block
+        // on the free (output) side.
+        if let Some((_, state)) = sim.and_then(|s| s.output_pin(&block.id)) {
             let text = if block.kind == "pwm_out" {
-                format!("GPIO{pin}: {state:.0} %")
+                format!("{state:.0} %")
             } else if state != 0.0 {
-                format!("GPIO{pin}: HIGH")
+                "HIGH".to_owned()
             } else {
-                format!("GPIO{pin}: LOW")
+                "LOW".to_owned()
             };
+            let p = port_pos(r, Kind::Box, 0, true, z);
             painter.text(
-                r.center_bottom() + Vec2::new(0.0, 3.0 * z),
-                Align2::CENTER_TOP,
+                p - Vec2::new(6.0 * z, 0.0),
+                Align2::RIGHT_CENTER,
                 text,
-                font(9.5),
-                pal.text,
+                font(10.0),
+                if state != 0.0 { pal.accent } else { pal.weak },
             );
         }
         responses.push((id.to_owned(), resp));
