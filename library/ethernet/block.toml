@@ -99,6 +99,7 @@ description = "Прошивку можно обновить по сети (OTA) 
 name = "ota_password"
 type = "string"
 label = "Пароль OTA"
+runtime = true
 default = ""
 when = "ota or web_update"
 show = "secret"

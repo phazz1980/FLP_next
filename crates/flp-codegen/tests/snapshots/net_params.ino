@@ -64,6 +64,7 @@ FLProgWebServer &flpWebSrv = wifi_web;
 // Update over the network (ArduinoOTA through the shared interface).
 FLProgNetworkOta wifi_ota;
 bool wifi_ota_on = false;
+String wifi_ota_pass;
 #define FLP_WEB_UPD 1
 // Firmware upload from the web page: raw HTTP POST streamed into Update (port 8080).
 FLProgNetworkTcpServer wifi_up;
@@ -130,6 +131,7 @@ static uint32_t broker_signature() {
   broker_mix(cfg, (broker_r_out_in));
   broker_mix(cfg, (login_r_out_in));
   broker_mix(cfg, (login_r_out_in));
+  broker_mix(cfg, (login_r_out_in));
   cfg = (cfg ^ (uint32_t)(1883)) * 16777619u;
   return cfg;
 }
@@ -154,8 +156,8 @@ void wifi_up_fail(const char *status, const char *text) {
 void wifi_up_header_line() {
   char *l = wifi_up_line;
   if (strncmp(l, "POST /update", 12) == 0) {
-    String expect = String("?p=") + "" + " ";
-    wifi_up_auth = strlen("") == 0 || strstr(l, expect.c_str()) != nullptr;
+    String expect = String("?p=") + String((pass_r_out_in)).c_str() + " ";
+    wifi_up_auth = strlen(String((pass_r_out_in)).c_str()) == 0 || strstr(l, expect.c_str()) != nullptr;
   } else if (strncasecmp(l, "Content-Length:", 15) == 0) {
     wifi_up_len = (uint32_t)strtoul(l + 15, nullptr, 10);
   }
@@ -353,10 +355,15 @@ void flp_bg_task(void *) {
     if (wifi_net_due && true) {
       if (!wifi_ota_on) {
         wifi_ota_on = true;
-        if (""[0] != 0) {
-          wifi_ota.setPasswordValue("");
+        wifi_ota_pass = String((pass_r_out_in)).c_str();
+        if (wifi_ota_pass.c_str()[0] != 0) {
+          wifi_ota.setPasswordValue(wifi_ota_pass.c_str());
         }
         wifi_ota.begin(flpWifi);
+      } else if (strcmp(wifi_ota_pass.c_str(), String((pass_r_out_in)).c_str()) != 0) {
+        // Password written while running: the next upload asks for the new one.
+        wifi_ota_pass = String((pass_r_out_in)).c_str();
+        if (wifi_ota_pass.c_str()[0] != 0) wifi_ota.setPasswordValue(wifi_ota_pass.c_str());
       }
       wifi_ota.pool();
     }
@@ -369,9 +376,15 @@ void flp_bg_task(void *) {
         flpMqtt.setBroker(String((broker_r_out_in)).c_str());
         flpMqtt.setPort(1883);
         if (String((login_r_out_in)).length()) flpMqtt.setCredentials(String((login_r_out_in)).c_str(), String((login_r_out_in)).c_str()); else flpMqtt.clearCredentials();
-        char cid[24];
-        snprintf(cid, sizeof(cid), "flp-%08lx", (unsigned long)ESP.getEfuseMac());
-        flpMqtt.setClientId(cid);
+        {
+          String cid = String((login_r_out_in));
+          if (!cid.length()) {
+            char auto_id[24];
+            snprintf(auto_id, sizeof(auto_id), "flp-%08lx", (unsigned long)ESP.getEfuseMac());
+            cid = auto_id;
+          }
+          flpMqtt.setClientId(cid.c_str());
+        }
         flpMqtt.setKeepAlive(60);
         flpMqtt.setMessageCallback(flp_mqtt_receive);
         flpMqtt.setAutoReconnect(true);
@@ -385,6 +398,15 @@ void flp_bg_task(void *) {
       flpMqtt.setBroker(String((broker_r_out_in)).c_str());
       flpMqtt.setPort(1883);
       if (String((login_r_out_in)).length()) flpMqtt.setCredentials(String((login_r_out_in)).c_str(), String((login_r_out_in)).c_str()); else flpMqtt.clearCredentials();
+      {
+        String cid = String((login_r_out_in));
+        if (!cid.length()) {
+          char auto_id[24];
+          snprintf(auto_id, sizeof(auto_id), "flp-%08lx", (unsigned long)ESP.getEfuseMac());
+          cid = auto_id;
+        }
+        flpMqtt.setClientId(cid.c_str());
+      }
       flpMqtt.connect();
     }
     broker_connected = flpMqtt.connected();

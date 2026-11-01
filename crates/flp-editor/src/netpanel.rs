@@ -41,12 +41,6 @@ pub enum NetAction {
     DeletePage(usize),
     Focus(String),
     /// Virtual bench in simulation: the network link is lost or back.
-    /// Turns a parameter into an input of the block, or back.
-    ParamInput {
-        id: String,
-        name: String,
-        on: bool,
-    },
     BenchOffline(bool),
     /// Virtual bench in simulation: the MQTT broker stops answering or comes back.
     BenchBrokerDown(bool),
@@ -406,25 +400,9 @@ fn settings(
                     true,
                     None,
                 );
-                // A parameter that may change while running can be an input of the block.
-                if flp_core::param_input_type(p).is_some() {
-                    let mut input = b.param_in.contains(&p.name);
-                    if ui
-                        .checkbox(&mut input, crate::i18n::tr("Вход"))
-                        .on_hover_text(crate::i18n::tr(
-                            "Значение приходит на вход блока и применяется на лету",
-                        ))
-                        .changed()
-                    {
-                        actions.push(NetAction::ParamInput {
-                            id: b.id.clone(),
-                            name: p.name.clone(),
-                            on: input,
-                        });
-                    }
-                    if input {
-                        return;
-                    }
+                // A parameter made an input in the block settings is fed by its input.
+                if b.param_in.contains(&p.name) {
+                    return;
                 }
                 let set = |value| NetAction::SetParam {
                     id: b.id.clone(),
@@ -814,12 +792,6 @@ pub fn apply(app: &mut EditorApp, actions: Vec<NetAction>) {
         let pos = crate::panels::free_spot(app);
         match action {
             NetAction::Focus(id) => app.focus_block(&id),
-            NetAction::ParamInput { id, name, on } => {
-                let Some(doc) = &mut app.doc else { return };
-                if let Err(e) = doc.edit(&lib, None, |p| p.set_param_input(&lib, &id, &name, on)) {
-                    app.info(LogLevel::Error, e.to_string());
-                }
-            }
             NetAction::BenchOffline(on) => {
                 if let Some(s) = &mut app.sim {
                     s.set_offline(on);

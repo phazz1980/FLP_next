@@ -161,10 +161,19 @@ static void @ID@_mix(uint32_t &h, const char *s) {
 }
 static void @ID@_mix(uint32_t &h, const String &s) { @ID@_mix(h, s.c_str()); }";
 
+/// The update password as a C string expression; from an input it is a `String`.
+fn ota_pass(e: &CppCtx) -> String {
+    if e.is_bound("ota_password") {
+        format!("String({}).c_str()", e.param("ota_password"))
+    } else {
+        e.param("ota_password").to_owned()
+    }
+}
+
 fn upload_functions(e: &CppCtx, net: &str) -> String {
     UPLOAD_FUNCTIONS
         .replace("@ID@", &e.id)
-        .replace("@PASS@", e.param("ota_password"))
+        .replace("@PASS@", &ota_pass(e))
         .replace("@NET@", net)
 }
 
@@ -183,6 +192,9 @@ fn service_globals(l: &mut Lines, e: &CppCtx, s: &Services, net: &str, with_defi
         l.line("// Update over the network (ArduinoOTA through the shared interface).")
             .line(format!("FLProgNetworkOta {id}_ota;"))
             .line(format!("bool {id}_ota_on = false;"));
+        if e.is_bound("ota_password") {
+            l.line(format!("String {id}_ota_pass;"));
+        }
     }
     if s.update {
         if with_define {
@@ -258,17 +270,39 @@ fn service_loop(l: &mut Lines, e: &CppCtx, s: &Services, net: &str) {
         .line("}");
     }
     if s.ota {
-        let pass = e.param("ota_password");
+        let pass = ota_pass(e);
+        // From an input the password lives in a String, so the library never keeps a
+        // pointer to a temporary.
+        let bound = e.is_bound("ota_password");
+        let held = if bound {
+            format!("{id}_ota_pass.c_str()")
+        } else {
+            pass.clone()
+        };
         l.line(format!("if ({due}{}) {{", e.flag_code("ota")))
             .line(format!("  if (!{id}_ota_on) {{"))
-            .line(format!("    {id}_ota_on = true;"))
-            .line(format!("    if ({pass}[0] != 0) {{"))
-            .line(format!("      {id}_ota.setPasswordValue({pass});"))
+            .line(format!("    {id}_ota_on = true;"));
+        if bound {
+            l.line(format!("    {id}_ota_pass = {pass};"));
+        }
+        l.line(format!("    if ({held}[0] != 0) {{"))
+            .line(format!("      {id}_ota.setPasswordValue({held});"))
             .line("    }")
-            .line(format!("    {id}_ota.begin({net});"))
-            .line("  }")
-            .line(format!("  {id}_ota.pool();"))
-            .line("}");
+            .line(format!("    {id}_ota.begin({net});"));
+        if bound {
+            l.line(format!(
+                "  }} else if (strcmp({id}_ota_pass.c_str(), {pass}) != 0) {{"
+            ))
+            .line("    // Password written while running: the next upload asks for the new one.")
+            .line(format!("    {id}_ota_pass = {pass};"))
+            .line(format!(
+                "    if ({held}[0] != 0) {id}_ota.setPasswordValue({held});"
+            ))
+            .line("  }");
+        } else {
+            l.line("  }");
+        }
+        l.line(format!("  {id}_ota.pool();")).line("}");
     }
 }
 

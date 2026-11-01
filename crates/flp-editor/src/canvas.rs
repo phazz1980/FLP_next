@@ -1279,6 +1279,14 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 if state != 0.0 { pal.accent } else { pal.weak },
             );
         }
+        // A selected block is tinted all over, so a group stands out from the sheet.
+        if is_sel {
+            painter.rect_filled(
+                r,
+                CornerRadius::same((3.0 * z) as u8),
+                pal.accent.gamma_multiply(0.3),
+            );
+        }
         responses.push((id.to_owned(), resp));
     }
     // Cut parameter lines open in full, with a background, over everything else.

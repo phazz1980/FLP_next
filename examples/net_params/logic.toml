@@ -10,7 +10,7 @@ type = "string"
 id = "wifi"
 type = "wifi"
 ssid = "MyNetwork"
-param_in = ["ssid", "password"]
+param_in = ["ssid", "password", "ota_password"]
 
 [[block]]
 id = "net_r"
@@ -41,7 +41,7 @@ type = "string"
 [[block]]
 id = "broker"
 type = "mqtt"
-param_in = ["broker", "user", "password"]
+param_in = ["broker", "user", "password", "client_id"]
 port = 1883
 
 [[block]]
@@ -65,3 +65,11 @@ to = "broker.user"
 [[link]]
 from = "login_r.out"
 to = "broker.password"
+
+[[link]]
+from = "login_r.out"
+to = "broker.client_id"
+
+[[link]]
+from = "pass_r.out"
+to = "wifi.ota_password"

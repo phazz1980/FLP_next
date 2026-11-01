@@ -58,7 +58,7 @@ fn c_text(e: &CppCtx, name: &str) -> String {
 pub(crate) fn mqtt(e: &CppCtx) -> CppParts {
     let id = &e.id;
     // Broker, port or credentials come from inputs or variables: re-applied when they change.
-    let dynamic = ["broker", "port", "user", "password"]
+    let dynamic = ["broker", "port", "user", "password", "client_id"]
         .iter()
         .any(|n| e.is_bound(n));
     let mut g = Lines::default();
@@ -93,6 +93,20 @@ pub(crate) fn mqtt(e: &CppCtx) -> CppParts {
             c_text(e, "password")
         ));
     }
+    if e.is_bound("client_id") {
+        apply
+            .line("{")
+            .line(format!("  String cid = String({});", e.param("client_id")))
+            .line("  if (!cid.length()) {")
+            .line("    char auto_id[24];")
+            .line(
+                "    snprintf(auto_id, sizeof(auto_id), \"flp-%08lx\", (unsigned long)ESP.getEfuseMac());",
+            )
+            .line("    cid = auto_id;")
+            .line("  }")
+            .line("  flpMqtt.setClientId(cid.c_str());")
+            .line("}");
+    }
     let apply = apply.finish();
     let mut l = Lines::default();
     l.line(format!("if (!{id}_bound) {{"))
@@ -100,7 +114,9 @@ pub(crate) fn mqtt(e: &CppCtx) -> CppParts {
         .line(format!("  {id}_bound = flpMqtt.begin({});", interface(e)))
         .line(format!("  if ({id}_bound) {{"))
         .line(crate::net::indent(&apply, 4));
-    if e.text("client_id").is_empty() {
+    if e.is_bound("client_id") {
+        // Set with the other settings above.
+    } else if e.text("client_id").is_empty() {
         l.line("    char cid[24];")
             .line(
                 "    snprintf(cid, sizeof(cid), \"flp-%08lx\", (unsigned long)ESP.getEfuseMac());",
@@ -144,7 +160,10 @@ pub(crate) fn mqtt(e: &CppCtx) -> CppParts {
         let mut sig = Lines::default();
         sig.line(format!("static uint32_t {id}_signature() {{"))
             .line("  uint32_t cfg = 2166136261u;");
-        for n in ["broker", "user", "password"] {
+        for n in ["broker", "user", "password", "client_id"]
+            .iter()
+            .filter(|n| e.is_bound(n) || **n != "client_id")
+        {
             sig.line(format!("  {id}_mix(cfg, {});", e.param(n)));
         }
         sig.line(format!(
