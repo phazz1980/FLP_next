@@ -41,13 +41,16 @@ fn load_library() {
     assert!(errors.is_empty(), "{errors:?}");
     for kind in ["digital_in", "digital_out", "analog_in", "pwm_out"] {
         let block = lib.get(kind).unwrap_or_else(|| panic!("нет блока {kind}"));
-        assert!(block.template_path(ESP32_CPP_TEMPLATE).is_some(), "{kind}");
+        assert!(block.template_path(ESP32_CPP_TEMPLATE).is_none(), "{kind}");
         assert!(block.docs_path().is_some(), "{kind}");
     }
     // Built-in Rust blocks keep only the description and docs in the library.
     let block = lib.get("bit_and").unwrap();
     assert!(block.template_path(ESP32_CPP_TEMPLATE).is_none());
     assert!(block.docs_path().is_some());
+    // Blocks not moved yet still have a template.
+    let block = lib.get("ethernet").unwrap();
+    assert!(block.template_path(ESP32_CPP_TEMPLATE).is_some());
 }
 
 #[test]

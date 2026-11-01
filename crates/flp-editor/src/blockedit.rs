@@ -447,6 +447,7 @@ impl Form {
                 pullable: false,
                 uart: self.uart.clone(),
                 board: None,
+                code_of: None,
                 expander: self.expander,
             },
             inputs: self

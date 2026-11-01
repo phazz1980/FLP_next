@@ -63,7 +63,7 @@ fn compare(zig: &Path, sc: &Scenario) {
     let wasm = std::fs::read(out.join("block.wasm")).unwrap();
 
     let mut module = SimModule::load(&wasm, def.outputs.len()).unwrap();
-    let mut expected = block.behavior();
+    let mut expected = block.behavior().expect("behaviour");
     let params: Vec<f64> = def
         .params
         .iter()
@@ -276,6 +276,11 @@ fn builtin_cpp_matches_the_behaviour() {
             live: Some(n + 1),
             ..scenario("mux")
         });
+    }
+    for n in [2, 5, 16] {
+        for kind in ["dms", "decoder", "encoder"] {
+            list.push(with(kind, vec![("count", ParamValue::Int(n))]));
+        }
     }
     for sc in &list {
         compare(zig, sc);

@@ -41,7 +41,7 @@ fn library_samples_report_their_source() {
         FirmwareSource::Module
     );
     assert_eq!(
-        lib.get("digital_out").unwrap().firmware_source(),
+        lib.get("ethernet").unwrap().firmware_source(),
         FirmwareSource::Template
     );
 }

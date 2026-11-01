@@ -2,6 +2,7 @@
 //! int is a whole number; strings travel beside them (see `text`). Port and parameter indexes follow `block.toml` order.
 
 mod cpp;
+mod hardware;
 mod more;
 mod text;
 
@@ -10,8 +11,8 @@ pub use more::{next_random, RANDOM_SEED};
 
 /// A built-in block: one Rust type that both simulates the block and writes its firmware code.
 pub trait BuiltinBlock: Sync {
-    /// Simulation: a fresh instance with its own state.
-    fn behavior(&self) -> Box<dyn Behavior>;
+    /// Simulation: a fresh instance with its own state; `None` for a block with hardware.
+    fn behavior(&self) -> Option<Box<dyn Behavior>>;
     /// Firmware: the C++ the block adds to the sketch.
     fn emit_cpp(&self, e: &CppCtx) -> CppParts;
 }
@@ -22,8 +23,8 @@ struct Block {
 }
 
 impl BuiltinBlock for Block {
-    fn behavior(&self) -> Box<dyn Behavior> {
-        behavior(self.kind).expect("a built-in block has a behaviour")
+    fn behavior(&self) -> Option<Box<dyn Behavior>> {
+        behavior(self.kind)
     }
 
     fn emit_cpp(&self, e: &CppCtx) -> CppParts {
@@ -313,6 +314,58 @@ static BLOCKS: &[Block] = &[
         kind: "text_to_ip",
         emit: text::text_to_ip,
     },
+    Block {
+        kind: "digital_in",
+        emit: hardware::digital_in,
+    },
+    Block {
+        kind: "digital_out",
+        emit: hardware::digital_out,
+    },
+    Block {
+        kind: "analog_in",
+        emit: hardware::analog_in,
+    },
+    Block {
+        kind: "pwm_out",
+        emit: hardware::pwm_out,
+    },
+    Block {
+        kind: "dht22",
+        emit: hardware::dht22,
+    },
+    Block {
+        kind: "ds18b20",
+        emit: hardware::ds18b20,
+    },
+    Block {
+        kind: "flash_store",
+        emit: hardware::flash_store,
+    },
+    Block {
+        kind: "dms",
+        emit: hardware::dms,
+    },
+    Block {
+        kind: "cycle_report",
+        emit: hardware::cycle_report,
+    },
+    Block {
+        kind: "decoder",
+        emit: hardware::decoder,
+    },
+    Block {
+        kind: "encoder",
+        emit: hardware::encoder,
+    },
+    Block {
+        kind: "pcf8574_in",
+        emit: hardware::pcf8574_in,
+    },
+    Block {
+        kind: "pcf8574_out",
+        emit: hardware::pcf8574_out,
+    },
 ];
 
 /// Built-in block of this type, or `None` when it has no Rust code (yet).
@@ -502,7 +555,9 @@ pub fn behavior(kind: &str) -> Option<Box<dyn Behavior>> {
             let idx = (c.input(0).max(0.0) as usize).min(count - 1);
             o[0] = c.input(1 + idx);
         }),
-        _ => more::behavior(kind).or_else(|| text::behavior(kind)),
+        _ => more::behavior(kind)
+            .or_else(|| text::behavior(kind))
+            .or_else(|| hardware::behavior(kind)),
     }
 }
 

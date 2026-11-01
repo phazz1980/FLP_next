@@ -289,6 +289,10 @@ pub struct BlockInfo {
     /// is offered and allowed only in projects of that board. See [`crate::devices`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub board: Option<String>,
+    /// Type of the built-in block whose Rust code this block runs: a device of a user
+    /// board is a copy of a built-in block. Not stored in `block.toml`.
+    #[serde(skip)]
+    pub code_of: Option<String>,
     /// The `pin` parameter may be a pin of an expander chip of the project instead of
     /// a GPIO (digital input and output). See [`crate::expander`].
     #[serde(default, skip_serializing_if = "is_false")]

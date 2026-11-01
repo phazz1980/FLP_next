@@ -113,7 +113,10 @@ fn cpp_ctx(
     value: &BTreeMap<&str, Value>,
 ) -> flp_blocks::CppCtx {
     use flp_blocks::Raw;
-    let text = |v: &Value| v.as_str().map_or_else(|| v.to_string(), str::to_owned);
+    let text = |v: &Value| match v.kind() {
+        ValueKind::Bool => v.is_true().to_string(),
+        _ => v.as_str().map_or_else(|| v.to_string(), str::to_owned),
+    };
     flp_blocks::CppCtx {
         id: id.to_owned(),
         input: input
@@ -133,6 +136,7 @@ fn cpp_ctx(
             .map(|(k, v)| ((*k).to_owned(), text(v)))
             .collect(),
         param_bound: bound_inputs.keys().map(|k| (*k).to_owned()).collect(),
+        expander: None,
         value: value
             .iter()
             .map(|(k, v)| {
@@ -192,7 +196,7 @@ fn render_block(
     // A template in the library folder wins over the Rust code of a built-in block.
     let builtin = match from {
         FirmwareSource::Template => None,
-        _ => flp_blocks::get(kind),
+        _ => flp_blocks::get(inst.lib.def.info.code_of.as_deref().unwrap_or(kind)),
     };
     let module = builtin.is_none() && from == FirmwareSource::Module;
     let mut source = if module || builtin.is_some() {
@@ -418,7 +422,7 @@ fn render_block(
         None => Value::from(()),
     };
     let mut sections = if let Some(block) = builtin {
-        let cpp = cpp_ctx(
+        let mut cpp = cpp_ctx(
             &id,
             &input,
             &input_type,
@@ -427,6 +431,11 @@ fn render_block(
             &bound_inputs,
             &value,
         );
+        cpp.expander = inst
+            .block
+            .expander
+            .as_deref()
+            .map(crate::expander::state_names);
         Sections::from(block.emit_cpp(&cpp))
     } else if module {
         wasm::sections(program, inst, &input, &param)?

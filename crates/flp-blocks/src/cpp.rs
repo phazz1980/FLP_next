@@ -28,6 +28,8 @@ pub struct CppCtx {
     pub value: BTreeMap<String, Raw>,
     /// Real type name (`bool`, `int`, `float`, `string`) of what feeds each input.
     pub input_type: BTreeMap<String, String>,
+    /// Words of the pin expander the block stands on: (read levels, wanted levels).
+    pub expander: Option<(String, String)>,
 }
 
 impl CppCtx {

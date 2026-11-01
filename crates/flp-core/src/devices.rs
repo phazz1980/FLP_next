@@ -1,7 +1,7 @@
 //! Peripherals of a user board: a `[[device]]` of `board.toml` becomes a block that is
 //! a copy of a built-in one (`pcf8574_out`) with the parameters fixed by the board and
 //! the channels named after the board's silkscreen (K1..K6). The copy shares the
-//! template of its parent, so no files are written for it.
+//! code of its parent (template or Rust), so no files are written for it.
 
 use std::collections::BTreeMap;
 
@@ -47,10 +47,13 @@ fn device_block(
         .get(&dev.kind)
         .filter(|b| lib.is_builtin(&dev.kind) && b.def.info.board.is_none())
         .ok_or_else(|| format!("нет встроенного блока «{}»", dev.kind))?;
-    let template = parent
-        .template(ESP32_CPP_TEMPLATE)
-        .ok_or_else(|| format!("у блока «{}» нет шаблона кода", dev.kind))?
-        .map_err(|e| format!("шаблон блока «{}» не прочитан: {e}", dev.kind))?;
+    // The code of the parent: its template, or the Rust code of the built-in block.
+    let template = match parent.template(ESP32_CPP_TEMPLATE) {
+        Some(src) => {
+            Some(src.map_err(|e| format!("шаблон блока «{}» не прочитан: {e}", dev.kind))?)
+        }
+        None => None,
+    };
 
     let mut def = parent.def.clone();
     let mut fixed: BTreeMap<String, ParamValue> = dev.params.clone();
@@ -102,11 +105,14 @@ fn device_block(
     // One chip on the board: a second block would write the same outputs.
     def.info.single = true;
     def.info.board = Some(info.id.clone());
+    def.info.code_of = template.is_none().then(|| dev.kind.clone());
     def.validate(&kind)?;
     Ok(LibraryBlock {
         def,
         dir: board.dir.clone(),
-        inline_templates: [(ESP32_CPP_TEMPLATE, template)].into(),
+        inline_templates: template
+            .map(|t| [(ESP32_CPP_TEMPLATE, t)].into())
+            .unwrap_or_default(),
     })
 }
 
@@ -193,7 +199,7 @@ mod tests {
         assert_eq!(ports.len(), 6);
         assert_eq!(ports[0], ("K1".to_owned(), SignalType::Bool));
         assert_eq!(ports[5].0, "K6");
-        assert!(block.template(ESP32_CPP_TEMPLATE).is_some());
+        assert_eq!(block.def.info.code_of.as_deref(), Some("pcf8574_out"));
     }
 
     #[test]

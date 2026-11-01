@@ -313,6 +313,7 @@ pub(crate) fn builtin_blocks() -> BTreeMap<String, LibraryBlock> {
                     pullable: false,
                     uart: None,
                     board: None,
+                    code_of: None,
                     expander: false,
                 },
                 inputs: match (get, en) {
