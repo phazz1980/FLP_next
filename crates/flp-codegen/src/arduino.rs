@@ -137,6 +137,9 @@ fn cpp_ctx(
             .collect(),
         param_bound: bound_inputs.keys().map(|k| (*k).to_owned()).collect(),
         expander: None,
+        uart: None,
+        bound: Default::default(),
+        flag_code: Default::default(),
         value: value
             .iter()
             .map(|(k, v)| {
@@ -436,6 +439,16 @@ fn render_block(
             .expander
             .as_deref()
             .map(crate::expander::state_names);
+        cpp.uart = uart_of(program, inst).map(|(u, _)| uart_ctx(&u, debug));
+        cpp.bound = bound
+            .iter()
+            .filter(|(_, b)| **b)
+            .map(|(n, _)| (*n).to_owned())
+            .collect();
+        cpp.flag_code = flag
+            .iter()
+            .map(|(n, c)| ((*n).to_owned(), c.clone()))
+            .collect();
         Sections::from(block.emit_cpp(&cpp))
     } else if module {
         wasm::sections(program, inst, &input, &param)?
@@ -474,6 +487,26 @@ pub(crate) fn uart_of(program: &Program, inst: &Instance) -> Option<(UartConfig,
     };
     let config = flp_core::uart::config_of(&program.uarts, flp_core::uart::port_number(*n))?;
     Some((config, uart.access))
+}
+
+/// UART of a block for a Rust block: the same values as `{{ uart.* }}` in templates.
+fn uart_ctx(u: &UartConfig, debug: bool) -> flp_blocks::UartCtx {
+    flp_blocks::UartCtx {
+        number: u.number,
+        serial: u.serial(),
+        input: if u.number == flp_core::uart::USB && debug {
+            "flp_dbg_input".to_owned()
+        } else {
+            u.serial()
+        },
+        speed: u.speed,
+        config: u.arduino_config(),
+        parity: u.parity_code(),
+        rx: u.rx,
+        tx: u.tx,
+        de: u.de,
+        rx_buffer: u.rx_buffer,
+    }
 }
 
 /// `{{ uart.* }}` in templates: ready C++ values of the block's UART.

@@ -48,9 +48,8 @@ fn load_library() {
     let block = lib.get("bit_and").unwrap();
     assert!(block.template_path(ESP32_CPP_TEMPLATE).is_none());
     assert!(block.docs_path().is_some());
-    // Blocks not moved yet still have a template.
-    let block = lib.get("ethernet").unwrap();
-    assert!(block.template_path(ESP32_CPP_TEMPLATE).is_some());
+    let block = lib.get("web_ui").unwrap();
+    assert!(block.template_path(ESP32_CPP_TEMPLATE).is_none());
 }
 
 #[test]

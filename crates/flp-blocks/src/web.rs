@@ -1,5 +1,11 @@
-// @global once
-// Web interface registry: widget blocks register their items, the web_ui block serves them.
+//! Firmware code of the web interface blocks: the page server `web_ui`, the network
+//! settings form `web_net` and the widgets. Big fixed texts (the page, its handlers) are
+//! kept as constants; `@NAME@` marks where the block's own values go (see `fill`).
+
+use crate::cpp::{CppCtx, CppParts, Lines, Raw};
+
+/// Registry of widget items, shared by all web blocks.
+const UI_REGISTRY: &str = r##"// Web interface registry: widget blocks register their items, the web_ui block serves them.
 struct FlpUiItem {
   const char *kind;
   const char *caption;
@@ -34,9 +40,10 @@ void flpUiSample(FlpUiItem *it) {
   it->hpos = (it->hpos + 1) % it->hn;
   if (it->hfill < it->hn) it->hfill++;
 }
-#define FLP_WEBUI 1
-// @global
-const char {{ id }}_html[] PROGMEM = R"FLPUI(<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FLP_next</title>
+#define FLP_WEBUI 1"##;
+
+/// The page served at `/`.
+const UI_PAGE: &str = r##"const char @ID@_html[] PROGMEM = R"FLPUI(<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FLP_next</title>
 <style>
 :root{color-scheme:light dark;--b:#fff;--f:#222;--c:#f1f3f6;--a:#2f7de1;--g:#2da44e}
 @media(prefers-color-scheme:dark){:root{--b:#14171c;--f:#e6e8eb;--c:#222831;--a:#5aa0f5;--g:#3fb950}}
@@ -246,45 +253,46 @@ F('/ui/layout').then(function(r){if(r.status==403){lg(K!='');throw 0}return r.js
  N.hidden=P.length<2;
  d.i.forEach(function(x,i){var m=mk(x,i);P[Math.min(Math.max(x.g,1),nm.length)-1].appendChild(m[0]);E.push(m[1])});
  go(Math.min(Math.max(parseInt(location.hash.slice(1))||1,1),P.length)-1);poll()}).catch(function(){})
-</script></body></html>)FLPUI";
-// @functions
-void {{ id }}_esc(String &o, const char *s) {
+</script></body></html>)FLPUI";"##;
+
+/// Request handlers of the page server.
+const UI_HANDLERS: &str = r##"void @ID@_esc(String &o, const char *s) {
   for (; *s; s++) {
     if (*s == '"' || *s == '\\') o += '\\';
     if ((uint8_t)*s >= 32) o += *s;
   }
 }
 // The page itself is public; everything it reads or writes needs the password (argument k).
-bool {{ id }}_allowed(FLProgNetworkHttpServer *server) {
-  const char *pw = {{ param.password }};
+bool @ID@_allowed(FLProgNetworkHttpServer *server) {
+  const char *pw = @P:password@;
   if (!pw[0] || server->argumentValueAtKey("k") == pw) return true;
   server->send(403, "text/plain", "auth");
   return false;
 }
-void {{ id }}_page(FLProgNetworkHttpServer *server) {
+void @ID@_page(FLProgNetworkHttpServer *server) {
   // The page is far bigger than the response buffer: stream it straight from flash.
-  if (!server->sendStreamProgmem(200, "text/html; charset=utf-8", {{ id }}_html, strlen({{ id }}_html))) {
+  if (!server->sendStreamProgmem(200, "text/html; charset=utf-8", @ID@_html, strlen(@ID@_html))) {
     // The legacy server mode cannot stream from flash: write the page to the client directly (the 200 header is added).
-    server->write((const uint8_t *){{ id }}_html, strlen({{ id }}_html));
+    server->write((const uint8_t *)@ID@_html, strlen(@ID@_html));
   }
 }
-void {{ id }}_layout(FLProgNetworkHttpServer *server) {
-  if (!{{ id }}_allowed(server)) return;
+void @ID@_layout(FLProgNetworkHttpServer *server) {
+  if (!@ID@_allowed(server)) return;
   String o = "{\"t\":\"";
-  {{ id }}_esc(o, {{ param.title }});
+  @ID@_esc(o, @P:title@);
   o += "\",\"p\":\"";
-  {{ id }}_esc(o, {{ param.pages }});
+  @ID@_esc(o, @P:pages@);
   o += "\",\"bg\":\"";
-  {{ id }}_esc(o, {{ param.bg }});
+  @ID@_esc(o, @P:bg@);
   o += "\",\"y\":";
-  o += {{ 1 if value.system else 0 }};
+  o += @SYSTEM@;
   o += ",\"i\":[";
   for (uint8_t i = 0; i < flpUiCount; i++) {
     FlpUiItem *it = flpUiItems[i];
     if (i) o += ',';
     o += "{\"k\":\""; o += (it->kind + 4);
-    o += "\",\"l\":\""; {{ id }}_esc(o, it->caption);
-    o += "\",\"u\":\""; {{ id }}_esc(o, it->unit);
+    o += "\",\"l\":\""; @ID@_esc(o, it->caption);
+    o += "\",\"u\":\""; @ID@_esc(o, it->unit);
     o += "\",\"c\":"; o += it->col;
     o += ",\"r\":"; o += it->row;
     o += ",\"w\":"; o += it->w;
@@ -294,22 +302,22 @@ void {{ id }}_layout(FLProgNetworkHttpServer *server) {
     o += ",\"a\":"; o += String(it->lo, 3);
     o += ",\"b\":"; o += String(it->hi, 3);
     o += ",\"s\":"; o += String(it->step, 3);
-    o += ",\"o\":\""; if (it->color) {{ id }}_esc(o, it->color);
-    o += "\",\"q\":\""; if (it->back) {{ id }}_esc(o, it->back);
+    o += ",\"o\":\""; if (it->color) @ID@_esc(o, it->color);
+    o += "\",\"q\":\""; if (it->back) @ID@_esc(o, it->back);
     o += '"';
     o += '}';
   }
   o += "]}";
   server->send(200, "application/json", o);
 }
-void {{ id }}_state(FLProgNetworkHttpServer *server) {
-  if (!{{ id }}_allowed(server)) return;
+void @ID@_state(FLProgNetworkHttpServer *server) {
+  if (!@ID@_allowed(server)) return;
   String o = "[";
   for (uint8_t i = 0; i < flpUiCount; i++) {
     FlpUiItem *it = flpUiItems[i];
     if (i) o += ',';
     if (!strcmp(it->kind, "web_text") || !strcmp(it->kind, "web_net")) {
-      o += '"'; {{ id }}_esc(o, it->text.c_str()); o += '"';
+      o += '"'; @ID@_esc(o, it->text.c_str()); o += '"';
     } else {
       o += String(it->value, (unsigned int)it->dec);
     }
@@ -317,8 +325,8 @@ void {{ id }}_state(FLProgNetworkHttpServer *server) {
   o += ']';
   server->send(200, "application/json", o);
 }
-void {{ id }}_set(FLProgNetworkHttpServer *server) {
-  if (!{{ id }}_allowed(server)) return;
+void @ID@_set(FLProgNetworkHttpServer *server) {
+  if (!@ID@_allowed(server)) return;
   if (server->hasArgumentKey("i") && server->hasArgumentKey("v")) {
     int i = server->argumentValueAtKey("i").toInt();
     float v = server->argumentValueAtKey("v").toFloat();
@@ -332,8 +340,8 @@ void {{ id }}_set(FLProgNetworkHttpServer *server) {
 }
 #ifdef FLP_WEB_NET
 // Network settings form: the widget block validates and saves what is stored here.
-void {{ id }}_net(FLProgNetworkHttpServer *server) {
-  if (!{{ id }}_allowed(server)) return;
+void @ID@_net(FLProgNetworkHttpServer *server) {
+  if (!@ID@_allowed(server)) return;
   int i = server->argumentValueAtKey("i").toInt();
   if (i >= 0 && i < flpUiCount && !strcmp(flpUiItems[i]->kind, "web_net")) {
     String a[10] = {"s", "p", "d", "i", "g", "m", "a", "b", "o", "w"};
@@ -351,8 +359,8 @@ void {{ id }}_net(FLProgNetworkHttpServer *server) {
   server->send(200, "text/plain", "ok");
 }
 // Wi-Fi scan: the first call starts it, "?" means still running, then one "ssid<TAB>rssi" per line.
-void {{ id }}_scan(FLProgNetworkHttpServer *server) {
-  if (!{{ id }}_allowed(server)) return;
+void @ID@_scan(FLProgNetworkHttpServer *server) {
+  if (!@ID@_allowed(server)) return;
   String o;
   int n = WiFi.scanComplete();
   if (n == WIFI_SCAN_FAILED) {
@@ -377,8 +385,8 @@ void {{ id }}_scan(FLProgNetworkHttpServer *server) {
 }
 #endif
 // Chart history, oldest point first.
-void {{ id }}_hist(FLProgNetworkHttpServer *server) {
-  if (!{{ id }}_allowed(server)) return;
+void @ID@_hist(FLProgNetworkHttpServer *server) {
+  if (!@ID@_allowed(server)) return;
   int i = server->argumentValueAtKey("i").toInt();
   String o = "[";
   if (i >= 0 && i < flpUiCount && flpUiItems[i]->hist) {
@@ -391,11 +399,12 @@ void {{ id }}_hist(FLProgNetworkHttpServer *server) {
   }
   o += ']';
   server->send(200, "application/json", o);
-}
-{% if value.system %}
-// Technical data of the device for the «Система» page.
-void {{ id }}_info(FLProgNetworkHttpServer *server) {
-  if (!{{ id }}_allowed(server)) return;
+}"##;
+
+/// Handler of the system page (`system = true`).
+const UI_INFO: &str = r##"// Technical data of the device for the «Система» page.
+void @ID@_info(FLProgNetworkHttpServer *server) {
+  if (!@ID@_allowed(server)) return;
   char mac[18];
   uint8_t *m = flpWifi.mac();
   snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", m[0], m[1], m[2], m[3], m[4], m[5]);
@@ -420,18 +429,482 @@ void {{ id }}_info(FLProgNetworkHttpServer *server) {
 #endif
   o += '}';
   server->send(200, "application/json", o);
-}
-{% endif %}
-// @setup
-flpWebSrv.addHandler("/", {{ id }}_page);
-flpWebSrv.addHandler("/ui/layout", {{ id }}_layout);
-flpWebSrv.addHandler("/ui/state", {{ id }}_state);
-flpWebSrv.addHandler("/ui/set", {{ id }}_set);
-flpWebSrv.addHandler("/ui/hist", {{ id }}_hist);
+}"##;
+
+/// Handlers registered on the shared web server.
+const UI_SETUP: &str = r##"flpWebSrv.addHandler("/", @ID@_page);
+flpWebSrv.addHandler("/ui/layout", @ID@_layout);
+flpWebSrv.addHandler("/ui/state", @ID@_state);
+flpWebSrv.addHandler("/ui/set", @ID@_set);
+flpWebSrv.addHandler("/ui/hist", @ID@_hist);
 #ifdef FLP_WEB_NET
-flpWebSrv.addHandler("/ui/net", {{ id }}_net);
-flpWebSrv.addHandler("/ui/scan", {{ id }}_scan);
-#endif
-{% if value.system %}
-flpWebSrv.addHandler("/ui/info", {{ id }}_info);
-{% endif %}
+flpWebSrv.addHandler("/ui/net", @ID@_net);
+flpWebSrv.addHandler("/ui/scan", @ID@_scan);
+#endif"##;
+
+/// Tells the page server to add the network form handlers.
+const NET_DEFINES: &str = r##"// Tells the web page block to add the network form handlers (/ui/net, /ui/scan).
+#define FLP_WEB_NET"##;
+
+/// Network settings shared with the Wi-Fi and Ethernet blocks.
+const NET_SHARED: &str = r##"// Network settings shared with the Wi-Fi and Ethernet blocks: ssid, password, dhcp, ip, gateway, subnet, ap ssid, ap password, mode, ap delay.
+struct FlpNet {
+  String f[10];
+  // Mode actually applied: differs from f[8] in the automatic access point mode.
+  int eff = 0;
+};
+FlpNet flpNet;"##;
+
+/// Item and storage of the network form.
+const NET_GLOBAL: &str = r##"FlpUiItem @ID@_ui = {"web_net", @P:caption@, "", @V:col@, @V:row@, @V:w@, @V:h@, @V:page@, true, 0, 0, 0, 0, 0};
+Preferences @ID@_prefs;"##;
+
+/// Form parsing and validation.
+const NET_FUNCTIONS: &str = r##"// The page sends the whole form as ten lines (ssid, password, dhcp, ip, gateway, subnet, ap ssid, ap password, mode, ap delay); an empty password keeps the saved one.
+String @ID@_line(const String &s, int n) {
+  int from = 0;
+  for (int k = 0; k < n; k++) {
+    int p = s.indexOf('\n', from);
+    if (p < 0) return String();
+    from = p + 1;
+  }
+  int e = s.indexOf('\n', from);
+  return e < 0 ? s.substring(from) : s.substring(from, e);
+}
+void @ID@_show() {
+  @ID@_ui.text = flpNet.f[0] + "\n\n" + flpNet.f[2] + "\n" + flpNet.f[3] + "\n" + flpNet.f[4] + "\n" + flpNet.f[5] + "\n" + flpNet.f[6] + "\n\n" + flpNet.f[8] + "\n" + flpNet.f[9];
+}
+static bool @ID@_pwok(const String &p) {
+  if (p.length() == 0) return true;
+  for (size_t k = 0; k < p.length(); k++) if (p[k] < 32 || p[k] > 126) return false;
+  if (p.length() >= 8 && p.length() <= 63) return true;
+  if (p.length() != 64) return false;
+  for (size_t k = 0; k < 64; k++) if (!isxdigit(p[k])) return false;
+  return true;
+}
+static bool @ID@_ssidok(const String &s) {
+  if (s.length() > 32) return false;
+  for (size_t k = 0; k < s.length(); k++) if ((uint8_t)s[k] < 32) return false;
+  return true;
+}"##;
+
+/// Restore the saved settings.
+const NET_SETUP: &str = r##"@ID@_prefs.begin("flp", false);
+// Defaults come from the editor: when they change (a new flash with other settings), the saved page values are dropped.
+{
+  String init[10] = { @P:init_ssid@, @P:init_password@, "@DHCP@", @P:init_ip@, @P:init_gateway@, @P:init_subnet@, @P:init_ap_ssid@, @P:init_ap_password@, "@V:init_mode@", "@V:init_ap_delay@"};
+  uint32_t sig = 2166136261UL;
+  for (int k = 0; k < 10; k++) {
+    for (size_t n = 0; n < init[k].length(); n++) sig = (sig ^ (uint8_t)init[k][n]) * 16777619UL;
+    sig = (sig ^ 0xFF) * 16777619UL;
+  }
+  if (@ID@_prefs.getUInt("@ID12@_h", 0) != sig) {
+    static const char *keys[10] = {"_s", "_p", "_d", "_i", "_g", "_m", "_a", "_b", "_o", "_w"};
+    for (int k = 0; k < 10; k++) @ID@_prefs.remove((String("@ID12@") + keys[k]).c_str());
+    @ID@_prefs.putUInt("@ID12@_h", sig);
+  }
+}
+flpNet.f[0] = @ID@_prefs.getString("@ID12@_s", @P:init_ssid@);
+flpNet.f[1] = @ID@_prefs.getString("@ID12@_p", @P:init_password@);
+flpNet.f[2] = @ID@_prefs.getString("@ID12@_d", "@DHCP@");
+flpNet.f[3] = @ID@_prefs.getString("@ID12@_i", @P:init_ip@);
+flpNet.f[4] = @ID@_prefs.getString("@ID12@_g", @P:init_gateway@);
+flpNet.f[5] = @ID@_prefs.getString("@ID12@_m", @P:init_subnet@);
+flpNet.f[6] = @ID@_prefs.getString("@ID12@_a", @P:init_ap_ssid@);
+flpNet.f[7] = @ID@_prefs.getString("@ID12@_b", @P:init_ap_password@);
+flpNet.f[8] = @ID@_prefs.getString("@ID12@_o", "@V:init_mode@");
+flpNet.f[9] = @ID@_prefs.getString("@ID12@_w", "@V:init_ap_delay@");
+@ID@_show();
+flpUiAdd(&@ID@_ui);
+@ID@_ui.color = @P:color@;
+@ID@_ui.back = @P:back@;"##;
+
+/// Apply the form and publish the settings.
+const NET_LOOP: &str = r##"@O:changed@ = false;
+if (@ID@_ui.value != 0) {
+  @ID@_ui.value = 0;
+  String t = @ID@_ui.text;
+  String pw = @ID@_line(t, 1);
+  String apw = @ID@_line(t, 7);
+  String nf[10] = { @ID@_line(t, 0), pw.length() ? pw : flpNet.f[1], @ID@_line(t, 2), @ID@_line(t, 3), @ID@_line(t, 4), @ID@_line(t, 5), @ID@_line(t, 6), apw.length() ? apw : flpNet.f[7], @ID@_line(t, 8), @ID@_line(t, 9)};
+  bool valid = @ID@_pwok(pw) && @ID@_pwok(apw) && @ID@_ssidok(nf[0]) && @ID@_ssidok(nf[6]);
+  static const char *keys[10] = {"_s", "_p", "_d", "_i", "_g", "_m", "_a", "_b", "_o", "_w"};
+  for (int k = 0; k < 10 && valid; k++) {
+    if (nf[k] != flpNet.f[k]) {
+      flpNet.f[k] = nf[k];
+      // Flash wears out: only changed fields are written.
+      @ID@_prefs.putString((String("@ID12@") + keys[k]).c_str(), nf[k]);
+      @O:changed@ = true;
+    }
+  }
+  @ID@_show();
+}
+{
+  // Automatic mode: client only, the access point joins when there is no connection for the delay.
+  static uint32_t since = 0;
+  static bool apUp = false;
+  static uint32_t joined = 0;
+  int m = flpNet.f[8].toInt();
+  if (m == 3) {
+    if (WiFi.status() == WL_CONNECTED) {
+      // The access point stays up for 10 s after the client got connected, then goes off.
+      if (!joined) joined = millis();
+      if (millis() - joined >= 10000UL) apUp = false;
+      since = millis();
+    } else {
+      joined = 0;
+      if (!apUp && millis() - since >= (uint32_t)flpNet.f[9].toInt() * 1000UL) {
+        apUp = true;
+      }
+    }
+    m = apUp ? 2 : 0;
+  }
+  flpNet.eff = m;
+}
+@O:ssid@ = flpNet.f[0];
+@O:password@ = flpNet.f[1];
+@O:dhcp@ = flpNet.f[2] != "0";
+@O:ip@ = flpNet.f[3];
+@O:gateway@ = flpNet.f[4];
+@O:subnet@ = flpNet.f[5];
+@O:mode@ = flpNet.f[8].toInt();"##;
+
+/// A value of the block as the text a template would print.
+fn value_text(e: &CppCtx, name: &str) -> String {
+    match e.value.get(name) {
+        Some(Raw::Int(v)) => v.to_string(),
+        Some(Raw::Float(v)) => v.to_string(),
+        Some(Raw::Text(v)) => v.clone(),
+        Some(Raw::Bool(v)) => v.to_string(),
+        None => String::new(),
+    }
+}
+
+/// The page the device serves at `/` (the raw string of the page constant), so the preview
+/// in the constructor is always the page that goes into the firmware.
+pub fn device_page() -> &'static str {
+    const OPEN: &str = "R\"FLPUI(";
+    const CLOSE: &str = ")FLPUI\"";
+    let start = UI_PAGE.find(OPEN).map_or(0, |i| i + OPEN.len());
+    let len = UI_PAGE[start..]
+        .find(CLOSE)
+        .unwrap_or(UI_PAGE.len() - start);
+    &UI_PAGE[start..start + len]
+}
+
+/// Puts the block's values into a constant text: `@ID@` (block id), `@ID12@` (its first
+/// twelve characters), `@P:name@` (parameter), `@V:name@` (plain value), `@O:name@`
+/// (output variable) and the ready-made `@SYSTEM@` and `@DHCP@` flags. Other `@` stay as is.
+fn fill(e: &CppCtx, text: &str) -> String {
+    let id12: String = e.id.chars().take(12).collect();
+    let flag = |n: &str| if e.flag(n) { "1" } else { "0" };
+    let mut out = String::with_capacity(text.len() + 256);
+    let mut rest = text;
+    while let Some(at) = rest.find('@') {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        let named = |kind: &str| {
+            let tail = rest.strip_prefix(kind)?;
+            let end = tail.find('@')?;
+            let name = &tail[..end];
+            (!name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))
+                .then_some((name, kind.len() + end + 1))
+        };
+        if let Some(r) = rest.strip_prefix("@ID@") {
+            out.push_str(&e.id);
+            rest = r;
+        } else if let Some(r) = rest.strip_prefix("@ID12@") {
+            out.push_str(&id12);
+            rest = r;
+        } else if let Some(r) = rest.strip_prefix("@SYSTEM@") {
+            out.push_str(flag("system"));
+            rest = r;
+        } else if let Some(r) = rest.strip_prefix("@DHCP@") {
+            out.push_str(flag("init_dhcp"));
+            rest = r;
+        } else if let Some((n, len)) = named("@P:") {
+            out.push_str(e.param(n));
+            rest = &rest[len..];
+        } else if let Some((n, len)) = named("@V:") {
+            out.push_str(&value_text(e, n));
+            rest = &rest[len..];
+        } else if let Some((n, len)) = named("@O:") {
+            out.push_str(e.output(n));
+            rest = &rest[len..];
+        } else {
+            out.push('@');
+            rest = &rest[1..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+pub(crate) fn web_ui(e: &CppCtx) -> CppParts {
+    let mut handlers = fill(e, UI_HANDLERS);
+    let mut setup = fill(e, UI_SETUP);
+    if e.flag("system") {
+        handlers.push('\n');
+        handlers.push_str(&fill(e, UI_INFO));
+        setup.push_str(&fill(e, "\nflpWebSrv.addHandler(\"/ui/info\", @ID@_info);"));
+    }
+    CppParts {
+        once_global: UI_REGISTRY.to_owned(),
+        global: fill(e, UI_PAGE),
+        functions: handlers,
+        setup,
+        ..Default::default()
+    }
+}
+
+pub(crate) fn web_net(e: &CppCtx) -> CppParts {
+    CppParts {
+        defines: NET_DEFINES.to_owned(),
+        once_global: NET_SHARED.to_owned(),
+        global: fill(e, NET_GLOBAL),
+        functions: fill(e, NET_FUNCTIONS),
+        setup: fill(e, NET_SETUP),
+        looped: fill(e, NET_LOOP),
+        ..Default::default()
+    }
+}
+
+/// The item every widget registers; `tail` is the part after the page number:
+/// `rw, init, lo, hi, step, dec`.
+fn item(e: &CppCtx, kind: &str, unit: &str, tail: &str) -> String {
+    format!(
+        "FlpUiItem {}_ui = {{\"web_{kind}\", {}, {unit}, {}, {}, {}, {}, {}, {tail}}};",
+        e.id,
+        e.param("caption"),
+        value_text(e, "col"),
+        value_text(e, "row"),
+        value_text(e, "w"),
+        value_text(e, "h"),
+        value_text(e, "page"),
+    )
+}
+
+/// The registration and colours are the same for all widgets.
+fn register(e: &CppCtx, comment: &str, global_item: String, looped: String) -> CppParts {
+    let id = &e.id;
+    let mut g = Lines::default();
+    if !comment.is_empty() {
+        g.line(comment);
+    }
+    g.line(global_item);
+    CppParts {
+        global: g.finish(),
+        setup: format!(
+            "flpUiAdd(&{id}_ui);\n{id}_ui.color = {};\n{id}_ui.back = {};",
+            e.param("color"),
+            e.param("back")
+        ),
+        looped,
+        ..Default::default()
+    }
+}
+
+fn plain(e: &CppCtx, kind: &str, tail: &str, looped: String) -> CppParts {
+    register(e, "", item(e, kind, "\"\"", tail), looped)
+}
+
+pub(crate) fn web_button(e: &CppCtx) -> CppParts {
+    plain(
+        e,
+        "button",
+        "true, 0, 0, 0, 0, 0",
+        format!("{} = {}_ui.value != 0;", e.output("out"), e.id),
+    )
+}
+
+pub(crate) fn web_switch(e: &CppCtx) -> CppParts {
+    let init = u8::from(e.flag("initial"));
+    plain(
+        e,
+        "switch",
+        &format!("true, {init}, 0, 0, 0, 0"),
+        format!("{} = {}_ui.value != 0;", e.output("out"), e.id),
+    )
+}
+
+pub(crate) fn web_label(e: &CppCtx) -> CppParts {
+    plain(e, "label", "false, 0, 0, 0, 0, 0", String::new())
+}
+
+pub(crate) fn web_clock(e: &CppCtx) -> CppParts {
+    let (s, d) = (u8::from(e.flag("seconds")), u8::from(e.flag("date")));
+    plain(
+        e,
+        "clock",
+        &format!("false, 0, {s}, {d}, 0, 0"),
+        String::new(),
+    )
+}
+
+pub(crate) fn web_led(e: &CppCtx) -> CppParts {
+    plain(
+        e,
+        "led",
+        "false, 0, 0, 0, 0, 0",
+        format!("{}_ui.value = {} ? 1 : 0;", e.id, e.input("in")),
+    )
+}
+
+pub(crate) fn web_text(e: &CppCtx) -> CppParts {
+    plain(
+        e,
+        "text",
+        "false, 0, 0, 0, 0, 0",
+        format!("{}_ui.text = {};", e.id, e.input("in")),
+    )
+}
+
+pub(crate) fn web_icon(e: &CppCtx) -> CppParts {
+    register(
+        e,
+        "// The icon number travels in `lo`.",
+        item(
+            e,
+            "icon",
+            "\"\"",
+            &format!("false, 0, {}, 0, 0, 0", value_text(e, "icon")),
+        ),
+        format!("{}_ui.value = {} ? 1 : 0;", e.id, e.input("in")),
+    )
+}
+
+pub(crate) fn web_image(e: &CppCtx) -> CppParts {
+    register(
+        e,
+        "// The image address travels in `unit`; the fit mode in `lo`.",
+        item(
+            e,
+            "image",
+            e.param("url"),
+            &format!("false, 0, {}, 0, 0, 0", u8::from(e.flag("fit"))),
+        ),
+        String::new(),
+    )
+}
+
+pub(crate) fn web_shape(e: &CppCtx) -> CppParts {
+    register(
+        e,
+        "// The shape code travels in `lo` and the thickness in `hi` (a shape has no value).",
+        item(
+            e,
+            "shape",
+            "\"\"",
+            &format!(
+                "false, 0, {}, {}, 0, 0",
+                value_text(e, "shape"),
+                value_text(e, "thickness")
+            ),
+        ),
+        String::new(),
+    )
+}
+
+pub(crate) fn web_gauge(e: &CppCtx) -> CppParts {
+    register(
+        e,
+        "",
+        item(
+            e,
+            "gauge",
+            e.param("unit"),
+            &format!("false, 0, {}, {}, 0, 1", e.param("min"), e.param("max")),
+        ),
+        format!("{}_ui.value = {};", e.id, e.input("in")),
+    )
+}
+
+pub(crate) fn web_tank(e: &CppCtx) -> CppParts {
+    register(
+        e,
+        "",
+        item(
+            e,
+            "tank",
+            e.param("unit"),
+            &format!(
+                "false, 0, {}, {}, 0, {}",
+                e.param("min"),
+                e.param("max"),
+                value_text(e, "decimals")
+            ),
+        ),
+        format!("{}_ui.value = {};", e.id, e.input("in")),
+    )
+}
+
+pub(crate) fn web_value(e: &CppCtx) -> CppParts {
+    register(
+        e,
+        "",
+        item(
+            e,
+            "value",
+            e.param("unit"),
+            &format!("false, 0, 0, 0, 0, {}", e.param("decimals")),
+        ),
+        format!("{}_ui.value = {};", e.id, e.input("in")),
+    )
+}
+
+/// A slider or a number field: the page writes the value.
+fn adjustable(e: &CppCtx, kind: &str) -> CppParts {
+    register(
+        e,
+        "",
+        item(
+            e,
+            kind,
+            e.param("unit"),
+            &format!(
+                "true, {}, {}, {}, {}, 3",
+                e.param("initial"),
+                e.param("min"),
+                e.param("max"),
+                e.param("step")
+            ),
+        ),
+        format!("{} = {}_ui.value;", e.output("out"), e.id),
+    )
+}
+
+pub(crate) fn web_slider(e: &CppCtx) -> CppParts {
+    adjustable(e, "slider")
+}
+
+pub(crate) fn web_input(e: &CppCtx) -> CppParts {
+    adjustable(e, "input")
+}
+
+pub(crate) fn web_chart(e: &CppCtx) -> CppParts {
+    let (id, points) = (&e.id, value_text(e, "points"));
+    let mut g = Lines::default();
+    g.line(format!("float {id}_buf[{points}];")).line(format!(
+        "FlpUiItem {id}_ui = {{\"web_chart\", {}, {}, {}, {}, {}, {}, {}, false, 0, {}, {}, {}, 1, String(), {id}_buf, {points}}};",
+        e.param("caption"),
+        e.param("unit"),
+        value_text(e, "col"),
+        value_text(e, "row"),
+        value_text(e, "w"),
+        value_text(e, "h"),
+        value_text(e, "page"),
+        e.param("min"),
+        e.param("max"),
+        value_text(e, "period"),
+    ));
+    CppParts {
+        global: g.finish(),
+        setup: format!(
+            "flpUiAdd(&{id}_ui);\n{id}_ui.color = {};\n{id}_ui.back = {};",
+            e.param("color"),
+            e.param("back")
+        ),
+        looped: format!("{id}_ui.value = {};\nflpUiSample(&{id}_ui);", e.input("in")),
+        ..Default::default()
+    }
+}

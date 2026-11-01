@@ -10,4 +10,5 @@ path = "src/main.rs"
 
 [dependencies]
 flp-ai = { path = "../flp-ai" }
+flp-blocks = { path = "../flp-blocks" }
 serde_json.workspace = true

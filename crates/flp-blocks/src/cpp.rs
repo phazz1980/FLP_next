@@ -30,6 +30,32 @@ pub struct CppCtx {
     pub input_type: BTreeMap<String, String>,
     /// Words of the pin expander the block stands on: (read levels, wanted levels).
     pub expander: Option<(String, String)>,
+    /// UART of a block with `[block.uart]`.
+    pub uart: Option<UartCtx>,
+    /// Parameters taken from variables: the code for them is always built in.
+    pub bound: BTreeSet<String>,
+    /// Boolean parameters as C++ expressions: a variable or `true` / `false`.
+    pub flag_code: BTreeMap<String, String>,
+}
+
+/// Ready C++ values of the UART a block works with.
+#[derive(Debug, Default, Clone)]
+pub struct UartCtx {
+    pub number: u8,
+    /// `Serial1`, `Serial2`...
+    pub serial: String,
+    /// What readers take bytes from: the port, or the console input of the debug module.
+    pub input: String,
+    pub speed: u32,
+    /// Arduino frame constant, e.g. `SERIAL_8N1`.
+    pub config: String,
+    /// 0 none, 1 even, 2 odd.
+    pub parity: u8,
+    /// Pins; -1 means not set.
+    pub rx: i64,
+    pub tx: i64,
+    pub de: i64,
+    pub rx_buffer: u32,
 }
 
 impl CppCtx {
@@ -64,6 +90,29 @@ impl CppCtx {
     /// Real type of the source of an input.
     pub fn input_type(&self, port: &str) -> &str {
         self.input_type.get(port).map_or("", String::as_str)
+    }
+
+    /// An enumeration or text parameter as the plain value taken while generating.
+    pub fn text(&self, name: &str) -> &str {
+        match self.value.get(name) {
+            Some(Raw::Text(v)) => v,
+            _ => "",
+        }
+    }
+
+    /// A boolean parameter as the plain value taken while generating.
+    pub fn flag(&self, name: &str) -> bool {
+        matches!(self.value.get(name), Some(Raw::Bool(true)))
+    }
+
+    /// A boolean parameter as a C++ expression (a variable, or `true` / `false`).
+    pub fn flag_code(&self, name: &str) -> &str {
+        self.flag_code.get(name).map_or("false", String::as_str)
+    }
+
+    /// Whether the parameter is taken from a variable and switched while running.
+    pub fn is_bound(&self, name: &str) -> bool {
+        self.bound.contains(name)
     }
 
     /// A numeric parameter as the plain value taken while generating.

@@ -42,6 +42,6 @@ fn library_samples_report_their_source() {
     );
     assert_eq!(
         lib.get("ethernet").unwrap().firmware_source(),
-        FirmwareSource::Template
+        FirmwareSource::None
     );
 }

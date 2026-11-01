@@ -4,10 +4,15 @@
 mod cpp;
 mod hardware;
 mod more;
+mod net;
+mod network;
 mod text;
+mod uart;
+mod web;
 
-pub use cpp::{CppCtx, CppParts, Raw};
+pub use cpp::{CppCtx, CppParts, Raw, UartCtx};
 pub use more::{next_random, RANDOM_SEED};
+pub use web::device_page;
 
 /// A built-in block: one Rust type that both simulates the block and writes its firmware code.
 pub trait BuiltinBlock: Sync {
@@ -365,6 +370,138 @@ static BLOCKS: &[Block] = &[
     Block {
         kind: "pcf8574_out",
         emit: hardware::pcf8574_out,
+    },
+    Block {
+        kind: "uart_config",
+        emit: uart::uart_config,
+    },
+    Block {
+        kind: "uart_read",
+        emit: uart::uart_read,
+    },
+    Block {
+        kind: "uart_send",
+        emit: uart::uart_send,
+    },
+    Block {
+        kind: "modbus_rtu_master",
+        emit: uart::modbus_rtu_master,
+    },
+    Block {
+        kind: "modbus_rtu_slave",
+        emit: uart::modbus_rtu_slave,
+    },
+    Block {
+        kind: "modbus_tcp_slave",
+        emit: uart::modbus_tcp_slave,
+    },
+    Block {
+        kind: "modbus_read",
+        emit: uart::modbus_read,
+    },
+    Block {
+        kind: "modbus_write",
+        emit: uart::modbus_write,
+    },
+    Block {
+        kind: "modbus_master_read",
+        emit: uart::modbus_master_read,
+    },
+    Block {
+        kind: "modbus_master_write",
+        emit: uart::modbus_master_write,
+    },
+    Block {
+        kind: "mqtt",
+        emit: network::mqtt,
+    },
+    Block {
+        kind: "mqtt_publish",
+        emit: network::mqtt_publish,
+    },
+    Block {
+        kind: "mqtt_subscribe",
+        emit: network::mqtt_subscribe,
+    },
+    Block {
+        kind: "ntp",
+        emit: network::ntp,
+    },
+    Block {
+        kind: "wifi",
+        emit: net::wifi,
+    },
+    Block {
+        kind: "ethernet",
+        emit: net::ethernet,
+    },
+    Block {
+        kind: "web_ui",
+        emit: web::web_ui,
+    },
+    Block {
+        kind: "web_net",
+        emit: web::web_net,
+    },
+    Block {
+        kind: "web_button",
+        emit: web::web_button,
+    },
+    Block {
+        kind: "web_chart",
+        emit: web::web_chart,
+    },
+    Block {
+        kind: "web_clock",
+        emit: web::web_clock,
+    },
+    Block {
+        kind: "web_gauge",
+        emit: web::web_gauge,
+    },
+    Block {
+        kind: "web_icon",
+        emit: web::web_icon,
+    },
+    Block {
+        kind: "web_image",
+        emit: web::web_image,
+    },
+    Block {
+        kind: "web_input",
+        emit: web::web_input,
+    },
+    Block {
+        kind: "web_label",
+        emit: web::web_label,
+    },
+    Block {
+        kind: "web_led",
+        emit: web::web_led,
+    },
+    Block {
+        kind: "web_shape",
+        emit: web::web_shape,
+    },
+    Block {
+        kind: "web_slider",
+        emit: web::web_slider,
+    },
+    Block {
+        kind: "web_switch",
+        emit: web::web_switch,
+    },
+    Block {
+        kind: "web_tank",
+        emit: web::web_tank,
+    },
+    Block {
+        kind: "web_text",
+        emit: web::web_text,
+    },
+    Block {
+        kind: "web_value",
+        emit: web::web_value,
     },
 ];
 
