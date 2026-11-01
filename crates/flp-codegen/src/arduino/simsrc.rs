@@ -200,6 +200,75 @@ static unsigned long micros() { return flp_now_ms * 1000UL; }
 #define sqrt(x) __builtin_sqrt(x)
 static float fmodf(float a, float b) { return (float)((double)a - (double)(long long)((double)a / b) * b); }
 #define PI 3.1415926535897932384626433832795
+// Math without libc: wasm has instructions for these, the rest is written out in double.
+#define fabs(x) __builtin_fabs(x)
+#define sqrtf(x) __builtin_sqrtf(x)
+#define floorf(x) __builtin_floorf(x)
+#define ceilf(x) __builtin_ceilf(x)
+static float roundf(float x) { return x >= 0 ? __builtin_floorf(x + 0.5f) : -__builtin_floorf(-x + 0.5f); }
+static double flp_sin(double x) {
+  const double two_pi = 6.283185307179586;
+  x -= two_pi * __builtin_floor(x / two_pi + 0.5);
+  double term = x, sum = x;
+  for (int i = 1; i < 14; i++) {
+    term *= -x * x / ((2 * i) * (2 * i + 1));
+    sum += term;
+  }
+  return sum;
+}
+static float sinf(float x) { return (float)flp_sin(x); }
+static float cosf(float x) { return (float)flp_sin((double)x + 1.5707963267948966); }
+static float tanf(float x) { return (float)(flp_sin(x) / flp_sin((double)x + 1.5707963267948966)); }
+static double flp_exp(double y) {
+  const double ln2 = 0.6931471805599453;
+  double k = __builtin_floor(y / ln2 + 0.5), r = y - k * ln2, term = 1, sum = 1;
+  for (int i = 1; i < 20; i++) {
+    term *= r / i;
+    sum += term;
+  }
+  for (; k > 0; k--) sum *= 2;
+  for (; k < 0; k++) sum /= 2;
+  return sum;
+}
+static double flp_log(double x) {
+  const double ln2 = 0.6931471805599453;
+  int e = 0;
+  while (x >= 1.4142135623730951) { x /= 2; e++; }
+  while (x < 0.7071067811865476) { x *= 2; e--; }
+  double s = (x - 1) / (x + 1), s2 = s * s, term = s, sum = 0;
+  for (int i = 1; i < 40; i += 2) {
+    sum += term / i;
+    term *= s2;
+  }
+  return 2 * sum + e * ln2;
+}
+static float powf(float a, float b) {
+  if (b == 0) return 1;
+  if (a == 0) return b > 0 ? 0 : __builtin_inff();
+  if (b == (float)(long long)b && b < 1e9f && b > -1e9f) {
+    long long n = (long long)b;
+    bool neg = n < 0;
+    if (neg) n = -n;
+    double r = 1, base = a;
+    for (; n; n >>= 1) {
+      if (n & 1) r *= base;
+      base *= base;
+    }
+    return (float)(neg ? 1 / r : r);
+  }
+  if (a < 0) return __builtin_nanf("");
+  return (float)flp_exp((double)b * flp_log(a));
+}
+// The same xorshift32 as `flp_blocks::next_random`, so a run is repeatable.
+static uint32_t flp_rng = 2463534242u;
+static uint32_t esp_random() { return 0; }
+static void randomSeed(uint32_t) {}
+static long random(long lo, long hi) {
+  flp_rng ^= flp_rng << 13;
+  flp_rng ^= flp_rng >> 17;
+  flp_rng ^= flp_rng << 5;
+  return lo + (long)(flp_rng % (uint32_t)(hi - lo));
+}
 "#;
 
 /// Source of the simulation module of `def` made from `template`.
@@ -541,10 +610,10 @@ if ({{ id }}_active && millis() - {{ id }}_start >= {{ param.time }}UL) {
     }
 
     #[test]
-    fn library_template_is_supported() {
+    fn library_builtin_block_is_supported() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../library/bit_and");
         let def = def(&std::fs::read_to_string(dir.join("block.toml")).unwrap());
-        let tmpl = std::fs::read_to_string(dir.join("esp32.cpp.tmpl")).unwrap();
-        assert!(sim_source(&def, &tmpl).is_ok());
+        let block = flp_blocks::get("bit_and").unwrap();
+        assert!(sim_source_builtin(&def, block).is_ok());
     }
 }

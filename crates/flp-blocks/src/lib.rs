@@ -2,8 +2,11 @@
 //! int is a whole number; strings travel beside them (see `text`). Port and parameter indexes follow `block.toml` order.
 
 mod cpp;
+mod more;
+mod text;
 
 pub use cpp::{CppCtx, CppParts, Raw};
+pub use more::{next_random, RANDOM_SEED};
 
 /// A built-in block: one Rust type that both simulates the block and writes its firmware code.
 pub trait BuiltinBlock: Sync {
@@ -153,6 +156,162 @@ static BLOCKS: &[Block] = &[
     Block {
         kind: "constant",
         emit: cpp::constant,
+    },
+    Block {
+        kind: "abs",
+        emit: more::abs,
+    },
+    Block {
+        kind: "sq",
+        emit: more::sq,
+    },
+    Block {
+        kind: "sqrt",
+        emit: more::sqrt,
+    },
+    Block {
+        kind: "pow",
+        emit: more::pow,
+    },
+    Block {
+        kind: "sin",
+        emit: more::sin,
+    },
+    Block {
+        kind: "cos",
+        emit: more::cos,
+    },
+    Block {
+        kind: "tan",
+        emit: more::tan,
+    },
+    Block {
+        kind: "float_to_int",
+        emit: more::float_to_int,
+    },
+    Block {
+        kind: "int_to_float",
+        emit: more::int_to_float,
+    },
+    Block {
+        kind: "random",
+        emit: more::random,
+    },
+    Block {
+        kind: "bit_and",
+        emit: more::bit_and,
+    },
+    Block {
+        kind: "bit_or",
+        emit: more::bit_or,
+    },
+    Block {
+        kind: "bit_xor",
+        emit: more::bit_xor,
+    },
+    Block {
+        kind: "bit_not",
+        emit: more::bit_not,
+    },
+    Block {
+        kind: "bit_read",
+        emit: more::bit_read,
+    },
+    Block {
+        kind: "bit_write",
+        emit: more::bit_write,
+    },
+    Block {
+        kind: "bit_change",
+        emit: more::bit_change,
+    },
+    Block {
+        kind: "bits_to_byte",
+        emit: more::bits_to_byte,
+    },
+    Block {
+        kind: "byte_to_bits",
+        emit: more::byte_to_bits,
+    },
+    Block {
+        kind: "bytes_to_word",
+        emit: more::bytes_to_word,
+    },
+    Block {
+        kind: "word_to_bytes",
+        emit: more::word_to_bytes,
+    },
+    Block {
+        kind: "bytes_to_dword",
+        emit: more::bytes_to_dword,
+    },
+    Block {
+        kind: "dword_to_bytes",
+        emit: more::dword_to_bytes,
+    },
+    Block {
+        kind: "number_change",
+        emit: more::number_change,
+    },
+    Block {
+        kind: "string_change",
+        emit: more::string_change,
+    },
+    Block {
+        kind: "pid",
+        emit: more::pid,
+    },
+    Block {
+        kind: "scale_table",
+        emit: more::scale_table,
+    },
+    Block {
+        kind: "text_const",
+        emit: text::text_const,
+    },
+    Block {
+        kind: "text_concat",
+        emit: text::text_concat,
+    },
+    Block {
+        kind: "text_length",
+        emit: text::text_length,
+    },
+    Block {
+        kind: "num_to_text",
+        emit: text::num_to_text,
+    },
+    Block {
+        kind: "text_compare",
+        emit: text::text_compare,
+    },
+    Block {
+        kind: "text_to_num",
+        emit: text::text_to_num,
+    },
+    Block {
+        kind: "text_substring",
+        emit: text::text_substring,
+    },
+    Block {
+        kind: "text_find",
+        emit: text::text_find,
+    },
+    Block {
+        kind: "text_char",
+        emit: text::text_char,
+    },
+    Block {
+        kind: "text_add_char",
+        emit: text::text_add_char,
+    },
+    Block {
+        kind: "ip_to_text",
+        emit: text::ip_to_text,
+    },
+    Block {
+        kind: "text_to_ip",
+        emit: text::text_to_ip,
     },
 ];
 
@@ -343,7 +502,7 @@ pub fn behavior(kind: &str) -> Option<Box<dyn Behavior>> {
             let idx = (c.input(0).max(0.0) as usize).min(count - 1);
             o[0] = c.input(1 + idx);
         }),
-        _ => None,
+        _ => more::behavior(kind).or_else(|| text::behavior(kind)),
     }
 }
 

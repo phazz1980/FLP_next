@@ -39,17 +39,15 @@ fn logic_roundtrips_through_toml_and_json() {
 fn load_library() {
     let (lib, errors) = Library::load(repo_path("library")).unwrap();
     assert!(errors.is_empty(), "{errors:?}");
-    for kind in [
-        "digital_in",
-        "digital_out",
-        "analog_in",
-        "bit_and",
-        "pwm_out",
-    ] {
+    for kind in ["digital_in", "digital_out", "analog_in", "pwm_out"] {
         let block = lib.get(kind).unwrap_or_else(|| panic!("нет блока {kind}"));
         assert!(block.template_path(ESP32_CPP_TEMPLATE).is_some(), "{kind}");
         assert!(block.docs_path().is_some(), "{kind}");
     }
+    // Built-in Rust blocks keep only the description and docs in the library.
+    let block = lib.get("bit_and").unwrap();
+    assert!(block.template_path(ESP32_CPP_TEMPLATE).is_none());
+    assert!(block.docs_path().is_some());
 }
 
 #[test]

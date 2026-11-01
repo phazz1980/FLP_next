@@ -91,6 +91,8 @@ fn compare(zig: &Path, sc: &Scenario) {
             }
             inputs[i] = match def.inputs[i].ty {
                 SignalType::Bool => 1.0 - inputs[i],
+                // Eighths are exact in 32 bits, so rounding modes get real fractions.
+                SignalType::Float => f64::from(((seed >> 4) % 1601) as i32 - 800) / 8.0,
                 _ => f64::from(((seed >> 4) % 201) as i32 - 100),
             };
         }
@@ -110,7 +112,9 @@ fn compare(zig: &Path, sc: &Scenario) {
         for (i, port) in def.outputs.iter().enumerate() {
             // The firmware computes floats in 32 bits, the simulation in 64.
             let same = if port.ty == SignalType::Float {
-                (got[i] - outputs[i]).abs() <= 1e-4 * outputs[i].abs().max(1.0)
+                (got[i].is_nan() && outputs[i].is_nan())
+                    || got[i] == outputs[i]
+                    || (got[i] - outputs[i]).abs() <= 1e-4 * outputs[i].abs().max(1.0)
             } else {
                 got[i] == outputs[i]
             };
@@ -162,6 +166,31 @@ fn builtin_cpp_matches_the_behaviour() {
         "switch",
         "mux",
         "constant",
+        "abs",
+        "sq",
+        "sqrt",
+        "pow",
+        "sin",
+        "cos",
+        "tan",
+        "float_to_int",
+        "int_to_float",
+        "random",
+        "bit_and",
+        "bit_or",
+        "bit_xor",
+        "bit_not",
+        "bit_read",
+        "bit_write",
+        "bit_change",
+        "bits_to_byte",
+        "byte_to_bits",
+        "bytes_to_word",
+        "word_to_bytes",
+        "bytes_to_dword",
+        "dword_to_bytes",
+        "number_change",
+        "pid",
     ]
     .into_iter()
     .map(scenario)
@@ -197,6 +226,38 @@ fn builtin_cpp_matches_the_behaviour() {
             ],
         ),
     ]);
+    for kind in ["sin", "cos", "tan"] {
+        list.push(with(kind, vec![("unit", ParamValue::Int(1))]));
+    }
+    for mode in 1..4 {
+        list.push(with("float_to_int", vec![("mode", ParamValue::Int(mode))]));
+    }
+    for bit in [0, 3, 31] {
+        for kind in ["bit_read", "bit_write", "bit_change"] {
+            list.push(with(kind, vec![("bit", ParamValue::Int(bit))]));
+        }
+    }
+    list.push(with(
+        "random",
+        vec![
+            ("min", ParamValue::Float(-5.0)),
+            ("max", ParamValue::Float(7.5)),
+        ],
+    ));
+    list.push(with(
+        "number_change",
+        vec![("deadband", ParamValue::Float(2.5))],
+    ));
+    list.push(with(
+        "pid",
+        vec![
+            ("kp", ParamValue::Float(2.0)),
+            ("ki", ParamValue::Float(0.5)),
+            ("kd", ParamValue::Float(0.1)),
+            ("out_min", ParamValue::Float(-50.0)),
+            ("out_max", ParamValue::Float(50.0)),
+        ],
+    ));
     for op in 0..6 {
         list.push(with("compare", vec![("op", ParamValue::Int(op))]));
     }

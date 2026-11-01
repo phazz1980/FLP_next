@@ -1,4 +1,4 @@
-//! A simulation module built from a text block template must behave like the built-in
+//! A simulation module built from the C++ of a built-in text block must behave like the built-in
 //! implementation of the same block (blocks written in Rust are checked in `builtin_cpp`). Needs a real compiler:
 //! `FLP_ZIG=<path to zig> cargo test -p flp-sim --test template`.
 
@@ -27,14 +27,15 @@ fn number(kind: ParamKind, value: &ParamValue) -> f64 {
     }
 }
 
-/// Text blocks: the module built from the template gives the same texts and numbers as
+/// Text blocks: the module built from the C++ gives the same texts and numbers as
 /// the built-in implementation, for a set of input texts.
 fn compare_text(zig: &Path, kind: &str, samples: &[&[&str]]) {
     let dir = repo("library").join(kind);
     let def: BlockDef =
         toml::from_str(&std::fs::read_to_string(dir.join("block.toml")).unwrap()).unwrap();
-    let template = std::fs::read_to_string(dir.join("esp32.cpp.tmpl")).unwrap();
-    let source = flp_codegen::sim_source(&def, &template).unwrap_or_else(|e| panic!("{kind}: {e}"));
+    let block = flp_blocks::get(kind).unwrap_or_else(|| panic!("{kind}: no built-in block"));
+    let source =
+        flp_codegen::sim_source_builtin(&def, block).unwrap_or_else(|e| panic!("{kind}: {e}"));
     let out = std::env::temp_dir().join(format!("flp-sim-text-{kind}-{}", std::process::id()));
     std::fs::create_dir_all(&out).unwrap();
     flp_build::wasm::build_module(zig, &out, &source).unwrap_or_else(|e| panic!("{kind}: {e}"));

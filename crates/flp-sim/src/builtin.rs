@@ -47,9 +47,6 @@ pub fn behavior(kind: &str) -> Option<Box<dyn Behavior>> {
             Some(Box::new(Sink))
         }
         "mqtt_publish" => Some(Box::<MqttPublish>::default()),
-        kind if text::is_text_block(kind) => Some(Box::new(text::TextBlock(kind.to_owned()))),
         _ => flp_blocks::behavior(kind),
     }
 }
-
-mod text;

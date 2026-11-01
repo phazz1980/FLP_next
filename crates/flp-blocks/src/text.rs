@@ -1,7 +1,8 @@
 //! Built-in blocks of the "Строки" group. Texts are bytes like Arduino `String`:
 //! positions and lengths count bytes.
 
-use super::{b, Behavior, Ctx};
+use crate::cpp::{CppCtx, CppParts, Lines, Raw};
+use crate::{b, Behavior, Ctx};
 
 const KINDS: [&str; 12] = [
     "ip_to_text",
@@ -18,8 +19,11 @@ const KINDS: [&str; 12] = [
     "text_add_char",
 ];
 
-pub fn is_text_block(kind: &str) -> bool {
-    KINDS.contains(&kind)
+/// Behaviour of a string block, or `None` for another type.
+pub fn behavior(kind: &str) -> Option<Box<dyn Behavior>> {
+    KINDS
+        .contains(&kind)
+        .then(|| Box::new(TextBlock(kind.to_owned())) as Box<dyn Behavior>)
 }
 
 /// A string block; it has no state, so one type serves all of them.
@@ -149,6 +153,228 @@ fn parse_ip(text: &str) -> Option<[u8; 4]> {
         *part = s.parse().ok()?;
     }
     it.next().is_none().then_some(parts)
+}
+
+fn looped(code: String) -> CppParts {
+    CppParts {
+        looped: code,
+        ..Default::default()
+    }
+}
+
+/// Fills `@NAME@` marks of a code fragment; the marks keep braces readable.
+fn fill(code: &str, marks: &[(&str, &str)]) -> String {
+    marks.iter().fold(code.to_owned(), |code, (name, value)| {
+        code.replace(&format!("@{name}@"), value)
+    })
+}
+
+pub(crate) fn text_const(e: &CppCtx) -> CppParts {
+    CppParts {
+        setup: format!("{} = {};", e.output("out"), e.param("value")),
+        ..Default::default()
+    }
+}
+
+pub(crate) fn text_concat(e: &CppCtx) -> CppParts {
+    const PORTS: [&str; 15] = [
+        "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p",
+    ];
+    let count = e.int("count", 2).clamp(1, 16) as usize;
+    let out = e.output("out");
+    let mut l = Lines::default();
+    l.line(format!("{out} = {};", e.input("a")));
+    for port in &PORTS[..count - 1] {
+        l.line(format!("{out} += {};", e.param("separator")))
+            .line(format!("{out} += {};", e.input(port)));
+    }
+    looped(l.finish())
+}
+
+pub(crate) fn text_length(e: &CppCtx) -> CppParts {
+    looped(format!(
+        "{} = (int32_t){}.length();",
+        e.output("out"),
+        e.input("in")
+    ))
+}
+
+pub(crate) fn num_to_text(e: &CppCtx) -> CppParts {
+    let out = e.output("out");
+    let mut l = Lines::default();
+    l.line(format!("{out} = {};", e.param("prefix")))
+        .line(format!(
+            "{out} += String({}, {});",
+            e.input("in"),
+            e.param("decimals")
+        ))
+        .line(format!("{out} += {};", e.param("suffix")));
+    looped(l.finish())
+}
+
+pub(crate) fn text_compare(e: &CppCtx) -> CppParts {
+    let (out, a, b) = (e.output("out"), e.input("a"), e.param("b"));
+    let mode = e.int("mode", 0);
+    let mut l = Lines::default();
+    if matches!(e.value.get("ignore_case"), Some(Raw::Bool(true))) {
+        l.line("{")
+            .line(format!("  String a = {a};"))
+            .line(format!("  String b = {b};"))
+            .line("  a.toLowerCase();")
+            .line("  b.toLowerCase();")
+            .line(match mode {
+                1 => format!("  {out} = a.indexOf(b) >= 0;"),
+                2 => format!("  {out} = a.startsWith(b);"),
+                3 => format!("  {out} = a.endsWith(b);"),
+                _ => format!("  {out} = a == b;"),
+            })
+            .line("}");
+    } else {
+        l.line(match mode {
+            1 => format!("{out} = {a}.indexOf({b}) >= 0;"),
+            2 => format!("{out} = {a}.startsWith({b});"),
+            3 => format!("{out} = {a}.endsWith({b});"),
+            _ => format!("{out} = {a} == {b};"),
+        });
+    }
+    looped(l.finish())
+}
+
+const TEXT_TO_FLOAT: &str = r#"// Number from text: spaces around are skipped, a decimal comma is accepted.
+bool flp_text_to_float(const String& text, float& out) {
+  String t = text;
+  t.trim();
+  t.replace(',', '.');
+  if (t.length() == 0) {
+    return false;
+  }
+  char* end = nullptr;
+  double v = strtod(t.c_str(), &end);
+  if (end == t.c_str() || *end != '\0') {
+    return false;
+  }
+  out = (float)v;
+  return true;
+}"#;
+
+pub(crate) fn text_to_num(e: &CppCtx) -> CppParts {
+    let (out, ok) = (e.output("out"), e.output("ok"));
+    let mut l = Lines::default();
+    l.line("{")
+        .line("  float v;")
+        .line(format!("  {ok} = flp_text_to_float({}, v);", e.input("in")))
+        .line(format!("  if ({ok}) {{"))
+        .line(format!("    {out} = v;"))
+        .line("  }")
+        .line("}");
+    CppParts {
+        once_functions: TEXT_TO_FLOAT.to_owned(),
+        looped: l.finish(),
+        ..Default::default()
+    }
+}
+
+pub(crate) fn text_substring(e: &CppCtx) -> CppParts {
+    let (out, input, start) = (e.output("out"), e.input("in"), e.param("start"));
+    looped(if e.int("len", -1) < 0 {
+        format!("{out} = {input}.substring({start});")
+    } else {
+        format!(
+            "{out} = {input}.substring({start}, {start} + {});",
+            e.param("len")
+        )
+    })
+}
+
+pub(crate) fn text_find(e: &CppCtx) -> CppParts {
+    let (pos, found) = (e.output("pos"), e.output("found"));
+    let mut l = Lines::default();
+    l.line(format!(
+        "{pos} = {}.indexOf({}, {});",
+        e.input("text"),
+        e.input("sub"),
+        e.param("from")
+    ))
+    .line(format!("{found} = {pos} >= 0;"));
+    looped(l.finish())
+}
+
+pub(crate) fn text_char(e: &CppCtx) -> CppParts {
+    let (text, index) = (e.input("text"), e.input("index"));
+    let (code, ch) = (e.output("code"), e.output("char"));
+    let mut l = Lines::default();
+    l.line(format!(
+        "if ({index} >= 0 && {index} < (int){text}.length()) {{"
+    ))
+    .line(format!("  {code} = (uint8_t){text}[{index}];"))
+    .line(format!("  {ch} = {text}.substring({index}, {index} + 1);"))
+    .line("} else {")
+    .line(format!("  {code} = 0;"))
+    .line(format!("  {ch} = \"\";"))
+    .line("}");
+    looped(l.finish())
+}
+
+pub(crate) fn text_add_char(e: &CppCtx) -> CppParts {
+    let out = e.output("out");
+    let mut l = Lines::default();
+    l.line(format!("{out} = {};", e.input("text")))
+        .line(format!("{out} += (char)({} & 0xFF);", e.input("code")));
+    looped(l.finish())
+}
+
+pub(crate) fn ip_to_text(e: &CppCtx) -> CppParts {
+    let byte = |port| format!("String({} & 0xFF)", e.input(port));
+    looped(format!(
+        "{} = {} + \".\" + {} + \".\" + {} + \".\" + {};",
+        e.output("out"),
+        byte("a"),
+        byte("b"),
+        byte("c"),
+        byte("d")
+    ))
+}
+
+const TEXT_TO_IP: &str = r#"{
+  int v[4] = {0, 0, 0, 0};
+  int part = 0;
+  bool digits = false;
+  bool good = true;
+  for (unsigned int i = 0; i < @IN@.length() && good; i++) {
+    char ch = @IN@[i];
+    if (ch >= '0' && ch <= '9') {
+      v[part] = v[part] * 10 + (ch - '0');
+      digits = true;
+      if (v[part] > 255) good = false;
+    } else if (ch == '.' && digits && part < 3) {
+      part++;
+      digits = false;
+    } else {
+      good = false;
+    }
+  }
+  good = good && digits && part == 3;
+  if (good) {
+    @A@ = v[0];
+    @B@ = v[1];
+    @C@ = v[2];
+    @D@ = v[3];
+  }
+  @OK@ = good;
+}"#;
+
+pub(crate) fn text_to_ip(e: &CppCtx) -> CppParts {
+    looped(fill(
+        TEXT_TO_IP,
+        &[
+            ("IN", e.input("in")),
+            ("A", e.output("a")),
+            ("B", e.output("b")),
+            ("C", e.output("c")),
+            ("D", e.output("d")),
+            ("OK", e.output("ok")),
+        ],
+    ))
 }
 
 #[cfg(test)]
