@@ -87,8 +87,12 @@ impl Context for FolderContext {
         let project = self.project.without_disabled();
         let program = Program::build(&project, &self.lib).map_err(|e| e.to_string())?;
         let table = flp_codegen::debug::debug_table(&program);
-        let session =
-            flp_debug::Session::start(table.clone(), flp_debug::transport::serial(&port), || {});
+        let session = flp_debug::Session::start_with(
+            table.clone(),
+            flp_debug::transport::serial(&port),
+            self.project.config.project.password.clone(),
+            || {},
+        );
         // Wait for a full set of values or give up after a few seconds.
         let mut live = session.snapshot();
         for _ in 0..30 {

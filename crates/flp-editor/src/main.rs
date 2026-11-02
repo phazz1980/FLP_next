@@ -31,6 +31,7 @@ mod mcp_host;
 mod netpanel;
 mod panels;
 mod pictures;
+mod pullview;
 mod report;
 mod selfupdate;
 mod simview;

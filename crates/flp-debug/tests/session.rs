@@ -13,6 +13,8 @@ use flp_debug::{Command, DebugTable, Entry, Session, Source, TextEntry, Transpor
 #[derive(Default)]
 struct Board {
     fingerprint: u32,
+    /// Protocol version the board reports.
+    version: u8,
     values: Vec<u32>,
     forced: Vec<Option<u32>>,
     /// Bytes received in `TEXT_IN` frames.
@@ -20,6 +22,10 @@ struct Board {
     out: VecDeque<u8>,
     parser: Parser,
     last_values: Option<Instant>,
+    seq: u16,
+    /// Password gate: salt and access key; `authed` once the host proved the password.
+    gate: Option<([u8; 16], [u8; 32])>,
+    authed: bool,
 }
 
 impl Board {
@@ -28,11 +34,45 @@ impl Board {
             let Event::Frame { kind, payload } = event else {
                 continue;
             };
+            if let Some((salt, key)) = self.gate {
+                match kind {
+                    protocol::AUTH_REQ => {
+                        let mut p = salt.to_vec();
+                        p.extend_from_slice(&[5; 16]);
+                        self.out
+                            .extend(protocol::encode(protocol::AUTH_CHALLENGE, &p));
+                        continue;
+                    }
+                    protocol::AUTH => {
+                        let ok = payload == flp_core::protect::auth_proof(&key, &[5; 16]);
+                        self.authed = ok;
+                        let frame = if ok {
+                            protocol::AUTH_OK
+                        } else {
+                            protocol::AUTH_FAIL
+                        };
+                        self.out.extend(protocol::encode(frame, &[]));
+                        if ok {
+                            // The firmware repeats `HELLO`, now unlocked.
+                            self.handle(&protocol::encode(protocol::HELLO_REQ, &[]));
+                        }
+                        continue;
+                    }
+                    protocol::HELLO_REQ => {}
+                    _ if !self.authed => continue,
+                    _ => {}
+                }
+            }
             match kind {
                 protocol::HELLO_REQ => {
                     let mut p = self.fingerprint.to_le_bytes().to_vec();
                     p.extend_from_slice(&(self.values.len() as u16).to_le_bytes());
-                    p.push(protocol::VERSION);
+                    p.push(self.version);
+                    p.extend_from_slice(&(table().image_layout().size as u16).to_le_bytes());
+                    p.push(u8::from(self.gate.is_some() && !self.authed));
+                    // Zeros while locked, like the firmware.
+                    let hidden = self.gate.is_some() && !self.authed;
+                    p.extend_from_slice(&if hidden { [0; 8] } else { HASH });
                     self.out.extend(protocol::encode(protocol::HELLO, &p));
                 }
                 protocol::FORCE => {
@@ -53,6 +93,9 @@ impl Board {
 
     /// Sends one scan of values every 20 ms, as the firmware does every 100 ms.
     fn tick(&mut self) {
+        if self.gate.is_some() && !self.authed {
+            return;
+        }
         if self
             .last_values
             .is_some_and(|t| t.elapsed() < Duration::from_millis(20))
@@ -66,12 +109,23 @@ impl Board {
             .zip(&self.forced)
             .map(|(v, f)| f.unwrap_or(*v))
             .collect();
-        let mut p = vec![0, 0, 0, 0, current.len() as u8];
-        for v in current {
-            p.extend_from_slice(&v.to_le_bytes());
+        // The image as the firmware lays it out; sent in two pieces to test assembly.
+        let layout = table().image_layout();
+        let mut image = vec![0u8; layout.size];
+        for (v, slot) in current.iter().zip(&layout.slots) {
+            let bytes = v.to_le_bytes();
+            image[slot.offset..slot.offset + slot.kind.size()]
+                .copy_from_slice(&bytes[..slot.kind.size()]);
         }
+        self.seq = self.seq.wrapping_add(1);
+        let cut = image.len() / 2;
         self.out.extend(b"debug print\n");
-        self.out.extend(protocol::encode(protocol::VALUES, &p));
+        for (offset, part) in [(0, &image[..cut]), (cut, &image[cut..])] {
+            let mut p = self.seq.to_le_bytes().to_vec();
+            p.extend_from_slice(&(offset as u16).to_le_bytes());
+            p.extend_from_slice(part);
+            self.out.extend(protocol::encode(protocol::IMAGE, &p));
+        }
         let mut text = vec![0, 0];
         text.extend_from_slice("P=2.5 бар".as_bytes());
         self.out.extend(protocol::encode(protocol::TEXT, &text));
@@ -97,6 +151,8 @@ impl Transport for FakePort {
         Ok(())
     }
 }
+
+const HASH: [u8; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
 
 fn table() -> DebugTable {
     DebugTable {
@@ -124,6 +180,7 @@ fn table() -> DebugTable {
 fn start(fingerprint: u32) -> (Session, Arc<Mutex<Board>>) {
     let board = Arc::new(Mutex::new(Board {
         fingerprint,
+        version: protocol::VERSION,
         values: vec![1, 21.5f32.to_bits()],
         forced: vec![None, None],
         ..Default::default()
@@ -216,4 +273,75 @@ fn console_input_goes_in_chunks() {
         thread::sleep(Duration::from_millis(10));
     }
     assert_eq!(board.lock().unwrap().text_in, long);
+}
+
+#[test]
+fn old_protocol_is_reported() {
+    let board = Arc::new(Mutex::new(Board {
+        fingerprint: table().fingerprint(),
+        version: 2,
+        values: vec![1, 21.5f32.to_bits()],
+        forced: vec![None, None],
+        ..Default::default()
+    }));
+    let shared = board.clone();
+    let session = Session::start(
+        table(),
+        Box::new(move || Ok(Box::new(FakePort(shared.clone())) as Box<dyn Transport>)),
+        || {},
+    );
+    let live = wait_for(&session, |l| l.schema_matches.is_some());
+    assert_eq!(live.schema_matches, Some(false));
+    assert!(live.status.contains("старый протокол"), "{}", live.status);
+    thread::sleep(Duration::from_millis(100));
+    assert!(session.snapshot().values.iter().all(Option::is_none));
+}
+
+fn start_locked(board_password: &str, host_password: &str) -> Session {
+    let salt = [4u8; 16];
+    let board = Arc::new(Mutex::new(Board {
+        fingerprint: table().fingerprint(),
+        version: protocol::VERSION,
+        values: vec![1, 21.5f32.to_bits()],
+        forced: vec![None, None],
+        gate: Some((salt, flp_core::protect::auth_key(board_password, &salt))),
+        ..Default::default()
+    }));
+    Session::start_with(
+        table(),
+        Box::new(move || Ok(Box::new(FakePort(board.clone())) as Box<dyn Transport>)),
+        host_password.to_owned(),
+        || {},
+    )
+}
+
+#[test]
+fn locked_board_opens_with_the_password() {
+    let session = start_locked("секрет", "секрет");
+    let live = wait_for(&session, |l| l.values.iter().all(Option::is_some));
+    assert_eq!(live.schema_matches, Some(true));
+    assert!(!live.needs_password);
+    assert_eq!(live.project_hash, Some(HASH));
+    assert_eq!(live.values[0], Some(Value::Bool(true)));
+}
+
+#[test]
+fn locked_board_waits_for_a_password_and_takes_it_later() {
+    let session = start_locked("секрет", "");
+    let live = wait_for(&session, |l| l.needs_password);
+    assert!(live.needs_password && live.values.iter().all(Option::is_none));
+    assert_eq!(live.project_hash, None, "hidden until sign-in");
+    assert!(live.status.contains("пароль"), "{}", live.status);
+    session.send(Command::Password("секрет".into()));
+    let live = wait_for(&session, |l| l.values.iter().all(Option::is_some));
+    assert!(!live.needs_password);
+    assert_eq!(live.schema_matches, Some(true));
+}
+
+#[test]
+fn locked_board_turns_a_wrong_password_away() {
+    let session = start_locked("секрет", "другой");
+    let live = wait_for(&session, |l| l.status.contains("Неверный пароль"));
+    assert!(live.status.contains("Неверный пароль"), "{}", live.status);
+    assert!(live.values.iter().all(Option::is_none));
 }

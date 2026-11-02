@@ -1,5 +1,5 @@
 // Сгенерировано CrabLogic из проекта «net_setup». Ручные правки будут перезаписаны.
-// Порядок выполнения: ui → head → head2 → host → user → mpass → broker → head3 → st_mqtt → wifi_1 → web_input_1 → web_input_2
+// Порядок выполнения: ui → head → ssid → pass → head2 → host → user → cid → mpass → broker → ota → wifi → head3 → st_wifi → st_mqtt → st_ip
 
 #define FLPROG_MQTT_MAX_SUBSCRIPTIONS 4U
 
@@ -8,17 +8,26 @@
 #include <flprogWebServer.h>
 #include <service/flprogNetworkOta.h>
 #include <Update.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
 
 // Выходы блоков
+String ssid_out = String();
+String pass_out = String();
 String host_out = String();
 String user_out = String();
+String cid_out = String();
 String mpass_out = String();
 bool broker_connected = false;
 int32_t broker_error = 0;
-bool wifi_1_ready = false;
-String wifi_1_address = String();
-float web_input_1_out = 0.0f;
-float web_input_2_out = 0.0f;
+String ota_out = String();
+bool wifi_ready = false;
+bool wifi_ap_ready = false;
+String wifi_address = String();
+
+// Обмен сигналами между основной и фоновой задачами
+SemaphoreHandle_t flp_bg_lock;
 
 // web_ui: общий код
 // Web interface registry: widget blocks register their items, the web_ui block serves them.
@@ -281,20 +290,32 @@ F('/ui/layout').then(function(r){if(r.status==403){lg(K!='');throw 0}return r.js
 // head: web_label
 FlpUiItem head_ui = {"web_label", "Wi-Fi", "", 1, 1, 24, 2, 1, false, 0, 0, 0, 0, 0};
 
+// ssid: web_text_input
+// The `lo` field marks a secret (password) field; the text lives in `text`.
+FlpUiItem ssid_ui = {"web_textin", "Имя сети (SSID)", "", 1, 3, 12, 2, 1, true, 0, 0, 0, 0, 0};
+
+// pass: web_text_input
+// The `lo` field marks a secret (password) field; the text lives in `text`.
+FlpUiItem pass_ui = {"web_textin", "Пароль сети", "", 13, 3, 12, 2, 1, true, 0, 1, 0, 0, 0};
+
 // head2: web_label
-FlpUiItem head2_ui = {"web_label", "MQTT и обновление", "", 1, 3, 24, 2, 1, false, 0, 0, 0, 0, 0};
+FlpUiItem head2_ui = {"web_label", "MQTT и обновление", "", 1, 5, 24, 2, 1, false, 0, 0, 0, 0, 0};
 
 // host: web_text_input
 // The `lo` field marks a secret (password) field; the text lives in `text`.
-FlpUiItem host_ui = {"web_textin", "Брокер", "", 1, 5, 6, 2, 1, true, 0, 0, 0, 0, 0};
+FlpUiItem host_ui = {"web_textin", "Брокер", "", 1, 7, 12, 2, 1, true, 0, 0, 0, 0, 0};
 
 // user: web_text_input
 // The `lo` field marks a secret (password) field; the text lives in `text`.
-FlpUiItem user_ui = {"web_textin", "Логин", "", 1, 9, 6, 2, 1, true, 0, 0, 0, 0, 0};
+FlpUiItem user_ui = {"web_textin", "Логин", "", 13, 7, 12, 2, 1, true, 0, 0, 0, 0, 0};
+
+// cid: web_text_input
+// The `lo` field marks a secret (password) field; the text lives in `text`.
+FlpUiItem cid_ui = {"web_textin", "Client ID", "", 1, 9, 12, 2, 1, true, 0, 0, 0, 0, 0};
 
 // mpass: web_text_input
 // The `lo` field marks a secret (password) field; the text lives in `text`.
-FlpUiItem mpass_ui = {"web_textin", "Пароль MQTT", "", 1, 11, 6, 2, 1, true, 0, 1, 0, 0, 0};
+FlpUiItem mpass_ui = {"web_textin", "Пароль MQTT", "", 13, 9, 12, 2, 1, true, 0, 1, 0, 0, 0};
 
 // broker: mqtt
 // Settings signature (FNV-1a): compared every cycle without building a String.
@@ -314,45 +335,58 @@ String flpMqttTopic;
 String flpMqttPayload;
 uint32_t flpMqttSeq = 0;
 
-// head3: web_label
-FlpUiItem head3_ui = {"web_label", "Состояние", "", 1, 17, 24, 2, 1, false, 0, 0, 0, 0, 0};
+// ota: web_text_input
+// The `lo` field marks a secret (password) field; the text lives in `text`.
+FlpUiItem ota_ui = {"web_textin", "Пароль OTA", "", 1, 11, 12, 2, 1, true, 0, 1, 0, 0, 0};
 
-// st_mqtt: web_led
-FlpUiItem st_mqtt_ui = {"web_led", "Брокер на связи", "", 9, 19, 8, 2, 1, false, 0, 0, 0, 0, 0};
-
-// wifi_1: wifi
+// wifi: wifi
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgOnBoardWifiInterface flpWifi;
 // Network services (MQTT, web, OTA) are polled at most once per period.
-uint32_t wifi_1_net_t = 0;
-bool wifi_1_net_due = true;
+uint32_t wifi_net_t = 0;
+bool wifi_net_due = true;
 // Applied radio state: 0 off, 1 client, 2 access point, 3 both; 255 not yet.
-uint8_t wifi_1_state = 255;
+uint8_t wifi_state = 255;
+// Settings signature (FNV-1a): compared every cycle without building a String.
+uint32_t wifi_cfg = 0;
+bool wifi_cfg_set = false;
+static void wifi_mix(uint32_t &h, const char *s) {
+  for (; *s; s++) h = (h ^ (uint8_t)*s) * 16777619u;
+  h = (h ^ '|') * 16777619u;
+}
+static void wifi_mix(uint32_t &h, const String &s) { wifi_mix(h, s.c_str()); }
 // Address shown on the address output; the text is rebuilt only when it changes.
-uint32_t wifi_1_ip_raw = 0;
+uint32_t wifi_ip_raw = 0;
 // Web server (port 80): the web_ui block adds its pages to it.
-FLProgWebServer wifi_1_web(&flpWifi, 80);
+FLProgWebServer wifi_web(&flpWifi, 80);
 // Shared web server: the web_ui block adds its pages to it.
-FLProgWebServer &flpWebSrv = wifi_1_web;
+FLProgWebServer &flpWebSrv = wifi_web;
 // Update over the network (ArduinoOTA through the shared interface).
-FLProgNetworkOta wifi_1_ota;
-bool wifi_1_ota_on = false;
+FLProgNetworkOta wifi_ota;
+bool wifi_ota_on = false;
+String wifi_ota_pass;
 #define FLP_WEB_UPD 1
 // Firmware upload from the web page: raw HTTP POST streamed into Update (port 8080).
-FLProgNetworkTcpServer wifi_1_up;
-FLProgNetworkTcpServerClient *wifi_1_up_c = nullptr;
-bool wifi_1_up_on = false;
-uint8_t wifi_1_up_st = 0;  // 0 idle, 1 headers, 2 body, 3 done (restart pending)
-char wifi_1_up_line[160];
-uint8_t wifi_1_up_ll = 0;
-uint32_t wifi_1_up_len = 0, wifi_1_up_got = 0, wifi_1_up_t = 0, wifi_1_up_try = 0;
-bool wifi_1_up_auth = false;
+FLProgNetworkTcpServer wifi_up;
+FLProgNetworkTcpServerClient *wifi_up_c = nullptr;
+bool wifi_up_on = false;
+uint8_t wifi_up_st = 0;  // 0 idle, 1 headers, 2 body, 3 done (restart pending)
+char wifi_up_line[160];
+uint8_t wifi_up_ll = 0;
+uint32_t wifi_up_len = 0, wifi_up_got = 0, wifi_up_t = 0, wifi_up_try = 0;
+bool wifi_up_auth = false;
 
-// web_input_1: web_input
-FlpUiItem web_input_1_ui = {"web_input", "Веб-ввод числа", "", 1, 7, 6, 2, 1, true, 0.0f, 0.0f, 0.0f, 1.0f, 3};
+// head3: web_label
+FlpUiItem head3_ui = {"web_label", "Состояние", "", 1, 13, 24, 2, 1, false, 0, 0, 0, 0, 0};
 
-// web_input_2: web_input
-FlpUiItem web_input_2_ui = {"web_input", "Веб-ввод числа", "", 1, 23, 8, 2, 1, true, 0.0f, 0.0f, 0.0f, 1.0f, 3};
+// st_wifi: web_led
+FlpUiItem st_wifi_ui = {"web_led", "Wi-Fi подключён", "", 1, 15, 8, 2, 1, false, 0, 0, 0, 0, 0};
+
+// st_mqtt: web_led
+FlpUiItem st_mqtt_ui = {"web_led", "Брокер на связи", "", 9, 15, 8, 2, 1, false, 0, 0, 0, 0, 0};
+
+// st_ip: web_text
+FlpUiItem st_ip_ui = {"web_text", "Адрес в сети", "", 17, 15, 8, 2, 1, false, 0, 0, 0, 0, 0};
 
 // mqtt: общий код
 void flp_mqtt_receive(const char *topic, const uint8_t *payload, size_t length, bool retained) {
@@ -391,7 +425,8 @@ static uint32_t broker_signature() {
   broker_mix(cfg, (host_out));
   broker_mix(cfg, (user_out));
   broker_mix(cfg, (mpass_out));
-  cfg = (cfg ^ (uint32_t)((1883))) * 16777619u;
+  broker_mix(cfg, (cid_out));
+  cfg = (cfg ^ (uint32_t)(1883)) * 16777619u;
   return cfg;
 }
 
@@ -580,133 +615,327 @@ void ui_info(FLProgNetworkHttpServer *server) {
   server->send(200, "application/json", o);
 }
 
-// wifi_1: wifi
-void wifi_1_up_reply(const char *status, const char *text) {
+// wifi: wifi
+void wifi_up_reply(const char *status, const char *text) {
   String r = String("HTTP/1.1 ") + status + "\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\nContent-Length: " + String(strlen(text)) + "\r\n\r\n" + text;
-  wifi_1_up_c->write((const uint8_t *)r.c_str(), r.length());
+  wifi_up_c->write((const uint8_t *)r.c_str(), r.length());
 }
 
-void wifi_1_up_fail(const char *status, const char *text) {
-  if (wifi_1_up_st == 2) {
+void wifi_up_fail(const char *status, const char *text) {
+  if (wifi_up_st == 2) {
     Update.abort();
   }
-  wifi_1_up_reply(status, text);
-  wifi_1_up_c->stop();
-  wifi_1_up_c = nullptr;
-  wifi_1_up_st = 0;
+  wifi_up_reply(status, text);
+  wifi_up_c->stop();
+  wifi_up_c = nullptr;
+  wifi_up_st = 0;
 }
 
 // Header line: the request line is checked for path and password, Content-Length is remembered.
-void wifi_1_up_header_line() {
-  char *l = wifi_1_up_line;
+void wifi_up_header_line() {
+  char *l = wifi_up_line;
   if (strncmp(l, "POST /update", 12) == 0) {
-    String expect = String("?p=") + "" + " ";
-    wifi_1_up_auth = strlen("") == 0 || strstr(l, expect.c_str()) != nullptr;
+    String expect = String("?p=") + String((ota_out)).c_str() + " ";
+    wifi_up_auth = strlen(String((ota_out)).c_str()) == 0 || strstr(l, expect.c_str()) != nullptr;
   } else if (strncasecmp(l, "Content-Length:", 15) == 0) {
-    wifi_1_up_len = (uint32_t)strtoul(l + 15, nullptr, 10);
+    wifi_up_len = (uint32_t)strtoul(l + 15, nullptr, 10);
   }
 }
 
-void wifi_1_up_poll() {
-  if (!wifi_1_up_on) {
-    if (millis() - wifi_1_up_try > 2000) {
-      wifi_1_up_try = millis();
-      wifi_1_up_on = wifi_1_up.begin(flpWifi, 8080);
+void wifi_up_poll() {
+  if (!wifi_up_on) {
+    if (millis() - wifi_up_try > 2000) {
+      wifi_up_try = millis();
+      wifi_up_on = wifi_up.begin(flpWifi, 8080);
     }
     return;
   }
-  wifi_1_up.pool();
-  if (wifi_1_up_c == nullptr) {
-    wifi_1_up_c = wifi_1_up.takeNewClient();
-    if (wifi_1_up_c == nullptr) {
+  wifi_up.pool();
+  if (wifi_up_c == nullptr) {
+    wifi_up_c = wifi_up.takeNewClient();
+    if (wifi_up_c == nullptr) {
       return;
     }
-    wifi_1_up_st = 1;
-    wifi_1_up_ll = 0;
-    wifi_1_up_len = 0;
-    wifi_1_up_got = 0;
-    wifi_1_up_auth = false;
-    wifi_1_up_t = millis();
+    wifi_up_st = 1;
+    wifi_up_ll = 0;
+    wifi_up_len = 0;
+    wifi_up_got = 0;
+    wifi_up_auth = false;
+    wifi_up_t = millis();
   }
-  if (wifi_1_up_st == 3) {
-    if (millis() - wifi_1_up_t > 800) {
+  if (wifi_up_st == 3) {
+    if (millis() - wifi_up_t > 800) {
       ESP.restart();
     }
     return;
   }
-  if (!wifi_1_up_c->active() || millis() - wifi_1_up_t > 10000) {
-    if (wifi_1_up_st == 2) {
+  if (!wifi_up_c->active() || millis() - wifi_up_t > 10000) {
+    if (wifi_up_st == 2) {
       Update.abort();
     }
-    wifi_1_up_c->stop();
-    wifi_1_up_c = nullptr;
-    wifi_1_up_st = 0;
+    wifi_up_c->stop();
+    wifi_up_c = nullptr;
+    wifi_up_st = 0;
     return;
   }
-  if (wifi_1_up_st == 1) {
-    for (uint16_t n = 0; n < 512 && wifi_1_up_st == 1; n++) {
-      int b = wifi_1_up_c->read();
+  if (wifi_up_st == 1) {
+    for (uint16_t n = 0; n < 512 && wifi_up_st == 1; n++) {
+      int b = wifi_up_c->read();
       if (b < 0) {
         break;
       }
-      wifi_1_up_t = millis();
+      wifi_up_t = millis();
       if (b == '\n') {
-        wifi_1_up_line[wifi_1_up_ll] = 0;
-        if (wifi_1_up_ll > 0 && wifi_1_up_line[wifi_1_up_ll - 1] == '\r') {
-          wifi_1_up_line[wifi_1_up_ll - 1] = 0;
+        wifi_up_line[wifi_up_ll] = 0;
+        if (wifi_up_ll > 0 && wifi_up_line[wifi_up_ll - 1] == '\r') {
+          wifi_up_line[wifi_up_ll - 1] = 0;
         }
-        bool empty = wifi_1_up_line[0] == 0;
+        bool empty = wifi_up_line[0] == 0;
         if (!empty) {
-          wifi_1_up_header_line();
+          wifi_up_header_line();
         }
-        wifi_1_up_ll = 0;
+        wifi_up_ll = 0;
         if (empty) {
-          if (!wifi_1_up_auth) {
-            wifi_1_up_fail("403 Forbidden", "Неверный пароль");
-          } else if (wifi_1_up_len == 0 || !Update.begin(wifi_1_up_len)) {
-            wifi_1_up_fail("500 Internal Server Error", "Нет места под прошивку");
+          if (!wifi_up_auth) {
+            wifi_up_fail("403 Forbidden", "Неверный пароль");
+          } else if (wifi_up_len == 0 || !Update.begin(wifi_up_len)) {
+            wifi_up_fail("500 Internal Server Error", "Нет места под прошивку");
           } else {
-            wifi_1_up_st = 2;
+            wifi_up_st = 2;
           }
         }
-      } else if (wifi_1_up_ll < sizeof(wifi_1_up_line) - 1) {
-        wifi_1_up_line[wifi_1_up_ll++] = (char)b;
+      } else if (wifi_up_ll < sizeof(wifi_up_line) - 1) {
+        wifi_up_line[wifi_up_ll++] = (char)b;
       }
     }
   }
-  if (wifi_1_up_st == 2) {
-    for (uint8_t n = 0; n < 4 && wifi_1_up_got < wifi_1_up_len; n++) {
+  if (wifi_up_st == 2) {
+    for (uint8_t n = 0; n < 4 && wifi_up_got < wifi_up_len; n++) {
       uint8_t buf[512];
-      uint32_t want = wifi_1_up_len - wifi_1_up_got;
-      int got = wifi_1_up_c->read(buf, want < sizeof(buf) ? want : sizeof(buf));
+      uint32_t want = wifi_up_len - wifi_up_got;
+      int got = wifi_up_c->read(buf, want < sizeof(buf) ? want : sizeof(buf));
       if (got <= 0) {
         break;
       }
-      wifi_1_up_t = millis();
+      wifi_up_t = millis();
       if (Update.write(buf, (size_t)got) != (size_t)got) {
-        wifi_1_up_fail("500 Internal Server Error", "Ошибка записи прошивки");
+        wifi_up_fail("500 Internal Server Error", "Ошибка записи прошивки");
         return;
       }
-      wifi_1_up_got += (uint32_t)got;
+      wifi_up_got += (uint32_t)got;
     }
-    if (wifi_1_up_got >= wifi_1_up_len) {
+    if (wifi_up_got >= wifi_up_len) {
       if (Update.end(true)) {
-        wifi_1_up_reply("200 OK", "Прошивка загружена, устройство перезагружается");
-        wifi_1_up_st = 3;
-        wifi_1_up_t = millis();
+        wifi_up_reply("200 OK", "Прошивка загружена, устройство перезагружается");
+        wifi_up_st = 3;
+        wifi_up_t = millis();
       } else {
-        wifi_1_up_fail("500 Internal Server Error", "Прошивка не принята");
+        wifi_up_fail("500 Internal Server Error", "Прошивка не принята");
       }
     }
   }
 }
 
+// Фоновая задача: ядро 0, блоки плат с признаком «фоновая задача»
+void flp_bg_task(void *) {
+  for (;;) {
+    // ssid: web_text_input
+    ssid_out = ssid_ui.text;
+
+    // pass: web_text_input
+    pass_out = pass_ui.text;
+
+    // host: web_text_input
+    host_out = host_ui.text;
+
+    // user: web_text_input
+    user_out = user_ui.text;
+
+    // cid: web_text_input
+    cid_out = cid_ui.text;
+
+    // mpass: web_text_input
+    mpass_out = mpass_ui.text;
+
+    // broker: mqtt
+    if (!broker_bound) {
+      // Attach once; the client reconnects by itself after that.
+      broker_bound = flpMqtt.begin(flpWifi);
+      if (broker_bound) {
+        flpMqtt.setBroker(String((host_out)).c_str());
+        flpMqtt.setPort(1883);
+        if (String((user_out)).length()) flpMqtt.setCredentials(String((user_out)).c_str(), String((mpass_out)).c_str()); else flpMqtt.clearCredentials();
+        {
+          String cid = String((cid_out));
+          if (!cid.length()) {
+            char auto_id[24];
+            snprintf(auto_id, sizeof(auto_id), "flp-%08lx", (unsigned long)ESP.getEfuseMac());
+            cid = auto_id;
+          }
+          flpMqtt.setClientId(cid.c_str());
+        }
+        flpMqtt.setKeepAlive(60);
+        flpMqtt.setMessageCallback(flp_mqtt_receive);
+        flpMqtt.setAutoReconnect(true);
+        broker_sig = broker_signature();
+        flpMqtt.connect();
+      }
+    } else if (broker_signature() != broker_sig) {
+      // Settings written while running: reconnect with the new ones.
+      broker_sig = broker_signature();
+      flpMqtt.disconnect();
+      flpMqtt.setBroker(String((host_out)).c_str());
+      flpMqtt.setPort(1883);
+      if (String((user_out)).length()) flpMqtt.setCredentials(String((user_out)).c_str(), String((mpass_out)).c_str()); else flpMqtt.clearCredentials();
+      {
+        String cid = String((cid_out));
+        if (!cid.length()) {
+          char auto_id[24];
+          snprintf(auto_id, sizeof(auto_id), "flp-%08lx", (unsigned long)ESP.getEfuseMac());
+          cid = auto_id;
+        }
+        flpMqtt.setClientId(cid.c_str());
+      }
+      flpMqtt.connect();
+    }
+    broker_connected = flpMqtt.connected();
+    broker_error = flpMqtt.error();
+
+    // ota: web_text_input
+    ota_out = ota_ui.text;
+
+    // wifi: wifi
+    {
+      // Settings written while running are applied when they change.
+      uint32_t cfg = 2166136261u;
+      wifi_mix(cfg, (ssid_out));
+      wifi_mix(cfg, (pass_out));
+      wifi_mix(cfg, (true) ? "1" : "0");
+      wifi_mix(cfg, "192.168.1.177");
+      wifi_mix(cfg, "192.168.1.1");
+      wifi_mix(cfg, "255.255.255.0");
+      wifi_mix(cfg, "FLP_ESP32");
+      wifi_mix(cfg, "12345678");
+      if (!wifi_cfg_set || cfg != wifi_cfg) {
+        bool first = !wifi_cfg_set;
+        wifi_cfg_set = true;
+        wifi_cfg = cfg;
+        flpWifi.setClientSsid((ssid_out));
+        flpWifi.setClientPassword((pass_out));
+        if (true) {
+          flpWifi.setDhcp();
+        } else {
+          IPAddress addr;
+          addr.fromString("192.168.1.177");
+          flpWifi.localIP(addr);
+          addr.fromString("192.168.1.1");
+          flpWifi.gateway(addr);
+          flpWifi.dns(addr);
+          addr.fromString("255.255.255.0");
+          flpWifi.subnet(addr);
+          flpWifi.resetDhcp();
+        }
+        flpWifi.setApSsid("FLP_ESP32");
+        flpWifi.setApPassword("12345678");
+        if (!first) {
+          flpWifi.clientOff();
+          flpWifi.apOff();
+          wifi_state = 255;
+        }
+      }
+    }
+    {
+      // Client and access point follow the inputs; switched only when they change.
+      int32_t mode = 2;
+      uint8_t state = (uint8_t)(mode + 1);
+      if (!String((ssid_out)).length()) {
+        state &= ~1;
+      }
+      if (state != wifi_state) {
+        wifi_state = state;
+        if (state & 1) {
+          flpWifi.clientOn();
+        } else {
+          flpWifi.clientOff();
+        }
+        if (state & 2) {
+          flpWifi.apOn();
+        } else {
+          flpWifi.apOff();
+        }
+      }
+    }
+    {
+      uint32_t now = millis();
+      wifi_net_due = (uint32_t)(now - wifi_net_t) >= 5;
+      if (wifi_net_due) {
+        wifi_net_t = now;
+      }
+    }
+    if (wifi_net_due) {
+      flpWifi.pool();
+    }
+    wifi_ready = flpWifi.clientIsReady();
+    wifi_ap_ready = flpWifi.apIsReady();
+    {
+      uint32_t ip = 0;
+      if (flpWifi.clientIsReady()) {
+        ip = (uint32_t)flpWifi.localIP();
+      } else if (flpWifi.apIsReady()) {
+        ip = (uint32_t)flpWifi.accessPointIP();
+      }
+      if (ip != wifi_ip_raw) {
+        wifi_ip_raw = ip;
+        wifi_address = ip ? IPAddress(ip).toString() : String();
+      }
+    }
+    if (wifi_net_due && true) {
+      wifi_web.pool();
+    }
+    if (wifi_net_due && true && true) {
+      wifi_up_poll();
+    }
+    if (wifi_net_due && true) {
+      if (!wifi_ota_on) {
+        wifi_ota_on = true;
+        wifi_ota_pass = String((ota_out)).c_str();
+        if (wifi_ota_pass.c_str()[0] != 0) {
+          wifi_ota.setPasswordValue(wifi_ota_pass.c_str());
+        }
+        wifi_ota.begin(flpWifi);
+      } else if (strcmp(wifi_ota_pass.c_str(), String((ota_out)).c_str()) != 0) {
+        // Password written while running: the next upload asks for the new one.
+        wifi_ota_pass = String((ota_out)).c_str();
+        if (wifi_ota_pass.c_str()[0] != 0) wifi_ota.setPasswordValue(wifi_ota_pass.c_str());
+      }
+      wifi_ota.pool();
+    }
+
+    // st_wifi: web_led
+    st_wifi_ui.value = wifi_ready ? 1 : 0;
+
+    // st_mqtt: web_led
+    st_mqtt_ui.value = broker_connected ? 1 : 0;
+
+    // st_ip: web_text
+    st_ip_ui.text = wifi_address;
+
+    vTaskDelay(1);
+  }
+}
+
 void setup() {
+  flp_bg_lock = xSemaphoreCreateMutex();
+
   // Память под строки заранее: меньше дробления кучи.
+  ssid_out.reserve(32);
+  pass_out.reserve(32);
   host_out.reserve(32);
   user_out.reserve(32);
+  cid_out.reserve(32);
   mpass_out.reserve(32);
-  wifi_1_address.reserve(32);
+  ota_out.reserve(32);
+  wifi_address.reserve(32);
 
   // ui: web_ui
   flpWebSrv.addHandler("/", ui_page);
@@ -725,6 +954,18 @@ void setup() {
   head_ui.color = "";
   head_ui.back = "";
 
+  // ssid: web_text_input
+  flpUiAdd(&ssid_ui);
+  ssid_ui.color = "";
+  ssid_ui.back = "";
+  ssid_ui.text = "";
+
+  // pass: web_text_input
+  flpUiAdd(&pass_ui);
+  pass_ui.color = "";
+  pass_ui.back = "";
+  pass_ui.text = "";
+
   // head2: web_label
   flpUiAdd(&head2_ui);
   head2_ui.color = "";
@@ -742,155 +983,50 @@ void setup() {
   user_ui.back = "";
   user_ui.text = "";
 
+  // cid: web_text_input
+  flpUiAdd(&cid_ui);
+  cid_ui.color = "";
+  cid_ui.back = "";
+  cid_ui.text = "";
+
   // mpass: web_text_input
   flpUiAdd(&mpass_ui);
   mpass_ui.color = "";
   mpass_ui.back = "";
   mpass_ui.text = "";
 
+  // ota: web_text_input
+  flpUiAdd(&ota_ui);
+  ota_ui.color = "";
+  ota_ui.back = "";
+  ota_ui.text = "";
+
+  // wifi: wifi
+  wifi_ota.setHostname("wifi");
+
   // head3: web_label
   flpUiAdd(&head3_ui);
   head3_ui.color = "";
   head3_ui.back = "";
+
+  // st_wifi: web_led
+  flpUiAdd(&st_wifi_ui);
+  st_wifi_ui.color = "";
+  st_wifi_ui.back = "";
 
   // st_mqtt: web_led
   flpUiAdd(&st_mqtt_ui);
   st_mqtt_ui.color = "";
   st_mqtt_ui.back = "";
 
-  // wifi_1: wifi
-  flpWifi.setClientSsid("Xiaomi_76D1");
-  flpWifi.setClientPassword("");
-  if (true) {
-    flpWifi.setDhcp();
-  } else {
-    IPAddress addr;
-    addr.fromString("192.168.1.177");
-    flpWifi.localIP(addr);
-    addr.fromString("192.168.1.1");
-    flpWifi.gateway(addr);
-    flpWifi.dns(addr);
-    addr.fromString("255.255.255.0");
-    flpWifi.subnet(addr);
-    flpWifi.resetDhcp();
-  }
-  wifi_1_ota.setHostname("wifi_1");
+  // st_ip: web_text
+  flpUiAdd(&st_ip_ui);
+  st_ip_ui.color = "";
+  st_ip_ui.back = "";
 
-  // web_input_1: web_input
-  flpUiAdd(&web_input_1_ui);
-  web_input_1_ui.color = "";
-  web_input_1_ui.back = "";
-
-  // web_input_2: web_input
-  flpUiAdd(&web_input_2_ui);
-  web_input_2_ui.color = "";
-  web_input_2_ui.back = "";
+  // Фоновая задача стартует после настройки всех блоков
+  xTaskCreatePinnedToCore(flp_bg_task, "flp_bg", 10240, nullptr, 1, nullptr, 0);
 }
 
 void loop() {
-  // host: web_text_input
-  host_out = host_ui.text;
-
-  // user: web_text_input
-  user_out = user_ui.text;
-
-  // mpass: web_text_input
-  mpass_out = mpass_ui.text;
-
-  // broker: mqtt
-  if (!broker_bound) {
-    // Attach once; the client reconnects by itself after that.
-    broker_bound = flpMqtt.begin(flpWifi);
-    if (broker_bound) {
-      flpMqtt.setBroker(String((host_out)).c_str());
-      flpMqtt.setPort((1883));
-      if (String((user_out)).length()) flpMqtt.setCredentials(String((user_out)).c_str(), String((mpass_out)).c_str()); else flpMqtt.clearCredentials();
-      char cid[24];
-      snprintf(cid, sizeof(cid), "flp-%08lx", (unsigned long)ESP.getEfuseMac());
-      flpMqtt.setClientId(cid);
-      flpMqtt.setKeepAlive(60);
-      flpMqtt.setMessageCallback(flp_mqtt_receive);
-      flpMqtt.setAutoReconnect(true);
-      broker_sig = broker_signature();
-      flpMqtt.connect();
-    }
-  } else if (broker_signature() != broker_sig) {
-    // Settings written while running: reconnect with the new ones.
-    broker_sig = broker_signature();
-    flpMqtt.disconnect();
-    flpMqtt.setBroker(String((host_out)).c_str());
-    flpMqtt.setPort((1883));
-    if (String((user_out)).length()) flpMqtt.setCredentials(String((user_out)).c_str(), String((mpass_out)).c_str()); else flpMqtt.clearCredentials();
-    flpMqtt.connect();
-  }
-  broker_connected = flpMqtt.connected();
-  broker_error = flpMqtt.error();
-
-  // st_mqtt: web_led
-  st_mqtt_ui.value = broker_connected ? 1 : 0;
-
-  // wifi_1: wifi
-  {
-    // Client and access point follow the inputs; switched only when they change.
-    int32_t mode = 0;
-    uint8_t state = (uint8_t)(mode + 1);
-    if (state != wifi_1_state) {
-      wifi_1_state = state;
-      if (state & 1) {
-        flpWifi.clientOn();
-      } else {
-        flpWifi.clientOff();
-      }
-      if (state & 2) {
-        flpWifi.apOn();
-      } else {
-        flpWifi.apOff();
-      }
-    }
-  }
-  {
-    uint32_t now = millis();
-    wifi_1_net_due = (uint32_t)(now - wifi_1_net_t) >= 5;
-    if (wifi_1_net_due) {
-      wifi_1_net_t = now;
-    }
-  }
-  if (wifi_1_net_due) {
-    flpWifi.pool();
-  }
-  wifi_1_ready = flpWifi.clientIsReady();
-  {
-    uint32_t ip = 0;
-    if (flpWifi.clientIsReady()) {
-      ip = (uint32_t)flpWifi.localIP();
-    } else if (flpWifi.apIsReady()) {
-      ip = (uint32_t)flpWifi.accessPointIP();
-    }
-    if (ip != wifi_1_ip_raw) {
-      wifi_1_ip_raw = ip;
-      wifi_1_address = ip ? IPAddress(ip).toString() : String();
-    }
-  }
-  if (wifi_1_net_due && true) {
-    wifi_1_web.pool();
-  }
-  if (wifi_1_net_due && true && true) {
-    wifi_1_up_poll();
-  }
-  if (wifi_1_net_due && true) {
-    if (!wifi_1_ota_on) {
-      wifi_1_ota_on = true;
-      if (""[0] != 0) {
-        wifi_1_ota.setPasswordValue("");
-      }
-      wifi_1_ota.begin(flpWifi);
-    }
-    wifi_1_ota.pool();
-  }
-
-  // web_input_1: web_input
-  web_input_1_out = web_input_1_ui.value;
-
-  // web_input_2: web_input
-  web_input_2_out = web_input_2_ui.value;
 }

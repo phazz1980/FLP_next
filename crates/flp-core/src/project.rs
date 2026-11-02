@@ -51,6 +51,21 @@ pub struct ProjectInfo {
     /// Language of the comments in the generated sketch (`ru`, `en`); empty means `ru`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub comment_lang: String,
+    /// Password of the project copy kept in the board's flash; empty means no protection.
+    /// The `.crab` file itself stays readable.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub password: String,
+    /// Keep the project copy in the firmware (readable back from the board). On by default.
+    #[serde(default = "embed_default", skip_serializing_if = "is_true")]
+    pub embed: bool,
+}
+
+fn embed_default() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -148,7 +163,21 @@ impl Project {
             source,
         };
         let file = File::open(path).map_err(read_err)?;
-        let mut zip = ZipArchive::new(BufReader::new(file)).map_err(|e| zip_err(path, e))?;
+        Self::read_archive(BufReader::new(file), path)
+    }
+
+    /// Reads a project from archive bytes (e.g. read back from a board); `path` is the
+    /// file the project will be saved to.
+    pub fn from_archive_bytes(bytes: &[u8], path: impl AsRef<Path>) -> Result<Self> {
+        Self::read_archive(std::io::Cursor::new(bytes), path.as_ref())
+    }
+
+    fn read_archive<R: Read + std::io::Seek>(reader: R, path: &Path) -> Result<Self> {
+        let read_err = |source| Error::Read {
+            path: path.to_owned(),
+            source,
+        };
+        let mut zip = ZipArchive::new(reader).map_err(|e| zip_err(path, e))?;
         let mut entry = |name: &str| -> Result<Option<String>> {
             let mut file = match zip.by_name(name) {
                 Ok(f) => f,
@@ -255,6 +284,53 @@ impl Project {
         std::fs::rename(&tmp, &self.path).map_err(write_err)
     }
 
+    /// The schema files packed into an archive in memory: the copy that goes into the
+    /// firmware. Equal projects give equal bytes (no timestamps), so an unchanged
+    /// project does not change the sketch.
+    pub fn archive_bytes(&self) -> Result<Vec<u8>> {
+        let inner = |name: &str| self.path.join(name);
+        let texts = [
+            (PROJECT_FILE, to_toml(&self.config, &inner(PROJECT_FILE))?),
+            (LOGIC_FILE, to_toml(&self.logic, &inner(LOGIC_FILE))?),
+            (LAYOUT_FILE, to_toml(&self.layout, &inner(LAYOUT_FILE))?),
+        ];
+        let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        for (name, text) in &texts {
+            zip.start_file(*name, options)
+                .map_err(|e| zip_err(&self.path, e))?;
+            zip.write_all(text.as_bytes())
+                .map_err(|source| Error::Write {
+                    path: self.path.clone(),
+                    source,
+                })?;
+        }
+        Ok(zip
+            .finish()
+            .map_err(|e| zip_err(&self.path, e))?
+            .into_inner())
+    }
+
+    /// Short identity of the project's logic and settings (`project.toml` and
+    /// `logic.toml`; coordinates in `layout.toml` do not count). The firmware carries
+    /// the same value, so the editor can tell whether the board runs this project.
+    pub fn content_hash(&self) -> Result<[u8; 8]> {
+        use sha2::{Digest, Sha256};
+        let inner = |name: &str| self.path.join(name);
+        let mut hasher = Sha256::new();
+        for (name, text) in [
+            (PROJECT_FILE, to_toml(&self.config, &inner(PROJECT_FILE))?),
+            (LOGIC_FILE, to_toml(&self.logic, &inner(LOGIC_FILE))?),
+        ] {
+            hasher.update((text.len() as u64).to_le_bytes());
+            hasher.update(name.as_bytes());
+            hasher.update(text.as_bytes());
+        }
+        let mut hash = [0u8; 8];
+        hash.copy_from_slice(&hasher.finalize()[..8]);
+        Ok(hash)
+    }
+
     /// Folder the project file lives in.
     pub fn dir(&self) -> &Path {
         self.path.parent().unwrap_or(Path::new(""))
@@ -322,6 +398,11 @@ fn migrate_wifi_mode(logic: &mut Logic) {
     }
 }
 
+/// A project hash as 16 hex digits.
+pub fn hash_hex(hash: &[u8; 8]) -> String {
+    hash.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,5 +453,44 @@ wifi_mode = 2
         let mut zip = ZipArchive::new(File::open(&project.path).unwrap()).unwrap();
         assert!(zip.by_name(BOARDS_PDF).is_ok());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn content_hash_ignores_layout_only() {
+        let config: ProjectConfig = toml::from_str(
+            "[project]
+name = \"t\"
+[board]
+fqbn = \"x:y:z\"
+",
+        )
+        .unwrap();
+        let project = Project {
+            path: PathBuf::from("t.crab"),
+            config,
+            logic: Logic::default(),
+            layout: Layout::default(),
+        };
+        let hash = project.content_hash().unwrap();
+        assert_eq!(hash, project.content_hash().unwrap());
+
+        let mut moved = project.clone();
+        moved.layout.sheets.push(Default::default());
+        assert_eq!(moved.content_hash().unwrap(), hash);
+
+        let mut renamed = project.clone();
+        renamed.config.project.name = "other".into();
+        assert_ne!(renamed.content_hash().unwrap(), hash);
+
+        let mut edited = project.clone();
+        edited.logic.blocks.push(
+            toml::from_str(
+                "id = \"a\"
+type = \"wifi\"
+",
+            )
+            .unwrap(),
+        );
+        assert_ne!(edited.content_hash().unwrap(), hash);
     }
 }

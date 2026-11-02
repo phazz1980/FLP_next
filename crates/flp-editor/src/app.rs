@@ -137,6 +137,8 @@ pub struct EditorApp {
     pub console: crate::console::PortConsole,
     /// Open pop-up window (block properties, variable, sheet).
     pub dialog: Option<Dialog>,
+    /// The "open project from board" window.
+    pub pull: Option<crate::pullview::PullWindow>,
     pub theme: Theme,
     /// Built-in and user themes.
     pub themes: Vec<Theme>,
@@ -264,6 +266,7 @@ impl EditorApp {
             bottom_tab: BottomTab::Log,
             console: Default::default(),
             dialog: None,
+            pull: None,
             theme: theme::light(),
             themes: theme::load_all(),
             theme_editor: None,
@@ -1046,6 +1049,8 @@ impl EditorApp {
                     name,
                     description: String::new(),
                     comment_lang: String::new(),
+                    password: String::new(),
+                    embed: true,
                 },
                 board: BoardConfig {
                     fqbn: "esp32:esp32:esp32".into(),
@@ -1235,10 +1240,16 @@ impl EditorApp {
         }
         let first = self.web_sig.is_empty();
         self.web_sig = sig;
+        // the constructor may also have been started by hand, so look for its port
         let running = self
             .web_editor
             .as_mut()
-            .is_some_and(|c| matches!(c.try_wait(), Ok(None)));
+            .is_some_and(|c| matches!(c.try_wait(), Ok(None)))
+            || std::net::TcpStream::connect_timeout(
+                &std::net::SocketAddr::from(([127, 0, 0, 1], 8080)),
+                Duration::from_millis(50),
+            )
+            .is_ok();
         if running && !first && doc.dirty {
             self.save();
         }
@@ -1571,6 +1582,7 @@ impl EditorApp {
             kind,
             self.debug_firmware,
             doc.project.with_local(&self.lib, &self.local),
+            doc.project.clone(),
             self.lib.clone(),
             move || ctx.request_repaint(),
         );
@@ -1825,6 +1837,19 @@ impl EditorApp {
             return;
         };
         d.refresh();
+        if let Some(doc) = &self.doc {
+            d.check_project(&doc.project, doc.revision);
+        }
+        if d.same_project == Some(false) && !d.hash_asked {
+            d.hash_asked = true;
+            let port = d.port.clone();
+            self.info(
+                LogLevel::Warning,
+                crate::i18n::tr("На плате другая версия проекта: её можно скачать (Файл → Открыть проект с платы)"),
+            );
+            self.pull = Some(crate::pullview::PullWindow::new(port));
+            return;
+        }
         // Publish values for the AI assistant.
         let published = d.online().then(|| {
             (0..d.table.entries.len())
@@ -2133,6 +2158,36 @@ impl EditorApp {
         }
     }
 
+    /// "Project in the board": keep a copy in the firmware and protect it with a password.
+    fn board_copy_menu(&mut self, ui: &mut egui::Ui) {
+        let Some(doc) = &self.doc else { return };
+        let info = doc.project.config.project.clone();
+        let lib = self.lib.clone();
+        let (mut embed, mut password) = (info.embed, info.password.clone());
+        ui.menu_button(
+            crate::i18n::tr("Проект в памяти платы"),
+            |ui| {
+                ui.checkbox(&mut embed, crate::i18n::tr("Хранить копию в прошивке"))
+                    .on_hover_text(crate::i18n::tr(
+                        "Тогда проект можно прочитать с платы (Файл → Открыть проект с платы)",
+                    ));
+                ui.add_enabled_ui(embed, |ui| {
+                    ui.label(crate::i18n::tr("Пароль (пусто — не шифровать):"));
+                    ui.add(egui::TextEdit::singleline(&mut password).password(true));
+                });
+            },
+        );
+        if embed != info.embed || password != info.password {
+            if let Some(doc) = &mut self.doc {
+                let _ = doc.edit(&lib, Some("project_copy".into()), |p| {
+                    p.config.project.embed = embed;
+                    p.config.project.password = password;
+                    Ok::<(), String>(())
+                });
+            }
+        }
+    }
+
     /// The editor menus; shown inside the burger button of the title bar.
     fn menus(&mut self, ui: &mut egui::Ui) {
         ui.menu_button(crate::i18n::tr("Файл"), |ui| {
@@ -2141,6 +2196,13 @@ impl EditorApp {
             }
             if ui.button(crate::i18n::tr("Открыть...")).clicked() {
                 self.pick_project();
+            }
+            if ui
+                .button(crate::i18n::tr("Открыть проект с платы..."))
+                .on_hover_text(crate::i18n::tr("Прочитать проект из памяти платы (нужна прошивка с отладкой)"))
+                .clicked()
+            {
+                self.pull = Some(crate::pullview::PullWindow::new(self.board_port().unwrap_or_default()));
             }
             let has_doc = self.doc.is_some();
             if ui
@@ -2340,6 +2402,7 @@ impl EditorApp {
             {
                 self.open_web_designer();
             }
+            ui.add_enabled_ui(has_doc, |ui| self.board_copy_menu(ui));
             ui.separator();
             if ui
                 .add_enabled(
@@ -2701,6 +2764,35 @@ impl EditorApp {
                         ))
                         .color(color),
                     );
+                    match d.same_project {
+                        Some(true) => {
+                            ui.label(crate::i18n::tr("Проект совпадает с платой"));
+                        }
+                        Some(false) => {
+                            ui.label(
+                                RichText::new(crate::i18n::tr("Проект отличается от платы"))
+                                    .color(self.theme.palette.warning),
+                            );
+                        }
+                        None => {}
+                    }
+                    if d.live.needs_password {
+                        let id = egui::Id::unique("debug_password_input");
+                        let mut text: String = ui.data_mut(|m| m.get_temp(id).unwrap_or_default());
+                        let edit = ui.add(
+                            egui::TextEdit::singleline(&mut text)
+                                .password(true)
+                                .desired_width(110.0)
+                                .hint_text(crate::i18n::tr("Пароль отладки")),
+                        );
+                        let enter =
+                            edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        let go = ui.small_button(crate::i18n::tr("Войти")).clicked();
+                        if (enter || go) && !text.is_empty() {
+                            d.send(flp_debug::Command::Password(text.clone()));
+                        }
+                        ui.data_mut(|m| m.insert_temp(id, text));
+                    }
                     if let Some(s) = d.live.stats.as_ref().filter(|_| d.online()) {
                         ui.separator();
                         ui.label(crate::i18n::fmt(
@@ -2964,6 +3056,7 @@ impl eframe::App for EditorApp {
         egui::CentralPanel::default_margins().show(ui, |ui| canvas::show(self, ui));
 
         dialogs::show(self, &ctx);
+        crate::pullview::show(self, &ctx);
         crate::themeedit::show(self, &ctx);
         crate::blockedit::show(self, &ctx);
         crate::boardedit::show(self, &ctx);

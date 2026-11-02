@@ -60,6 +60,7 @@ impl Job {
         kind: JobKind,
         debug: bool,
         project: Project,
+        source: Project,
         lib: Library,
         wake: impl Fn() + Send + 'static,
     ) -> Self {
@@ -87,7 +88,7 @@ impl Job {
                 note: &mut |level, line| send(JobEvent::Note(level, line.to_owned())),
                 direct: &direct_flag,
             };
-            let result = run(kind, debug, &project, &lib, worker, report);
+            let result = run(kind, debug, &project, &source, &lib, worker, report);
             send(JobEvent::Done(result));
         });
         Self {
@@ -137,6 +138,7 @@ fn run(
     kind: JobKind,
     debug: bool,
     project: &Project,
+    source: &Project,
     lib: &Library,
     control: Arc<BuildControl>,
     report: Report,
@@ -152,6 +154,8 @@ fn run(
     let code = ArduinoCpp { debug }
         .generate(&program)
         .map_err(|e| e.to_string())?;
+    // The project goes into the firmware as saved, not as prepared for generation.
+    let code = flp_codegen::embed_project(&code, source).map_err(|e| e.to_string())?;
     let (path, _) =
         flp_codegen::write_sketch(&project.work_dir(), &code).map_err(|e| e.to_string())?;
     out(

@@ -98,8 +98,9 @@ uint32_t flp_st_free_heap() {
 #endif
 }
 
-// ---- Онлайн-отладка CrabLogic (протокол v2) ----
+// ---- Онлайн-отладка CrabLogic (протокол v5) ----
 // Кадры: 0xAA 0x55, тип, длина, данные, CRC-16/CCITT. Обычный Serial.print не мешает.
+#include <mbedtls/md.h>
 const uint32_t FLP_DBG_FINGERPRINT = 0x84B418D3UL;
 const uint16_t FLP_DBG_COUNT = 10;
 // Наблюдаемые значения: выходы блоков, затем переменные (+ пустой элемент в конце).
@@ -107,11 +108,67 @@ void* const flp_dbg_ptr[FLP_DBG_COUNT + 1] = { &adc_out, &to_c_out, &temp_r_out,
 const uint8_t flp_dbg_type[FLP_DBG_COUNT + 1] = { 1, 2, 2, 2, 2, 0, 0, 2, 2, 0, 0 };  // see type_code in flp-codegen
 bool flp_dbg_forced[FLP_DBG_COUNT + 1];
 uint32_t flp_dbg_force_raw[FLP_DBG_COUNT + 1];
+// Образ наблюдаемых значений: от крупных типов к мелким, без дыр; смещения — в flp_dbg_off.
+struct __attribute__((packed)) FlpImage {
+  int32_t v0;  // adc_out
+  float v1;  // to_c_out
+  float v2;  // temp_r_out
+  float v3;  // setpoint_r_out
+  float v4;  // error_out
+  float v7;  // var_temp
+  float v8;  // var_setpoint
+  bool v5;  // cold_out
+  bool v6;  // heating_r_out
+  bool v9;  // var_heating
+};
+alignas(8) FlpImage flp_img;
+alignas(8) FlpImage flp_img_out;
+const uint16_t FLP_IMG_SIZE = 31;
+const uint16_t flp_dbg_off[FLP_DBG_COUNT + 1] = { 0, 4, 8, 12, 16, 28, 29, 20, 24, 30, 0 };
+#ifdef ARDUINO_ARCH_ESP32
+portMUX_TYPE flp_img_mux = portMUX_INITIALIZER_UNLOCKED;
+#define FLP_IMG_LOCK() portENTER_CRITICAL(&flp_img_mux)
+#define FLP_IMG_UNLOCK() portEXIT_CRITICAL(&flp_img_mux)
+#else
+#define FLP_IMG_LOCK()
+#define FLP_IMG_UNLOCK()
+#endif
+
+// End of a scan: all watched values are copied at one moment.
+void flp_img_snapshot() {
+  FLP_IMG_LOCK();
+  flp_img.v0 = adc_out;
+  flp_img.v1 = to_c_out;
+  flp_img.v2 = temp_r_out;
+  flp_img.v3 = setpoint_r_out;
+  flp_img.v4 = error_out;
+  flp_img.v7 = var_temp;
+  flp_img.v8 = var_setpoint;
+  flp_img.v5 = cold_out;
+  flp_img.v6 = heating_r_out;
+  flp_img.v9 = var_heating;
+  FLP_IMG_UNLOCK();
+}
 uint8_t flp_dbg_rx[4 + 255 + 2];
 uint16_t flp_dbg_rx_len = 0;
 uint16_t flp_dbg_seq = 0;
 unsigned long flp_dbg_last = 0;
 uint8_t flp_dbg_ticks = 0;
+
+// Password gate: FLP_AUTH_* come from the end of the sketch and exist only when the
+// project has a password. Locked means nothing is sent and no command is taken.
+extern const uint8_t FLP_AUTH_ON __attribute__((weak));
+extern const uint8_t FLP_AUTH_KEY[32] __attribute__((weak));
+extern const uint8_t FLP_AUTH_SALT[16] __attribute__((weak));
+bool flp_dbg_authed = false;
+unsigned long flp_dbg_auth_seen = 0;
+unsigned long flp_dbg_auth_block = 0;
+bool flp_dbg_nonce_ok = false;
+uint8_t flp_dbg_nonce[16];
+
+bool flp_dbg_locked() {
+  return &FLP_AUTH_ON != nullptr && !flp_dbg_authed;
+}
 
 uint16_t flp_dbg_crc(uint16_t crc, uint8_t b) {
   crc ^= (uint16_t)b << 8;
@@ -133,23 +190,6 @@ void flp_dbg_frame(uint8_t type, const uint8_t* data, uint8_t len) {
     Serial.write(data, len);
   }
   Serial.write(tail, 2);
-}
-
-uint32_t flp_dbg_get(uint16_t i) {
-  uint32_t raw = 0;
-  void* p = flp_dbg_ptr[i];
-  switch (flp_dbg_type[i]) {
-    case 0: raw = *(bool*)p ? 1 : 0; break;
-    case 3: raw = (uint32_t)(int32_t)*(int8_t*)p; break;
-    case 4: raw = *(uint8_t*)p; break;
-    case 5: raw = (uint32_t)(int32_t)*(int16_t*)p; break;
-    case 6: raw = *(uint16_t*)p; break;
-    case 8: raw = (uint32_t)(int32_t)*(int64_t*)p; break;
-    case 9: raw = (uint32_t)*(uint64_t*)p; break;
-    case 10: { float f = (float)*(double*)p; memcpy(&raw, &f, 4); break; }
-    default: memcpy(&raw, p, 4);
-  }
-  return raw;
 }
 
 void flp_dbg_put(uint16_t i, uint32_t raw) {
@@ -175,30 +215,41 @@ void flp_dbg_force(uint16_t i) {
   }
 }
 
+// Identity of the project this firmware was built from (see `FLP_PROJECT_HASH` at the
+// end of the sketch); weak, so a build without it still links. Zeros are not shown to a
+// host that has not signed in.
+extern const uint8_t FLP_PROJECT_HASH[8] __attribute__((weak));
+
 void flp_dbg_hello() {
-  uint8_t p[7];
+  uint8_t p[18] = {0};
   memcpy(p, &FLP_DBG_FINGERPRINT, 4);
   p[4] = FLP_DBG_COUNT & 0xFF;
   p[5] = FLP_DBG_COUNT >> 8;
-  p[6] = 2;
-  flp_dbg_frame(0x01, p, 7);
+  p[6] = 5;
+  p[7] = FLP_IMG_SIZE & 0xFF;
+  p[8] = FLP_IMG_SIZE >> 8;
+  p[9] = flp_dbg_locked() ? 1 : 0;
+  if (&FLP_PROJECT_HASH != nullptr && !flp_dbg_locked()) {
+    memcpy(p + 10, FLP_PROJECT_HASH, 8);
+  }
+  flp_dbg_frame(0x01, p, 18);
 }
 
-void flp_dbg_values() {
-  uint8_t p[5 + 4 * 60];
+// The image of one scan in pieces: seq u16, offset u16, bytes.
+void flp_dbg_image() {
+  uint8_t p[4 + 240];
+  FLP_IMG_LOCK();
+  memcpy(&flp_img_out, &flp_img, sizeof(flp_img));
+  FLP_IMG_UNLOCK();
   flp_dbg_seq++;
-  for (uint16_t start = 0; start < FLP_DBG_COUNT; start += 60) {
-    uint8_t n = (FLP_DBG_COUNT - start) > 60 ? 60 : (uint8_t)(FLP_DBG_COUNT - start);
+  for (uint16_t off = 0; off < FLP_IMG_SIZE; off += 240) {
+    uint16_t n = (FLP_IMG_SIZE - off) > 240 ? 240 : (FLP_IMG_SIZE - off);
     p[0] = flp_dbg_seq & 0xFF;
     p[1] = flp_dbg_seq >> 8;
-    p[2] = start & 0xFF;
-    p[3] = start >> 8;
-    p[4] = n;
-    for (uint8_t k = 0; k < n; k++) {
-      uint32_t raw = flp_dbg_get(start + k);
-      memcpy(p + 5 + 4 * k, &raw, 4);
-    }
-    flp_dbg_frame(0x02, p, 5 + 4 * n);
+    p[2] = off & 0xFF;
+    p[3] = off >> 8;
+    memcpy(p + 4, (uint8_t*)&flp_img_out + off, n);
+    flp_dbg_frame(0x05, p, 4 + n);
   }
 }
 
@@ -218,7 +269,94 @@ void flp_dbg_stats() {
   flp_dbg_frame(0x03, p, 25 + 10 * FLP_ST_SHEETS);
 }
 
+// The project archive in flash (see `FLP_PROJECT` at the end of the sketch); weak,
+// so a sketch generated without it still links and answers "no project".
+extern const uint8_t FLP_PROJECT[] PROGMEM __attribute__((weak));
+extern const uint32_t FLP_PROJECT_SIZE __attribute__((weak));
+
+// One piece of the project: total u32, offset u32, bytes.
+void flp_dbg_project(const uint8_t* p, uint8_t len) {
+  uint32_t total = (&FLP_PROJECT_SIZE != nullptr) ? FLP_PROJECT_SIZE : 0;
+  uint32_t off = 0;
+  if (len >= 4) {
+    memcpy(&off, p, 4);
+  }
+  uint32_t n = off < total ? total - off : 0;
+  if (n > 240) {
+    n = 240;
+  }
+  uint8_t out[8 + 240];
+  memcpy(out, &total, 4);
+  memcpy(out + 4, &off, 4);
+  if (n > 0) {
+    memcpy_P(out + 8, FLP_PROJECT + off, n);
+  }
+  flp_dbg_frame(0x06, out, 8 + n);
+}
+
+// Password check: a challenge (salt + random nonce), then HMAC-SHA256 of the nonce.
+void flp_dbg_auth_challenge() {
+  uint8_t out[32];
+  for (uint8_t k = 0; k < 16; k += 4) {
+    uint32_t r = esp_random();
+    memcpy(flp_dbg_nonce + k, &r, 4);
+  }
+  flp_dbg_nonce_ok = true;
+  memcpy(out, FLP_AUTH_SALT, 16);
+  memcpy(out + 16, flp_dbg_nonce, 16);
+  flp_dbg_frame(0x07, out, 32);
+}
+
+void flp_dbg_auth_check(const uint8_t* p, uint8_t len) {
+  if (!flp_dbg_nonce_ok || len != 32 || (long)(millis() - flp_dbg_auth_block) < 0) {
+    return;
+  }
+  flp_dbg_nonce_ok = false;
+  uint8_t proof[32];
+  mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), FLP_AUTH_KEY, 32,
+                  flp_dbg_nonce, 16, proof);
+  uint8_t diff = 0;
+  for (uint8_t k = 0; k < 32; k++) {
+    diff |= proof[k] ^ p[k];
+  }
+  if (diff == 0) {
+    flp_dbg_authed = true;
+    flp_dbg_auth_seen = millis();
+    flp_dbg_frame(0x08, nullptr, 0);
+    flp_dbg_hello();
+  } else {
+    flp_dbg_auth_block = millis() + 1000;
+    flp_dbg_frame(0x09, nullptr, 0);
+  }
+}
+
 void flp_dbg_command(uint8_t type, const uint8_t* p, uint8_t len) {
+  if (&FLP_AUTH_ON != nullptr) {
+    if (type == 0x17) {
+      flp_dbg_authed = false;  // also the way to sign out
+      flp_dbg_auth_challenge();
+      return;
+    }
+    if (type == 0x18) {
+      flp_dbg_auth_check(p, len);
+      return;
+    }
+    if (flp_dbg_authed) {
+      flp_dbg_auth_seen = millis();
+    } else {
+      if (type == 0x10) {
+        flp_dbg_hello();
+      }
+      return;
+    }
+    if (type == 0x19) {
+      return;
+    }
+  }
+  if (type == 0x16) {
+    flp_dbg_project(p, len);
+    return;
+  }
   if (type == 0x10) {
     flp_dbg_hello();
     return;
@@ -284,9 +422,16 @@ void flp_dbg_setup() {
 
 void flp_dbg_loop() {
   flp_dbg_poll();
+  if (flp_dbg_authed && millis() - flp_dbg_auth_seen > 3000UL) {
+    flp_dbg_authed = false;
+    flp_dbg_hello();
+  }
+  if (flp_dbg_locked()) {
+    return;
+  }
   if (millis() - flp_dbg_last >= 100) {
     flp_dbg_last = millis();
-    flp_dbg_values();
+    flp_dbg_image();
     if (++flp_dbg_ticks >= 5) {
       flp_dbg_ticks = 0;
       flp_dbg_stats();
@@ -359,6 +504,8 @@ void loop() {
 
   // heater: digital_out
   digitalWrite(26, (heating_r_out) ? HIGH : LOW);
+
+  flp_img_snapshot();
 
   flp_st_end();
 }

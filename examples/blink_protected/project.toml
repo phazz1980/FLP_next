@@ -1,0 +1,8 @@
+[project]
+name = "blink_protected"
+description = "Мигающий светодиод; копия проекта в прошивке зашифрована паролем (пароль: crab)"
+# Without a password the project in the board's flash is stored as is.
+password = "crab"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

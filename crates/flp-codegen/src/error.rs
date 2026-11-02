@@ -42,6 +42,10 @@ pub enum GenError {
     #[error("фоновая задача: {0}")]
     Task(String),
 
+    /// The project copy for the firmware could not be packed.
+    #[error("проект для прошивки: {0}")]
+    Embed(#[from] flp_core::Error),
+
     #[error("{}: {}", .path.display(), .source)]
     Io {
         path: PathBuf,

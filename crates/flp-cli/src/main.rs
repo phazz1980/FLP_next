@@ -73,6 +73,25 @@ enum Command {
         #[arg(long, short)]
         port: Option<String>,
     },
+    /// Напечатать хеш проекта (логика и настройки, без координат): по нему редактор сверяет файл с платой
+    Hash {
+        /// Файл проекта .crab (или папка с ним)
+        project: PathBuf,
+    },
+    /// Прочитать проект из прошивки на плате (нужна отладочная прошивка) и сохранить в файл .crab
+    Pull {
+        /// Куда сохранить проект (файл .crab)
+        output: PathBuf,
+        /// Порт платы, например COM3
+        #[arg(long, short)]
+        port: String,
+        /// Пароль проекта, если он был задан
+        #[arg(long)]
+        password: Option<String>,
+        /// Заменить файл, если он уже есть
+        #[arg(long)]
+        force: bool,
+    },
     /// Собрать прошивку и залить её на плату
     Upload {
         /// Файл проекта .crab (или папка с ним)
@@ -143,6 +162,31 @@ fn main() -> ExitCode {
             force,
         } => run_build(&project, cli.library.as_deref(), debug, force, Some(port)),
         Command::Monitor { project, port } => run_monitor(&project, cli.library.as_deref(), port),
+        Command::Hash { project } => match Project::load(&project)
+            .map_err(|e| e.to_string())
+            .and_then(|p| p.content_hash().map_err(|e| e.to_string()))
+        {
+            Ok(hash) => {
+                println!("{}", flp_core::hash_hex(&hash));
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("ошибка: {e}");
+                ExitCode::from(EXIT_LOAD_FAILED)
+            }
+        },
+        Command::Pull {
+            output,
+            port,
+            password,
+            force,
+        } => run_pull(
+            &output,
+            &port,
+            password.as_deref().unwrap_or(""),
+            force,
+            cli.library.as_deref(),
+        ),
         Command::Block { action } => run_block(action, cli.library.as_deref()),
         Command::Convert { project } => run_convert(&project, cli.library.as_deref()),
     }
@@ -406,9 +450,11 @@ fn generate(
         eprintln!("предупреждение: {e}");
         LocalValues::default()
     });
+    let source = project;
     let project = &project.with_local(lib, &store);
     let result = Program::build(project, lib).and_then(|program| {
         let code = backend.generate(&program)?;
+        let code = flp_codegen::embed_project(&code, source)?;
         let libraries = program.libraries().into_iter().map(String::from).collect();
         Ok((code, libraries, program.attached_libraries()))
     });
@@ -439,6 +485,76 @@ fn write_sketch(project: &Project, code: &str) -> Result<(), ExitCode> {
 }
 
 /// Prints live values every half second until Ctrl+C.
+/// Reads the project out of the board's flash and saves it as `output`.
+fn run_pull(
+    output: &Path,
+    port: &str,
+    password: &str,
+    force: bool,
+    library: Option<&Path>,
+) -> ExitCode {
+    if output.exists() && !force {
+        eprintln!(
+            "ошибка: файл {} уже есть; укажите --force, чтобы заменить его",
+            output.display()
+        );
+        return ExitCode::FAILURE;
+    }
+    let mut transport = match flp_debug::transport::serial(port)() {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("ошибка: не удалось открыть порт {port}: {e}");
+            return ExitCode::from(EXIT_BUILD_FAILED);
+        }
+    };
+    println!("Чтение проекта с платы ({port})...");
+    let pulled = match flp_debug::read_project(transport.as_mut(), password, |got, total| {
+        eprint!("\r{got} из {total} байт");
+    }) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("\nошибка: {e}");
+            return ExitCode::from(EXIT_BUILD_FAILED);
+        }
+    };
+    eprintln!();
+    let archive = match flp_core::protect::open(&pulled.data, password) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let project = match Project::from_archive_bytes(&archive, output) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            return ExitCode::from(EXIT_LOAD_FAILED);
+        }
+    };
+    if let Err(e) = project.save() {
+        eprintln!("ошибка: {e}");
+        return ExitCode::from(EXIT_LOAD_FAILED);
+    }
+    println!("Проект сохранён: {}", output.display());
+    // The firmware must have been built from this very schema.
+    if let (Some(fp), Some(lib)) = (pulled.fingerprint, load_library(output, library)) {
+        let project = project.without_disabled();
+        match Program::build(&project, &lib) {
+            Ok(program) => {
+                let same = flp_codegen::debug::debug_table(&program).fingerprint() == fp;
+                if same {
+                    println!("Отпечаток схемы совпадает с прошивкой.");
+                } else {
+                    println!("Внимание: отпечаток схемы не совпадает с прошивкой.");
+                }
+            }
+            Err(e) => eprintln!("предупреждение: отпечаток не проверен: {e}"),
+        }
+    }
+    ExitCode::SUCCESS
+}
+
 fn run_monitor(project_dir: &Path, library: Option<&Path>, port: Option<String>) -> ExitCode {
     let (project, lib) = match load(project_dir, library) {
         Ok(loaded) => loaded,
@@ -471,7 +587,14 @@ fn run_monitor(project_dir: &Path, library: Option<&Path>, port: Option<String>)
             flp_debug::Source::Var(v) => format!("${v}"),
         })
         .collect();
-    let session = flp_debug::Session::start(table, flp_debug::transport::serial(&port), || {});
+    let session = flp_debug::Session::start_with(
+        table,
+        flp_debug::transport::serial(&port),
+        project.config.project.password.clone(),
+        || {},
+    );
+    let mine = project.content_hash().ok();
+    let mut reported = None;
     println!("Монитор {port}, Ctrl+C — выход");
     let mut printed_console = 0;
     loop {
@@ -492,6 +615,25 @@ fn run_monitor(project_dir: &Path, library: Option<&Path>, port: Option<String>)
             })
             .collect();
         println!("[{}] {}", live.status, values.join("  "));
+        if live.project_hash != reported {
+            reported = live.project_hash;
+            if let Some(on_board) = reported {
+                if Some(on_board) == mine {
+                    println!("  проект совпадает с платой");
+                } else {
+                    println!(
+                        "  проект на плате отличается от этого файла (хеш {})",
+                        flp_core::hash_hex(&on_board)
+                    );
+                }
+            }
+        }
+        if let Some(st) = &live.stats {
+            println!(
+                "  цикл: логика {} мкс (макс {}, средн. {}), период макс {} мкс, сканов {}, куча {} Б",
+                st.last_us, st.max_us, st.avg_us, st.period_max_us, st.cycles, st.free_heap
+            );
+        }
     }
 }
 

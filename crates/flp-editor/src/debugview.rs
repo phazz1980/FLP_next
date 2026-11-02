@@ -27,6 +27,12 @@ pub struct DebugState {
     /// Cycle time reports of the last two minutes, for the diagnostics charts.
     stat_history: Vec<StatSample>,
     started: Instant,
+    /// Does the project in the editor match the board's? Recomputed when the board's
+    /// hash or the schema changes.
+    pub same_project: Option<bool>,
+    checked: Option<([u8; 8], u64)>,
+    /// The question "download the board's version?" was already put this session.
+    pub hash_asked: bool,
 }
 
 /// One cycle time report with the time it arrived (seconds since the session start).
@@ -50,9 +56,10 @@ impl DebugState {
         let table = flp_codegen::debug::debug_table(&program);
         let inputs = input_ports(project, lib, &table);
         let ctx = ctx.clone();
-        let session = Session::start(
+        let session = Session::start_with(
             table.clone(),
             flp_debug::transport::serial(port),
+            project.config.project.password.clone(),
             move || ctx.request_repaint(),
         );
         Ok(Self {
@@ -66,6 +73,9 @@ impl DebugState {
             inputs,
             stat_history: Vec::new(),
             started: Instant::now(),
+            same_project: None,
+            checked: None,
+            hash_asked: false,
         })
     }
 
@@ -93,6 +103,24 @@ impl DebugState {
             .iter()
             .filter_map(|s| value(&s.stats).map(|v| (s.t, v)))
             .collect()
+    }
+
+    /// Compares the editor's project with the one the board was built from.
+    pub fn check_project(&mut self, project: &Project, revision: u64) {
+        let Some(on_board) = self.live.project_hash else {
+            self.same_project = None;
+            self.checked = None;
+            return;
+        };
+        if self.checked == Some((on_board, revision)) {
+            return;
+        }
+        self.checked = Some((on_board, revision));
+        self.same_project = project
+            .without_disabled()
+            .content_hash()
+            .ok()
+            .map(|mine| mine == on_board);
     }
 
     pub fn stop(self) {

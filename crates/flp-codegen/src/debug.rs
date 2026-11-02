@@ -7,7 +7,7 @@ use flp_core::vars::storage_name;
 use flp_core::{PortRef, SignalType};
 use flp_debug::protocol;
 use flp_debug::transport::BAUD;
-use flp_debug::{DebugTable, Entry, Source, TextEntry};
+use flp_debug::{DebugTable, Entry, Kind, Source, TextEntry};
 
 use crate::{locf, Lang, Program};
 
@@ -57,27 +57,66 @@ pub fn debug_table(program: &Program) -> DebugTable {
     DebugTable { entries, texts }
 }
 
-/// Storage kind in firmware: 0 bool, 1 int32, 2 float, 3 int8, 4 uint8, 5 int16,
-/// 6 uint16, 7 uint32, 8 int64, 9 uint64, 10 double. Values travel as int32 / float bits.
+/// Storage kind in firmware: see [`flp_debug::Kind`] for the codes.
+/// Values travel as int32 / float bits.
 fn type_code(e: &Entry) -> u8 {
-    match e.cpp_type {
-        "char" | "int8_t" => 3,
-        "byte" | "uint8_t" => 4,
-        "short" | "int16_t" => 5,
-        "word" | "uint16_t" => 6,
-        "unsigned int" | "unsigned long" | "uint32_t" => 7,
-        "long long" | "int64_t" => 8,
-        "unsigned long long" | "uint64_t" => 9,
-        "double" => 10,
-        _ => match e.ty {
-            SignalType::Bool => 0,
-            SignalType::Int => 1,
-            SignalType::Float => 2,
-            SignalType::String | SignalType::Any | SignalType::Number | SignalType::Same => {
-                unreachable!("strings are not in the debug table")
-            }
-        },
+    Kind::of(e).code()
+}
+
+/// The memory image: a packed structure with the watched values, largest type
+/// first (see `flp_debug::image`), copied at the end of every scan. A reader sees
+/// one scan only: the report may run on another core, so it takes a copy under a lock.
+fn image_module(table: &DebugTable, lang: Lang) -> String {
+    let layout = table.image_layout();
+    let mut fields = String::new();
+    for &i in &layout.order {
+        let _ = writeln!(
+            fields,
+            "  {} v{i};  // {}",
+            layout.slots[i].kind.cpp(),
+            table.entries[i].storage
+        );
     }
+    let mut copies = String::new();
+    for &i in &layout.order {
+        let _ = writeln!(copies, "  flp_img.v{i} = {};", table.entries[i].storage);
+    }
+    let offsets: Vec<String> = layout
+        .slots
+        .iter()
+        .map(|s| s.offset.to_string())
+        .chain(["0".to_owned()])
+        .collect();
+    format!(
+        "{comment}
+struct __attribute__((packed)) FlpImage {{
+{fields}}};
+alignas(8) FlpImage flp_img;
+alignas(8) FlpImage flp_img_out;
+const uint16_t FLP_IMG_SIZE = {size};
+const uint16_t flp_dbg_off[FLP_DBG_COUNT + 1] = {{ {offsets} }};
+#ifdef ARDUINO_ARCH_ESP32
+portMUX_TYPE flp_img_mux = portMUX_INITIALIZER_UNLOCKED;
+#define FLP_IMG_LOCK() portENTER_CRITICAL(&flp_img_mux)
+#define FLP_IMG_UNLOCK() portEXIT_CRITICAL(&flp_img_mux)
+#else
+#define FLP_IMG_LOCK()
+#define FLP_IMG_UNLOCK()
+#endif
+
+// End of a scan: all watched values are copied at one moment.
+void flp_img_snapshot() {{
+  FLP_IMG_LOCK();
+{copies}  FLP_IMG_UNLOCK();
+}}
+",
+        comment = lang.pick(
+            "// Образ наблюдаемых значений: от крупных типов к мелким, без дыр; смещения — в flp_dbg_off.",
+            "// Image of watched values: largest types first, no gaps; offsets are in flp_dbg_off."
+        ),
+        size = layout.size,
+        offsets = offsets.join(", "),
+    )
 }
 
 /// The firmware side of the protocol, placed after all globals of the sketch
@@ -104,6 +143,7 @@ pub fn runtime(table: &DebugTable, text_in: bool, background: bool, lang: Lang) 
         out,
         r#"
 {head}
+#include <mbedtls/md.h>
 const uint32_t FLP_DBG_FINGERPRINT = 0x{fingerprint:08X}UL;
 const uint16_t FLP_DBG_COUNT = {n};
 {watched}
@@ -111,11 +151,26 @@ void* const flp_dbg_ptr[FLP_DBG_COUNT + 1] = {{ {ptrs} }};
 const uint8_t flp_dbg_type[FLP_DBG_COUNT + 1] = {{ {types} }};  // see type_code in flp-codegen
 bool flp_dbg_forced[FLP_DBG_COUNT + 1];
 uint32_t flp_dbg_force_raw[FLP_DBG_COUNT + 1];
-uint8_t flp_dbg_rx[4 + 255 + 2];
+{image_struct}uint8_t flp_dbg_rx[4 + 255 + 2];
 uint16_t flp_dbg_rx_len = 0;
 uint16_t flp_dbg_seq = 0;
 unsigned long flp_dbg_last = 0;
 uint8_t flp_dbg_ticks = 0;
+
+// Password gate: FLP_AUTH_* come from the end of the sketch and exist only when the
+// project has a password. Locked means nothing is sent and no command is taken.
+extern const uint8_t FLP_AUTH_ON __attribute__((weak));
+extern const uint8_t FLP_AUTH_KEY[32] __attribute__((weak));
+extern const uint8_t FLP_AUTH_SALT[16] __attribute__((weak));
+bool flp_dbg_authed = false;
+unsigned long flp_dbg_auth_seen = 0;
+unsigned long flp_dbg_auth_block = 0;
+bool flp_dbg_nonce_ok = false;
+uint8_t flp_dbg_nonce[16];
+
+bool flp_dbg_locked() {{
+  return &FLP_AUTH_ON != nullptr && !flp_dbg_authed;
+}}
 
 uint16_t flp_dbg_crc(uint16_t crc, uint8_t b) {{
   crc ^= (uint16_t)b << 8;
@@ -137,23 +192,6 @@ void flp_dbg_frame(uint8_t type, const uint8_t* data, uint8_t len) {{
     Serial.write(data, len);
   }}
   Serial.write(tail, 2);
-}}
-
-uint32_t flp_dbg_get(uint16_t i) {{
-  uint32_t raw = 0;
-  void* p = flp_dbg_ptr[i];
-  switch (flp_dbg_type[i]) {{
-    case 0: raw = *(bool*)p ? 1 : 0; break;
-    case 3: raw = (uint32_t)(int32_t)*(int8_t*)p; break;
-    case 4: raw = *(uint8_t*)p; break;
-    case 5: raw = (uint32_t)(int32_t)*(int16_t*)p; break;
-    case 6: raw = *(uint16_t*)p; break;
-    case 8: raw = (uint32_t)(int32_t)*(int64_t*)p; break;
-    case 9: raw = (uint32_t)*(uint64_t*)p; break;
-    case 10: {{ float f = (float)*(double*)p; memcpy(&raw, &f, 4); break; }}
-    default: memcpy(&raw, p, 4);
-  }}
-  return raw;
 }}
 
 void flp_dbg_put(uint16_t i, uint32_t raw) {{
@@ -179,30 +217,41 @@ void flp_dbg_force(uint16_t i) {{
   }}
 }}
 
+// Identity of the project this firmware was built from (see `FLP_PROJECT_HASH` at the
+// end of the sketch); weak, so a build without it still links. Zeros are not shown to a
+// host that has not signed in.
+extern const uint8_t FLP_PROJECT_HASH[8] __attribute__((weak));
+
 void flp_dbg_hello() {{
-  uint8_t p[7];
+  uint8_t p[18] = {{0}};
   memcpy(p, &FLP_DBG_FINGERPRINT, 4);
   p[4] = FLP_DBG_COUNT & 0xFF;
   p[5] = FLP_DBG_COUNT >> 8;
   p[6] = {version};
-  flp_dbg_frame(0x{hello:02X}, p, 7);
+  p[7] = FLP_IMG_SIZE & 0xFF;
+  p[8] = FLP_IMG_SIZE >> 8;
+  p[9] = flp_dbg_locked() ? {locked} : 0;
+  if (&FLP_PROJECT_HASH != nullptr && !flp_dbg_locked()) {{
+    memcpy(p + 10, FLP_PROJECT_HASH, 8);
+  }}
+  flp_dbg_frame(0x{hello:02X}, p, 18);
 }}
 
-void flp_dbg_values() {{
-  uint8_t p[5 + 4 * {per_frame}];
+// The image of one scan in pieces: seq u16, offset u16, bytes.
+void flp_dbg_image() {{
+  uint8_t p[4 + {chunk}];
+  FLP_IMG_LOCK();
+  memcpy(&flp_img_out, &flp_img, sizeof(flp_img));
+  FLP_IMG_UNLOCK();
   flp_dbg_seq++;
-  for (uint16_t start = 0; start < FLP_DBG_COUNT; start += {per_frame}) {{
-    uint8_t n = (FLP_DBG_COUNT - start) > {per_frame} ? {per_frame} : (uint8_t)(FLP_DBG_COUNT - start);
+  for (uint16_t off = 0; off < FLP_IMG_SIZE; off += {chunk}) {{
+    uint16_t n = (FLP_IMG_SIZE - off) > {chunk} ? {chunk} : (FLP_IMG_SIZE - off);
     p[0] = flp_dbg_seq & 0xFF;
     p[1] = flp_dbg_seq >> 8;
-    p[2] = start & 0xFF;
-    p[3] = start >> 8;
-    p[4] = n;
-    for (uint8_t k = 0; k < n; k++) {{
-      uint32_t raw = flp_dbg_get(start + k);
-      memcpy(p + 5 + 4 * k, &raw, 4);
-    }}
-    flp_dbg_frame(0x{values:02X}, p, 5 + 4 * n);
+    p[2] = off & 0xFF;
+    p[3] = off >> 8;
+    memcpy(p + 4, (uint8_t*)&flp_img_out + off, n);
+    flp_dbg_frame(0x{image:02X}, p, 4 + n);
   }}
 }}
 
@@ -222,7 +271,94 @@ void flp_dbg_values() {{
 {bg_tail}  flp_dbg_frame(0x{stats:02X}, p, 25 + 10 * FLP_ST_SHEETS{bg_len});
 }}
 
+// The project archive in flash (see `FLP_PROJECT` at the end of the sketch); weak,
+// so a sketch generated without it still links and answers "no project".
+extern const uint8_t FLP_PROJECT[] PROGMEM __attribute__((weak));
+extern const uint32_t FLP_PROJECT_SIZE __attribute__((weak));
+
+// One piece of the project: total u32, offset u32, bytes.
+void flp_dbg_project(const uint8_t* p, uint8_t len) {{
+  uint32_t total = (&FLP_PROJECT_SIZE != nullptr) ? FLP_PROJECT_SIZE : 0;
+  uint32_t off = 0;
+  if (len >= 4) {{
+    memcpy(&off, p, 4);
+  }}
+  uint32_t n = off < total ? total - off : 0;
+  if (n > {project_chunk}) {{
+    n = {project_chunk};
+  }}
+  uint8_t out[8 + {project_chunk}];
+  memcpy(out, &total, 4);
+  memcpy(out + 4, &off, 4);
+  if (n > 0) {{
+    memcpy_P(out + 8, FLP_PROJECT + off, n);
+  }}
+  flp_dbg_frame(0x{project:02X}, out, 8 + n);
+}}
+
+// Password check: a challenge (salt + random nonce), then HMAC-SHA256 of the nonce.
+void flp_dbg_auth_challenge() {{
+  uint8_t out[32];
+  for (uint8_t k = 0; k < 16; k += 4) {{
+    uint32_t r = esp_random();
+    memcpy(flp_dbg_nonce + k, &r, 4);
+  }}
+  flp_dbg_nonce_ok = true;
+  memcpy(out, FLP_AUTH_SALT, 16);
+  memcpy(out + 16, flp_dbg_nonce, 16);
+  flp_dbg_frame(0x{auth_challenge:02X}, out, 32);
+}}
+
+void flp_dbg_auth_check(const uint8_t* p, uint8_t len) {{
+  if (!flp_dbg_nonce_ok || len != 32 || (long)(millis() - flp_dbg_auth_block) < 0) {{
+    return;
+  }}
+  flp_dbg_nonce_ok = false;
+  uint8_t proof[32];
+  mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), FLP_AUTH_KEY, 32,
+                  flp_dbg_nonce, 16, proof);
+  uint8_t diff = 0;
+  for (uint8_t k = 0; k < 32; k++) {{
+    diff |= proof[k] ^ p[k];
+  }}
+  if (diff == 0) {{
+    flp_dbg_authed = true;
+    flp_dbg_auth_seen = millis();
+    flp_dbg_frame(0x{auth_ok:02X}, nullptr, 0);
+    flp_dbg_hello();
+  }} else {{
+    flp_dbg_auth_block = millis() + 1000;
+    flp_dbg_frame(0x{auth_fail:02X}, nullptr, 0);
+  }}
+}}
+
 void flp_dbg_command(uint8_t type, const uint8_t* p, uint8_t len) {{
+  if (&FLP_AUTH_ON != nullptr) {{
+    if (type == 0x{auth_req:02X}) {{
+      flp_dbg_authed = false;  // also the way to sign out
+      flp_dbg_auth_challenge();
+      return;
+    }}
+    if (type == 0x{auth:02X}) {{
+      flp_dbg_auth_check(p, len);
+      return;
+    }}
+    if (flp_dbg_authed) {{
+      flp_dbg_auth_seen = millis();
+    }} else {{
+      if (type == 0x{hello_req:02X}) {{
+        flp_dbg_hello();
+      }}
+      return;
+    }}
+    if (type == 0x{ping:02X}) {{
+      return;
+    }}
+  }}
+  if (type == 0x{get_project:02X}) {{
+    flp_dbg_project(p, len);
+    return;
+  }}
   if (type == 0x{hello_req:02X}) {{
     flp_dbg_hello();{texts_reset}
     return;
@@ -288,9 +424,16 @@ void flp_dbg_setup() {{
 
 void flp_dbg_loop() {{
   flp_dbg_poll();
+  if (flp_dbg_authed && millis() - flp_dbg_auth_seen > {idle}UL) {{
+    flp_dbg_authed = false;
+    flp_dbg_hello();
+  }}
+  if (flp_dbg_locked()) {{
+    return;
+  }}
   if (millis() - flp_dbg_last >= 100) {{
     flp_dbg_last = millis();
-    flp_dbg_values();{texts_loop}
+    flp_dbg_image();{texts_loop}
     if (++flp_dbg_ticks >= 5) {{
       flp_dbg_ticks = 0;
       flp_dbg_stats();
@@ -305,14 +448,25 @@ void flp_dbg_loop() {{
         s0 = protocol::SYNC[0],
         s1 = protocol::SYNC[1],
         hello = protocol::HELLO,
-        values = protocol::VALUES,
+        image = protocol::IMAGE,
+        get_project = protocol::GET_PROJECT,
+        project = protocol::PROJECT,
+        project_chunk = protocol::PROJECT_CHUNK,
         hello_req = protocol::HELLO_REQ,
+        locked = protocol::HELLO_LOCKED,
+        auth_challenge = protocol::AUTH_CHALLENGE,
+        auth_ok = protocol::AUTH_OK,
+        auth_fail = protocol::AUTH_FAIL,
+        auth_req = protocol::AUTH_REQ,
+        auth = protocol::AUTH,
+        ping = protocol::PING,
+        idle = protocol::AUTH_IDLE_MS,
         force = protocol::FORCE,
         set = protocol::SET,
         release_all = protocol::RELEASE_ALL,
         stats = protocol::STATS,
         reset_stats = protocol::RESET_STATS,
-        per_frame = protocol::VALUES_PER_FRAME,
+        chunk = protocol::IMAGE_CHUNK,
         baud = BAUD,
         head = locf!(
             lang,
@@ -327,6 +481,7 @@ void flp_dbg_loop() {{
             "// Watched values: block outputs, then variables (+ an empty element at the end)."
         ),
         texts = texts_module(table, lang),
+        image_struct = image_module(table, lang),
         bg_tail = if background {
             "  memcpy(p + 25 + 10 * FLP_ST_SHEETS, &flp_st_bg_last, 4);
   memcpy(p + 29 + 10 * FLP_ST_SHEETS, &flp_st_bg_max, 4);

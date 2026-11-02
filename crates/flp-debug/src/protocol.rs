@@ -6,20 +6,41 @@
 //!
 //! CRC-16/CCITT-FALSE over `type`, `len` and the payload. Bytes outside frames are
 //! ordinary `Serial.print` output and are passed through as text. Multi-byte
-//! numbers are little-endian. Every value travels as 4 raw bytes: bool as 0/1,
-//! int as `int32_t`, float as IEEE-754 `float`.
+//! numbers are little-endian (the firmware runs on a little-endian chip).
+//!
+//! Watched values travel as a memory image: the raw bytes of the packed structure
+//! the firmware fills at the end of a scan, laid out by [`crate::image`].
 
 /// Protocol version reported in `HELLO`.
-pub const VERSION: u8 = 2;
+pub const VERSION: u8 = 5;
 pub const SYNC: [u8; 2] = [0xAA, 0x55];
 pub const MAX_PAYLOAD: usize = 255;
-/// Values per `VALUES` frame: header 5 bytes + 4 bytes per value fits in 255.
-pub const VALUES_PER_FRAME: usize = 60;
+/// Bytes of the image per `IMAGE` frame: header 4 bytes + data fits in 255.
+pub const IMAGE_CHUNK: usize = 240;
 
-/// Board → host: `fingerprint u32, count u16, version u8`.
+/// Board → host: `fingerprint u32, count u16, version u8, image_size u16, flags u8,
+/// project_hash [u8; 8]` (flags: [`HELLO_LOCKED`]; the hash is
+/// `flp_core::Project::content_hash`, zeros while the board is locked).
+/// (Version 2 had no `image_size` and sent `VALUES` frames, type 0x02.)
 pub const HELLO: u8 = 0x01;
-/// Board → host: `seq u16, start u16, n u8, n × value u32` (one scan, in chunks).
-pub const VALUES: u8 = 0x02;
+/// Bit in the `HELLO` flags: the firmware is locked with a password; until the host
+/// signs in ([`AUTH_REQ`], [`AUTH`]) it sends nothing but `HELLO` and `AUTH_*` and
+/// ignores every command except `HELLO_REQ`, `AUTH_REQ` and `AUTH`.
+pub const HELLO_LOCKED: u8 = 1;
+/// Board → host, the answer to `AUTH_REQ`: `salt[16], nonce[16]` — the salt of the
+/// access key (see `flp_core::protect::auth_key`) and a fresh random challenge.
+pub const AUTH_CHALLENGE: u8 = 0x07;
+/// Board → host: the proof was right; the session stays open while the host keeps
+/// talking (silence for [`AUTH_IDLE_MS`] locks it again) or until the board resets.
+pub const AUTH_OK: u8 = 0x08;
+/// Board → host: the proof was wrong; attempts in the next second are ignored.
+pub const AUTH_FAIL: u8 = 0x09;
+/// Milliseconds without any host frame after which a signed-in session is closed.
+pub const AUTH_IDLE_MS: u32 = 3000;
+/// Board → host: `seq u16, offset u16, data` — a piece of the memory image of one
+/// scan; all pieces of a scan share `seq`, the image is complete when `image_size`
+/// bytes have arrived.
+pub const IMAGE: u8 = 0x05;
 /// Board → host, every 500 ms: `cycles u32, last u32, max u32, avg u32,
 /// period_max u32, free_heap u32, n u8, n × (sheet u16, last u32, max u32)`,
 /// then optionally `bg_last u32, bg_max u32` — a pass of the background task on core 0.
@@ -49,6 +70,22 @@ pub const RESET_STATS: u8 = 0x14;
 pub const TEXT_IN: u8 = 0x15;
 /// Bytes per `TEXT_IN` frame; longer input goes in several frames.
 pub const TEXT_IN_CHUNK: usize = 200;
+
+/// Host → board: ask for an `AUTH_CHALLENGE`. A signed-in session ends with it: the host
+/// sends it on leaving, so the board does not stay open for the idle time.
+pub const AUTH_REQ: u8 = 0x17;
+/// Host → board, every second while signed in: keeps the session open (`AUTH_IDLE_MS`).
+pub const PING: u8 = 0x19;
+/// Host → board: HMAC-SHA256 (32 bytes) of the challenge nonce under the access key.
+pub const AUTH: u8 = 0x18;
+
+/// Host → board: `offset u32` — ask for a piece of the project archive kept in flash.
+pub const GET_PROJECT: u8 = 0x16;
+/// Board → host, the answer to `GET_PROJECT`: `total u32, offset u32, data` (at most
+/// [`PROJECT_CHUNK`] bytes). `total` is 0 when the firmware carries no project.
+pub const PROJECT: u8 = 0x06;
+/// Bytes of the project per `PROJECT` frame: header 8 bytes + data fits in 255.
+pub const PROJECT_CHUNK: usize = 240;
 
 /// Cycle time figures of the board, decoded from `STATS`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -285,7 +322,7 @@ mod tests {
         let mut stream = b"boot ok\r\n".to_vec();
         stream.extend(encode(HELLO, &[1, 2, 3]));
         stream.extend(b"temp=21\n");
-        stream.extend(encode(VALUES, &[]));
+        stream.extend(encode(IMAGE, &[]));
         let mut p = Parser::default();
         let events = p.feed(&stream);
         assert_eq!(
@@ -298,7 +335,7 @@ mod tests {
                 },
                 Event::Text("temp=21".into()),
                 Event::Frame {
-                    kind: VALUES,
+                    kind: IMAGE,
                     payload: vec![]
                 },
             ]

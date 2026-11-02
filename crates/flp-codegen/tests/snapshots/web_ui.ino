@@ -1,5 +1,5 @@
 // Сгенерировано CrabLogic из проекта «web_ui». Ручные правки будут перезаписаны.
-// Порядок выполнения: wifi → ui → head → sw → btn → sld → inp → val → bar → any → lamp → led → txt → info → line → box → trend → net → tank → clock → pic → fan → arrow → panel → sepv → cnt
+// Порядок выполнения: wifi → ui → head → sw → btn → sld → inp → val → bar → any → led → txt → info → line → box → trend → net → tank → clock → pic → fan → arrow → panel → sepv → cnt
 
 // Tells the web page block to add the network form handlers (/ui/net, /ui/scan).
 #define FLP_WEB_NET
@@ -354,9 +354,6 @@ FlpUiItem val_ui = {"web_value", "Ползунок", "%", 1, 7, 8, 4, 1, false, 
 
 // bar: web_gauge
 FlpUiItem bar_ui = {"web_gauge", "Шкала", "%", 9, 7, 16, 4, 1, false, 0, 0.0f, 100.0f, 0, 1};
-
-// lamp: web_led
-FlpUiItem lamp_ui = {"web_led", "Светодиод", "", 17, 3, 8, 2, 1, false, 0, 0, 0, 0, 0};
 
 // info: web_text
 FlpUiItem info_ui = {"web_text", "Состояние", "", 1, 11, 24, 2, 1, false, 0, 0, 0, 0, 0};
@@ -801,11 +798,6 @@ void setup() {
   bar_ui.color = "";
   bar_ui.back = "";
 
-  // lamp: web_led
-  flpUiAdd(&lamp_ui);
-  lamp_ui.color = "";
-  lamp_ui.back = "";
-
   // led: digital_out
   pinMode(8, OUTPUT);
 
@@ -1026,9 +1018,6 @@ void loop() {
 
   // any: or
   any_out = sw_out || btn_out;
-
-  // lamp: web_led
-  lamp_ui.value = any_out ? 1 : 0;
 
   // led: digital_out
   digitalWrite(8, (any_out) ? HIGH : LOW);

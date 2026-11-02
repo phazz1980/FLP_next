@@ -72,7 +72,7 @@ fn shows_text_and_drops_frames() {
         let mut w = wire.lock().unwrap();
         w.to_host.extend(b"hello\r\n");
         w.to_host
-            .extend(protocol::encode(protocol::VALUES, &[0, 0, 0, 0, 0]));
+            .extend(protocol::encode(protocol::IMAGE, &[0, 0, 0, 0]));
         w.to_host.extend("t=21.5\nВвод> ".as_bytes());
     }
     assert_eq!(lines(&monitor, 3), ["hello", "t=21.5", "Ввод>"]);

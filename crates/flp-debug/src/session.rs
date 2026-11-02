@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::image::ImageLayout;
 use crate::protocol::{self, Event, Parser, Stats};
 use crate::table::{DebugTable, Value};
 use crate::transport::{Connector, Transport};
@@ -34,6 +35,11 @@ pub struct Live {
     pub frames: u64,
     /// Latest cycle time report of the board.
     pub stats: Option<Stats>,
+    /// The firmware is locked with a password and has not let this session in.
+    pub needs_password: bool,
+    /// `Project::content_hash` of the project the firmware was built from; `None`
+    /// until the board has told it (and for a firmware that cannot).
+    pub project_hash: Option<[u8; 8]>,
 }
 
 impl Live {
@@ -63,6 +69,8 @@ pub enum Command {
     ResetStats,
     /// Bytes typed in the debug console (line ending included).
     TextIn(Vec<u8>),
+    /// A new password for a locked firmware (after "needs password" or "wrong password").
+    Password(String),
     Stop,
 }
 
@@ -73,8 +81,19 @@ pub struct Session {
 }
 
 impl Session {
-    /// Starts the session. `wake` is called whenever new data arrives.
+    /// Starts the session for firmware without a password.
+    /// `wake` is called whenever new data arrives.
     pub fn start(table: DebugTable, connect: Connector, wake: impl Fn() + Send + 'static) -> Self {
+        Self::start_with(table, connect, String::new(), wake)
+    }
+
+    /// Starts the session; `password` opens firmware locked with the project password.
+    pub fn start_with(
+        table: DebugTable,
+        connect: Connector,
+        password: String,
+        wake: impl Fn() + Send + 'static,
+    ) -> Self {
         let n = table.entries.len();
         let live = Arc::new(Mutex::new(Live {
             values: vec![None; n],
@@ -86,7 +105,7 @@ impl Session {
         }));
         let (tx, rx) = mpsc::channel();
         let shared = live.clone();
-        let thread = thread::spawn(move || run(table, connect, rx, shared, wake));
+        let thread = thread::spawn(move || run(table, connect, password, rx, shared, wake));
         Self {
             live,
             tx,
@@ -123,12 +142,14 @@ impl Drop for Session {
 fn run(
     table: DebugTable,
     connect: Connector,
+    mut password: String,
     rx: Receiver<Command>,
     live: Arc<Mutex<Live>>,
     wake: impl Fn(),
 ) {
     let started = Instant::now();
     let expected = table.fingerprint();
+    let layout = table.image_layout();
     loop {
         let mut port = match connect() {
             Ok(port) => port,
@@ -143,10 +164,22 @@ fn run(
         };
         set_status(&live, true, "Подключено, ждём ответа платы...".into());
         wake();
-        match serve(&table, expected, started, port.as_mut(), &rx, &live, &wake) {
+        match serve(
+            &table,
+            &layout,
+            expected,
+            started,
+            &mut password,
+            port.as_mut(),
+            &rx,
+            &live,
+            &wake,
+        ) {
             Ok(Stop::Requested) => {
                 // Leave the board in normal operation.
                 let _ = port.write_all(&protocol::encode(protocol::RELEASE_ALL, &[]));
+                // Sign out: a password-locked board closes at once.
+                let _ = port.write_all(&protocol::encode(protocol::AUTH_REQ, &[]));
                 return;
             }
             Ok(Stop::Silent) => {
@@ -166,10 +199,13 @@ enum Stop {
     Silent,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn serve(
     table: &DebugTable,
+    layout: &ImageLayout,
     expected: u32,
     started: Instant,
+    password: &mut String,
     port: &mut dyn Transport,
     rx: &Receiver<Command>,
     live: &Arc<Mutex<Live>>,
@@ -180,14 +216,35 @@ fn serve(
     let mut last_rx = Instant::now();
     let mut last_hello = Instant::now() - Duration::from_secs(10);
     let mut greeted = false;
+    // The image of the scan being received.
+    let mut image = vec![0u8; layout.size];
+    let mut image_seq = 0u16;
+    let mut image_got = 0usize;
+    // Password gate: the board locked itself, we signed in, or it turned us away.
+    let mut locked = false;
+    let mut authed = false;
+    let mut rejected = false;
+    let mut last_ping = Instant::now();
+    let mut key: Option<([u8; 16], [u8; 32])> = None;
     loop {
         // Commands from the editor.
         loop {
             match rx.try_recv() {
                 Ok(Command::Stop) | Err(TryRecvError::Disconnected) => return Ok(Stop::Requested),
+                Ok(Command::Password(new)) => {
+                    *password = new;
+                    rejected = false;
+                    if locked {
+                        port.write_all(&protocol::encode(protocol::AUTH_REQ, &[]))?;
+                    }
+                }
                 Ok(cmd) => apply_command(table, port, live, cmd)?,
                 Err(TryRecvError::Empty) => break,
             }
+        }
+        if authed && last_ping.elapsed() > Duration::from_secs(1) {
+            port.write_all(&protocol::encode(protocol::PING, &[]))?;
+            last_ping = Instant::now();
         }
         if !greeted && last_hello.elapsed() > Duration::from_millis(700) {
             port.write_all(&protocol::encode(protocol::HELLO_REQ, &[]))?;
@@ -196,6 +253,10 @@ fn serve(
 
         let n = port.read(&mut buf)?;
         if n == 0 {
+            // A locked board stays quiet on purpose; that is not a dead link.
+            if locked && !authed {
+                last_rx = Instant::now();
+            }
             if last_rx.elapsed() > Duration::from_secs(3) {
                 return Ok(Stop::Silent);
             }
@@ -218,10 +279,47 @@ fn serve(
                         protocol::HELLO if payload.len() >= 6 => {
                             let fp = u32::from_le_bytes(payload[0..4].try_into().expect("4 bytes"));
                             greeted = true;
-                            let ok = fp == expected;
+                            let version = payload.get(6).copied().unwrap_or(0);
+                            let size = payload
+                                .get(7..9)
+                                .map(|b| usize::from(u16::from_le_bytes([b[0], b[1]])));
+                            locked = payload
+                                .get(9)
+                                .is_some_and(|f| f & protocol::HELLO_LOCKED != 0);
+                            authed = authed && !locked;
+                            l.needs_password = locked;
+                            l.project_hash = payload
+                                .get(10..18)
+                                .filter(|_| !locked)
+                                .map(|h| <[u8; 8]>::try_from(h).expect("8 bytes"));
+                            if locked && version == protocol::VERSION {
+                                l.schema_matches = None;
+                                l.stats = None;
+                                if password.is_empty() || rejected {
+                                    l.status = if rejected {
+                                        "Неверный пароль отладки".into()
+                                    } else {
+                                        "Отладка защищена паролем: введите пароль".into()
+                                    };
+                                } else {
+                                    l.status = "Вход по паролю...".into();
+                                    drop(l);
+                                    port.write_all(&protocol::encode(protocol::AUTH_REQ, &[]))?;
+                                }
+                                changed = true;
+                                continue;
+                            }
+                            let ok = fp == expected
+                                && version == protocol::VERSION
+                                && size == Some(layout.size);
                             l.schema_matches = Some(ok);
                             l.status = if ok {
                                 "Онлайн".into()
+                            } else if version != protocol::VERSION {
+                                format!(
+                                    "Прошивка использует старый протокол отладки (v{version}, нужен v{}) — перезалейте её",
+                                    protocol::VERSION
+                                )
                             } else {
                                 "Прошивка на плате собрана для другой схемы — перезалейте её".into()
                             };
@@ -241,6 +339,34 @@ fn serve(
                             changed = true;
                             continue;
                         }
+                        protocol::AUTH_CHALLENGE if payload.len() >= 32 => {
+                            drop(l);
+                            let mut salt = [0u8; 16];
+                            salt.copy_from_slice(&payload[..16]);
+                            // The key takes a moment to derive: once per salt.
+                            let key = match key {
+                                Some((s, k)) if s == salt => k,
+                                _ => {
+                                    let k = flp_core::protect::auth_key(password, &salt);
+                                    key = Some((salt, k));
+                                    k
+                                }
+                            };
+                            let proof = flp_core::protect::auth_proof(&key, &payload[16..32]);
+                            port.write_all(&protocol::encode(protocol::AUTH, &proof))?;
+                            continue;
+                        }
+                        protocol::AUTH_OK => {
+                            authed = true;
+                            last_ping = Instant::now();
+                            l.needs_password = false;
+                            l.status = "Подключено, ждём ответа платы...".into();
+                        }
+                        protocol::AUTH_FAIL => {
+                            rejected = true;
+                            key = None;
+                            l.status = "Неверный пароль отладки".into();
+                        }
                         protocol::STATS => {
                             if l.schema_matches == Some(true) {
                                 l.stats = Stats::decode(&payload);
@@ -255,22 +381,32 @@ fn serve(
                                 *slot = Some(String::from_utf8_lossy(&payload[2..]).into_owned());
                             }
                         }
-                        protocol::VALUES if payload.len() >= 5 => {
+                        protocol::IMAGE if payload.len() >= 4 => {
                             if l.schema_matches != Some(true) {
                                 // Layout unknown or foreign: values would be misread.
                                 continue;
                             }
-                            let start = usize::from(u16::from_le_bytes([payload[2], payload[3]]));
-                            let count = usize::from(payload[4]);
+                            let seq = u16::from_le_bytes([payload[0], payload[1]]);
+                            let offset = usize::from(u16::from_le_bytes([payload[2], payload[3]]));
+                            let data = &payload[4..];
+                            if offset + data.len() > image.len() {
+                                continue;
+                            }
+                            if seq != image_seq {
+                                image_seq = seq;
+                                image_got = 0;
+                            }
+                            image[offset..offset + data.len()].copy_from_slice(data);
+                            image_got += data.len();
+                            if image_got < image.len() {
+                                continue;
+                            }
+                            image_got = 0;
                             let t = started.elapsed().as_secs_f64();
-                            let (chunks, _) = payload[5..].as_chunks::<4>();
-                            for (k, raw) in chunks.iter().take(count).enumerate() {
-                                let i = start + k;
-                                let Some(entry) = table.entries.get(i) else {
+                            for i in 0..table.entries.len() {
+                                let Some(v) = layout.read(&image, i) else {
                                     break;
                                 };
-                                let raw = u32::from_le_bytes(*raw);
-                                let v = Value::from_raw(entry.ty, raw);
                                 l.values[i] = Some(v);
                                 let y = match v {
                                     Value::Bool(b) => f64::from(u8::from(b)),
@@ -333,7 +469,7 @@ fn apply_command(
             }
             Ok(())
         }
-        Command::Stop => Ok(()),
+        Command::Stop | Command::Password(_) => Ok(()),
     }
 }
 

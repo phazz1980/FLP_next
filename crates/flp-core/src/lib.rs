@@ -19,6 +19,7 @@ pub mod pack;
 pub mod packed;
 pub mod pins;
 pub mod project;
+pub mod protect;
 pub mod tags;
 pub mod uart;
 pub mod value;
@@ -39,7 +40,7 @@ pub use library::{
 pub use local::LocalValues;
 pub use logic::{Block, Link, Logic, PortRef, PortRefError};
 pub use pins::PinFunction;
-pub use project::{BoardConfig, Project, ProjectConfig, ProjectInfo};
+pub use project::{hash_hex, BoardConfig, Project, ProjectConfig, ProjectInfo};
 pub use uart::{UartAccess, UartConfig, UartUse};
 pub use value::ParamValue;
 pub use vars::{Var, VarType};

@@ -1262,6 +1262,9 @@ flp_st_bg_end();
         out.push('\n');
         push_indented(&mut out, save.into_iter());
     }
+    if table.is_some() {
+        out.push_str("\n  flp_img_snapshot();\n");
+    }
     if stats {
         out.push_str("\n  flp_st_end();\n");
     }

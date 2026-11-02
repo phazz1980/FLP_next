@@ -59,6 +59,128 @@ pub fn generate(
     backend.generate(&program)
 }
 
+/// Adds the project to the sketch: its archive (encrypted when the project has a
+/// password) as `FLP_PROJECT[]` in flash. The firmware only stores it; the editor reads
+/// it back from the board and opens it.
+///
+/// Pass the project as saved: values kept outside the file (Wi-Fi passwords) must not
+/// get into the firmware image of the project.
+pub fn embed_project(code: &str, project: &Project) -> Result<String, GenError> {
+    let archive = project.archive_bytes()?;
+    let password = &project.config.project.password;
+    let mut out = if project.config.project.embed {
+        let blob = flp_core::protect::seal(&archive, password)?;
+        embed_blob(code, &blob)
+    } else {
+        code.to_owned()
+    };
+    // The identity of the project for the debug module's `HELLO`.
+    if out.contains("flp_dbg_locked") {
+        out.push_str(&format!(
+            "
+// Project identity (reported in the debug hello).
+const uint8_t FLP_PROJECT_HASH[8] = {{ {} }};
+",
+            project
+                .content_hash()?
+                .iter()
+                .map(|b| format!("0x{b:02X}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    // The password gate of the debug module (see `debug::runtime`), only where there is one.
+    if let Some(auth) = flp_core::protect::auth_material(&archive, password) {
+        if out.contains("flp_dbg_locked") {
+            embed_auth(&mut out, &auth);
+        }
+    }
+    Ok(out)
+}
+
+/// The access key and salt of the debug gate as `FLP_AUTH_*` constants in flash.
+fn embed_auth(out: &mut String, auth: &flp_core::protect::AuthMaterial) {
+    let list = |bytes: &[u8]| {
+        bytes
+            .iter()
+            .map(|b| format!("0x{b:02X}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    const SETUP: &str = "
+void setup() {
+";
+    if let Some(at) = out.find(SETUP) {
+        out.insert_str(
+            at + SETUP.len(),
+            "  asm volatile(\"\" : : \"r\"(FLP_AUTH_KEY), \"r\"(FLP_AUTH_SALT), \"r\"(&FLP_AUTH_ON));
+",
+        );
+        out.insert_str(
+            at,
+            "
+extern const uint8_t FLP_AUTH_ON;
+extern const uint8_t FLP_AUTH_KEY[32];
+extern const uint8_t FLP_AUTH_SALT[16];
+",
+        );
+    }
+    out.push_str(
+        "
+// Debug password gate: salt and access key (not the password itself).
+",
+    );
+    out.push_str(
+        "const uint8_t FLP_AUTH_ON = 1;
+",
+    );
+    out.push_str(&format!(
+        "const uint8_t FLP_AUTH_SALT[16] = {{ {} }};
+",
+        list(&auth.salt)
+    ));
+    out.push_str(&format!(
+        "const uint8_t FLP_AUTH_KEY[32] = {{ {} }};
+",
+        list(&auth.key)
+    ));
+}
+
+fn embed_blob(code: &str, blob: &[u8]) -> String {
+    let mut out = String::with_capacity(code.len() + blob.len() * 6 + 512);
+    out.push_str(code);
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str("\n// Project archive (read back by the editor).\n");
+    out.push_str("const uint8_t FLP_PROJECT[] PROGMEM = {");
+    for (i, byte) in blob.iter().enumerate() {
+        if i % 16 == 0 {
+            out.push_str("\n ");
+        }
+        out.push_str(&format!(" 0x{byte:02X},"));
+    }
+    out.push_str("\n};\n");
+    out.push_str(&format!(
+        "const uint32_t FLP_PROJECT_SIZE = {};\n",
+        blob.len()
+    ));
+    // Takes the address of the array in `setup()` so the linker keeps it: nothing else
+    // reads it until the board is asked for the project.
+    const SETUP: &str = "\nvoid setup() {\n";
+    if let Some(at) = out.find(SETUP) {
+        out.insert_str(
+            at + SETUP.len(),
+            "  asm volatile(\"\" : : \"r\"(FLP_PROJECT));\n",
+        );
+        out.insert_str(
+            at,
+            "\nextern const uint8_t FLP_PROJECT[] PROGMEM;\nextern const uint32_t FLP_PROJECT_SIZE;\n",
+        );
+    }
+    out
+}
+
 /// Writes the Arduino sketch to `<work_dir>/sketch/sketch.ino`
 /// (`work_dir` is [`Project::work_dir`]).
 ///

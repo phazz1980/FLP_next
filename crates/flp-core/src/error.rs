@@ -49,6 +49,9 @@ pub enum Error {
 
     #[error("неверное описание платы {}: {}", .path.display(), .message)]
     InvalidBoard { path: PathBuf, message: String },
+
+    #[error("{0}")]
+    Crypto(String),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

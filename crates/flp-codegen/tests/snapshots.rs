@@ -135,6 +135,21 @@ fn debug_module_snapshot() {
     assert!(code.contains("flp_dbg_loop();"));
     assert!(code.contains("flp_st_begin();"));
     assert!(code.contains("flp_st_end();"));
+    // Memory image: largest types first, copied at the end of the scan, after
+    // every forcing, so a forced value is in the image too.
+    assert!(code.contains("struct __attribute__((packed)) FlpImage {"));
+    let image = code
+        .split("struct __attribute__((packed)) FlpImage {")
+        .nth(1)
+        .unwrap();
+    assert!(
+        image.trim_start().starts_with("int32_t v0;  // adc_out"),
+        "{image}"
+    );
+    assert!(image.contains("bool v9;  // var_heating"), "{image}");
+    assert!(code.contains("const uint16_t flp_dbg_off[FLP_DBG_COUNT + 1] = { 0, 4, 8, 12, 16, 28, 29, 20, 24, 30, 0 };"));
+    let scan = code.split("void loop() {").nth(1).unwrap();
+    assert!(scan.find("flp_dbg_force(").unwrap() < scan.find("flp_img_snapshot();").unwrap());
 }
 
 /// Strings in the debug build: their own table and `TEXT` frames.
@@ -1030,4 +1045,119 @@ fn firmware_source_order() {
         Err(GenError::MissingTemplate { kind, .. }) => assert_eq!(kind, "my_ton"),
         other => panic!("ожидалась ошибка «нет шаблона», получено {other:?}"),
     }
+}
+
+#[test]
+fn project_is_embedded_in_flash() {
+    let lib = library();
+    let mut project = Project::load(repo_path("examples/pump")).unwrap();
+    let code = generate(&project, &lib, &ArduinoCpp { debug: false }).unwrap();
+    let plain = flp_codegen::embed_project(&code, &project).unwrap();
+    assert!(plain.contains("const uint8_t FLP_PROJECT[] PROGMEM = {"));
+    assert!(plain.contains("const uint32_t FLP_PROJECT_SIZE = "));
+    // Declared before use in setup(), which keeps the array linked.
+    let decl = plain.find("extern const uint8_t FLP_PROJECT[]").unwrap();
+    let setup = plain.find("void setup() {").unwrap();
+    assert!(decl < setup);
+    assert!(plain.contains("asm volatile(\"\" : : \"r\"(FLP_PROJECT));"));
+    // The same project gives the same sketch (the build cache stays valid).
+    assert_eq!(plain, flp_codegen::embed_project(&code, &project).unwrap());
+    // A plain archive starts with the ZIP magic "PK".
+    assert!(plain.contains("FLP_PROJECT[] PROGMEM = {\n  0x50, 0x4B,"));
+
+    project.config.project.password = "секрет".into();
+    let sealed = flp_codegen::embed_project(&code, &project).unwrap();
+    assert!(sealed.contains("FLP_PROJECT[] PROGMEM = {\n  0x43, 0x52, 0x42, 0x31,"));
+    assert_eq!(sealed, flp_codegen::embed_project(&code, &project).unwrap());
+}
+
+#[test]
+fn debug_password_gate_is_embedded_only_with_a_password() {
+    let lib = library();
+    let mut project = Project::load(repo_path("examples/pump")).unwrap();
+    let debug = generate(&project, &lib, &ArduinoCpp { debug: true }).unwrap();
+    let open = flp_codegen::embed_project(&debug, &project).unwrap();
+    assert!(!open.contains("FLP_AUTH_ON = 1"));
+    assert!(open.contains("const uint8_t FLP_PROJECT_HASH[8] = {"));
+    // A release sketch has no debug module to report it.
+    let release = generate(&project, &lib, &ArduinoCpp { debug: false }).unwrap();
+    assert!(!flp_codegen::embed_project(&release, &project)
+        .unwrap()
+        .contains("FLP_PROJECT_HASH"));
+
+    project.config.project.password = "секрет".into();
+    let locked = flp_codegen::embed_project(&debug, &project).unwrap();
+    assert!(locked.contains("const uint8_t FLP_AUTH_ON = 1;"));
+    assert!(locked.contains("const uint8_t FLP_AUTH_KEY[32] = {"));
+    assert!(!locked.contains("секрет"));
+    // Declared before setup(), which takes their addresses so the linker keeps them.
+    let decl = locked
+        .find("extern const uint8_t FLP_AUTH_KEY[32];")
+        .unwrap();
+    assert!(decl < locked.find("void setup() {").unwrap());
+    assert_eq!(
+        locked,
+        flp_codegen::embed_project(&debug, &project).unwrap()
+    );
+    // Also without the project copy in flash.
+    project.config.project.embed = false;
+    let no_copy = flp_codegen::embed_project(&debug, &project).unwrap();
+    assert!(
+        no_copy.contains("FLP_AUTH_KEY[32] = {")
+            && !no_copy.contains(
+                "FLP_PROJECT[] PROGMEM = {
+"
+            )
+    );
+
+    // A release sketch has no debug module, hence no gate to configure.
+    let release = generate(&project, &lib, &ArduinoCpp { debug: false }).unwrap();
+    assert!(!flp_codegen::embed_project(&release, &project)
+        .unwrap()
+        .contains("FLP_AUTH"));
+}
+
+/// Bytes of `FLP_PROJECT[]` as the firmware would return them.
+fn embedded_bytes(sketch: &str) -> Vec<u8> {
+    let start = sketch.find("FLP_PROJECT[] PROGMEM = {").unwrap();
+    let body = &sketch[start..];
+    let body = &body[body.find('{').unwrap() + 1..body.find("};").unwrap()];
+    body.split(',')
+        .filter_map(|t| t.trim().strip_prefix("0x"))
+        .map(|h| u8::from_str_radix(h, 16).unwrap())
+        .collect()
+}
+
+#[test]
+fn project_read_back_from_sketch_keeps_the_fingerprint() {
+    let lib = library();
+    let mut project = Project::load(repo_path("examples/pump")).unwrap();
+    let fingerprint = |p: &Project| {
+        let enabled = p.without_disabled();
+        let program = flp_codegen::Program::build(&enabled, &lib).unwrap();
+        flp_codegen::debug::debug_table(&program).fingerprint()
+    };
+    for password in ["", "секрет"] {
+        project.config.project.password = password.into();
+        let code = generate(&project, &lib, &ArduinoCpp { debug: true }).unwrap();
+        let sketch = flp_codegen::embed_project(&code, &project).unwrap();
+        let blob = embedded_bytes(&sketch);
+        let archive = flp_core::protect::open(&blob, password).unwrap();
+        let back = Project::from_archive_bytes(&archive, "back.crab").unwrap();
+        assert_eq!(back.logic, project.logic);
+        assert_eq!(back.config.project.password, password);
+        assert_eq!(fingerprint(&back), fingerprint(&project));
+        // The debug module answers GET_PROJECT.
+        assert!(sketch.contains("flp_dbg_project(p, len);"));
+    }
+}
+
+#[test]
+fn embedding_can_be_switched_off() {
+    let lib = library();
+    let mut project = Project::load(repo_path("examples/pump")).unwrap();
+    project.config.project.embed = false;
+    let code = generate(&project, &lib, &ArduinoCpp { debug: true }).unwrap();
+    let sketch = flp_codegen::embed_project(&code, &project).unwrap();
+    assert!(!sketch.contains("FLP_PROJECT[] PROGMEM = {"));
 }

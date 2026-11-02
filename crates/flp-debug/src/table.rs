@@ -67,6 +67,11 @@ impl DebugTable {
         hash
     }
 
+    /// Offsets of the entries in the memory image the firmware keeps.
+    pub fn image_layout(&self) -> crate::ImageLayout {
+        crate::ImageLayout::new(&self.entries)
+    }
+
     pub fn text_output_index(&self, port: &PortRef) -> Option<usize> {
         self.texts
             .iter()
