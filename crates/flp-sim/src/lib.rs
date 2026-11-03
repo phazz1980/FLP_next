@@ -12,6 +12,7 @@
 //! Indexes follow the order of ports and parameters in `block.toml`.
 
 pub mod builtin;
+pub mod mcu;
 pub mod schema;
 
 pub use flp_blocks::{Bench, Signal, OWN_SLAVE};

@@ -64,7 +64,7 @@ void setup() {
   // step time (millis() check inside the module makes most calls cheap)
   const int n = 20000;
   uint32_t t0 = micros();
-  for (int i = 0; i < n; i++) m3_CallV(g_mod.step);
+  for (int i = 0; i < n; i++) m3_CallV(g_mod.step, (int32_t)0);
   Serial.printf("step: %.2f us\n", (micros() - t0) / (float)n);
 
   // hot swap: single and 1000x, then fragmentation
@@ -78,6 +78,6 @@ void setup() {
 }
 
 void loop() {
-  if (g_mod.step) m3_CallV(g_mod.step);
+  if (g_mod.step) m3_CallV(g_mod.step, (int32_t)0);
   delay(1);
 }

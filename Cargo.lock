@@ -1837,6 +1837,7 @@ dependencies = [
  "flp-build",
  "flp-codegen",
  "flp-core",
+ "serde",
  "toml 0.8.23",
  "wasmi 2.0.0",
  "wat",

@@ -5,7 +5,7 @@
   (global $last (mut i32) (i32.const 0))
   (global $state (mut i32) (i32.const 0))
   (func (export "abi_version") (result i32) i32.const 2)
-  (func (export "step")
+  (func (export "step") (param $dt i32)
     (if (i32.ge_u (i32.sub (call $millis) (global.get $last)) (i32.const 500))
       (then
         (global.set $last (call $millis))
