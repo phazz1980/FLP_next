@@ -1,0 +1,19 @@
+# Same script for the PC (flp-sim test) and the board (compare.ps1).
+# reset   param|in <index> <value>   tick <steps> <dt_ms>   out (first 4 outputs as f64 bits)
+reset
+param 0 0.5
+in 0 1.0
+in 1 0.25
+tick 5 10
+out
+in 0 -2.5
+in 1 3.0
+tick 5 10
+out
+in 0 0.1
+in 1 0.2
+param 0 3.3
+tick 3 20
+out
+tick 40 7
+out

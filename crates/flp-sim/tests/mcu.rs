@@ -119,3 +119,76 @@ fn manifest_is_validated() {
         .contains("format_disk"));
     assert!(Manifest::parse("abi = 3").unwrap_err().contains("ABI 3"));
 }
+
+/// The module and script shared with the board comparison (`proto/compare/compare.ps1`).
+const COUNTER: &str = include_str!("../../../specs/wasm-on-mcu/proto/counter.wat");
+const SCENARIO: &str = include_str!("../../../specs/wasm-on-mcu/proto/compare/scenario.txt");
+const GOLDEN_PATH: &str = "../../specs/wasm-on-mcu/proto/compare/golden.txt";
+
+/// Runs the scenario the way the master does: a step, then the messages it published go back
+/// to the subscribers. Returns one `out …` line per `out` command.
+fn run_scenario() -> Vec<String> {
+    let manifest = Manifest::parse("").unwrap();
+    let fresh = || McuModule::load(&wat::parse_str(COUNTER).unwrap(), &manifest, 4).unwrap();
+    let mut m = fresh();
+    let mut inputs = vec![0.0; 8];
+    let mut params = vec![0.0; 8];
+    let mut lines = Vec::new();
+    for line in SCENARIO.lines().map(str::trim) {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        match words.as_slice() {
+            [] | ["#", ..] => {}
+            ["reset"] => {
+                m = fresh();
+                inputs = vec![0.0; 8];
+                params = vec![0.0; 8];
+            }
+            ["in", i, v] => inputs[i.parse::<usize>().unwrap()] = v.parse().unwrap(),
+            ["param", i, v] => params[i.parse::<usize>().unwrap()] = v.parse().unwrap(),
+            ["tick", n, dt] => {
+                for _ in 0..n.parse::<u32>().unwrap() {
+                    m.set_inputs(&inputs);
+                    m.set_params(&params);
+                    m.step(dt.parse().unwrap()).unwrap();
+                    for (topic, data) in m.take_published() {
+                        m.deliver(&topic, &data).unwrap();
+                    }
+                }
+            }
+            ["out"] => {
+                let bits: Vec<String> = m.outputs()[..4]
+                    .iter()
+                    .map(|v| format!("{:016x}", v.to_bits()))
+                    .collect();
+                lines.push(format!("out {}", bits.join(" ")));
+            }
+            other => panic!("unknown scenario line: {other:?}"),
+        }
+    }
+    lines
+}
+
+#[test]
+fn counter_matches_golden_outputs() {
+    let got = run_scenario().join("\n") + "\n";
+    if std::env::var_os("UPDATE_GOLDEN").is_some() {
+        std::fs::write(GOLDEN_PATH, &got).unwrap();
+    }
+    let want = std::fs::read_to_string(GOLDEN_PATH)
+        .unwrap()
+        .replace("\r\n", "\n");
+    assert_eq!(
+        got, want,
+        "run with UPDATE_GOLDEN=1 to refresh the golden file"
+    );
+}
+
+#[test]
+fn counter_scenario_is_sane() {
+    let lines = run_scenario();
+    let last = lines.last().unwrap();
+    let steps = f64::from_bits(u64::from_str_radix(last.split(' ').nth(2).unwrap(), 16).unwrap());
+    let msgs = f64::from_bits(u64::from_str_radix(last.split(' ').nth(4).unwrap(), 16).unwrap());
+    assert_eq!(steps, 53.0);
+    assert_eq!(msgs, 26.0); // a message after every even step
+}

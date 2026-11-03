@@ -3,6 +3,10 @@
 //
 // Serial protocol (115200, lines end with \n):
 //   put <name> <len> <crc32 hex> <allow,list|->   then <len> raw bytes -> stores and (re)starts the module
+//   in|param <name> <i> <value>      set an input / parameter (module tests)
+//   reset <name>                     restart the module paused, inputs and outputs zero
+//   tick <name> <n> <dt_ms>          pause the module and run n steps now
+//   out <name> <n>                   first n outputs as f64 bits in hex
 //   swap <name>      reload the module from LittleFS      list      stats      log      del <name>
 #include <LittleFS.h>
 #include <esp_crc.h>
@@ -29,13 +33,13 @@ struct Slot {
   IM3Runtime rt = nullptr;
   IM3Function step = nullptr, alloc = nullptr, onMessage = nullptr;
   TaskHandle_t task = nullptr;
-  volatile bool inStep = false, needRestart = false;
+  volatile bool inStep = false, needRestart = false, paused = false;
   volatile uint32_t stepStart = 0, steps = 0, restarts = 0;
   char subs[4][24];
   int nSubs = 0;
   Msg queue[4];
   volatile int qHead = 0, qTail = 0;
-  double outputs[8];
+  double outputs[8], inputs[8], params[8];
 };
 
 static Slot g_slots[kMaxSlots];
@@ -69,8 +73,12 @@ static bool inMem(IM3Runtime rt, int32_t ptr, int32_t len) {
 m3ApiRawFunction(h_input) {
   m3ApiReturnType(double);
   m3ApiGetArg(int32_t, i);
-  (void)i;
-  m3ApiReturn(0.0);
+  m3ApiReturn((i >= 0 && i < 8) ? slotOf(_ctx)->inputs[i] : 0.0);
+}
+m3ApiRawFunction(h_param) {
+  m3ApiReturnType(double);
+  m3ApiGetArg(int32_t, i);
+  m3ApiReturn((i >= 0 && i < 8) ? slotOf(_ctx)->params[i] : 0.0);
 }
 m3ApiRawFunction(h_output) {
   m3ApiGetArg(int32_t, i);
@@ -170,7 +178,7 @@ m3ApiRawFunction(h_millis) {
 static void linkAll(Slot &s, IM3Module m) {
   auto L = [&](const char *n, const char *sig, M3RawCall f) { m3_LinkRawFunctionEx(m, "flp", n, sig, f, &s); };
   L("input", "F(i)", h_input);
-  L("param", "F(i)", h_input);
+  L("param", "F(i)", h_param);
   L("output", "v(iF)", h_output);
   L("log", "v(ii)", h_log);
   L("tag_get", "F(i)", h_tag_get);
@@ -215,7 +223,7 @@ static void stopSlot(Slot &s) {
   s.qHead = s.qTail = 0;
 }
 
-static bool startSlot(Slot &s) {
+static bool startSlot(Slot &s, bool paused = false) {
   String base = String("/modules/") + s.name;
   File f = LittleFS.open(base + ".wasm", "r");
   if (!f) {
@@ -260,6 +268,10 @@ static bool startSlot(Slot &s) {
   m3_FindFunction(&s.alloc, s.rt, "alloc");
   m3_FindFunction(&s.onMessage, s.rt, "on_message");
   s.steps = 0;
+  s.paused = paused;
+  memset((void *)s.inputs, 0, sizeof s.inputs);
+  memset((void *)s.params, 0, sizeof s.params);
+  memset((void *)s.outputs, 0, sizeof s.outputs);
   xTaskCreatePinnedToCore(slotTask, s.name, 6144, &s, 1, &s.task, 1);
   return true;
 }
@@ -294,6 +306,7 @@ static void deliver(Slot &s) {
 static void slotTask(void *arg) {
   Slot &s = *(Slot *)arg;
   for (;;) {
+    while (s.paused) vTaskDelay(pdMS_TO_TICKS(5));
     s.stepStart = millis();
     s.inStep = true;
     M3Result r = m3_CallV(s.step, (int32_t)kStepPeriodMs);
@@ -396,9 +409,71 @@ static void cmdPut(const String &line) {
   Serial.println(ok ? "ok" : "err not started (see log)");
 }
 
+// Module tests: set inputs, run exact steps, read outputs bit for bit.
+static void cmdTest(const String &line) {
+  char cmd[8], name[32];
+  int idx = 0;
+  double val = 0;
+  unsigned n = 0, dt = 0;
+  Slot *s = nullptr;
+  if (sscanf(line.c_str(), "%7s %31s", cmd, name) == 2) s = findSlot(name, false);
+  if (!s || !s->task) {
+    Serial.println("err no such module");
+    return;
+  }
+  if (!strcmp(cmd, "reset")) {
+    xSemaphoreTake(g_mgmt, portMAX_DELAY);
+    stopSlot(*s);
+    bool ok = startSlot(*s, true);
+    xSemaphoreGive(g_mgmt);
+    Serial.println(ok ? "ok" : "err not started (see log)");
+  } else if (!strcmp(cmd, "in") || !strcmp(cmd, "param")) {
+    if (sscanf(line.c_str(), "%*s %*s %d %lf", &idx, &val) != 2 || idx < 0 || idx >= 8) {
+      Serial.println("err bad index");
+      return;
+    }
+    (cmd[0] == 'i' ? s->inputs : s->params)[idx] = val;
+    Serial.println("ok");
+  } else if (!strcmp(cmd, "tick")) {
+    if (sscanf(line.c_str(), "%*s %*s %u %u", &n, &dt) != 2 || n > 100000) {
+      Serial.println("err bad tick");
+      return;
+    }
+    xSemaphoreTake(g_mgmt, portMAX_DELAY);
+    s->paused = true;
+    for (int i = 0; i < 100 && s->inStep; i++) delay(2);
+    bool ok = !s->inStep;
+    for (unsigned i = 0; ok && i < n; i++) {
+      s->stepStart = millis();
+      s->inStep = true;
+      ok = !m3_CallV(s->step, (int32_t)dt);
+      s->inStep = false;
+      s->steps++;
+      deliver(*s);
+    }
+    xSemaphoreGive(g_mgmt);
+    Serial.println(ok ? "ok" : "err step failed");
+  } else {  // out
+    if (sscanf(line.c_str(), "%*s %*s %u", &n) != 1 || n > 8) {
+      Serial.println("err bad count");
+      return;
+    }
+    Serial.print("out");
+    for (unsigned i = 0; i < n; i++) {
+      uint64_t bits;
+      memcpy(&bits, &s->outputs[i], 8);
+      Serial.printf(" %08x%08x", (unsigned)(bits >> 32), (unsigned)bits);
+    }
+    Serial.println();
+    Serial.println("ok");
+  }
+}
+
 static void cmdLine(String line) {
   line.trim();
-  if (line.startsWith("put ")) {
+  if (line.startsWith("in ") || line.startsWith("param ") || line.startsWith("tick ") || line.startsWith("out ") || line.startsWith("reset ")) {
+    cmdTest(line);
+  } else if (line.startsWith("put ")) {
     cmdPut(line);
   } else if (line == "log") {
     int n = g_jCount < kJournal ? g_jCount : kJournal;
