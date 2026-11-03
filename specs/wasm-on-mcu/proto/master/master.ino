@@ -15,6 +15,8 @@
 
 static const int kMaxSlots = 4;
 static const int kStackWords = 2048;
+// The wasm3 compiler recurses deeply on a big module (300 blocks overflowed 6 KB), so the task needs room.
+static const int kTaskStackBytes = 16384;
 static const uint32_t kStepPeriodMs = 10;
 static const uint32_t kStepLimitMs = 100;  // watchdog: a longer step means a hang
 static const int kJournal = 50;
@@ -284,7 +286,7 @@ static bool startSlot(Slot &s, bool paused = false) {
   memset((void *)s.inputs, 0, sizeof s.inputs);
   memset((void *)s.params, 0, sizeof s.params);
   memset((void *)s.outputs, 0, sizeof s.outputs);
-  xTaskCreatePinnedToCore(slotTask, s.name, 6144, &s, 1, &s.task, 1);
+  xTaskCreatePinnedToCore(slotTask, s.name, kTaskStackBytes, &s, 1, &s.task, 1);
   return true;
 }
 
@@ -520,6 +522,8 @@ static void cmdLine(String line) {
     Serial.println("err unknown command");
   }
 }
+
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);  // `tick` and `put` run wasm3 on the loop task
 
 void setup() {
   Serial.begin(115200);

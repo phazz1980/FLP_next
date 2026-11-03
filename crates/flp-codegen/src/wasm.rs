@@ -103,11 +103,20 @@ struct Emitter<'a, 'p> {
     vars: HashMap<String, u32>,
     /// Number of `f64` scratch locals (local 0 is `dt`).
     scratch: u32,
+    /// Most scratch locals any block needed at once; blocks reuse the same locals.
+    scratch_peak: u32,
     watch: bool,
     watched: Vec<String>,
     /// Hardware imports the code calls (placeholders, see `HW_BASE`).
     hw: std::collections::BTreeSet<u32>,
+    /// Offsets in `code` where `step` is cut into separate functions (block boundaries only):
+    /// wasm3 refuses a function that overruns its stack height limit.
+    cuts: Vec<usize>,
 }
+
+/// Blocks per generated function. wasm3 without tail-call optimization (ESP32 build) recurses once
+/// per operation of a function, so a long function overflows the task stack; short ones do not.
+const BLOCKS_PER_CHUNK: usize = 8;
 
 impl<'a, 'p> Emitter<'a, 'p> {
     fn new(program: &'a Program<'p>, module: &'a SheetModule) -> Self {
@@ -120,9 +129,11 @@ impl<'a, 'p> Emitter<'a, 'p> {
             signals: HashMap::new(),
             vars: HashMap::new(),
             scratch: 0,
+            scratch_peak: 0,
             watch: false,
             watched: Vec::new(),
             hw: Default::default(),
+            cuts: Vec::new(),
         };
         for &bi in &module.blocks {
             for &signal in program.blocks[bi].outputs.values() {
@@ -144,6 +155,7 @@ impl<'a, 'p> Emitter<'a, 'p> {
 
     fn tmp(&mut self) -> u32 {
         self.scratch += 1;
+        self.scratch_peak = self.scratch_peak.max(self.scratch);
         self.scratch
     }
 
@@ -366,7 +378,12 @@ impl<'a, 'p> Emitter<'a, 'p> {
         self.op(I::F64Add);
         self.op(I::GlobalSet(GLOBAL_NOW));
         let blocks = self.module.blocks.clone();
-        for bi in blocks {
+        for (k, bi) in blocks.into_iter().enumerate() {
+            if k > 0 && k % BLOCKS_PER_CHUNK == 0 {
+                self.cuts.push(self.code.len());
+            }
+            // A block's temporaries never outlive it: state lives in globals.
+            self.scratch = 0;
             let program = self.program;
             self.block(&program.blocks[bi])?;
         }
@@ -1072,10 +1089,14 @@ impl<'a, 'p> Emitter<'a, 'p> {
         funcs.function(2);
         funcs.function(3);
         funcs.function(4);
+        for _ in &self.cuts {
+            funcs.function(3);
+        }
 
         let mut memory = MemorySection::new();
         memory.memory(MemoryType {
-            minimum: 1,
+            // No strings or messages in sheet modules: a page (64 KB) would be taken from the board's heap.
+            minimum: 0,
             maximum: None,
             memory64: false,
             shared: false,
@@ -1103,14 +1124,31 @@ impl<'a, 'p> Emitter<'a, 'p> {
         let mut abi = Function::new([]);
         abi.instruction(&I::I32Const(2)).instruction(&I::End);
 
-        let mut step = Function::new_with_locals_types(vec![ValType::F64; self.scratch as usize]);
-        for i in &self.code {
-            match i {
-                I::Call(n) if *n >= HW_BASE => step.instruction(&I::Call(remap(*n))),
-                other => step.instruction(other),
-            };
+        // `step` runs the first piece and calls the rest, each a function of its own with the same locals.
+        let locals = vec![ValType::F64; self.scratch_peak as usize];
+        let mut bounds = vec![0];
+        bounds.extend(self.cuts.iter().copied());
+        bounds.push(self.code.len());
+        let mut pieces: Vec<Function> = Vec::new();
+        for w in bounds.windows(2) {
+            let mut f = Function::new_with_locals_types(locals.clone());
+            for i in &self.code[w[0]..w[1]] {
+                match i {
+                    I::Call(n) if *n >= HW_BASE => f.instruction(&I::Call(remap(*n))),
+                    other => f.instruction(other),
+                };
+            }
+            pieces.push(f);
+        }
+        let mut step = pieces.remove(0);
+        for k in 0..pieces.len() as u32 {
+            step.instruction(&I::LocalGet(0));
+            step.instruction(&I::Call(first + 3 + k));
         }
         step.instruction(&I::End);
+        for p in &mut pieces {
+            p.instruction(&I::End);
+        }
 
         // The owner of a tag writes its initial value once.
         let mut init = Function::new([]);
@@ -1127,6 +1165,9 @@ impl<'a, 'p> Emitter<'a, 'p> {
         code.function(&abi);
         code.function(&step);
         code.function(&init);
+        for p in &pieces {
+            code.function(p);
+        }
 
         let mut module = Module::new();
         module
