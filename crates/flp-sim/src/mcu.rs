@@ -1,12 +1,15 @@
-//! Host ABI v2: modules that run on the PC in wasmi and on the board in the master firmware.
+//! Host ABI v3: modules that run on the PC in wasmi and on the board in the master firmware.
 //!
-//! Exports of a module: `abi_version() -> i32` (must be 2), `step(dt_ms: i32)`; optional
+//! Values are 32 bit: `bool` and `int` travel as `i32`, `float` as `f32` (see `specs/numeric-model`).
+//! Exports of a module: `abi_version() -> i32` (must be 3), `step(dt_ms: i32)`; optional
 //! `init()`, `alloc(len: i32) -> i32` (where the host puts message bytes) and
 //! `on_message(topic_ptr, topic_len, ptr, len)`.
 //!
-//! Imports from module `flp`: `input`, `param`, `output`, `log` as in ABI v1, plus
-//! `tag_get(id) -> f64`, `tag_set(id, v)`, `publish(topic_ptr, topic_len, ptr, len)` and
-//! `subscribe(topic_ptr, topic_len)`. Hardware imports (`gpio_read`, `gpio_write`, `adc_read`,
+//! Imports from module `flp`: `log(ptr, len)`, `publish(topic_ptr, topic_len, ptr, len)`,
+//! `subscribe(topic_ptr, topic_len)` and the typed value access, one pair per type (`_i` for
+//! `bool`/`int`, `_f` for `float`): `input_i/f(idx) -> v`, `param_i/f(idx) -> v`,
+//! `output_i/f(idx, v)`, `tag_get_i/f(id) -> v`, `tag_set_i/f(id, v)`. A slot is 4 bytes, the
+//! type is a view of the same bits. Hardware imports (`gpio_read`, `gpio_write`, `adc_read`,
 //! `pwm_write`, `millis`) work only if the manifest `allow` list names them. On the PC the
 //! hardware is a stub ([`StubIo`]) that tests and the editor fill and read.
 
@@ -19,16 +22,21 @@ use wasmi::{
 };
 
 /// The ABI version this host speaks.
-pub const ABI_VERSION: i32 = 2;
+pub const ABI_VERSION: i32 = 3;
 
 /// Imports every module may use.
 const ALWAYS: &[&str] = &[
-    "input",
-    "param",
-    "output",
+    "input_i",
+    "input_f",
+    "param_i",
+    "param_f",
+    "output_i",
+    "output_f",
     "log",
-    "tag_get",
-    "tag_set",
+    "tag_get_i",
+    "tag_get_f",
+    "tag_set_i",
+    "tag_set_f",
     "publish",
     "subscribe",
 ];
@@ -50,6 +58,28 @@ pub struct Manifest {
     pub abi: i32,
     #[serde(default)]
     pub allow: Vec<String>,
+    /// Linear memory the module needs, in 64 KiB pages (0 when it has none or declares it itself).
+    #[serde(default)]
+    pub memory_pages: u32,
+}
+
+/// One 4-byte value slot: the bits of an `i32` (`bool`, `int`) or an `f32` (`float`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Word(pub u32);
+
+impl Word {
+    pub fn int(v: i32) -> Self {
+        Self(v as u32)
+    }
+    pub fn float(v: f32) -> Self {
+        Self(v.to_bits())
+    }
+    pub fn as_int(self) -> i32 {
+        self.0 as i32
+    }
+    pub fn as_float(self) -> f32 {
+        f32::from_bits(self.0)
+    }
 }
 
 fn default_abi() -> i32 {
@@ -92,10 +122,10 @@ pub struct StubIo {
 }
 
 struct Host {
-    inputs: Vec<f64>,
-    params: Vec<f64>,
-    outputs: Vec<f64>,
-    tags: HashMap<i32, f64>,
+    inputs: Vec<Word>,
+    params: Vec<Word>,
+    outputs: Vec<Word>,
+    tags: HashMap<i32, Word>,
     io: StubIo,
     subscriptions: Vec<String>,
     published: Vec<(String, Vec<u8>)>,
@@ -103,7 +133,7 @@ struct Host {
     limits: StoreLimits,
 }
 
-/// A loaded ABI v2 module with its state.
+/// A loaded ABI v3 module with its state.
 pub struct McuModule {
     store: Store<Host>,
     instance: Instance,
@@ -125,7 +155,7 @@ impl McuModule {
             Host {
                 inputs: Vec::new(),
                 params: Vec::new(),
-                outputs: vec![0.0; n_outputs],
+                outputs: vec![Word::default(); n_outputs],
                 tags: HashMap::new(),
                 io: StubIo::default(),
                 subscriptions: Vec::new(),
@@ -144,7 +174,7 @@ impl McuModule {
 
         let abi_version = instance
             .get_typed_func::<(), i32>(&store, "abi_version")
-            .map_err(|_| "в модуле нет функции abi_version() (нужен ABI 2)".to_owned())?;
+            .map_err(|_| "в модуле нет функции abi_version() (нужен ABI 3)".to_owned())?;
         store
             .set_fuel(FUEL_PER_CALL)
             .map_err(|e| format!("ошибка лимита выполнения: {e}"))?;
@@ -218,23 +248,23 @@ impl McuModule {
         Ok(true)
     }
 
-    pub fn set_inputs(&mut self, inputs: &[f64]) {
+    pub fn set_inputs(&mut self, inputs: &[Word]) {
         self.store.data_mut().inputs = inputs.to_vec();
     }
 
-    pub fn set_params(&mut self, params: &[f64]) {
+    pub fn set_params(&mut self, params: &[Word]) {
         self.store.data_mut().params = params.to_vec();
     }
 
-    pub fn outputs(&self) -> &[f64] {
+    pub fn outputs(&self) -> &[Word] {
         &self.store.data().outputs
     }
 
-    pub fn tag(&self, id: i32) -> Option<f64> {
+    pub fn tag(&self, id: i32) -> Option<Word> {
         self.store.data().tags.get(&id).copied()
     }
 
-    pub fn set_tag(&mut self, id: i32, value: f64) {
+    pub fn set_tag(&mut self, id: i32, value: Word) {
         self.store.data_mut().tags.insert(id, value);
     }
 
@@ -292,21 +322,35 @@ fn check_imports(module: &Module, manifest: &Manifest) -> Result<(), String> {
 fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
     let bad = |e: wasmi::errors::LinkerError| format!("ошибка подключения функций: {e}");
     linker
-        .func_wrap("flp", "input", |c: Caller<'_, Host>, i: i32| -> f64 {
-            c.data().inputs.get(i as usize).copied().unwrap_or(0.0)
+        .func_wrap("flp", "input_i", |c: Caller<'_, Host>, i: i32| -> i32 {
+            slot(&c.data().inputs, i).as_int()
         })
         .map_err(bad)?
-        .func_wrap("flp", "param", |c: Caller<'_, Host>, i: i32| -> f64 {
-            c.data().params.get(i as usize).copied().unwrap_or(0.0)
+        .func_wrap("flp", "input_f", |c: Caller<'_, Host>, i: i32| -> f32 {
+            slot(&c.data().inputs, i).as_float()
+        })
+        .map_err(bad)?
+        .func_wrap("flp", "param_i", |c: Caller<'_, Host>, i: i32| -> i32 {
+            slot(&c.data().params, i).as_int()
+        })
+        .map_err(bad)?
+        .func_wrap("flp", "param_f", |c: Caller<'_, Host>, i: i32| -> f32 {
+            slot(&c.data().params, i).as_float()
         })
         .map_err(bad)?
         .func_wrap(
             "flp",
-            "output",
-            |mut c: Caller<'_, Host>, i: i32, v: f64| {
-                if let Some(slot) = c.data_mut().outputs.get_mut(i as usize) {
-                    *slot = v;
-                }
+            "output_i",
+            |mut c: Caller<'_, Host>, i: i32, v: i32| {
+                set_slot(&mut c.data_mut().outputs, i, Word::int(v));
+            },
+        )
+        .map_err(bad)?
+        .func_wrap(
+            "flp",
+            "output_f",
+            |mut c: Caller<'_, Host>, i: i32, v: f32| {
+                set_slot(&mut c.data_mut().outputs, i, Word::float(v));
             },
         )
         .map_err(bad)?
@@ -323,15 +367,32 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
             },
         )
         .map_err(bad)?
-        .func_wrap("flp", "tag_get", |c: Caller<'_, Host>, id: i32| -> f64 {
-            c.data().tags.get(&id).copied().unwrap_or(0.0)
+        .func_wrap("flp", "tag_get_i", |c: Caller<'_, Host>, id: i32| -> i32 {
+            c.data().tags.get(&id).copied().unwrap_or_default().as_int()
+        })
+        .map_err(bad)?
+        .func_wrap("flp", "tag_get_f", |c: Caller<'_, Host>, id: i32| -> f32 {
+            c.data()
+                .tags
+                .get(&id)
+                .copied()
+                .unwrap_or_default()
+                .as_float()
         })
         .map_err(bad)?
         .func_wrap(
             "flp",
-            "tag_set",
-            |mut c: Caller<'_, Host>, id: i32, v: f64| {
-                c.data_mut().tags.insert(id, v);
+            "tag_set_i",
+            |mut c: Caller<'_, Host>, id: i32, v: i32| {
+                c.data_mut().tags.insert(id, Word::int(v));
+            },
+        )
+        .map_err(bad)?
+        .func_wrap(
+            "flp",
+            "tag_set_f",
+            |mut c: Caller<'_, Host>, id: i32, v: f32| {
+                c.data_mut().tags.insert(id, Word::float(v));
             },
         )
         .map_err(bad)?
@@ -395,6 +456,16 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
         })
         .map_err(bad)?;
     Ok(())
+}
+
+fn slot(slots: &[Word], i: i32) -> Word {
+    slots.get(i as usize).copied().unwrap_or_default()
+}
+
+fn set_slot(slots: &mut [Word], i: i32, v: Word) {
+    if let Some(s) = slots.get_mut(i as usize) {
+        *s = v;
+    }
 }
 
 /// Reads at most `max` bytes from the module memory; `None` if the range is outside it.

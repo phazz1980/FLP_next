@@ -1,6 +1,6 @@
-//! ABI v2: tags, bus, permissions and the version check, on WAT modules.
+//! ABI v3: tags, bus, permissions and the version check, on WAT modules.
 
-use flp_sim::mcu::{Manifest, McuModule};
+use flp_sim::mcu::{Manifest, McuModule, Word};
 
 fn load(src: &str, allow: &[&str]) -> Result<McuModule, String> {
     let manifest = Manifest {
@@ -32,35 +32,35 @@ fn blink_toggles_pin_every_500_ms() {
 fn tags_are_shared_with_the_host() {
     let mut m = load(
         r#"(module
-            (import "flp" "tag_get" (func $get (param i32) (result f64)))
-            (import "flp" "tag_set" (func $set (param i32 f64)))
-            (func (export "abi_version") (result i32) i32.const 2)
+            (import "flp" "tag_get_f" (func $get (param i32) (result f32)))
+            (import "flp" "tag_set_f" (func $set (param i32 f32)))
+            (func (export "abi_version") (result i32) i32.const 3)
             (func (export "step") (param i32)
-                (call $set (i32.const 2) (f64.mul (call $get (i32.const 1)) (f64.const 2)))))"#,
+                (call $set (i32.const 2) (f32.mul (call $get (i32.const 1)) (f32.const 2)))))"#,
         &[],
     )
     .unwrap();
-    m.set_tag(1, 21.0);
+    m.set_tag(1, Word::float(21.0));
     m.step(10).unwrap();
-    assert_eq!(m.tag(2), Some(42.0));
+    assert_eq!(m.tag(2), Some(Word::float(42.0)));
 }
 
 const BUS: &str = r#"(module
     (import "flp" "publish" (func $publish (param i32 i32 i32 i32)))
     (import "flp" "subscribe" (func $subscribe (param i32 i32)))
-    (import "flp" "tag_set" (func $set (param i32 f64)))
+    (import "flp" "tag_set_i" (func $set (param i32 i32)))
     (memory (export "memory") 1)
     (data (i32.const 0) "ping")
     (data (i32.const 4) "pong")
     (global $heap (mut i32) (i32.const 1024))
-    (func (export "abi_version") (result i32) i32.const 2)
+    (func (export "abi_version") (result i32) i32.const 3)
     (func (export "init") (call $subscribe (i32.const 0) (i32.const 4)))
     (func (export "alloc") (param $n i32) (result i32)
         (global.get $heap)
         (global.set $heap (i32.add (global.get $heap) (local.get $n))))
     ;; reply "pong" with the first payload byte as the payload
     (func (export "on_message") (param i32 i32 i32 i32)
-        (call $set (i32.const 0) (f64.convert_i32_u (i32.load8_u (local.get 2))))
+        (call $set (i32.const 0) (i32.load8_u (local.get 2)))
         (call $publish (i32.const 4) (i32.const 4) (local.get 2) (local.get 3)))
     (func (export "step") (param i32)))"#;
 
@@ -70,7 +70,7 @@ fn bus_delivers_to_subscribers_only() {
     assert_eq!(m.subscriptions(), ["ping".to_owned()]);
     assert!(!m.deliver("other", b"x").unwrap());
     assert!(m.deliver("ping", &[7, 8]).unwrap());
-    assert_eq!(m.tag(0), Some(7.0));
+    assert_eq!(m.tag(0), Some(Word::int(7)));
     assert_eq!(m.take_published(), vec![("pong".to_owned(), vec![7, 8])]);
     assert!(m.take_published().is_empty());
 }
@@ -85,7 +85,7 @@ fn hardware_import_needs_permission() {
 #[test]
 fn unknown_import_is_named() {
     let err = load(
-        r#"(module (import "flp" "reboot" (func)) (func (export "abi_version") (result i32) i32.const 2)
+        r#"(module (import "flp" "reboot" (func)) (func (export "abi_version") (result i32) i32.const 3)
             (func (export "step") (param i32)))"#,
         &[],
     )
@@ -117,7 +117,8 @@ fn manifest_is_validated() {
     assert!(Manifest::parse("allow = [\"format_disk\"]")
         .unwrap_err()
         .contains("format_disk"));
-    assert!(Manifest::parse("abi = 3").unwrap_err().contains("ABI 3"));
+    assert!(Manifest::parse("abi = 2").unwrap_err().contains("ABI 2"));
+    assert_eq!(Manifest::parse("memory_pages = 2").unwrap().memory_pages, 2);
 }
 
 /// The module and script shared with the board comparison (`proto/compare/compare.ps1`).
@@ -125,14 +126,23 @@ const COUNTER: &str = include_str!("../../../specs/wasm-on-mcu/proto/counter.wat
 const SCENARIO: &str = include_str!("../../../specs/wasm-on-mcu/proto/compare/scenario.txt");
 const GOLDEN_PATH: &str = "../../specs/wasm-on-mcu/proto/compare/golden.txt";
 
+/// A scenario value: `i` is an `i32`, `f` an `f32`.
+fn word(kind: &str, text: &str) -> Word {
+    match kind {
+        "i" => Word::int(text.parse().unwrap()),
+        "f" => Word::float(text.parse().unwrap()),
+        other => panic!("unknown value type in scenario: {other}"),
+    }
+}
+
 /// Runs the scenario the way the master does: a step, then the messages it published go back
 /// to the subscribers. Returns one `out …` line per `out` command.
 fn run_scenario() -> Vec<String> {
     let manifest = Manifest::parse("").unwrap();
     let fresh = || McuModule::load(&wat::parse_str(COUNTER).unwrap(), &manifest, 4).unwrap();
     let mut m = fresh();
-    let mut inputs = vec![0.0; 8];
-    let mut params = vec![0.0; 8];
+    let mut inputs = vec![Word::default(); 8];
+    let mut params = vec![Word::default(); 8];
     let mut lines = Vec::new();
     for line in SCENARIO.lines().map(str::trim) {
         let words: Vec<&str> = line.split_whitespace().collect();
@@ -140,11 +150,11 @@ fn run_scenario() -> Vec<String> {
             [] | ["#", ..] => {}
             ["reset"] => {
                 m = fresh();
-                inputs = vec![0.0; 8];
-                params = vec![0.0; 8];
+                inputs = vec![Word::default(); 8];
+                params = vec![Word::default(); 8];
             }
-            ["in", i, v] => inputs[i.parse::<usize>().unwrap()] = v.parse().unwrap(),
-            ["param", i, v] => params[i.parse::<usize>().unwrap()] = v.parse().unwrap(),
+            ["in", i, t, v] => inputs[i.parse::<usize>().unwrap()] = word(t, v),
+            ["param", i, t, v] => params[i.parse::<usize>().unwrap()] = word(t, v),
             ["tick", n, dt] => {
                 for _ in 0..n.parse::<u32>().unwrap() {
                     m.set_inputs(&inputs);
@@ -158,7 +168,7 @@ fn run_scenario() -> Vec<String> {
             ["out"] => {
                 let bits: Vec<String> = m.outputs()[..4]
                     .iter()
-                    .map(|v| format!("{:016x}", v.to_bits()))
+                    .map(|v| format!("{:08x}", v.0))
                     .collect();
                 lines.push(format!("out {}", bits.join(" ")));
             }
@@ -186,9 +196,14 @@ fn counter_matches_golden_outputs() {
 #[test]
 fn counter_scenario_is_sane() {
     let lines = run_scenario();
-    let last = lines.last().unwrap();
-    let steps = f64::from_bits(u64::from_str_radix(last.split(' ').nth(2).unwrap(), 16).unwrap());
-    let msgs = f64::from_bits(u64::from_str_radix(last.split(' ').nth(4).unwrap(), 16).unwrap());
-    assert_eq!(steps, 53.0);
-    assert_eq!(msgs, 26.0); // a message after every even step
+    let last: Vec<u32> = lines
+        .last()
+        .unwrap()
+        .split(' ')
+        .skip(1)
+        .map(|w| u32::from_str_radix(w, 16).unwrap())
+        .collect();
+    // 53 steps added to in2 = i32::MAX wrap around, as the model says.
+    assert_eq!(last[1] as i32, 53i32.wrapping_add(i32::MAX));
+    assert_eq!(last[3], 26); // a message after every even step
 }
