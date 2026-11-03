@@ -106,6 +106,20 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// Залить один WASM-модуль на плату с мастер-прошивкой (без сброса выходов и соседних модулей)
+    UploadWasm {
+        /// Файл модуля .wasm; рядом может лежать module.toml с именем и правами
+        file: PathBuf,
+        /// Имя модуля на плате (по умолчанию из module.toml или имя файла)
+        #[arg(long)]
+        name: Option<String>,
+        /// Права на железо через запятую, например gpio_write,millis (заменяют module.toml)
+        #[arg(long, value_delimiter = ',')]
+        allow: Option<Vec<String>>,
+        /// Порт платы, например COM3 (по умолчанию единственный найденный)
+        #[arg(long, short)]
+        port: Option<String>,
+    },
     /// Наборы пользовательских блоков: список, экспорт и импорт файлом .crabblocks
     Block {
         #[command(subcommand)]
@@ -187,6 +201,12 @@ fn main() -> ExitCode {
             force,
             cli.library.as_deref(),
         ),
+        Command::UploadWasm {
+            file,
+            name,
+            allow,
+            port,
+        } => run_upload_wasm(&file, name, allow, port),
         Command::Block { action } => run_block(action, cli.library.as_deref()),
         Command::Convert { project } => run_convert(&project, cli.library.as_deref()),
     }
@@ -430,6 +450,72 @@ fn run_build(
     }
     println!("Прошивка залита на {port}");
     ExitCode::SUCCESS
+}
+
+/// Uploads one `.wasm` module to the master firmware over serial.
+fn run_upload_wasm(
+    file: &Path,
+    name: Option<String>,
+    allow: Option<Vec<String>>,
+    port: Option<String>,
+) -> ExitCode {
+    let failed = |message: String| {
+        eprintln!("ошибка: {message}");
+        ExitCode::from(EXIT_BUILD_FAILED)
+    };
+    let wasm = match std::fs::read(file) {
+        Ok(bytes) => bytes,
+        Err(e) => return failed(format!("не прочитан {}: {e}", file.display())),
+    };
+    let manifest_path = file.with_file_name("module.toml");
+    let manifest = match std::fs::read_to_string(&manifest_path) {
+        Ok(text) => match flp_sim::mcu::Manifest::parse(&text) {
+            Ok(manifest) => Some(manifest),
+            Err(e) => return failed(e),
+        },
+        Err(_) => None,
+    };
+    let name = name
+        .or_else(|| {
+            manifest
+                .as_ref()
+                .map(|m| m.name.clone())
+                .filter(|n| !n.is_empty())
+        })
+        .or_else(|| file.file_stem().map(|s| s.to_string_lossy().into_owned()))
+        .unwrap_or_default();
+    let allow = allow.unwrap_or_else(|| manifest.map(|m| m.allow).unwrap_or_default());
+    let port = match port {
+        Some(port) => port,
+        None => match ArduinoCli::locate()
+            .and_then(|cli| cli.serial_ports())
+            .and_then(|ports| flp_build::auto_port(&ports))
+        {
+            Ok(port) => port,
+            Err(e) => return failed(e.to_string()),
+        },
+    };
+    let mut serial = match serialport::new(&port, 115_200)
+        .timeout(std::time::Duration::from_millis(200))
+        .open()
+    {
+        Ok(serial) => serial,
+        Err(e) => return failed(format!("порт {port} не открыт: {e}")),
+    };
+    // Release DTR/RTS so opening the port does not reset the board.
+    let _ = serial.write_data_terminal_ready(false);
+    let _ = serial.write_request_to_send(false);
+    println!("Модуль «{name}» ({} байт) -> {port}...", wasm.len());
+    match flp_build::mcu_module::upload_module(&mut serial, &name, &wasm, &allow) {
+        Ok(done) => {
+            match done.swap_us {
+                Some(us) => println!("Модуль «{name}» залит и запущен (замена {} мс)", us / 1000),
+                None => println!("Модуль «{name}» залит и запущен"),
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => failed(e.to_string()),
+    }
 }
 
 /// Generates the sketch, printing schema errors. Also returns the Arduino libraries it needs.

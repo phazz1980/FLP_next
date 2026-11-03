@@ -19,6 +19,7 @@ use flp_core::BoardConfig;
 use serde::Deserialize;
 
 mod direct;
+pub mod mcu_module;
 mod output;
 pub mod wasm;
 pub mod wasm_c;

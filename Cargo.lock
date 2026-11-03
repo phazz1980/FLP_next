@@ -1735,6 +1735,8 @@ dependencies = [
  "flp-core",
  "flp-debug",
  "flp-pdf",
+ "flp-sim",
+ "serialport",
 ]
 
 [[package]]

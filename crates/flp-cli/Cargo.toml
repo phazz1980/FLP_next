@@ -15,3 +15,5 @@ flp-codegen = { path = "../flp-codegen" }
 flp-core = { path = "../flp-core" }
 flp-pdf = { path = "../flp-pdf" }
 flp-debug = { path = "../flp-debug", features = ["serial"] }
+flp-sim = { path = "../flp-sim" }
+serialport = { version = "4", default-features = false }
