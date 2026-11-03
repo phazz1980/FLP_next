@@ -271,10 +271,21 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
         ui,
         has_doc && idle,
         "⬆",
-        crate::i18n::tr("Залить: собрать и залить на плату через выбранный порт"),
+        crate::i18n::tr("Залить мастер-прошивку на плату (схему потом заливает 📦)"),
     ) {
         let port = app.port_choice();
         app.start_job(JobKind::Upload { port }, ui.ctx());
+    }
+    if !app.has_job()
+        && icon(
+            ui,
+            has_doc && idle,
+            "📦",
+            crate::i18n::tr("Залить модули: листы схемы как WASM-модули в мастер-прошивку на плате, без перепрошивки"),
+        )
+    {
+        let port = app.port_choice();
+        app.start_job(JobKind::UploadModules { port }, ui.ctx());
     }
     icon_toggle(
         ui,

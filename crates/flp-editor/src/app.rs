@@ -33,6 +33,14 @@ use crate::update::{self, Check, Release};
 /// What a build was made from: project folder, schema revision, debug firmware.
 type BuildKey = (PathBuf, u64, bool);
 
+/// Identifies the board and its settings: what, besides libraries, decides the core build.
+fn board_hash(board: &impl std::fmt::Debug) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    format!("{board:?}").hash(&mut hasher);
+    hasher.finish()
+}
+
 /// What is selected on the canvas.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
@@ -1563,7 +1571,7 @@ impl EditorApp {
             return;
         }
         // The upload needs the serial port that debugging or the monitor holds.
-        if matches!(kind, JobKind::Upload { .. }) {
+        if matches!(kind, JobKind::Upload { .. } | JobKind::UploadModules { .. }) {
             self.stop_debug();
             self.console.release();
         }
@@ -1621,6 +1629,13 @@ impl EditorApp {
             _ => self.seen_rev = Some((rev, now)),
         }
         let current = Some((doc.project.path.clone(), rev, self.debug_firmware));
+        // Edits of the schema do not start a build: the core and libraries compile once per
+        // project and board (the schema itself is built by the user's build or module upload).
+        let stable = Some((
+            doc.project.path.clone(),
+            board_hash(&doc.project.config.board),
+            self.debug_firmware,
+        ));
         let quiet = self.seen_rev.is_some_and(|(_, t)| now - t >= PAUSE);
         // A direct build of an older schema is cancelled, and the latest one starts after
         // the pause. An arduino-cli build is left to finish: it compiles the core and
@@ -1634,12 +1649,12 @@ impl EditorApp {
             || self.debug.is_some()
             || !quiet
             || doc.report.has_errors()
-            || self.precompiled == current
+            || self.precompiled == stable
         {
             return;
         }
         // Mark it tried even if the build fails, so a broken sketch is not rebuilt in a loop.
-        self.precompiled = current;
+        self.precompiled = stable;
         self.start_job(JobKind::Precompile, ctx);
     }
 
@@ -1673,7 +1688,13 @@ impl EditorApp {
                     done = true;
                 }
                 JobEvent::Done(Ok(result)) => {
-                    self.precompiled = self.job_rev.clone();
+                    if let Some(doc) = &self.doc {
+                        self.precompiled = Some((
+                            doc.project.path.clone(),
+                            board_hash(&doc.project.config.board),
+                            self.debug_firmware,
+                        ));
+                    }
                     self.info(LogLevel::Ok, result.message);
                     if let (true, Some(port)) = (result.debug, result.port) {
                         connect = Some(port);
@@ -1697,11 +1718,11 @@ impl EditorApp {
         }
     }
 
-    /// Builds and uploads firmware with the debugging module, then connects.
+    /// Uploads the modules that report their signals to the master firmware, then connects.
     pub fn start_debug(&mut self, ctx: &egui::Context) {
         self.debug_firmware = true;
         let port = self.port_choice();
-        self.start_job(JobKind::Upload { port }, ctx);
+        self.start_job(JobKind::UploadModules { port }, ctx);
     }
 
     /// Connects to a board that already runs debugging firmware.
@@ -2444,7 +2465,7 @@ impl EditorApp {
             if ui
                 .add_enabled(
                     has_doc && idle,
-                    egui::Button::new(crate::i18n::tr("Залить на плату")),
+                    egui::Button::new(crate::i18n::tr("Залить мастер-прошивку")),
                 )
                 .clicked()
             {

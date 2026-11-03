@@ -341,16 +341,18 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
         .func_wrap(
             "flp",
             "output_i",
-            |mut c: Caller<'_, Host>, i: i32, v: i32| {
+            |mut c: Caller<'_, Host>, i: i32, v: i32| -> i32 {
                 set_slot(&mut c.data_mut().outputs, i, Word::int(v));
+                v
             },
         )
         .map_err(bad)?
         .func_wrap(
             "flp",
             "output_f",
-            |mut c: Caller<'_, Host>, i: i32, v: f32| {
+            |mut c: Caller<'_, Host>, i: i32, v: f32| -> f32 {
                 set_slot(&mut c.data_mut().outputs, i, Word::float(v));
+                v
             },
         )
         .map_err(bad)?

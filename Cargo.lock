@@ -1797,6 +1797,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "serialport",
  "toml 0.8.23",
  "ureq",
  "winreg 0.55.0",

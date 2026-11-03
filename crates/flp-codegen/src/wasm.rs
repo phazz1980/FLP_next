@@ -574,7 +574,9 @@ impl<'a, 'p> Emitter<'a, 'p> {
                 });
             self.c_i(k as i32);
             self.op(I::GlobalGet(g));
+            // The host answers with the value to use (a forced one while forcing).
             self.op(I::Call(if ty == Ty::F { OUTPUT_F } else { OUTPUT_I }));
+            self.op(I::GlobalSet(g));
         }
         if let Some((n, tag_ty)) = self.tag_of(&TagKind::Signal(label)) {
             self.c_i(n as i32);
@@ -1339,14 +1341,20 @@ impl<'a, 'p> Emitter<'a, 'p> {
         types.ty().function([], [ValType::I32]); // 4: abi_version
         types.ty().function([ValType::I32], []); // 5: step
         types.ty().function([], []); // 6: init
+        types
+            .ty()
+            .function([ValType::I32, ValType::I32], [ValType::I32]); // 7: output_i
+        types
+            .ty()
+            .function([ValType::I32, ValType::F32], [ValType::F32]); // 8: output_f
 
         let mut imports = ImportSection::new();
         imports.import("flp", "tag_get_i", EntityType::Function(0));
         imports.import("flp", "tag_get_f", EntityType::Function(1));
         imports.import("flp", "tag_set_i", EntityType::Function(2));
         imports.import("flp", "tag_set_f", EntityType::Function(3));
-        imports.import("flp", "output_i", EntityType::Function(2));
-        imports.import("flp", "output_f", EntityType::Function(3));
+        imports.import("flp", "output_i", EntityType::Function(7));
+        imports.import("flp", "output_f", EntityType::Function(8));
         // Hardware imports follow in placeholder order; defined functions come after them.
         let used: Vec<u32> = self.hw.iter().copied().collect();
         let mut allow = Vec::new();

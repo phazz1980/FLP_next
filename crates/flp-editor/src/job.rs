@@ -23,6 +23,10 @@ pub enum JobKind {
     Upload {
         port: Option<String>,
     },
+    /// Sheets as WASM modules into the master firmware already on the board.
+    UploadModules {
+        port: Option<String>,
+    },
 }
 
 pub struct Done {
@@ -70,9 +74,10 @@ impl Job {
             JobKind::Precompile => crate::i18n::tr("Фоновая сборка"),
             JobKind::Upload { .. } if debug => crate::i18n::tr("Заливка отладочной прошивки"),
             JobKind::Upload { .. } => crate::i18n::tr("Заливка"),
+            JobKind::UploadModules { .. } => crate::i18n::tr("Заливка модулей"),
         };
         let background = matches!(kind, JobKind::Precompile);
-        let uses_port = matches!(kind, JobKind::Upload { .. });
+        let uses_port = matches!(kind, JobKind::Upload { .. } | JobKind::UploadModules { .. });
         let control = Arc::new(BuildControl::default());
         let worker = control.clone();
         let direct = Arc::new(AtomicBool::new(false));
@@ -145,6 +150,14 @@ fn run(
 ) -> Result<Done, String> {
     let Report { out, note, direct } = report;
     let background = matches!(kind, JobKind::Precompile);
+    if let JobKind::UploadModules { port } = &kind {
+        return upload_modules(port.as_deref(), project, lib, debug, out);
+    }
+    // The plain upload puts the master on the board; the schema follows as modules.
+    // Debugging still needs the schema firmware with the debugging module.
+    if let (JobKind::Upload { port }, false) = (&kind, debug) {
+        return upload_master(port.as_deref(), project, control, out);
+    }
     if let Some(w2c2) = crate::theme::w2c2() {
         for problem in flp_build::wasm_c::translate_library(&w2c2, lib) {
             out(LogLevel::Warning, &problem);
@@ -267,6 +280,7 @@ fn run(
             port: None,
             debug,
         }),
+        JobKind::UploadModules { .. } => unreachable!("handled before the sketch is built"),
         JobKind::Upload { port } => {
             let port = cli
                 .choose_port(port.as_deref(), board)
@@ -295,6 +309,99 @@ fn run(
             })
         }
     }
+}
+
+/// Builds the master firmware and uploads it: the schema itself goes to the board as
+/// WASM modules (`upload_modules`).
+fn upload_master(
+    port: Option<&str>,
+    project: &Project,
+    control: Arc<BuildControl>,
+    out: &mut dyn FnMut(LogLevel, &str),
+) -> Result<Done, String> {
+    let cli = ArduinoCli::locate()
+        .map_err(|e| e.to_string())?
+        .with_control(control);
+    let board = &project.config.board;
+    let port = cli.choose_port(port, board).map_err(|e| e.to_string())?;
+    warn_if_other_board(&cli, &port, &board.fqbn, out);
+    out(
+        LogLevel::Info,
+        &crate::i18n::fmt("Сборка и заливка мастер-прошивки на {0}...", &[&port]),
+    );
+    let mut explained = None;
+    let result = cli.upload_master(&project.work_dir(), board, &port, &mut |l| {
+        match flp_build::explain_upload(l, &board.fqbn) {
+            Some(text) => {
+                out(LogLevel::Info, l);
+                out(LogLevel::Error, &text);
+                explained.get_or_insert(text);
+            }
+            None => match flp_build::classify(l) {
+                OutputLine::Stage(s) | OutputLine::Size(s) => out(LogLevel::Info, &s),
+                OutputLine::Warning(s) => out(LogLevel::Warning, &s),
+                OutputLine::Error(s) => out(LogLevel::Error, &s),
+                _ => {}
+            },
+        }
+    });
+    result.map_err(|e| explained.unwrap_or_else(|| e.to_string()))?;
+    Ok(Done {
+        message: crate::i18n::fmt("Мастер-прошивка залита на {0}", &[&port]),
+        port: Some(port),
+        debug: false,
+    })
+}
+
+/// Builds every sheet as a WASM module and sends it to the master firmware on the board.
+/// With `watch` the modules report every block output, so the debugger can show them.
+fn upload_modules(
+    port: Option<&str>,
+    project: &Project,
+    lib: &Library,
+    watch: bool,
+    out: &mut dyn FnMut(LogLevel, &str),
+) -> Result<Done, String> {
+    let program = Program::build(project, lib).map_err(|e| e.to_string())?;
+    let mut modules = Vec::new();
+    for sheet in program.sheets() {
+        let module = program
+            .wasm_module_with(sheet, watch)
+            .map_err(|e| crate::i18n::fmt("лист {0}: {1}", &[&sheet, &e]))?;
+        modules.push(module);
+    }
+    let cli = ArduinoCli::locate().map_err(|e| e.to_string())?;
+    let port = cli
+        .choose_port(port, &project.config.board)
+        .map_err(|e| e.to_string())?;
+    let mut serial = serialport::new(&port, 115_200)
+        .timeout(std::time::Duration::from_millis(200))
+        .open()
+        .map_err(|e| crate::i18n::fmt("порт {0} не открыт: {1}", &[&port, &e]))?;
+    // Release DTR/RTS so opening the port does not reset the board.
+    let _ = serial.write_data_terminal_ready(false);
+    let _ = serial.write_request_to_send(false);
+    flp_build::mcu_module::wait_for_master(&mut serial, std::time::Duration::from_secs(8))
+        .map_err(|e| e.to_string())?;
+    for module in &modules {
+        let allow = flp_sim::mcu::Manifest::parse(&module.manifest)
+            .map(|m| m.allow)
+            .unwrap_or_default();
+        out(
+            LogLevel::Info,
+            &crate::i18n::fmt(
+                "Модуль «{0}» ({1} байт) -> {2}...",
+                &[&module.name, &module.wasm.len(), &port],
+            ),
+        );
+        flp_build::mcu_module::upload_module(&mut serial, &module.name, &module.wasm, &allow)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(Done {
+        message: crate::i18n::fmt("Модули залиты на {0}", &[&port]),
+        port: Some(port),
+        debug: watch,
+    })
 }
 
 fn reason_text(reason: CliReason) -> &'static str {

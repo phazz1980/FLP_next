@@ -25,6 +25,8 @@ pub enum ModuleUploadError {
     Io(#[from] io::Error),
     #[error("плата не ответила за {} с", ANSWER_TIMEOUT.as_secs())]
     Timeout,
+    #[error("мастер-прошивка не отвечает: на плате другая прошивка, не тот порт или плата ещё загружается")]
+    NoMaster,
     #[error("плата отклонила модуль: {0}")]
     Rejected(String),
 }
@@ -108,17 +110,45 @@ pub fn upload_module<P: Read + Write>(
     }
 }
 
-/// Reads and drops whatever is waiting on the port.
+/// Waits until the master answers: opening the port can reset a board with native USB
+/// (ESP32-C3), and a command sent while it boots is lost. Pings with `stats` until the
+/// answer ends with `end`.
+pub fn wait_for_master<P: Read + Write>(
+    port: &mut P,
+    within: Duration,
+) -> Result<(), ModuleUploadError> {
+    const PING_ANSWER: Duration = Duration::from_millis(700);
+    let started = Instant::now();
+    while started.elapsed() < within {
+        port.write_all(b"stats\n")?;
+        port.flush()?;
+        let ping = Instant::now();
+        while ping.elapsed() < PING_ANSWER {
+            match read_line_within(port, PING_ANSWER) {
+                Ok(line) if line == "end" => return Ok(()),
+                Ok(_) | Err(ModuleUploadError::Timeout) => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    Err(ModuleUploadError::NoMaster)
+}
+
+/// Reads and drops whatever is waiting on the port. Stops after a moment even if the
+/// board keeps talking (a module that logs errors in a loop never lets the port go quiet).
 fn drain<P: Read>(port: &mut P) -> Result<(), ModuleUploadError> {
+    const LIMIT: Duration = Duration::from_millis(300);
+    let started = Instant::now();
     let mut buf = [0u8; 256];
-    loop {
+    while started.elapsed() < LIMIT {
         match port.read(&mut buf) {
-            Ok(0) => return Ok(()),
+            Ok(0) => break,
             Ok(_) => {}
-            Err(e) if is_timeout(&e) => return Ok(()),
+            Err(e) if is_timeout(&e) => break,
             Err(e) => return Err(e.into()),
         }
     }
+    Ok(())
 }
 
 fn is_timeout(e: &io::Error) -> bool {
@@ -130,6 +160,10 @@ fn is_timeout(e: &io::Error) -> bool {
 
 /// Reads one trimmed line; read timeouts of the port are retried until `ANSWER_TIMEOUT`.
 fn read_line<P: Read>(port: &mut P) -> Result<String, ModuleUploadError> {
+    read_line_within(port, ANSWER_TIMEOUT)
+}
+
+fn read_line_within<P: Read>(port: &mut P, limit: Duration) -> Result<String, ModuleUploadError> {
     let started = Instant::now();
     let mut line = Vec::new();
     let mut byte = [0u8; 1];
@@ -143,7 +177,7 @@ fn read_line<P: Read>(port: &mut P) -> Result<String, ModuleUploadError> {
             Err(e) if is_timeout(&e) => {}
             Err(e) => return Err(e.into()),
         }
-        if started.elapsed() > ANSWER_TIMEOUT {
+        if started.elapsed() > limit {
             return Err(ModuleUploadError::Timeout);
         }
     }

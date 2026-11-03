@@ -6,7 +6,9 @@
 //   in|param <name> <i> <i|f> <value>  set an input / parameter; the letter is the type (i = int/bool, f = float)
 //   reset <name>                     restart the module paused, inputs and outputs zero
 //   tick <name> <n> <dt_ms>          pause the module and run n steps now
-//   out <name> <n>                   first n outputs as 32-bit words in hex (8 digits each)
+//   force <name> <idx> <i|f> <val>   show <val> as output idx of a module built with watch (idx < 128)
+//   unforce <name> <idx|all>         release forced outputs
+//   out <name> <n>                   first n (<=128) outputs as 32-bit words in hex (8 digits each)
 // Values are 4-byte words (ABI 3): the bits of an i32 (bool, int) or of an f32 (float).
 //   swap <name>      reload the module from LittleFS      list      stats      log      del <name>
 #include <LittleFS.h>
@@ -15,6 +17,9 @@
 #include <m3_env.h>
 
 static const int kMaxSlots = 4;
+static const int kMaxOutputs = 128;  // watched signals per module
+// Modules and the watchdog share one core: core 1 where there are two, core 0 on single-core chips (C3).
+static const int kCore = portNUM_PROCESSORS > 1 ? 1 : 0;
 static const int kStackWords = 2048;
 // The wasm3 compiler recurses deeply on a big module (300 blocks overflowed 6 KB), so the task needs room.
 static const int kTaskStackBytes = 16384;
@@ -42,7 +47,9 @@ struct Slot {
   int nSubs = 0;
   Msg queue[4];
   volatile int qHead = 0, qTail = 0;
-  uint32_t outputs[8], inputs[8], params[8];  // bits of i32 / f32
+  uint32_t outputs[kMaxOutputs], inputs[8], params[8];  // bits of i32 / f32
+  uint32_t forceVal[kMaxOutputs];                         // value shown instead of the module's own
+  bool forced[kMaxOutputs];
 };
 
 static Slot g_slots[kMaxSlots];
@@ -83,17 +90,28 @@ FLP_SLOT_GET(h_input_i, inputs, int32_t, intOf)
 FLP_SLOT_GET(h_input_f, inputs, float, floatOf)
 FLP_SLOT_GET(h_param_i, params, int32_t, intOf)
 FLP_SLOT_GET(h_param_f, params, float, floatOf)
+// The module reports the output and gets back the value to use: the forced one while forced.
 m3ApiRawFunction(h_output_i) {
+  m3ApiReturnType(int32_t);
   m3ApiGetArg(int32_t, i);
   m3ApiGetArg(int32_t, v);
-  if (i >= 0 && i < 8) slotOf(_ctx)->outputs[i] = (uint32_t)v;
-  m3ApiSuccess();
+  if (i >= 0 && i < kMaxOutputs) {
+    Slot *s = slotOf(_ctx);
+    if (s->forced[i]) v = intOf(s->forceVal[i]);
+    s->outputs[i] = (uint32_t)v;
+  }
+  m3ApiReturn(v);
 }
 m3ApiRawFunction(h_output_f) {
+  m3ApiReturnType(float);
   m3ApiGetArg(int32_t, i);
   m3ApiGetArg(float, v);
-  if (i >= 0 && i < 8) slotOf(_ctx)->outputs[i] = bitsOf(v);
-  m3ApiSuccess();
+  if (i >= 0 && i < kMaxOutputs) {
+    Slot *s = slotOf(_ctx);
+    if (s->forced[i]) v = floatOf(s->forceVal[i]);
+    s->outputs[i] = bitsOf(v);
+  }
+  m3ApiReturn(v);
 }
 m3ApiRawFunction(h_log) {
   m3ApiGetArg(int32_t, p);
@@ -213,8 +231,8 @@ static void linkAll(Slot &s, IM3Module m) {
   L("input_f", "f(i)", h_input_f);
   L("param_i", "i(i)", h_param_i);
   L("param_f", "f(i)", h_param_f);
-  L("output_i", "v(ii)", h_output_i);
-  L("output_f", "v(if)", h_output_f);
+  L("output_i", "i(ii)", h_output_i);
+  L("output_f", "f(if)", h_output_f);
   L("log", "v(ii)", h_log);
   L("tag_get_i", "i(i)", h_tag_get_i);
   L("tag_get_f", "f(i)", h_tag_get_f);
@@ -309,7 +327,8 @@ static bool startSlot(Slot &s, bool paused = false) {
   memset((void *)s.inputs, 0, sizeof s.inputs);
   memset((void *)s.params, 0, sizeof s.params);
   memset((void *)s.outputs, 0, sizeof s.outputs);
-  xTaskCreatePinnedToCore(slotTask, s.name, kTaskStackBytes, &s, 1, &s.task, 1);
+  memset((void *)s.forced, 0, sizeof s.forced);
+  xTaskCreatePinnedToCore(slotTask, s.name, kTaskStackBytes, &s, 1, &s.task, kCore);
   return true;
 }
 
@@ -448,13 +467,13 @@ static void cmdPut(const String &line) {
 
 // Module tests: set inputs, run exact steps, read outputs bit for bit.
 static void cmdTest(const String &line) {
-  char cmd[8], name[32];
+  char cmd[10], name[32];
   int idx = 0;
   char ty = 'i';
   char vs[32];
   unsigned n = 0, dt = 0;
   Slot *s = nullptr;
-  if (sscanf(line.c_str(), "%7s %31s", cmd, name) == 2) s = findSlot(name, false);
+  if (sscanf(line.c_str(), "%9s %31s", cmd, name) == 2) s = findSlot(name, false);
   if (!s || !s->task) {
     Serial.println("err no such module");
     return;
@@ -476,6 +495,32 @@ static void cmdTest(const String &line) {
     uint32_t w = ty == 'f' ? bitsOf(strtof(vs, nullptr)) : (uint32_t)(int32_t)iv;
     (cmd[0] == 'i' ? s->inputs : s->params)[idx] = w;
     Serial.println("ok");
+  } else if (!strcmp(cmd, "force")) {
+    if (sscanf(line.c_str(), "%*s %*s %d %c %31s", &idx, &ty, vs) != 3 || idx < 0 || idx >= kMaxOutputs || (ty != 'i' && ty != 'f')) {
+      Serial.println("err bad index or type");
+      return;
+    }
+    long long iv = strtoll(vs, nullptr, 10);
+    iv = iv < INT32_MIN ? INT32_MIN : (iv > INT32_MAX ? INT32_MAX : iv);
+    s->forceVal[idx] = ty == 'f' ? bitsOf(strtof(vs, nullptr)) : (uint32_t)(int32_t)iv;
+    s->forced[idx] = true;
+    Serial.println("ok");
+  } else if (!strcmp(cmd, "unforce")) {
+    if (sscanf(line.c_str(), "%*s %*s %31s", vs) != 1) {
+      Serial.println("err bad index");
+      return;
+    }
+    if (!strcmp(vs, "all")) {
+      memset((void *)s->forced, 0, sizeof s->forced);
+    } else {
+      idx = atoi(vs);
+      if (idx < 0 || idx >= kMaxOutputs) {
+        Serial.println("err bad index");
+        return;
+      }
+      s->forced[idx] = false;
+    }
+    Serial.println("ok");
   } else if (!strcmp(cmd, "tick")) {
     if (sscanf(line.c_str(), "%*s %*s %u %u", &n, &dt) != 2 || n > 100000) {
       Serial.println("err bad tick");
@@ -496,7 +541,7 @@ static void cmdTest(const String &line) {
     xSemaphoreGive(g_mgmt);
     Serial.println(ok ? "ok" : "err step failed");
   } else {  // out
-    if (sscanf(line.c_str(), "%*s %*s %u", &n) != 1 || n > 8) {
+    if (sscanf(line.c_str(), "%*s %*s %u", &n) != 1 || n > kMaxOutputs) {
       Serial.println("err bad count");
       return;
     }
@@ -511,7 +556,7 @@ static void cmdTest(const String &line) {
 
 static void cmdLine(String line) {
   line.trim();
-  if (line.startsWith("in ") || line.startsWith("param ") || line.startsWith("tick ") || line.startsWith("out ") || line.startsWith("reset ")) {
+  if (line.startsWith("in ") || line.startsWith("param ") || line.startsWith("tick ") || line.startsWith("out ") || line.startsWith("reset ") || line.startsWith("force ") || line.startsWith("unforce ")) {
     cmdTest(line);
   } else if (line.startsWith("put ")) {
     cmdPut(line);
@@ -523,7 +568,7 @@ static void cmdLine(String line) {
   } else if (line == "list" || line == "stats") {
     for (auto &s : g_slots)
       if (s.used)
-        Serial.printf("%s %s steps=%u restarts=%u out0=%08x\n", s.name, s.task ? "run" : "stop", (unsigned)s.steps, (unsigned)s.restarts, (unsigned)s.outputs[0]);
+        Serial.printf("%s %s steps=%u restarts=%u out0=%08x crc=%08x\n", s.name, s.task ? "run" : "stop", (unsigned)s.steps, (unsigned)s.restarts, (unsigned)s.outputs[0], (unsigned)(s.wasm ? esp_crc32_le(0, s.wasm, s.wasmLen) : 0));
     Serial.printf("free=%u largest=%u\n", (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     Serial.println("end");
   } else if (line.startsWith("swap ") || line.startsWith("del ")) {
@@ -565,6 +610,7 @@ static void webStart() {
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);  // `tick` and `put` run wasm3 on the loop task
 
 void setup() {
+  Serial.setRxBufferSize(4096);  // native USB (C3) has only 256 bytes: a module sent at once would be cut
   Serial.begin(115200);
   Serial.setTimeout(200);
   g_mgmt = xSemaphoreCreateMutex();
@@ -579,7 +625,7 @@ void setup() {
       if (s) startSlot(*s);
     }
   }
-  xTaskCreatePinnedToCore(watchdogTask, "wdt", 4096, nullptr, 3, nullptr, 1);  // same core + higher priority than modules: deleting a hung task never crosses cores
+  xTaskCreatePinnedToCore(watchdogTask, "wdt", 4096, nullptr, 3, nullptr, kCore);  // same core + higher priority than modules: deleting a hung task never crosses cores
 #ifdef FLP_WEB
   webStart();
 #endif

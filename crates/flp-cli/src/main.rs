@@ -113,6 +113,9 @@ enum Command {
         /// Только этот лист (по умолчанию все листы с блоками)
         #[arg(long)]
         sheet: Option<u32>,
+        /// Модули сообщают значения всех выходов блоков (для отладки)
+        #[arg(long)]
+        watch: bool,
         /// Залить модули на плату с мастер-прошивкой
         #[arg(long)]
         upload: bool,
@@ -224,9 +227,10 @@ fn main() -> ExitCode {
         Command::GenWasm {
             project,
             sheet,
+            watch,
             upload,
             port,
-        } => run_gen_wasm(&project, cli.library.as_deref(), sheet, upload, port),
+        } => run_gen_wasm(&project, cli.library.as_deref(), sheet, watch, upload, port),
         Command::Block { action } => run_block(action, cli.library.as_deref()),
         Command::Convert { project } => run_convert(&project, cli.library.as_deref()),
     }
@@ -534,6 +538,11 @@ fn push_module(name: &str, wasm: &[u8], allow: &[String], port: Option<String>) 
     // Release DTR/RTS so opening the port does not reset the board.
     let _ = serial.write_data_terminal_ready(false);
     let _ = serial.write_request_to_send(false);
+    if let Err(e) =
+        flp_build::mcu_module::wait_for_master(&mut serial, std::time::Duration::from_secs(8))
+    {
+        return failed(e.to_string());
+    }
     println!("Модуль «{name}» ({} байт) -> {port}...", wasm.len());
     match flp_build::mcu_module::upload_module(&mut serial, name, wasm, allow) {
         Ok(done) => {
@@ -553,6 +562,7 @@ fn run_gen_wasm(
     project_dir: &Path,
     library: Option<&Path>,
     sheet: Option<u32>,
+    watch: bool,
     upload: bool,
     port: Option<String>,
 ) -> ExitCode {
@@ -575,7 +585,7 @@ fn run_gen_wasm(
     let sheets = sheet.map_or_else(|| program.sheets(), |n| vec![n]);
     let mut modules = Vec::new();
     for n in sheets {
-        match program.wasm_module(n) {
+        match program.wasm_module_with(n, watch) {
             Ok(module) => modules.push(module),
             Err(e) => {
                 eprintln!("ошибка: лист {n}: {e}");

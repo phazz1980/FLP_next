@@ -6,12 +6,12 @@ use std::time::Instant;
 use eframe::egui::{self, Color32, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use flp_codegen::Program;
 use flp_core::{Layout, Library, ParamKind, PortRef, Project, SignalType};
-use flp_debug::{Command, DebugTable, Live, Session, Source, Value};
+use flp_debug::{Command, DebugTable, Live, MasterSession, ModuleMap, Source, Value};
 
 use crate::theme::Palette;
 
 pub struct DebugState {
-    session: Session,
+    session: MasterSession,
     pub table: DebugTable,
     pub port: String,
     /// Snapshot taken at the start of each frame.
@@ -55,11 +55,30 @@ impl DebugState {
         let program = Program::build(project, lib).map_err(|e| e.to_string())?;
         let table = flp_codegen::debug::debug_table(&program);
         let inputs = input_ports(project, lib, &table);
+        let mut modules = Vec::new();
+        for sheet in program.sheets() {
+            let built = program
+                .wasm_module_with(sheet, true)
+                .map_err(|e| crate::i18n::fmt("лист {0}: {1}", &[&sheet, &e]))?;
+            let slots = built
+                .watched
+                .iter()
+                .map(|label| {
+                    let port = label.parse::<PortRef>().ok()?;
+                    table.output_index(&port)
+                })
+                .collect();
+            modules.push(ModuleMap {
+                crc: flp_build::mcu_module::crc32(&built.wasm),
+                name: built.name,
+                slots,
+            });
+        }
         let ctx = ctx.clone();
-        let session = Session::start_with(
+        let session = MasterSession::start(
             table.clone(),
+            modules,
             flp_debug::transport::serial(port),
-            project.config.project.password.clone(),
             move || ctx.request_repaint(),
         );
         Ok(Self {
