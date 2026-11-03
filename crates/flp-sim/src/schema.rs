@@ -536,6 +536,11 @@ impl Simulation {
         &self.bench
     }
 
+    /// The bench for setting pin levels and sensor signals from a test or the editor.
+    pub fn bench_mut(&mut self) -> &mut Bench {
+        &mut self.bench
+    }
+
     /// Takes over the bench settings of an older simulation of the same project.
     pub fn keep_bench(&mut self, old: &Simulation) {
         self.bench = old.bench.clone();

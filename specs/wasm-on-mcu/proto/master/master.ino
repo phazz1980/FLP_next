@@ -148,14 +148,26 @@ m3ApiRawFunction(h_publish) {
   }
   m3ApiSuccess();
 }
+// Pin modes are set on first use (modules cannot call pinMode): one bit per GPIO.
+static uint64_t g_pinInit = 0;
+static void pinOnce(int32_t pin, uint8_t mode) {
+  if (pin < 0 || pin > 63 || (g_pinInit >> pin & 1)) return;
+  g_pinInit |= 1ULL << pin;
+  pinMode(pin, mode);
+}
 m3ApiRawFunction(h_gpio_read) {
   m3ApiReturnType(int32_t);
   m3ApiGetArg(int32_t, pin);
+  // Bit 8 of the pin number asks for the internal pull-up.
+  bool pullup = pin & 0x100;
+  pin &= 0xFF;
+  pinOnce(pin, pullup ? INPUT_PULLUP : INPUT);
   m3ApiReturn(digitalRead(pin));
 }
 m3ApiRawFunction(h_gpio_write) {
   m3ApiGetArg(int32_t, pin);
   m3ApiGetArg(int32_t, v);
+  pinOnce(pin, OUTPUT);
   digitalWrite(pin, v);
   m3ApiSuccess();
 }
@@ -166,7 +178,7 @@ m3ApiRawFunction(h_adc_read) {
 }
 m3ApiRawFunction(h_pwm_write) {
   m3ApiGetArg(int32_t, pin);
-  m3ApiGetArg(int32_t, v);
+  m3ApiGetArg(int32_t, v);  // 8 bits, 0..255
   analogWrite(pin, v);
   m3ApiSuccess();
 }

@@ -96,11 +96,43 @@ fn empty_sheet_is_refused() {
 }
 
 #[test]
-fn hardware_block_is_refused_with_its_name() {
+fn pins_become_imports_and_rights() {
     let lib = library();
     let mut project = background();
     project.logic.vars[0].retain = false;
     let program = Program::build(&project, &lib).unwrap();
+    let built = program.wasm_module(1).unwrap();
+    assert!(
+        built.manifest.contains("allow = [\"gpio_write\"]"),
+        "{}",
+        built.manifest
+    );
+}
+
+#[test]
+fn unsupported_block_is_refused_with_its_name() {
+    let lib = library();
+    let mut project = background();
+    project.logic.vars[0].retain = false;
+    project
+        .logic
+        .blocks
+        .iter_mut()
+        .find(|b| b.id == "blink_led")
+        .unwrap()
+        .expander = Some("pcf".into());
+    project.logic.expanders.push(flp_core::expander::Expander {
+        id: "pcf".into(),
+        chip: Default::default(),
+        address: 0x20,
+        sda: -1,
+        scl: -1,
+        period: "20ms".into(),
+    });
+    let program = Program::build(&project, &lib).unwrap();
     let err = program.wasm_module(1).unwrap_err().to_string();
-    assert!(err.contains("не поддержан"), "{err}");
+    assert!(
+        err.contains("blink_led") && err.contains("не поддержан"),
+        "{err}"
+    );
 }

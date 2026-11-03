@@ -22,6 +22,17 @@ const TAG_SET: u32 = 1;
 const OUTPUT: u32 = 2;
 const GLOBAL_NOW: u32 = 0;
 
+/// Hardware imports are numbered after the fixed ones once the used set is known; code is
+/// emitted with these placeholders (`HW_BASE + position in HW_NAMES`) and remapped in `finish`.
+const HW_BASE: u32 = 100;
+const HW_GPIO_READ: u32 = HW_BASE;
+const HW_GPIO_WRITE: u32 = HW_BASE + 1;
+const HW_ADC_READ: u32 = HW_BASE + 2;
+const HW_PWM_WRITE: u32 = HW_BASE + 3;
+const HW_NAMES: [&str; 4] = ["gpio_read", "gpio_write", "adc_read", "pwm_write"];
+/// Bit of the pin number passed to `gpio_read` that asks for the pull-up.
+const PIN_PULLUP: i32 = 0x100;
+
 /// A finished module: the `.wasm` bytes and the text of `module.toml`.
 #[derive(Debug, Clone)]
 pub struct WasmModule {
@@ -94,6 +105,8 @@ struct Emitter<'a, 'p> {
     scratch: u32,
     watch: bool,
     watched: Vec<String>,
+    /// Hardware imports the code calls (placeholders, see `HW_BASE`).
+    hw: std::collections::BTreeSet<u32>,
 }
 
 impl<'a, 'p> Emitter<'a, 'p> {
@@ -109,6 +122,7 @@ impl<'a, 'p> Emitter<'a, 'p> {
             scratch: 0,
             watch: false,
             watched: Vec::new(),
+            hw: Default::default(),
         };
         for &bi in &module.blocks {
             for &signal in program.blocks[bi].outputs.values() {
@@ -359,7 +373,110 @@ impl<'a, 'p> Emitter<'a, 'p> {
         Ok(())
     }
 
+    fn hw_call(&mut self, import: u32) {
+        self.hw.insert(import);
+        self.op(I::Call(import));
+    }
+
+    /// Writes an output block: `level` (an `f64` global) goes to the pin when `en` allows.
+    fn hold_unless_enabled(
+        &mut self,
+        inst: &Instance,
+        store: impl FnOnce(&mut Self) -> Result<(), WasmError>,
+    ) -> Result<(), WasmError> {
+        let gated = inst.inputs.contains_key("en");
+        if gated {
+            self.flag(inst, 1)?;
+            self.op(I::If(BlockType::Empty));
+        }
+        store(self)?;
+        if gated {
+            self.op(I::End);
+        }
+        Ok(())
+    }
+
+    /// Digital/analog/PWM pins of the board: calls into the master.
+    fn hardware_block(&mut self, inst: &Instance) -> Result<bool, WasmError> {
+        let kind = inst.block.kind.as_str();
+        if !matches!(kind, "digital_in" | "analog_in" | "digital_out" | "pwm_out") {
+            return Ok(false);
+        }
+        if inst.block.expander.is_some() {
+            return Err(self.unsupported(inst, "вывод на расширителе пока не поддержан в модулях"));
+        }
+        let pin = self.const_param(inst, 0)? as i32;
+        match kind {
+            "digital_in" => {
+                let pullup = self.const_param(inst, 1)? != 0.0;
+                let inverted = self.const_param(inst, 2)? != 0.0;
+                self.op(I::I32Const(pin | if pullup { PIN_PULLUP } else { 0 }));
+                self.hw_call(HW_GPIO_READ);
+                self.op(I::I32Const(0));
+                self.op(I::I32Ne);
+                if inverted {
+                    self.op(I::I32Eqz);
+                }
+                self.op(I::F64ConvertI32U);
+            }
+            "analog_in" => {
+                self.op(I::I32Const(pin));
+                self.hw_call(HW_ADC_READ);
+                self.op(I::F64ConvertI32S);
+                self.c(0.0);
+                self.op(I::F64Max);
+                self.c(4095.0);
+                self.op(I::F64Min);
+            }
+            "digital_out" => {
+                let inverted = self.const_param(inst, 1)? != 0.0;
+                let logic = self.global(0.0);
+                self.hold_unless_enabled(inst, |e| {
+                    e.flag(inst, 0)?;
+                    e.op(I::F64ConvertI32U);
+                    e.op(I::GlobalSet(logic));
+                    Ok(())
+                })?;
+                self.op(I::I32Const(pin));
+                self.op(I::GlobalGet(logic));
+                self.c(0.0);
+                self.op(I::F64Ne);
+                if inverted {
+                    self.op(I::I32Eqz);
+                }
+                self.hw_call(HW_GPIO_WRITE);
+                return Ok(true);
+            }
+            _ => {
+                let duty = self.global(0.0);
+                self.hold_unless_enabled(inst, |e| {
+                    e.input(inst, 0)?;
+                    e.c(0.0);
+                    e.op(I::F64Max);
+                    e.c(100.0);
+                    e.op(I::F64Min);
+                    e.op(I::GlobalSet(duty));
+                    Ok(())
+                })?;
+                // The master passes the value to `analogWrite`: 8 bits, 0..255.
+                self.op(I::I32Const(pin));
+                self.op(I::GlobalGet(duty));
+                self.c(2.55);
+                self.op(I::F64Mul);
+                self.op(I::F64Nearest);
+                self.op(I::I32TruncF64U);
+                self.hw_call(HW_PWM_WRITE);
+                return Ok(true);
+            }
+        }
+        self.set_out(inst, 0);
+        Ok(true)
+    }
+
     fn block(&mut self, inst: &Instance) -> Result<(), WasmError> {
+        if self.hardware_block(inst)? {
+            return Ok(());
+        }
         let kind = inst.block.kind.as_str();
         match kind {
             "and" => self.fold_flags(inst, I::I32And, 1)?,
@@ -925,11 +1042,31 @@ impl<'a, 'p> Emitter<'a, 'p> {
         types.ty().function([], [ValType::I32]); // abi_version
         types.ty().function([ValType::I32], []); // step
         types.ty().function([], []); // init
+        types.ty().function([ValType::I32], [ValType::I32]); // gpio_read, adc_read
+        types.ty().function([ValType::I32, ValType::I32], []); // gpio_write, pwm_write
 
         let mut imports = ImportSection::new();
         imports.import("flp", "tag_get", EntityType::Function(0));
         imports.import("flp", "tag_set", EntityType::Function(1));
         imports.import("flp", "output", EntityType::Function(1));
+        // Hardware imports follow in placeholder order; defined functions come after them.
+        let used: Vec<u32> = self.hw.iter().copied().collect();
+        let mut allow = Vec::new();
+        for &h in &used {
+            let name = HW_NAMES[(h - HW_BASE) as usize];
+            let ty = if h == HW_GPIO_READ || h == HW_ADC_READ {
+                5
+            } else {
+                6
+            };
+            imports.import("flp", name, EntityType::Function(ty));
+            allow.push(format!("\"{name}\""));
+        }
+        let first = 3 + used.len() as u32;
+        let remap = |n: u32| match used.iter().position(|&h| h == n) {
+            Some(k) => 3 + k as u32,
+            None => n,
+        };
 
         let mut funcs = FunctionSection::new();
         funcs.function(2);
@@ -959,16 +1096,19 @@ impl<'a, 'p> Emitter<'a, 'p> {
 
         let mut exports = ExportSection::new();
         exports.export("memory", ExportKind::Memory, 0);
-        exports.export("abi_version", ExportKind::Func, 3);
-        exports.export("step", ExportKind::Func, 4);
-        exports.export("init", ExportKind::Func, 5);
+        exports.export("abi_version", ExportKind::Func, first);
+        exports.export("step", ExportKind::Func, first + 1);
+        exports.export("init", ExportKind::Func, first + 2);
 
         let mut abi = Function::new([]);
         abi.instruction(&I::I32Const(2)).instruction(&I::End);
 
         let mut step = Function::new_with_locals_types(vec![ValType::F64; self.scratch as usize]);
         for i in &self.code {
-            step.instruction(i);
+            match i {
+                I::Call(n) if *n >= HW_BASE => step.instruction(&I::Call(remap(*n))),
+                other => step.instruction(other),
+            };
         }
         step.instruction(&I::End);
 
@@ -998,7 +1138,11 @@ impl<'a, 'p> Emitter<'a, 'p> {
             .section(&exports)
             .section(&code);
 
-        let mut manifest = format!("name = \"{}\"\nabi = 2\nallow = []\n", self.module.name);
+        let mut manifest = format!(
+            "name = \"{}\"\nabi = 2\nallow = [{}]\n",
+            self.module.name,
+            allow.join(", ")
+        );
         for t in &self.module.tags {
             let name = match &t.tag.kind {
                 TagKind::Var(n) | TagKind::Signal(n) => n.replace('"', "'"),

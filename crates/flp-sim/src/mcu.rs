@@ -366,7 +366,8 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
         )
         .map_err(bad)?
         .func_wrap("flp", "gpio_read", |c: Caller<'_, Host>, pin: i32| -> i32 {
-            c.data().io.gpio_in.get(&pin).copied().unwrap_or(0)
+            // Bit 8 of the pin asks the master for the pull-up; the stub has no resistors.
+            c.data().io.gpio_in.get(&(pin & 0xFF)).copied().unwrap_or(0)
         })
         .map_err(bad)?
         .func_wrap(

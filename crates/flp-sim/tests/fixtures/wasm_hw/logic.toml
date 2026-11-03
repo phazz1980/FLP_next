@@ -1,0 +1,58 @@
+[[block]]
+id = "btn"
+type = "digital_in"
+pin = 4
+pullup = true
+inverted = true
+
+[[block]]
+id = "lvl"
+type = "analog_in"
+pin = 34
+
+[[block]]
+id = "gen"
+type = "generator"
+time_on = "300ms"
+time_off = "500ms"
+
+[[block]]
+id = "lamp"
+type = "digital_out"
+pin = 2
+inverted = true
+
+[[block]]
+id = "fan"
+type = "digital_out"
+pin = 5
+write_enable = true
+
+[[block]]
+id = "dim"
+type = "pwm_out"
+pin = 18
+write_enable = true
+
+[[block]]
+id = "half"
+type = "scale"
+
+[[link]]
+from = "gen.out"
+to = "lamp.in"
+[[link]]
+from = "btn.out"
+to = "fan.in"
+[[link]]
+from = "gen.out"
+to = "fan.en"
+[[link]]
+from = "half.out"
+to = "dim.in"
+[[link]]
+from = "btn.out"
+to = "dim.en"
+[[link]]
+from = "lvl.out"
+to = "half.in"
