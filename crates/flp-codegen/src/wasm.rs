@@ -174,6 +174,17 @@ struct Emitter<'a, 'p> {
 /// Blocks per generated function. wasm3 without tail-call optimization (ESP32 build) recurses once
 /// per operation of a function, so a long function overflows the task stack; short ones do not.
 const BLOCKS_PER_CHUNK: usize = 8;
+/// Pieces called straight from `step`; beyond that they go through groups of this size.
+const PIECES_PER_GROUP: u32 = 16;
+
+/// Group functions needed for `pieces` pieces after the first (0: `step` calls them itself).
+fn group_count(pieces: usize) -> usize {
+    if pieces as u32 <= PIECES_PER_GROUP {
+        0
+    } else {
+        (pieces as u32).div_ceil(PIECES_PER_GROUP) as usize
+    }
+}
 
 impl<'a, 'p> Emitter<'a, 'p> {
     fn new(program: &'a Program<'p>, module: &'a SheetModule) -> Self {
@@ -1370,6 +1381,10 @@ impl<'a, 'p> Emitter<'a, 'p> {
         for _ in &self.cuts {
             funcs.function(5);
         }
+        let groups = group_count(self.cuts.len());
+        for _ in 0..groups {
+            funcs.function(5);
+        }
 
         let mut memory = MemorySection::new();
         memory.memory(MemoryType {
@@ -1426,9 +1441,28 @@ impl<'a, 'p> Emitter<'a, 'p> {
             pieces.push(f);
         }
         let mut step = pieces.remove(0);
-        for k in 0..pieces.len() as u32 {
-            step.instruction(&I::LocalGet(0));
-            step.instruction(&I::Call(first + 3 + k));
+        // The interpreter does not tail-call between wasm functions: every call in a row takes
+        // C stack on the board. Many pieces are therefore called through groups of `PIECES_PER_GROUP`.
+        let rest = pieces.len() as u32;
+        let mut group_fns: Vec<Function> = Vec::new();
+        if groups == 0 {
+            for k in 0..rest {
+                step.instruction(&I::LocalGet(0));
+                step.instruction(&I::Call(first + 3 + k));
+            }
+        } else {
+            for g in 0..groups as u32 {
+                let mut f = Function::new([]);
+                let from = g * PIECES_PER_GROUP;
+                for k in from..rest.min(from + PIECES_PER_GROUP) {
+                    f.instruction(&I::LocalGet(0));
+                    f.instruction(&I::Call(first + 3 + k));
+                }
+                f.instruction(&I::End);
+                group_fns.push(f);
+                step.instruction(&I::LocalGet(0));
+                step.instruction(&I::Call(first + 3 + rest + g));
+            }
         }
         step.instruction(&I::End);
         for p in &mut pieces {
@@ -1456,6 +1490,9 @@ impl<'a, 'p> Emitter<'a, 'p> {
         code.function(&init);
         for p in &pieces {
             code.function(p);
+        }
+        for g in &group_fns {
+            code.function(g);
         }
 
         let mut module = Module::new();
