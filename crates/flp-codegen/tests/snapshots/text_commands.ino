@@ -46,6 +46,29 @@ unsigned long rx_last = 0;
 // report: uart_send
 bool report_prev = false;
 
+// text_compare: общий код
+static inline char flp_lower(char c) {
+  return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+}
+bool flp_text_match_nocase(const String& a, const String& b, int mode) {
+  int la = a.length(), lb = b.length();
+  if (lb > la || (mode == 0 && lb != la)) {
+    return false;
+  }
+  int first = mode == 3 ? la - lb : 0;
+  int last = (mode == 1 ? la : first + lb) - lb;
+  for (int at = first; at <= last; at++) {
+    int i = 0;
+    while (i < lb && flp_lower(a[at + i]) == flp_lower(b[i])) {
+      i++;
+    }
+    if (i == lb) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // text_to_num: общий код
 // Number from text: spaces around are skipped, a decimal comma is accepted.
 bool flp_text_to_float(const String& text, float& out) {
@@ -203,13 +226,7 @@ void loop() {
   }
 
   // is_on: text_compare
-  {
-    String a = command_r_out;
-    String b = "ON";
-    a.toLowerCase();
-    b.toLowerCase();
-    is_on_out = a == b;
-  }
+  is_on_out = flp_text_match_nocase(command_r_out, "ON", 0);
 
   // pump: digital_out
   digitalWrite(26, (is_on_out) ? HIGH : LOW);

@@ -217,18 +217,7 @@ pub(crate) fn text_compare(e: &CppCtx) -> CppParts {
     let mode = e.int("mode", 0);
     let mut l = Lines::default();
     if matches!(e.value.get("ignore_case"), Some(Raw::Bool(true))) {
-        l.line("{")
-            .line(format!("  String a = {a};"))
-            .line(format!("  String b = {b};"))
-            .line("  a.toLowerCase();")
-            .line("  b.toLowerCase();")
-            .line(match mode {
-                1 => format!("  {out} = a.indexOf(b) >= 0;"),
-                2 => format!("  {out} = a.startsWith(b);"),
-                3 => format!("  {out} = a.endsWith(b);"),
-                _ => format!("  {out} = a == b;"),
-            })
-            .line("}");
+        l.line(format!("{out} = flp_text_match_nocase({a}, {b}, {mode});"));
     } else {
         l.line(match mode {
             1 => format!("{out} = {a}.indexOf({b}) >= 0;"),
@@ -237,8 +226,36 @@ pub(crate) fn text_compare(e: &CppCtx) -> CppParts {
             _ => format!("{out} = {a} == {b};"),
         });
     }
-    looped(l.finish())
+    let mut parts = looped(l.finish());
+    if matches!(e.value.get("ignore_case"), Some(Raw::Bool(true))) {
+        parts.once_functions = TEXT_MATCH_NOCASE.to_owned();
+    }
+    parts
 }
+
+/// Case-insensitive (ASCII) comparison without temporary strings: mode 0 equal, 1 contains,
+/// 2 starts with, 3 ends with.
+const TEXT_MATCH_NOCASE: &str = r#"static inline char flp_lower(char c) {
+  return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+}
+bool flp_text_match_nocase(const String& a, const String& b, int mode) {
+  int la = a.length(), lb = b.length();
+  if (lb > la || (mode == 0 && lb != la)) {
+    return false;
+  }
+  int first = mode == 3 ? la - lb : 0;
+  int last = (mode == 1 ? la : first + lb) - lb;
+  for (int at = first; at <= last; at++) {
+    int i = 0;
+    while (i < lb && flp_lower(a[at + i]) == flp_lower(b[i])) {
+      i++;
+    }
+    if (i == lb) {
+      return true;
+    }
+  }
+  return false;
+}"#;
 
 const TEXT_TO_FLOAT: &str = r#"// Number from text: spaces around are skipped, a decimal comma is accepted.
 bool flp_text_to_float(const String& text, float& out) {
