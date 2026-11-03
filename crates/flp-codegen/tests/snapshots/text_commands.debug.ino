@@ -553,8 +553,8 @@ void setup() {
   Serial2.begin(9600, SERIAL_8N1, 16, 17);
 
   // Память под строки заранее: меньше дробления кучи.
-  p_text_out.reserve(32);
-  name_out.reserve(32);
+  p_text_out.reserve(20);
+  name_out.reserve(10);
   rx_line.reserve(32);
   command_r_out.reserve(32);
   message_out.reserve(32);

@@ -675,6 +675,56 @@ fn constant_literal(ty: SignalType, value: &ParamValue) -> String {
 /// Bytes reserved for every string signal and variable at startup.
 const STRING_RESERVE: usize = 32;
 
+/// Longest text each signal can hold, when the generator can tell: `None` for other types
+/// and for texts that depend on run-time values.
+fn static_lengths(program: &Program) -> Vec<Option<usize>> {
+    let mut known: Vec<Option<usize>> = vec![None; program.signals.len()];
+    for inst in &program.blocks {
+        let Some(&out) = inst.outputs.get("out") else {
+            continue;
+        };
+        if program.signals[out].ty != SignalType::String {
+            continue;
+        }
+        let text = |name: &str| match inst.params.get(name) {
+            Some(ParamValue::Text(t)) if !inst.param_vars.contains_key(name) => Some(t.len()),
+            _ => None,
+        };
+        let input = |port: &str| match &inst.inputs.get(port)?.source {
+            Source::Signal { index, .. } => known[*index],
+            Source::Default(ParamValue::Text(t)) => Some(t.len()),
+            _ => None,
+        };
+        let int_param = |name: &str| match inst.params.get(name) {
+            Some(ParamValue::Int(v)) => usize::try_from(*v).ok(),
+            _ => None,
+        };
+        known[out] = match inst.block.kind.as_str() {
+            "text_const" => text("value"),
+            "text_concat" => (|| {
+                const PORTS: &str = "abcdefghijklmnop";
+                let count = int_param("count")?.clamp(2, 16);
+                let mut total = text("separator")? * (count - 1);
+                for port in PORTS.chars().take(count) {
+                    total += input(&port.to_string())?;
+                }
+                Some(total)
+            })(),
+            // Sign, digits, the point and decimals of a usual number (8 integer digits for a float);
+            // a rarer longer one grows the buffer once.
+            "num_to_text" => (|| {
+                let digits = match inst.inputs.get("in")?.ty {
+                    SignalType::Float => 10 + int_param("decimals")?,
+                    _ => 11,
+                };
+                Some(text("prefix")? + digits + text("suffix")?)
+            })(),
+            _ => None,
+        };
+    }
+    known
+}
+
 pub(crate) fn cpp_type(ty: SignalType) -> &'static str {
     match ty {
         SignalType::Bool => "bool",
@@ -1136,16 +1186,19 @@ flp_st_bg_end();
         push_indented(&mut out, uarts.into_iter());
         out.push('\n');
     }
-    // String storage is reserved up front: fewer heap reallocations in the loop.
-    let strings: Vec<String> = program
+    // String storage is reserved up front: fewer heap reallocations in the loop. Where the
+    // length is known while generating (constants, concatenation of known parts), exactly that.
+    let known = static_lengths(program);
+    let strings: Vec<(String, usize)> = program
         .signals
         .iter()
-        .filter(|s| s.ty == SignalType::String)
-        .map(|s| s.name.clone())
+        .enumerate()
+        .filter(|(_, s)| s.ty == SignalType::String)
+        .map(|(i, s)| (s.name.clone(), known[i].unwrap_or(STRING_RESERVE)))
         .chain(
             vars.iter()
                 .filter(|v| v.ty.signal() == SignalType::String)
-                .map(|v| flp_core::vars::storage_name(&v.name)),
+                .map(|v| (flp_core::vars::storage_name(&v.name), STRING_RESERVE)),
         )
         .collect();
     if !strings.is_empty() {
@@ -1153,8 +1206,8 @@ flp_st_bg_end();
             "  // Память под строки заранее: меньше дробления кучи.\n",
             "  // Reserve memory for strings up front: less heap fragmentation.\n",
         ));
-        for name in &strings {
-            let _ = writeln!(out, "  {name}.reserve({STRING_RESERVE});");
+        for (name, len) in &strings {
+            let _ = writeln!(out, "  {name}.reserve({len});");
         }
         out.push('\n');
     }

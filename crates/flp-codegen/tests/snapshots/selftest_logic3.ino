@@ -42,12 +42,12 @@ void setup() {
   Serial.begin(115200);
 
   // Память под строки заранее: меньше дробления кучи.
-  poly_text_out.reserve(32);
+  poly_text_out.reserve(16);
   ip_out.reserve(32);
-  ok_text_out.reserve(32);
-  bad_text_out.reserve(32);
-  d_text_out.reserve(32);
-  line_out.reserve(32);
+  ok_text_out.reserve(13);
+  bad_text_out.reserve(14);
+  d_text_out.reserve(12);
+  line_out.reserve(59);
   line2_out.reserve(32);
 
 }

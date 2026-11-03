@@ -741,7 +741,7 @@ static bool net_ssidok(const String &s) {
 void setup() {
   // Память под строки заранее: меньше дробления кучи.
   wifi_address.reserve(32);
-  txt_out.reserve(32);
+  txt_out.reserve(27);
   net_ssid.reserve(32);
   net_password.reserve(32);
   net_ip.reserve(32);

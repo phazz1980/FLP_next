@@ -87,26 +87,26 @@ void setup() {
   Serial.begin(115200);
 
   // Память под строки заранее: меньше дробления кучи.
-  t_abs_out.reserve(32);
-  t_min_out.reserve(32);
-  t_max_out.reserve(32);
-  t_lim_out.reserve(32);
-  t_sqrt_out.reserve(32);
-  t_sq_out.reserve(32);
-  t_pow_out.reserve(32);
-  t_mod_out.reserve(32);
-  t_sw_out.reserve(32);
-  t_mux_out.reserve(32);
-  t_dms1_out.reserve(32);
-  t_dms2_out.reserve(32);
-  t_dms3_out.reserve(32);
-  t_tt_out.reserve(32);
-  t_deb_out.reserve(32);
-  t_gen_out.reserve(32);
-  line1_out.reserve(32);
-  line2_out.reserve(32);
-  line3_out.reserve(32);
-  line4_out.reserve(32);
+  t_abs_out.reserve(15);
+  t_min_out.reserve(15);
+  t_max_out.reserve(15);
+  t_lim_out.reserve(15);
+  t_sqrt_out.reserve(16);
+  t_sq_out.reserve(14);
+  t_pow_out.reserve(15);
+  t_mod_out.reserve(15);
+  t_sw_out.reserve(14);
+  t_mux_out.reserve(15);
+  t_dms1_out.reserve(16);
+  t_dms2_out.reserve(16);
+  t_dms3_out.reserve(16);
+  t_tt_out.reserve(14);
+  t_deb_out.reserve(15);
+  t_gen_out.reserve(15);
+  line1_out.reserve(63);
+  line2_out.reserve(63);
+  line3_out.reserve(64);
+  line4_out.reserve(63);
 
 }
 
