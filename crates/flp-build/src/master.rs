@@ -17,8 +17,14 @@ pub fn master_sketch_id() -> u64 {
     hasher.finish()
 }
 
-/// Arduino library the master needs.
-const LIBRARY: &str = "Wasm3";
+/// Arduino libraries the master needs: wasm3 and the sensor drivers.
+const LIBRARIES: [&str; 5] = [
+    "Wasm3",
+    "OneWire",
+    "DallasTemperature",
+    "DHT sensor library",
+    "Adafruit Unified Sensor",
+];
 
 /// Compiled master firmware, ready to be flashed.
 pub struct MasterBuild {
@@ -47,7 +53,7 @@ impl ArduinoCli {
         if let Some(core) = self.ensure_core(&board.fqbn, on_line)? {
             on_line(&format!("Установлено ядро {core}"));
         }
-        let installed = self.ensure_libraries(&[LIBRARY], on_line)?;
+        let installed = self.ensure_libraries(&LIBRARIES, on_line)?;
         if !installed.is_empty() {
             on_line(&format!("Установлены библиотеки: {}", installed.join(", ")));
         }

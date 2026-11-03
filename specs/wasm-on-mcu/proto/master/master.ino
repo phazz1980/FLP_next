@@ -13,6 +13,9 @@
 //   swap <name>      reload the module from LittleFS      list      stats      log      del <name>
 #include <LittleFS.h>
 #include <esp_crc.h>
+#include <DHT.h>
+#include <DallasTemperature.h>
+#include <OneWire.h>
 #include <wasm3.h>
 #include <m3_env.h>
 
@@ -27,7 +30,27 @@ static const uint32_t kStepPeriodMs = 10;
 static const uint32_t kStepLimitMs = 100;  // watchdog: a longer step means a hang
 static const int kJournal = 50;
 
-enum { P_GPIO_READ = 1, P_GPIO_WRITE = 2, P_ADC = 4, P_PWM = 8, P_MILLIS = 16 };
+enum { P_GPIO_READ = 1, P_GPIO_WRITE = 2, P_ADC = 4, P_PWM = 8, P_MILLIS = 16, P_SENSOR = 32 };
+
+// ---- sensors: one task polls them (a read blocks for milliseconds), modules take the last values ----
+enum { SENSOR_DS18B20 = 0, SENSOR_DHT22 = 1 };
+struct Sensor {
+  volatile bool used = false;
+  int32_t key = 0;
+  uint8_t kind = 0, pin = 0, index = 0;
+  uint32_t period = 1000;
+  volatile float temp = 0, hum = 0;
+  volatile bool ok = false;
+  // driver state, touched by sensorTask only
+  bool ready = false;
+  uint32_t last = 0;
+  OneWire *wire = nullptr;
+  DallasTemperature *bus = nullptr;
+  DHT *dht = nullptr;
+};
+static const int kMaxSensors = 8;
+static Sensor g_sensors[kMaxSensors];
+static SemaphoreHandle_t g_sensorLock;
 
 struct Msg { char topic[24]; uint8_t data[64]; uint8_t len; };
 
@@ -225,6 +248,86 @@ m3ApiRawFunction(h_millis) {
   m3ApiReturn((int32_t)millis());
 }
 
+// ---- sensors: one task polls them (a read blocks for milliseconds), modules take the last values ----
+// ---- sensor access ----
+// key = kind | index << 4 | pin << 8
+static Sensor *sensorFor(int32_t key, uint32_t period) {
+  Sensor *found = nullptr;
+  xSemaphoreTake(g_sensorLock, portMAX_DELAY);
+  for (auto &s : g_sensors) {
+    if (s.used && s.key == key) { found = &s; break; }
+  }
+  if (!found) {
+    for (auto &s : g_sensors) {
+      if (s.used) continue;
+      s.key = key;
+      s.kind = key & 15;
+      s.index = key >> 4 & 15;
+      s.pin = key >> 8 & 0xFF;
+      s.period = period < 100 ? 100 : period;
+      s.used = true;  // last: the task sees a complete entry
+      found = &s;
+      break;
+    }
+  }
+  xSemaphoreGive(g_sensorLock);
+  return found;
+}
+
+static void sensorPoll(Sensor &s, uint32_t now) {
+  if (s.kind == SENSOR_DS18B20) {
+    if (!s.ready) {
+      s.wire = new OneWire(s.pin);
+      s.bus = new DallasTemperature(s.wire);
+      s.bus->begin();
+      s.bus->setWaitForConversion(false);  // do not block for 750 ms: request now, read next period
+      s.bus->requestTemperatures();
+      s.last = now;
+      s.ready = true;
+    } else if (now - s.last >= s.period) {
+      float t = s.bus->getTempCByIndex(s.index);
+      s.ok = t != DEVICE_DISCONNECTED_C;
+      if (s.ok) s.temp = t;
+      s.bus->requestTemperatures();
+      s.last = now;
+    }
+  } else {
+    if (!s.ready) {
+      s.dht = new DHT(s.pin, DHT22);
+      s.dht->begin();
+      s.last = now - s.period;  // the first read is due at once
+      s.ready = true;
+    }
+    if (now - s.last >= s.period) {
+      s.last = now;
+      float t = s.dht->readTemperature(), h = s.dht->readHumidity();
+      s.ok = !isnan(t) && !isnan(h);
+      if (s.ok) { s.temp = t; s.hum = h; }
+    }
+  }
+}
+
+static void sensorTask(void *) {
+  for (;;) {
+    uint32_t now = millis();
+    for (auto &s : g_sensors) {
+      if (s.used) sensorPoll(s, now);
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
+m3ApiRawFunction(h_sensor_read) {
+  m3ApiReturnType(float);
+  m3ApiGetArg(int32_t, key);
+  m3ApiGetArg(int32_t, period);
+  m3ApiGetArg(int32_t, field);  // 0 temperature, 1 humidity, 2 last read ok (1 or 0)
+  Sensor *s = sensorFor(key, period < 0 ? 0 : period);
+  float v = 0;
+  if (s) v = field == 0 ? s->temp : field == 1 ? s->hum : (s->ok ? 1.0f : 0.0f);
+  m3ApiReturn(v);
+}
+
 static void linkAll(Slot &s, IM3Module m) {
   auto L = [&](const char *n, const char *sig, M3RawCall f) { m3_LinkRawFunctionEx(m, "flp", n, sig, f, &s); };
   L("input_i", "i(i)", h_input_i);
@@ -245,6 +348,7 @@ static void linkAll(Slot &s, IM3Module m) {
   if (s.perms & P_ADC) L("adc_read", "i(i)", h_adc_read);
   if (s.perms & P_PWM) L("pwm_write", "v(ii)", h_pwm_write);
   if (s.perms & P_MILLIS) L("millis", "i()", h_millis);
+  if (s.perms & P_SENSOR) L("sensor_read", "f(iii)", h_sensor_read);
 }
 
 // ---- module lifecycle (call with g_mgmt held) ----
@@ -255,6 +359,7 @@ static uint8_t parsePerms(const String &a) {
   if (a.indexOf("adc_read") >= 0) p |= P_ADC;
   if (a.indexOf("pwm_write") >= 0) p |= P_PWM;
   if (a.indexOf("millis") >= 0) p |= P_MILLIS;
+  if (a.indexOf("sensor_read") >= 0) p |= P_SENSOR;
   return p;
 }
 
@@ -614,6 +719,8 @@ void setup() {
   Serial.begin(115200);
   Serial.setTimeout(200);
   g_mgmt = xSemaphoreCreateMutex();
+  g_sensorLock = xSemaphoreCreateMutex();
+  xTaskCreate(sensorTask, "sensors", 4096, nullptr, 1, nullptr);
   if (!LittleFS.begin(true)) Serial.println("LittleFS failed");
   LittleFS.mkdir("/modules");
   File dir = LittleFS.open("/modules");

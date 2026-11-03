@@ -35,7 +35,14 @@ const HW_GPIO_READ: u32 = HW_BASE;
 const HW_GPIO_WRITE: u32 = HW_BASE + 1;
 const HW_ADC_READ: u32 = HW_BASE + 2;
 const HW_PWM_WRITE: u32 = HW_BASE + 3;
-const HW_NAMES: [&str; 4] = ["gpio_read", "gpio_write", "adc_read", "pwm_write"];
+const HW_SENSOR_READ: u32 = HW_BASE + 4;
+const HW_NAMES: [&str; 5] = [
+    "gpio_read",
+    "gpio_write",
+    "adc_read",
+    "pwm_write",
+    "sensor_read",
+];
 /// Bit of the pin number passed to `gpio_read` that asks for the pull-up.
 const PIN_PULLUP: i32 = 0x100;
 /// `f32` scratch locals are numbered from here until `finish` knows how many `i32` ones there are.
@@ -674,8 +681,44 @@ impl<'a, 'p> Emitter<'a, 'p> {
         self.pick(Ty::I, false);
     }
 
+    /// Sensors on 1-Wire/DHT pins: the master polls them on its own, the module takes the last
+    /// values (`sensor_read(key, period_ms, field)`: 0 temperature, 1 humidity, 2 read ok).
+    fn sensor_block(&mut self, inst: &Instance) -> Result<bool, WasmError> {
+        // (kind code, index of the pin param, index of the period param, outputs as fields)
+        let (kind, index, period, fields): (i32, i32, usize, &[(usize, i32)]) =
+            match inst.block.kind.as_str() {
+                "ds18b20" => (0, self.const_param(inst, 1)? as i32, 2, &[(0, 0), (1, 2)]),
+                "dht22" => (1, 0, 1, &[(0, 0), (1, 1), (2, 2)]),
+                _ => return Ok(false),
+            };
+        if inst.block.expander.is_some() {
+            return Err(self.unsupported(inst, "датчик на расширителе не поддержан"));
+        }
+        let pin = self.const_param(inst, 0)? as i32;
+        let period_ms = self.const_param(inst, period)? as i32;
+        // One byte of pin and one nibble of index fit the key the master tells sensors apart by.
+        let key = kind | (index & 15) << 4 | (pin & 0xFF) << 8;
+        for &(output, field) in fields {
+            self.c_i(key);
+            self.c_i(period_ms);
+            self.c_i(field);
+            self.hw_call(HW_SENSOR_READ);
+            if inst.lib.def.outputs[output].name == "ok" {
+                self.c_f(0.0);
+                self.op(I::F32Ne);
+                self.set_out(inst, output, Ty::I);
+            } else {
+                self.set_out(inst, output, Ty::F);
+            }
+        }
+        Ok(true)
+    }
+
     /// Digital/analog/PWM pins of the board: calls into the master.
     fn hardware_block(&mut self, inst: &Instance) -> Result<bool, WasmError> {
+        if self.sensor_block(inst)? {
+            return Ok(true);
+        }
         let kind = inst.block.kind.as_str();
         if !matches!(kind, "digital_in" | "analog_in" | "digital_out" | "pwm_out") {
             return Ok(false);
@@ -1347,6 +1390,9 @@ impl<'a, 'p> Emitter<'a, 'p> {
         types
             .ty()
             .function([ValType::I32, ValType::F32], [ValType::F32]); // 8: output_f
+        types
+            .ty()
+            .function([ValType::I32, ValType::I32, ValType::I32], [ValType::F32]); // 9: sensor_read
 
         let mut imports = ImportSection::new();
         imports.import("flp", "tag_get_i", EntityType::Function(0));
@@ -1360,10 +1406,10 @@ impl<'a, 'p> Emitter<'a, 'p> {
         let mut allow = Vec::new();
         for &h in &used {
             let name = HW_NAMES[(h - HW_BASE) as usize];
-            let ty = if h == HW_GPIO_READ || h == HW_ADC_READ {
-                0
-            } else {
-                2
+            let ty = match h {
+                HW_GPIO_READ | HW_ADC_READ => 0,
+                HW_SENSOR_READ => 9,
+                _ => 2,
             };
             imports.import("flp", name, EntityType::Function(ty));
             allow.push(format!("\"{name}\""));

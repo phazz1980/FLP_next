@@ -10,7 +10,7 @@
 //! `bool`/`int`, `_f` for `float`): `input_i/f(idx) -> v`, `param_i/f(idx) -> v`,
 //! `output_i/f(idx, v)`, `tag_get_i/f(id) -> v`, `tag_set_i/f(id, v)`. A slot is 4 bytes, the
 //! type is a view of the same bits. Hardware imports (`gpio_read`, `gpio_write`, `adc_read`,
-//! `pwm_write`, `millis`) work only if the manifest `allow` list names them. On the PC the
+//! `pwm_write`, `sensor_read`, `millis`) work only if the manifest `allow` list names them. On the PC the
 //! hardware is a stub ([`StubIo`]) that tests and the editor fill and read.
 
 use std::collections::HashMap;
@@ -41,7 +41,14 @@ const ALWAYS: &[&str] = &[
     "subscribe",
 ];
 /// Imports that touch the hardware and need a permission in the manifest.
-const HARDWARE: &[&str] = &["gpio_read", "gpio_write", "adc_read", "pwm_write", "millis"];
+const HARDWARE: &[&str] = &[
+    "gpio_read",
+    "gpio_write",
+    "adc_read",
+    "pwm_write",
+    "millis",
+    "sensor_read",
+];
 
 const FUEL_PER_CALL: u64 = 5_000_000;
 const MAX_MEMORY: usize = 16 * 1024 * 1024;
@@ -117,6 +124,9 @@ pub struct StubIo {
     pub adc_in: HashMap<i32, i32>,
     pub gpio_out: HashMap<i32, i32>,
     pub pwm_out: HashMap<i32, i32>,
+    /// What the master reports for a sensor: `(key, field)` as the module passes them
+    /// (`kind | index << 4 | pin << 8`; field 0 temperature, 1 humidity, 2 read ok).
+    pub sensors: HashMap<(i32, i32), f32>,
     /// Milliseconds since the module started; advances with every step.
     pub now_ms: u32,
 }
@@ -450,6 +460,19 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
             "pwm_write",
             |mut c: Caller<'_, Host>, pin: i32, v: i32| {
                 c.data_mut().io.pwm_out.insert(pin, v);
+            },
+        )
+        .map_err(bad)?
+        .func_wrap(
+            "flp",
+            "sensor_read",
+            |c: Caller<'_, Host>, key: i32, _period: i32, field: i32| -> f32 {
+                c.data()
+                    .io
+                    .sensors
+                    .get(&(key, field))
+                    .copied()
+                    .unwrap_or(0.0)
             },
         )
         .map_err(bad)?

@@ -142,3 +142,63 @@ fn numeric_edges_match_the_simulation() {
     // `n` starts 3 below i32::MAX and wraps; division by zero, remainders and mixed operands.
     compare("crates/flp-sim/tests/fixtures/wasm_edges", 13, 12, 100);
 }
+
+#[test]
+fn sensors_read_what_the_master_reports() {
+    let lib = library();
+    let project = Project::load(repo_path("crates/flp-sim/tests/fixtures/wasm_sensors")).unwrap();
+    let program = Program::build(&project, &lib).unwrap();
+    let built = program.wasm_module_with(1, true).unwrap();
+    let manifest = Manifest::parse(&built.manifest).unwrap();
+    assert_eq!(manifest.allow, ["sensor_read"]);
+    let mut module = McuModule::load(&built.wasm, &manifest, built.watched.len()).unwrap();
+    let out = |module: &McuModule, label: &str| {
+        let i = built.watched.iter().position(|l| l == label).unwrap();
+        module.outputs()[i]
+    };
+    // Keys are `kind | index << 4 | pin << 8`; fields: 0 temperature, 1 humidity, 2 read ok.
+    let sensors = &mut module.io_mut().sensors;
+    sensors.insert((4 << 8, 0), 21.5);
+    sensors.insert((4 << 8, 2), 1.0);
+    sensors.insert((4 << 8 | 1 << 4, 0), -3.25);
+    sensors.insert((4 << 8 | 1 << 4, 2), 1.0);
+    sensors.insert((1 | 5 << 8, 0), 24.0);
+    sensors.insert((1 | 5 << 8, 1), 55.5);
+    sensors.insert((1 | 5 << 8, 2), 1.0);
+    module.step(50).unwrap();
+    assert_eq!(out(&module, "t1.temp"), Word::float(21.5));
+    assert_eq!(out(&module, "t1.ok"), Word::int(1));
+    assert_eq!(out(&module, "t2.temp"), Word::float(-3.25));
+    assert_eq!(out(&module, "air.temp"), Word::float(24.0));
+    assert_eq!(out(&module, "air.humidity"), Word::float(55.5));
+    assert_eq!(out(&module, "air.ok"), Word::int(1));
+    // A failed read: the master keeps the last temperature and drops `ok`.
+    module.io_mut().sensors.insert((4 << 8, 2), 0.0);
+    module.step(50).unwrap();
+    assert_eq!(out(&module, "t1.temp"), Word::float(21.5));
+    assert_eq!(out(&module, "t1.ok"), Word::int(0));
+    assert_eq!(out(&module, "t2.ok"), Word::int(1));
+}
+
+#[test]
+fn sensors_example_switches_pins_from_sensor_values() {
+    let lib = library();
+    let project = Project::load(repo_path("examples/sensors")).unwrap();
+    let program = Program::build(&project, &lib).unwrap();
+    let built = program.wasm_module(1).unwrap();
+    let manifest = Manifest::parse(&built.manifest).unwrap();
+    assert_eq!(manifest.allow, ["gpio_write", "sensor_read"]);
+    let mut module = McuModule::load(&built.wasm, &manifest, 0).unwrap();
+    let (water, air) = (4 << 8, 1 | 15 << 8);
+    let sensors = &mut module.io_mut().sensors;
+    sensors.extend([((water, 0), 30.0), ((water, 2), 1.0)]);
+    sensors.extend([((air, 0), 20.0), ((air, 1), 80.0), ((air, 2), 1.0)]);
+    module.step(50).unwrap();
+    let pin = |module: &McuModule, p: i32| module.io().gpio_out.get(&p).copied();
+    assert_eq!(pin(&module, 26), Some(1), "humid: fan on");
+    assert_eq!(pin(&module, 27), Some(1), "cold water: heater on");
+    assert_eq!(pin(&module, 2), Some(0), "both sensors ok: no fault");
+    module.io_mut().sensors.insert((air, 2), 0.0);
+    module.step(50).unwrap();
+    assert_eq!(pin(&module, 2), Some(1), "air sensor lost: fault lamp");
+}

@@ -1,0 +1,88 @@
+# Воздух: DHT22 на GPIO15; вода: DS18B20 на GPIO4.
+[[block]]
+id = "air"
+type = "dht22"
+pin = 15
+
+[[block]]
+id = "water"
+type = "ds18b20"
+pin = 4
+
+# Вытяжка: включить при 70 %, выключить при 60 %.
+[[block]]
+id = "humid"
+type = "hysteresis"
+on = 70.0
+off = 60.0
+
+[[block]]
+id = "fan"
+type = "digital_out"
+pin = 26
+
+# Нагрев воды: включать ниже 40 °C, выключать выше 45 °C (гистерезис с инверсией по входу).
+[[block]]
+id = "cold"
+type = "hysteresis"
+on = 45.0
+off = 40.0
+
+[[block]]
+id = "heater_logic"
+type = "not"
+
+[[block]]
+id = "heater"
+type = "digital_out"
+pin = 27
+
+# Лампа аварии горит, если хотя бы один датчик не отвечает.
+[[block]]
+id = "all_ok"
+type = "and"
+
+[[block]]
+id = "fault"
+type = "not"
+
+[[block]]
+id = "fault_led"
+type = "digital_out"
+pin = 2
+
+[[link]]
+from = "air.humidity"
+to   = "humid.in"
+
+[[link]]
+from = "humid.out"
+to   = "fan.in"
+
+[[link]]
+from = "water.temp"
+to   = "cold.in"
+
+[[link]]
+from = "cold.out"
+to   = "heater_logic.in"
+
+[[link]]
+from = "heater_logic.out"
+to   = "heater.in"
+
+[[link]]
+from = "air.ok"
+to   = "all_ok.a"
+
+[[link]]
+from = "water.ok"
+to   = "all_ok.b"
+
+[[link]]
+from = "all_ok.out"
+to   = "fault.in"
+
+[[link]]
+from = "fault.out"
+to   = "fault_led.in"

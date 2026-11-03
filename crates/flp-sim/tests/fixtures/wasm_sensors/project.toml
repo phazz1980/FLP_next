@@ -1,0 +1,6 @@
+[project]
+name = "wasm_sensors"
+description = "Датчики для проверки модуля WASM"
+
+[board]
+fqbn = "esp32:esp32:esp32"

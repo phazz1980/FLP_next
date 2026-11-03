@@ -1,0 +1,18 @@
+[[block]]
+id = "t1"
+type = "ds18b20"
+pin = 4
+index = 0
+period = "1s"
+
+[[block]]
+id = "t2"
+type = "ds18b20"
+pin = 4
+index = 1
+period = "2s"
+
+[[block]]
+id = "air"
+type = "dht22"
+pin = 5
