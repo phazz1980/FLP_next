@@ -3,10 +3,11 @@
 //
 // Serial protocol (115200, lines end with \n):
 //   put <name> <len> <crc32 hex> <allow,list|->   then <len> raw bytes -> stores and (re)starts the module
-//   in|param <name> <i> <value>      set an input / parameter (module tests)
+//   in|param <name> <i> <i|f> <value>  set an input / parameter; the letter is the type (i = int/bool, f = float)
 //   reset <name>                     restart the module paused, inputs and outputs zero
 //   tick <name> <n> <dt_ms>          pause the module and run n steps now
-//   out <name> <n>                   first n outputs as f64 bits in hex
+//   out <name> <n>                   first n outputs as 32-bit words in hex (8 digits each)
+// Values are 4-byte words (ABI 3): the bits of an i32 (bool, int) or of an f32 (float).
 //   swap <name>      reload the module from LittleFS      list      stats      log      del <name>
 #include <LittleFS.h>
 #include <esp_crc.h>
@@ -41,12 +42,16 @@ struct Slot {
   int nSubs = 0;
   Msg queue[4];
   volatile int qHead = 0, qTail = 0;
-  double outputs[8], inputs[8], params[8];
+  uint32_t outputs[8], inputs[8], params[8];  // bits of i32 / f32
 };
 
 static Slot g_slots[kMaxSlots];
 static SemaphoreHandle_t g_mgmt;
-static double g_tags[64];
+static uint32_t g_tags[64];  // bits of i32 / f32
+
+static inline uint32_t bitsOf(float v) { uint32_t u; memcpy(&u, &v, 4); return u; }
+static inline float floatOf(uint32_t u) { float v; memcpy(&v, &u, 4); return v; }
+static inline int32_t intOf(uint32_t u) { return (int32_t)u; }
 static portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
 
 struct Entry { uint32_t ms; char text[96]; };
@@ -72,20 +77,22 @@ static bool inMem(IM3Runtime rt, int32_t ptr, int32_t len) {
   return ptr >= 0 && len >= 0 && (uint64_t)ptr + len <= rt->memory.mallocated->length;
 }
 
-m3ApiRawFunction(h_input) {
-  m3ApiReturnType(double);
+// Typed access to the slots: the module asks for `_i` or `_f`, the bits stay as they are.
+#define FLP_SLOT_GET(fn, field, T, conv)   m3ApiRawFunction(fn) {     m3ApiReturnType(T);     m3ApiGetArg(int32_t, i);     m3ApiReturn((i >= 0 && i < 8) ? conv(slotOf(_ctx)->field[i]) : (T)0);   }
+FLP_SLOT_GET(h_input_i, inputs, int32_t, intOf)
+FLP_SLOT_GET(h_input_f, inputs, float, floatOf)
+FLP_SLOT_GET(h_param_i, params, int32_t, intOf)
+FLP_SLOT_GET(h_param_f, params, float, floatOf)
+m3ApiRawFunction(h_output_i) {
   m3ApiGetArg(int32_t, i);
-  m3ApiReturn((i >= 0 && i < 8) ? slotOf(_ctx)->inputs[i] : 0.0);
+  m3ApiGetArg(int32_t, v);
+  if (i >= 0 && i < 8) slotOf(_ctx)->outputs[i] = (uint32_t)v;
+  m3ApiSuccess();
 }
-m3ApiRawFunction(h_param) {
-  m3ApiReturnType(double);
+m3ApiRawFunction(h_output_f) {
   m3ApiGetArg(int32_t, i);
-  m3ApiReturn((i >= 0 && i < 8) ? slotOf(_ctx)->params[i] : 0.0);
-}
-m3ApiRawFunction(h_output) {
-  m3ApiGetArg(int32_t, i);
-  m3ApiGetArg(double, v);
-  if (i >= 0 && i < 8) slotOf(_ctx)->outputs[i] = v;
+  m3ApiGetArg(float, v);
+  if (i >= 0 && i < 8) slotOf(_ctx)->outputs[i] = bitsOf(v);
   m3ApiSuccess();
 }
 m3ApiRawFunction(h_log) {
@@ -100,15 +107,26 @@ m3ApiRawFunction(h_log) {
   }
   m3ApiSuccess();
 }
-m3ApiRawFunction(h_tag_get) {
-  m3ApiReturnType(double);
+m3ApiRawFunction(h_tag_get_i) {
+  m3ApiReturnType(int32_t);
   m3ApiGetArg(int32_t, id);
-  m3ApiReturn((id >= 0 && id < 64) ? g_tags[id] : 0.0);
+  m3ApiReturn((id >= 0 && id < 64) ? (int32_t)g_tags[id] : 0);
 }
-m3ApiRawFunction(h_tag_set) {
+m3ApiRawFunction(h_tag_get_f) {
+  m3ApiReturnType(float);
   m3ApiGetArg(int32_t, id);
-  m3ApiGetArg(double, v);
-  if (id >= 0 && id < 64) g_tags[id] = v;
+  m3ApiReturn((id >= 0 && id < 64) ? floatOf(g_tags[id]) : 0.0f);
+}
+m3ApiRawFunction(h_tag_set_i) {
+  m3ApiGetArg(int32_t, id);
+  m3ApiGetArg(int32_t, v);
+  if (id >= 0 && id < 64) g_tags[id] = (uint32_t)v;
+  m3ApiSuccess();
+}
+m3ApiRawFunction(h_tag_set_f) {
+  m3ApiGetArg(int32_t, id);
+  m3ApiGetArg(float, v);
+  if (id >= 0 && id < 64) g_tags[id] = bitsOf(v);
   m3ApiSuccess();
 }
 m3ApiRawFunction(h_subscribe) {
@@ -191,12 +209,17 @@ m3ApiRawFunction(h_millis) {
 
 static void linkAll(Slot &s, IM3Module m) {
   auto L = [&](const char *n, const char *sig, M3RawCall f) { m3_LinkRawFunctionEx(m, "flp", n, sig, f, &s); };
-  L("input", "F(i)", h_input);
-  L("param", "F(i)", h_param);
-  L("output", "v(iF)", h_output);
+  L("input_i", "i(i)", h_input_i);
+  L("input_f", "f(i)", h_input_f);
+  L("param_i", "i(i)", h_param_i);
+  L("param_f", "f(i)", h_param_f);
+  L("output_i", "v(ii)", h_output_i);
+  L("output_f", "v(if)", h_output_f);
   L("log", "v(ii)", h_log);
-  L("tag_get", "F(i)", h_tag_get);
-  L("tag_set", "v(iF)", h_tag_set);
+  L("tag_get_i", "i(i)", h_tag_get_i);
+  L("tag_get_f", "f(i)", h_tag_get_f);
+  L("tag_set_i", "v(ii)", h_tag_set_i);
+  L("tag_set_f", "v(if)", h_tag_set_f);
   L("publish", "v(iiii)", h_publish);
   L("subscribe", "v(ii)", h_subscribe);
   if (s.perms & P_GPIO_READ) L("gpio_read", "i(i)", h_gpio_read);
@@ -272,8 +295,8 @@ static bool startSlot(Slot &s, bool paused = false) {
   }
   IM3Function av;
   int32_t ver = -1;
-  if (m3_FindFunction(&av, s.rt, "abi_version") || m3_CallV(av) || m3_GetResultsV(av, &ver) || ver != 2) {
-    jlog(s.name, "нужен abi_version() = 2 (получено %d)", (int)ver);
+  if (m3_FindFunction(&av, s.rt, "abi_version") || m3_CallV(av) || m3_GetResultsV(av, &ver) || ver != 3) {
+    jlog(s.name, "нужен abi_version() = 3 (получено %d)", (int)ver);
     stopSlot(s);
     return false;
   }
@@ -427,7 +450,8 @@ static void cmdPut(const String &line) {
 static void cmdTest(const String &line) {
   char cmd[8], name[32];
   int idx = 0;
-  double val = 0;
+  char ty = 'i';
+  char vs[32];
   unsigned n = 0, dt = 0;
   Slot *s = nullptr;
   if (sscanf(line.c_str(), "%7s %31s", cmd, name) == 2) s = findSlot(name, false);
@@ -442,11 +466,15 @@ static void cmdTest(const String &line) {
     xSemaphoreGive(g_mgmt);
     Serial.println(ok ? "ok" : "err not started (see log)");
   } else if (!strcmp(cmd, "in") || !strcmp(cmd, "param")) {
-    if (sscanf(line.c_str(), "%*s %*s %d %lf", &idx, &val) != 2 || idx < 0 || idx >= 8) {
-      Serial.println("err bad index");
+    if (sscanf(line.c_str(), "%*s %*s %d %c %31s", &idx, &ty, vs) != 3 || idx < 0 || idx >= 8 || (ty != 'i' && ty != 'f')) {
+      Serial.println("err bad index or type");
       return;
     }
-    (cmd[0] == 'i' ? s->inputs : s->params)[idx] = val;
+    // `i`: a decimal int (clamped to the i32 range); `f`: a float parsed in 32 bits.
+    long long iv = strtoll(vs, nullptr, 10);
+    iv = iv < INT32_MIN ? INT32_MIN : (iv > INT32_MAX ? INT32_MAX : iv);
+    uint32_t w = ty == 'f' ? bitsOf(strtof(vs, nullptr)) : (uint32_t)(int32_t)iv;
+    (cmd[0] == 'i' ? s->inputs : s->params)[idx] = w;
     Serial.println("ok");
   } else if (!strcmp(cmd, "tick")) {
     if (sscanf(line.c_str(), "%*s %*s %u %u", &n, &dt) != 2 || n > 100000) {
@@ -474,9 +502,7 @@ static void cmdTest(const String &line) {
     }
     Serial.print("out");
     for (unsigned i = 0; i < n; i++) {
-      uint64_t bits;
-      memcpy(&bits, &s->outputs[i], 8);
-      Serial.printf(" %08x%08x", (unsigned)(bits >> 32), (unsigned)bits);
+      Serial.printf(" %08x", (unsigned)s->outputs[i]);
     }
     Serial.println();
     Serial.println("ok");
@@ -497,7 +523,7 @@ static void cmdLine(String line) {
   } else if (line == "list" || line == "stats") {
     for (auto &s : g_slots)
       if (s.used)
-        Serial.printf("%s %s steps=%u restarts=%u out0=%.1f\n", s.name, s.task ? "run" : "stop", (unsigned)s.steps, (unsigned)s.restarts, s.outputs[0]);
+        Serial.printf("%s %s steps=%u restarts=%u out0=%08x\n", s.name, s.task ? "run" : "stop", (unsigned)s.steps, (unsigned)s.restarts, (unsigned)s.outputs[0]);
     Serial.printf("free=%u largest=%u\n", (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     Serial.println("end");
   } else if (line.startsWith("swap ") || line.startsWith("del ")) {

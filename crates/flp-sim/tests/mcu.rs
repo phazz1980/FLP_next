@@ -207,3 +207,29 @@ fn counter_scenario_is_sane() {
     assert_eq!(last[1] as i32, 53i32.wrapping_add(i32::MAX));
     assert_eq!(last[3], 26); // a message after every even step
 }
+
+/// `EXPORT_WASM=<dir> cargo test -p flp-sim --test mcu -- --ignored export_prototypes`
+/// writes the prototype modules as `.wasm` for the board (`compare.ps1`, `test.ps1`).
+#[test]
+#[ignore = "writes files; run by hand"]
+fn export_prototypes() {
+    let dir = std::path::PathBuf::from(std::env::var("EXPORT_WASM").expect("set EXPORT_WASM"));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, src) in [
+        ("counter", COUNTER),
+        (
+            "blink",
+            include_str!("../../../specs/wasm-on-mcu/proto/blink.wat"),
+        ),
+        (
+            "hang",
+            include_str!("../../../specs/wasm-on-mcu/proto/hang.wat"),
+        ),
+    ] {
+        std::fs::write(
+            dir.join(format!("{name}.wasm")),
+            wat::parse_str(src).unwrap(),
+        )
+        .unwrap();
+    }
+}
