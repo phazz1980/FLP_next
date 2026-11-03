@@ -98,3 +98,25 @@ fn pins_match_the_simulation() {
         );
     }
 }
+
+#[test]
+fn blink_example_drives_the_led_like_the_simulation() {
+    let lib = library();
+    let project = Project::load(repo_path("examples/blink")).unwrap();
+    let program = Program::build(&project, &lib).unwrap();
+    let built = program.wasm_module(1).unwrap();
+    assert!(built.manifest.contains("allow = [\"gpio_write\"]"));
+    let manifest = Manifest::parse(&built.manifest).unwrap();
+    let mut module = McuModule::load(&built.wasm, &manifest, 0).unwrap();
+    let mut sim = Simulation::new(&project.logic, &lib).unwrap();
+    let mut levels = std::collections::BTreeSet::new();
+    for step in 0..60 {
+        sim.step(50).unwrap();
+        module.step(50).unwrap();
+        let want = sim.bench().driven(2).unwrap_or(0.0) as i32;
+        let got = module.io().gpio_out.get(&2).copied().unwrap_or(0);
+        assert_eq!(got, want, "step {step}");
+        levels.insert(got);
+    }
+    assert_eq!(levels.len(), 2, "the led must blink");
+}

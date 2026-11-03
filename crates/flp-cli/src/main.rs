@@ -106,6 +106,20 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// Собрать листы схемы как WASM-модули (.flp/<проект>/wasm/<лист>/) и при желании залить на плату
+    GenWasm {
+        /// Файл проекта .crab (или папка с ним)
+        project: PathBuf,
+        /// Только этот лист (по умолчанию все листы с блоками)
+        #[arg(long)]
+        sheet: Option<u32>,
+        /// Залить модули на плату с мастер-прошивкой
+        #[arg(long)]
+        upload: bool,
+        /// Порт платы, например COM3 (по умолчанию единственный найденный)
+        #[arg(long, short)]
+        port: Option<String>,
+    },
     /// Залить один WASM-модуль на плату с мастер-прошивкой (без сброса выходов и соседних модулей)
     UploadWasm {
         /// Файл модуля .wasm; рядом может лежать module.toml с именем и правами
@@ -207,6 +221,12 @@ fn main() -> ExitCode {
             allow,
             port,
         } => run_upload_wasm(&file, name, allow, port),
+        Command::GenWasm {
+            project,
+            sheet,
+            upload,
+            port,
+        } => run_gen_wasm(&project, cli.library.as_deref(), sheet, upload, port),
         Command::Block { action } => run_block(action, cli.library.as_deref()),
         Command::Convert { project } => run_convert(&project, cli.library.as_deref()),
     }
@@ -485,6 +505,15 @@ fn run_upload_wasm(
         .or_else(|| file.file_stem().map(|s| s.to_string_lossy().into_owned()))
         .unwrap_or_default();
     let allow = allow.unwrap_or_else(|| manifest.map(|m| m.allow).unwrap_or_default());
+    push_module(&name, &wasm, &allow, port)
+}
+
+/// Sends one module to the master firmware over serial.
+fn push_module(name: &str, wasm: &[u8], allow: &[String], port: Option<String>) -> ExitCode {
+    let failed = |message: String| {
+        eprintln!("ошибка: {message}");
+        ExitCode::from(EXIT_BUILD_FAILED)
+    };
     let port = match port {
         Some(port) => port,
         None => match ArduinoCli::locate()
@@ -506,7 +535,7 @@ fn run_upload_wasm(
     let _ = serial.write_data_terminal_ready(false);
     let _ = serial.write_request_to_send(false);
     println!("Модуль «{name}» ({} байт) -> {port}...", wasm.len());
-    match flp_build::mcu_module::upload_module(&mut serial, &name, &wasm, &allow) {
+    match flp_build::mcu_module::upload_module(&mut serial, name, wasm, allow) {
         Ok(done) => {
             match done.swap_us {
                 Some(us) => println!("Модуль «{name}» залит и запущен (замена {} мс)", us / 1000),
@@ -516,6 +545,75 @@ fn run_upload_wasm(
         }
         Err(e) => failed(e.to_string()),
     }
+}
+
+/// Builds the sheets of the project as WASM modules into `.flp/<project>/wasm/<name>/`
+/// (`<name>.wasm` + `module.toml`); with `upload` also sends them to the board.
+fn run_gen_wasm(
+    project_dir: &Path,
+    library: Option<&Path>,
+    sheet: Option<u32>,
+    upload: bool,
+    port: Option<String>,
+) -> ExitCode {
+    let (project, lib) = match load(project_dir, library) {
+        Ok(loaded) => loaded,
+        Err(code) => return code,
+    };
+    let program = match Program::build(&project, &lib) {
+        Ok(program) => program,
+        Err(GenError::Schema(diagnostics)) => {
+            print_diagnostics(&diagnostics);
+            eprintln!("Генерация отменена: в схеме есть ошибки (подробнее — crablogic check)");
+            return ExitCode::from(EXIT_SCHEMA_ERRORS);
+        }
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            return ExitCode::from(EXIT_GEN_FAILED);
+        }
+    };
+    let sheets = sheet.map_or_else(|| program.sheets(), |n| vec![n]);
+    let mut modules = Vec::new();
+    for n in sheets {
+        match program.wasm_module(n) {
+            Ok(module) => modules.push(module),
+            Err(e) => {
+                eprintln!("ошибка: лист {n}: {e}");
+                return ExitCode::from(EXIT_GEN_FAILED);
+            }
+        }
+    }
+    let mut allows = Vec::new();
+    for module in &modules {
+        let dir = project.work_dir().join("wasm").join(&module.name);
+        let written = std::fs::create_dir_all(&dir)
+            .and_then(|()| std::fs::write(dir.join(format!("{}.wasm", module.name)), &module.wasm))
+            .and_then(|()| std::fs::write(dir.join("module.toml"), &module.manifest));
+        if let Err(e) = written {
+            eprintln!("ошибка: не записан {}: {e}", dir.display());
+            return ExitCode::from(EXIT_GEN_FAILED);
+        }
+        println!(
+            "Модуль «{}»: {} байт -> {}",
+            module.name,
+            module.wasm.len(),
+            dir.display()
+        );
+        allows.push(
+            flp_sim::mcu::Manifest::parse(&module.manifest)
+                .map(|m| m.allow)
+                .unwrap_or_default(),
+        );
+    }
+    if upload {
+        for (module, allow) in modules.iter().zip(&allows) {
+            let code = push_module(&module.name, &module.wasm, allow, port.clone());
+            if code != ExitCode::SUCCESS {
+                return code;
+            }
+        }
+    }
+    ExitCode::SUCCESS
 }
 
 /// Generates the sketch, printing schema errors. Also returns the Arduino libraries it needs.
