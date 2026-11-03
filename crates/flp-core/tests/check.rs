@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use flp_core::{check, Library, Logic, Project, Report};
+use flp_core::{check, DiagKind, Library, Logic, Project, Report};
 
 fn repo_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -338,6 +338,16 @@ fn loop_through_variable_is_allowed() {
     "#;
     let report = check_src(src);
     assert!(!report.has_errors(), "{:#?}", report.diagnostics);
+    // A float counter is reported, an int one is not.
+    let warned = |r: &flp_core::Report| {
+        r.diagnostics
+            .iter()
+            .any(|d| d.kind == DiagKind::FloatCounter)
+    };
+    assert!(warned(&report), "{:#?}", report.diagnostics);
+    assert!(!warned(&check_src(
+        &src.replace("float", "int").replace("1.0", "1")
+    )));
 }
 
 #[test]

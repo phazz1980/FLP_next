@@ -52,6 +52,7 @@ pub enum DiagKind {
     Expander,
     ExpanderPin,
     Tag,
+    FloatCounter,
 }
 
 impl DiagKind {
@@ -85,6 +86,7 @@ impl DiagKind {
         DiagKind::Expander,
         DiagKind::ExpanderPin,
         DiagKind::Tag,
+        DiagKind::FloatCounter,
     ];
 
     /// Stable machine-readable id, kebab-case.
@@ -119,6 +121,7 @@ impl DiagKind {
             DiagKind::Expander => "expander",
             DiagKind::ExpanderPin => "expander-pin",
             DiagKind::Tag => "tag",
+            DiagKind::FloatCounter => "float-counter",
         }
     }
 }
@@ -211,8 +214,72 @@ pub fn check(logic: &Logic, lib: &Library, layout: Option<&Layout>) -> Report {
     order_blocks(logic, &defs, &edges, &mut report);
     if !report.has_errors() {
         check_number_flow(logic, &defs, &mut report);
+        check_float_accumulators(logic, &defs, &mut report);
     }
     report
+}
+
+/// Warns about a `float` variable that is counted up through `add`/`sub` (`n = n + 1`):
+/// `float` is exact only up to 2^24, then the count stops. A float sum of measured values
+/// is fine, so only an accumulator fed back through a variable is reported.
+fn check_float_accumulators(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) {
+    let n = logic.blocks.len();
+    let mut next: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for link in &logic.links {
+        let from = logic.blocks.iter().position(|b| b.id == link.from.block);
+        let to = logic.blocks.iter().position(|b| b.id == link.to.block);
+        if let (Some(f), Some(t)) = (from, to) {
+            next[f].push(t);
+        }
+    }
+    for var in &logic.vars {
+        if !matches!(
+            var.ty,
+            crate::vars::VarType::Float | crate::vars::VarType::Double
+        ) {
+            continue;
+        }
+        let of_var = |kind: &str| -> Vec<usize> {
+            (0..n)
+                .filter(|&i| defs[i].is_some())
+                .filter(|&i| {
+                    logic.blocks[i].kind == kind
+                        && logic.blocks[i].var_name() == Some(var.name.as_str())
+                })
+                .collect()
+        };
+        let setters = of_var(crate::vars::VAR_SET);
+        // States are (block, passed an add/sub on the way).
+        let mut seen = vec![[false; 2]; n];
+        let mut stack: Vec<(usize, bool)> = of_var(crate::vars::VAR_GET)
+            .into_iter()
+            .map(|i| (i, false))
+            .collect();
+        let mut found = false;
+        while let Some((i, counted)) = stack.pop() {
+            if std::mem::replace(&mut seen[i][usize::from(counted)], true) {
+                continue;
+            }
+            if counted && setters.contains(&i) {
+                found = true;
+                break;
+            }
+            let counted = counted || matches!(logic.blocks[i].kind.as_str(), "add" | "sub");
+            stack.extend(next[i].iter().map(|&t| (t, counted)));
+        }
+        if found {
+            report.push(
+                DiagKind::FloatCounter,
+                Severity::Warning,
+                None,
+                None,
+                format!(
+                    "переменная «{}» типа float считает через сложение: float точен только до 16 777 216, дальше счёт встанет; для счётчика возьмите int",
+                    var.name
+                ),
+            );
+        }
+    }
 }
 
 /// Real type of every output once `number` and `same` outputs follow their inputs, by

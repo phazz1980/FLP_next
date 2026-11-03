@@ -48,6 +48,7 @@ pub fn error_anchor(kind: DiagKind) -> &'static str {
         DiagKind::Expander => crate::i18n::tr("расширитель"),
         DiagKind::ExpanderPin => crate::i18n::tr("вывод-расширителя"),
         DiagKind::Tag => crate::i18n::tr("копия-тега"),
+        DiagKind::FloatCounter => crate::i18n::tr("счётчик-на-float"),
     }
 }
 
