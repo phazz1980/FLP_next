@@ -16,6 +16,14 @@ float route_o1 = 0.0f;
 float route_o2 = 0.0f;
 float route_o3 = 0.0f;
 
+// mux: общий код
+static inline int32_t flp_f2i(float x) {
+  if (x != x) return 0;
+  if (x >= 2147483648.0f) return INT32_MAX;
+  if (x <= -2147483648.0f) return INT32_MIN;
+  return (int32_t)x;
+}
+
 void setup() {
   // mode: constant
   mode_out = 1.0f;
@@ -43,7 +51,7 @@ void loop() {
 
   // choose: mux
   {
-    int idx = (int)mode_out;
+    int idx = flp_f2i(mode_out);
     if (idx <= 0) {
       choose_out = root_out;
     } else
@@ -58,18 +66,18 @@ void loop() {
 
   // route: dms
   {
-    int idx = (int)mode_out;
+    int idx = flp_f2i(mode_out);
     route_o1 = idx == 0 ? choose_out : 0.0f;
     route_o2 = idx == 1 ? choose_out : 0.0f;
     route_o3 = idx == 2 ? choose_out : 0.0f;
   }
 
   // out1: pwm_out
-  analogWrite(25, (int)(constrain(route_o1, 0.0f, 100.0f) * 2.55f + 0.5f));
+  analogWrite(25, flp_f2i(constrain(route_o1, 0.0f, 100.0f) * 2.55f + 0.5f));
 
   // out2: pwm_out
-  analogWrite(26, (int)(constrain(route_o2, 0.0f, 100.0f) * 2.55f + 0.5f));
+  analogWrite(26, flp_f2i(constrain(route_o2, 0.0f, 100.0f) * 2.55f + 0.5f));
 
   // out3: pwm_out
-  analogWrite(27, (int)(constrain(route_o3, 0.0f, 100.0f) * 2.55f + 0.5f));
+  analogWrite(27, flp_f2i(constrain(route_o3, 0.0f, 100.0f) * 2.55f + 0.5f));
 }

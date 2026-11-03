@@ -3,7 +3,7 @@
 //! Integer ports are 32-bit as in the firmware; floats are computed in 32 bits, as `sinf` and
 //! friends do on the board.
 
-use crate::cpp::{CppCtx, CppParts, Lines, Raw};
+use crate::cpp::{self, CppCtx, CppParts, Lines, Raw};
 use crate::{b, Behavior, Ctx, Plain};
 
 /// Deterministic generator shared by the simulation and the PC test of the C++: the same
@@ -213,13 +213,17 @@ pub(crate) fn float_to_int(e: &CppCtx) -> CppParts {
         Some(Raw::Int(2)) => "ceilf",
         _ => "",
     };
-    unary(e, |x| {
+    if matches!(e.input_type("in"), "int" | "bool") {
+        return unary(e, |x| x.to_owned());
+    }
+    let parts = unary(e, |x| {
         if round.is_empty() {
-            format!("(int32_t){x}")
+            format!("flp_f2i({x})")
         } else {
-            format!("(int32_t){round}({x})")
+            format!("flp_f2i({round}({x}))")
         }
-    })
+    });
+    cpp::with_functions(parts, cpp::F2I)
 }
 
 pub(crate) fn int_to_float(e: &CppCtx) -> CppParts {

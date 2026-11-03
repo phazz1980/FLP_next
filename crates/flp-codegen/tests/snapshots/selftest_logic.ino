@@ -74,6 +74,14 @@ bool tx3_prev = false;
 // tx4: uart_send
 bool tx4_prev = false;
 
+// mux: общий код
+static inline int32_t flp_f2i(float x) {
+  if (x != x) return 0;
+  if (x >= 2147483648.0f) return INT32_MAX;
+  if (x <= -2147483648.0f) return INT32_MIN;
+  return (int32_t)x;
+}
+
 void setup() {
   // USB: 115200 бод
   Serial.begin(115200);
@@ -132,7 +140,7 @@ void loop() {
 
   // mx4: mux
   {
-    int idx = (int)2.0f;
+    int idx = flp_f2i(2.0f);
     if (idx <= 0) {
       mx4_out = 10.0f;
     } else
@@ -144,7 +152,7 @@ void loop() {
 
   // dm: dms
   {
-    int idx = (int)1.0f;
+    int idx = flp_f2i(1.0f);
     dm_o1 = idx == 0 ? 7.0f : 0.0f;
     dm_o2 = idx == 1 ? 7.0f : 0.0f;
     dm_o3 = idx == 2 ? 7.0f : 0.0f;

@@ -22,6 +22,14 @@ bool blink_out = false;
 // blink: generator
 unsigned long blink_start = 0;
 
+// pwm_out: общий код
+static inline int32_t flp_f2i(float x) {
+  if (x != x) return 0;
+  if (x >= 2147483648.0f) return INT32_MAX;
+  if (x <= -2147483648.0f) return INT32_MIN;
+  return (int32_t)x;
+}
+
 void setup() {
   // two: constant
   two_out = 2.0f;
@@ -77,7 +85,7 @@ void loop() {
   duty_out = excess_out * gain_out;
 
   // fan: pwm_out
-  analogWrite(25, (int)(constrain(duty_out, 0.0f, 100.0f) * 2.55f + 0.5f));
+  analogWrite(25, flp_f2i(constrain(duty_out, 0.0f, 100.0f) * 2.55f + 0.5f));
 
   // hot: greater
   hot_out = temp_out > 30.0f;

@@ -201,6 +201,14 @@ bool tx9_prev = false;
 // tx10: uart_send
 bool tx10_prev = false;
 
+// float_to_int: общий код
+static inline int32_t flp_f2i(float x) {
+  if (x != x) return 0;
+  if (x >= 2147483648.0f) return INT32_MAX;
+  if (x <= -2147483648.0f) return INT32_MIN;
+  return (int32_t)x;
+}
+
 void setup() {
   // USB: 115200 бод
   Serial.begin(115200);
@@ -322,7 +330,7 @@ void loop() {
   if (true) { enc_out = 3; enc_any = true; }if (false) { enc_out = 2; enc_any = true; }if (true) { enc_out = 1; enc_any = true; }if (false) { enc_out = 0; enc_any = true; }
 
   // f2i: float_to_int
-  f2i_out = (int32_t)roundf(2.5f);
+  f2i_out = flp_f2i(roundf(2.5f));
 
   // i2f: int_to_float
   i2f_out = (float)7;
@@ -394,7 +402,7 @@ void loop() {
 
   // mux16: mux
   {
-    int idx = (int)15.0f;
+    int idx = flp_f2i(15.0f);
     if (idx <= 0) {
       mux16_out = 0.0f;
     } else
@@ -445,7 +453,7 @@ void loop() {
 
   // dms16: dms
   {
-    int idx = (int)15.0f;
+    int idx = flp_f2i(15.0f);
     dms16_o1 = idx == 0 ? 5.0f : 0.0f;
     dms16_o2 = idx == 1 ? 5.0f : 0.0f;
     dms16_o3 = idx == 2 ? 5.0f : 0.0f;

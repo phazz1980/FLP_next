@@ -25,6 +25,14 @@ bool tx_prev = false;
 // blink: generator
 unsigned long blink_start = 0;
 
+// pwm_out: общий код
+static inline int32_t flp_f2i(float x) {
+  if (x != x) return 0;
+  if (x >= 2147483648.0f) return INT32_MAX;
+  if (x <= -2147483648.0f) return INT32_MIN;
+  return (int32_t)x;
+}
+
 void setup() {
   // USB: 115200 бод
   Serial.begin(115200);
@@ -65,7 +73,7 @@ void loop() {
 
   // msg: mux
   {
-    int idx = (int)mode_count;
+    int idx = mode_count;
     if (idx <= 0) {
       msg_out = String("Стоп");
     } else
@@ -111,18 +119,18 @@ void loop() {
 
   // route: dms
   {
-    int idx = (int)mode_count;
+    int idx = mode_count;
     route_o1 = idx == 0 ? mode_count : 0;
     route_o2 = idx == 1 ? mode_count : 0;
     route_o3 = idx == 2 ? mode_count : 0;
   }
 
   // pwm1: pwm_out
-  analogWrite(25, (int)(constrain((float)route_o1, 0.0f, 100.0f) * 2.55f + 0.5f));
+  analogWrite(25, flp_f2i(constrain((float)route_o1, 0.0f, 100.0f) * 2.55f + 0.5f));
 
   // pwm2: pwm_out
-  analogWrite(26, (int)(constrain((float)route_o2, 0.0f, 100.0f) * 2.55f + 0.5f));
+  analogWrite(26, flp_f2i(constrain((float)route_o2, 0.0f, 100.0f) * 2.55f + 0.5f));
 
   // pwm3: pwm_out
-  analogWrite(27, (int)(constrain((float)route_o3, 0.0f, 100.0f) * 2.55f + 0.5f));
+  analogWrite(27, flp_f2i(constrain((float)route_o3, 0.0f, 100.0f) * 2.55f + 0.5f));
 }

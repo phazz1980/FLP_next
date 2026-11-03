@@ -166,6 +166,38 @@ impl Lines {
 /// `fn(&CppCtx)` of the blocks that are implemented here.
 pub(crate) type Emit = fn(&CppCtx) -> CppParts;
 
+/// `float` -> `int32_t` as in the numeric model: out-of-range values stick to the limits and
+/// NaN gives 0 (a plain C++ cast is undefined there).
+pub(crate) const F2I: &str = "static inline int32_t flp_f2i(float x) {
+  if (x != x) return 0;
+  if (x >= 2147483648.0f) return INT32_MAX;
+  if (x <= -2147483648.0f) return INT32_MIN;
+  return (int32_t)x;
+}";
+
+/// Integer remainder: a zero divisor gives 0, and `x % -1` is 0 without the overflow of `INT_MIN`.
+const MOD: &str = "static inline int32_t flp_mod(int32_t a, int32_t b) {
+  return (b == 0 || b == -1) ? 0 : a % b;
+}";
+
+/// `float` -> `int` conversion of an input that may be a float; ints pass through.
+pub(crate) fn to_int(e: &CppCtx, port: &str) -> String {
+    match e.input_type(port) {
+        "float" => format!("flp_f2i({})", e.input(port)),
+        _ => e.input(port).to_owned(),
+    }
+}
+
+/// Parts with a shared function.
+pub(crate) fn with_functions(mut parts: CppParts, functions: &str) -> CppParts {
+    parts.once_functions = functions.to_owned();
+    parts
+}
+
+fn is_int(e: &CppCtx, port: &str) -> bool {
+    matches!(e.input_type(port), "int" | "bool")
+}
+
 pub(crate) fn add(e: &CppCtx) -> CppParts {
     looped(format!(
         "{} = {} + {};",
@@ -482,7 +514,12 @@ pub(crate) fn mul(e: &CppCtx) -> CppParts {
 }
 
 pub(crate) fn div(e: &CppCtx) -> CppParts {
-    let (a, b) = (e.input("a"), e.input("b"));
+    // Division is always float, also for two ints.
+    let cast = |port| match e.input_type(port) {
+        "float" => e.input(port).to_owned(),
+        _ => format!("(float){}", e.input(port)),
+    };
+    let (a, b) = (cast("a"), cast("b"));
     looped(format!(
         "{} = {b} != 0.0f ? {a} / {b} : 0.0f;",
         e.output("out")
@@ -491,8 +528,8 @@ pub(crate) fn div(e: &CppCtx) -> CppParts {
 
 pub(crate) fn modulo(e: &CppCtx) -> CppParts {
     let (a, b, out) = (e.input("a"), e.input("b"), e.output("out"));
-    if e.input_type("a") == "int" && e.input_type("b") == "int" {
-        looped(format!("{out} = {b} != 0 ? {a} % {b} : 0;"))
+    if is_int(e, "a") && is_int(e, "b") {
+        with_functions(looped(format!("{out} = flp_mod({a}, {b});")), MOD)
     } else {
         looped(format!("{out} = {b} != 0.0f ? fmodf({a}, {b}) : 0.0f;"))
     }
@@ -510,10 +547,17 @@ pub(crate) fn max(e: &CppCtx) -> CppParts {
 
 pub(crate) fn limit(e: &CppCtx) -> CppParts {
     let (x, lo, hi) = (e.input("in"), e.param("lo"), e.param("hi"));
-    looped(format!(
-        "{} = {x} < {lo} ? {lo} : ({x} > {hi} ? {hi} : {x});",
-        e.output("out")
-    ))
+    let select = format!("{x} < {lo} ? {lo} : ({x} > {hi} ? {hi} : {x})");
+    // An int input with float limits: the clamped value goes back to int.
+    let float_limits = |name| !matches!(e.value.get(name), Some(Raw::Int(_)));
+    if is_int(e, "in") && (float_limits("lo") || float_limits("hi")) {
+        with_functions(
+            looped(format!("{} = flp_f2i({select});", e.output("out"))),
+            F2I,
+        )
+    } else {
+        looped(format!("{} = {select};", e.output("out")))
+    }
 }
 
 pub(crate) fn scale(e: &CppCtx) -> CppParts {
@@ -553,7 +597,7 @@ pub(crate) fn mux(e: &CppCtx) -> CppParts {
     let out = e.output("out");
     let mut l = Lines::default();
     l.line("{")
-        .line(format!("  int idx = (int){};", e.input("sel")));
+        .line(format!("  int idx = {};", to_int(e, "sel")));
     for (i, port) in PORTS[..count].iter().enumerate() {
         if i + 1 == count {
             l.line(format!("  {out} = {};", e.input(port)));
@@ -564,7 +608,17 @@ pub(crate) fn mux(e: &CppCtx) -> CppParts {
         }
     }
     l.line("}");
-    looped(l.finish())
+    selector_parts(e, l.finish())
+}
+
+/// Code that takes its index from `sel`: a float selector needs the saturating conversion.
+pub(crate) fn selector_parts(e: &CppCtx, code: String) -> CppParts {
+    let parts = looped(code);
+    if e.input_type("sel") == "float" {
+        with_functions(parts, F2I)
+    } else {
+        parts
+    }
 }
 
 pub(crate) fn constant(e: &CppCtx) -> CppParts {

@@ -13,6 +13,14 @@ float clamp_out = 0.0f;
 bool button_out = false;
 float pick_out = 0.0f;
 
+// pwm_out: общий код
+static inline int32_t flp_f2i(float x) {
+  if (x != x) return 0;
+  if (x >= 2147483648.0f) return INT32_MAX;
+  if (x <= -2147483648.0f) return INT32_MIN;
+  return (int32_t)x;
+}
+
 void setup() {
   // button: digital_in
   pinMode(12, INPUT_PULLUP);
@@ -45,11 +53,11 @@ void loop() {
   pick_out = button_out ? 50.0f : clamp_out;
 
   // fan: pwm_out
-  analogWrite(25, (int)(constrain(pick_out, 0.0f, 100.0f) * 2.55f + 0.5f));
+  analogWrite(25, flp_f2i(constrain(pick_out, 0.0f, 100.0f) * 2.55f + 0.5f));
 
   // dev_out: pwm_out
-  analogWrite(26, (int)(constrain(dev_out, 0.0f, 100.0f) * 2.55f + 0.5f));
+  analogWrite(26, flp_f2i(constrain(dev_out, 0.0f, 100.0f) * 2.55f + 0.5f));
 
   // max_out: pwm_out
-  analogWrite(27, (int)(constrain(highest_out, 0.0f, 100.0f) * 2.55f + 0.5f));
+  analogWrite(27, flp_f2i(constrain(highest_out, 0.0f, 100.0f) * 2.55f + 0.5f));
 }

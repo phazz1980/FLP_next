@@ -248,6 +248,7 @@ fn build_stamp(exe: &Path, work_dir: &Path, board: &BoardConfig, opts: &CompileO
         h.write(&std::fs::read(&file).unwrap_or_default());
     }
     // Flags chosen from the sketch (see `compile_args`) are part of the firmware too.
+    h.write(FP_CONTRACT_FLAG.as_bytes());
     if uses_web_ui(work_dir) {
         h.write(WEBUI_RESPONSE_DEFINE.as_bytes());
     }
@@ -975,6 +976,10 @@ fn board_args(board: &BoardConfig) -> Vec<OsString> {
 /// Response buffer size of the library HTTP server for the web interface page.
 const WEBUI_RESPONSE_DEFINE: &str = "FLPROG_HTTP_SERVER_MAX_RESPONSE_BYTES=6144U";
 
+/// The numeric model of `specs/numeric-model` in the compiler: no fused multiply-add (every
+/// float operation is rounded to `f32` on its own) and wrapping `int` arithmetic without UB.
+const FP_CONTRACT_FLAG: &str = "-ffp-contract=off -fwrapv";
+
 /// The sketch contains the `web_ui` block (it defines `FLP_WEBUI`).
 fn uses_web_ui(work_dir: &Path) -> bool {
     std::fs::read_to_string(sketch_dir(work_dir).join("sketch.ino"))
@@ -993,12 +998,14 @@ fn compile_args(work_dir: &Path, board: &BoardConfig, opts: &CompileOptions) -> 
         args.push("--libraries".into());
         args.push(dir.into());
     }
+    let mut extra_flags = String::from(FP_CONTRACT_FLAG);
     // The web interface page does not fit into the library's default response buffer
     // (2 KiB, answer 500), so a sketch with the `web_ui` block raises the limit.
     if uses_web_ui(work_dir) {
-        args.push("--build-property".into());
-        args.push(format!("compiler.cpp.extra_flags=-D{WEBUI_RESPONSE_DEFINE}").into());
+        extra_flags.push_str(&format!(" -D{WEBUI_RESPONSE_DEFINE}"));
     }
+    args.push("--build-property".into());
+    args.push(format!("compiler.cpp.extra_flags={extra_flags}").into());
     // Always verbose: the log carries the link commands for the direct rebuild
     // (`compile` hides the noise unless `verbose` is set).
     args.push("-v".into());
@@ -1327,6 +1334,8 @@ mod tests {
                 "CPUFreq=240",
                 "--build-path",
                 &build,
+                "--build-property",
+                "compiler.cpp.extra_flags=-ffp-contract=off -fwrapv",
                 "-v",
                 &sketch,
             ]

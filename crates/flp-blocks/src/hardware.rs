@@ -2,7 +2,7 @@
 //! PCF8574 expanders. Those that are plain logic (`dms`, `decoder`, `encoder`, `flash_store`)
 //! are simulated; the rest have no simulation.
 
-use crate::cpp::{CppCtx, CppParts, Lines};
+use crate::cpp::{self, CppCtx, CppParts, Lines};
 use crate::{b, Behavior, Ctx};
 
 /// Behaviour of a block of this file, or `None` when it has no simulation.
@@ -170,12 +170,15 @@ pub(crate) fn analog_in(e: &CppCtx) -> CppParts {
 }
 
 pub(crate) fn pwm_out(e: &CppCtx) -> CppParts {
-    looped(format!(
-        "{}analogWrite({}, (int)(constrain({}, 0.0f, 100.0f) * 2.55f + 0.5f));",
-        guard(e),
-        e.param("pin"),
-        e.input("in")
-    ))
+    cpp::with_functions(
+        looped(format!(
+            "{}analogWrite({}, flp_f2i(constrain({}, 0.0f, 100.0f) * 2.55f + 0.5f));",
+            guard(e),
+            e.param("pin"),
+            e.input("in")
+        )),
+        cpp::F2I,
+    )
 }
 
 pub(crate) fn dht22(e: &CppCtx) -> CppParts {
@@ -285,7 +288,7 @@ pub(crate) fn dms(e: &CppCtx) -> CppParts {
     let count = e.int("count", 2).clamp(0, 16);
     let mut l = Lines::default();
     l.line("{")
-        .line(format!("  int idx = (int){};", e.input("sel")));
+        .line(format!("  int idx = {};", cpp::to_int(e, "sel")));
     for i in 0..count {
         l.line(format!(
             "  {} = idx == {i} ? {} : {zero};",
@@ -294,7 +297,7 @@ pub(crate) fn dms(e: &CppCtx) -> CppParts {
         ));
     }
     l.line("}");
-    looped(l.finish())
+    cpp::selector_parts(e, l.finish())
 }
 
 pub(crate) fn cycle_report(_: &CppCtx) -> CppParts {
