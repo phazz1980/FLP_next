@@ -413,7 +413,7 @@ fn bench_modbus_master_reads_a_register_and_loses_the_slave() {
     };
     s.set_register(slave, &table, reg, 36.6);
     s.step(10).unwrap();
-    assert_eq!(s.output("temp", "out_f"), Some(36.6));
+    assert_eq!(s.output("temp", "out_f"), Some(f64::from(36.6f32))); // a float signal is an f32
     assert_eq!(s.output("temp", "ok"), Some(1.0));
     s.set_silent(slave, true);
     s.step(10).unwrap();

@@ -8,6 +8,7 @@ mod more;
 mod net;
 mod netsim;
 mod network;
+mod num;
 mod text;
 mod uart;
 mod web;
@@ -17,6 +18,7 @@ pub use cpp::{CppCtx, CppParts, Raw, UartCtx};
 pub use hardware::ds18b20_channel;
 pub use more::{next_random, RANDOM_SEED};
 pub use netsim::OWN_SLAVE;
+pub use num::{Types, V};
 pub use web::device_page;
 
 /// A built-in block: one Rust type that both simulates the block and writes its firmware code.
@@ -578,6 +580,9 @@ pub trait Behavior {
     /// texts of the outputs (only string ports are written).
     fn step_text(&mut self, _ctx: &Ctx, _out: &mut [f64], _out_text: &mut [String]) {}
 
+    /// Real port types and parameter kinds of the block, given once after creation.
+    fn set_types(&mut self, _: &Types) {}
+
     /// What an output block puts on its pin after the last step: `0`/`1` or a duty in percent.
     fn drive(&self) -> Option<f64> {
         None
@@ -597,7 +602,29 @@ impl Behavior for Plain {
     }
 }
 
+/// A stateless block that computes in the numeric model and so needs the real types.
+struct Typed {
+    f: fn(&Ctx, &Types, &mut [f64]),
+    types: Types,
+}
+
+impl Behavior for Typed {
+    fn step(&mut self, ctx: &Ctx, out: &mut [f64]) {
+        (self.f)(ctx, &self.types, out);
+    }
+
+    fn set_types(&mut self, t: &Types) {
+        self.types = t.clone();
+    }
+}
+
 pub fn behavior(kind: &str) -> Option<Box<dyn Behavior>> {
+    let typed = |f: fn(&Ctx, &Types, &mut [f64])| -> Option<Box<dyn Behavior>> {
+        Some(Box::new(Typed {
+            f,
+            types: Types::default(),
+        }))
+    };
     let plain = |f: fn(&Ctx, &mut [f64])| -> Option<Box<dyn Behavior>> { Some(Box::new(Plain(f))) };
     match kind {
         "and" => plain(|c, o| o[0] = b(c.live_flags().all(|v| v))),
@@ -635,8 +662,9 @@ pub fn behavior(kind: &str) -> Option<Box<dyn Behavior>> {
         "generator" => Some(Box::<Generator>::default()),
         "debounce" => Some(Box::<Debounce>::default()),
         "counter" => Some(Box::<Counter>::default()),
-        "hysteresis" => plain(|c, o| {
-            let (x, on, off) = (c.input(0), c.param(0), c.param(1));
+        "hysteresis" => typed(|c, t, o| {
+            let x = t.input(0, c.input(0)).f();
+            let (on, off) = (t.param(0, c.param(0)).f(), t.param(1, c.param(1)).f());
             if on >= off {
                 if x >= on {
                     o[0] = 1.0;
@@ -649,56 +677,59 @@ pub fn behavior(kind: &str) -> Option<Box<dyn Behavior>> {
                 o[0] = 0.0;
             }
         }),
-        "compare" => plain(|c, o| {
-            let (x, y) = (c.input(0), c.input(1));
-            o[0] = b(match c.param(0) as i64 {
-                0 => x == y,
-                1 => x != y,
-                2 => x < y,
-                3 => x <= y,
-                4 => x > y,
-                _ => x >= y,
-            });
+        "compare" => typed(|c, t, o| {
+            let (x, y) = (t.input(0, c.input(0)), t.input(1, c.input(1)));
+            o[0] = b(num::compare(x, y, c.param(0) as i64));
         }),
-        "greater" => plain(|c, o| o[0] = b(c.input(0) > c.param(0))),
-        "less" => plain(|c, o| o[0] = b(c.input(0) < c.param(0))),
-        "add" => plain(|c, o| o[0] = c.input(0) + c.input(1)),
-        "sub" => plain(|c, o| o[0] = c.input(0) - c.input(1)),
-        "mul" => plain(|c, o| o[0] = c.input(0) * c.input(1)),
-        "div" => plain(|c, o| {
-            o[0] = if c.input(1) != 0.0 {
-                c.input(0) / c.input(1)
-            } else {
-                0.0
-            }
+        "greater" => typed(|c, t, o| {
+            o[0] = b(num::compare(
+                t.input(0, c.input(0)),
+                t.param(0, c.param(0)),
+                4,
+            ));
         }),
-        "mod" => plain(|c, o| {
-            o[0] = if c.input(1) != 0.0 {
-                c.input(0) % c.input(1)
-            } else {
-                0.0
-            }
+        "less" => typed(|c, t, o| {
+            o[0] = b(num::compare(
+                t.input(0, c.input(0)),
+                t.param(0, c.param(0)),
+                2,
+            ));
         }),
-        "min" => plain(|c, o| o[0] = c.input(0).min(c.input(1))),
-        "max" => plain(|c, o| o[0] = c.input(0).max(c.input(1))),
-        "limit" => plain(|c, o| {
-            o[0] = c
-                .input(0)
-                .clamp(c.param(0).min(c.param(1)), c.param(1).max(c.param(0)))
+        "add" => {
+            typed(|c, t, o| o[0] = num::add(t.input(0, c.input(0)), t.input(1, c.input(1))).out())
+        }
+        "sub" => {
+            typed(|c, t, o| o[0] = num::sub(t.input(0, c.input(0)), t.input(1, c.input(1))).out())
+        }
+        "mul" => {
+            typed(|c, t, o| o[0] = num::mul(t.input(0, c.input(0)), t.input(1, c.input(1))).out())
+        }
+        "div" => {
+            typed(|c, t, o| o[0] = num::div(t.input(0, c.input(0)), t.input(1, c.input(1))).out())
+        }
+        "mod" => {
+            typed(|c, t, o| o[0] = num::rem(t.input(0, c.input(0)), t.input(1, c.input(1))).out())
+        }
+        "min" => {
+            typed(|c, t, o| o[0] = num::min(t.input(0, c.input(0)), t.input(1, c.input(1))).out())
+        }
+        "max" => {
+            typed(|c, t, o| o[0] = num::max(t.input(0, c.input(0)), t.input(1, c.input(1))).out())
+        }
+        "limit" => typed(|c, t, o| {
+            let (lo, hi) = (t.param(0, c.param(0)), t.param(1, c.param(1)));
+            o[0] = num::limit(t.input(0, c.input(0)), lo, hi).out();
         }),
-        "scale" => plain(|c, o| {
-            let (in_min, in_max, out_min, out_max) =
-                (c.param(0), c.param(1), c.param(2), c.param(3));
-            let span = in_max - in_min;
-            let mut y = if span != 0.0 {
-                out_min + (c.input(0) - in_min) * (out_max - out_min) / span
-            } else {
-                out_min
-            };
-            if c.param(4) != 0.0 {
-                y = y.clamp(out_min.min(out_max), out_min.max(out_max));
-            }
-            o[0] = y;
+        "scale" => typed(|c, t, o| {
+            let p = |i| t.param(i, c.param(i)).f();
+            o[0] = f64::from(num::scale(
+                t.input(0, c.input(0)).f(),
+                p(0),
+                p(1),
+                p(2),
+                p(3),
+                c.param(4) != 0.0,
+            ));
         }),
         "constant" => plain(|c, o| o[0] = c.param(0)),
         "switch" => plain(|c, o| o[0] = if c.flag(0) { c.input(2) } else { c.input(1) }),
@@ -750,7 +781,7 @@ impl Behavior for Edge {
 #[derive(Default)]
 struct TimerOn {
     running: bool,
-    start: u64,
+    start: u32,
 }
 
 impl Behavior for TimerOn {
@@ -758,9 +789,9 @@ impl Behavior for TimerOn {
         if ctx.flag(0) {
             if !self.running {
                 self.running = true;
-                self.start = ctx.now_ms;
+                self.start = ctx.now_ms as u32;
             }
-            out[0] = b((ctx.now_ms - self.start) as f64 >= ctx.param(0));
+            out[0] = b(num::elapsed(ctx.now_ms, self.start) >= num::ms(ctx.param(0)));
         } else {
             self.running = false;
             out[0] = 0.0;
@@ -771,7 +802,7 @@ impl Behavior for TimerOn {
 #[derive(Default)]
 struct TimerOff {
     on: bool,
-    off_at: u64,
+    off_at: u32,
 }
 
 impl Behavior for TimerOff {
@@ -782,9 +813,10 @@ impl Behavior for TimerOff {
         } else {
             if self.on {
                 self.on = false;
-                self.off_at = ctx.now_ms;
+                self.off_at = ctx.now_ms as u32;
             }
-            out[0] = b(out[0] != 0.0 && ((ctx.now_ms - self.off_at) as f64) < ctx.param(0));
+            out[0] =
+                b(out[0] != 0.0 && num::elapsed(ctx.now_ms, self.off_at) < num::ms(ctx.param(0)));
         }
     }
 }
@@ -793,7 +825,7 @@ impl Behavior for TimerOff {
 struct Pulse {
     prev: bool,
     active: bool,
-    start: u64,
+    start: u32,
 }
 
 impl Behavior for Pulse {
@@ -801,10 +833,10 @@ impl Behavior for Pulse {
         let now = ctx.flag(0);
         if now && !self.prev && !self.active {
             self.active = true;
-            self.start = ctx.now_ms;
+            self.start = ctx.now_ms as u32;
         }
         self.prev = now;
-        if self.active && (ctx.now_ms - self.start) as f64 >= ctx.param(0) {
+        if self.active && num::elapsed(ctx.now_ms, self.start) >= num::ms(ctx.param(0)) {
             self.active = false;
         }
         out[0] = b(self.active);
@@ -813,17 +845,18 @@ impl Behavior for Pulse {
 
 #[derive(Default)]
 struct Generator {
-    start: u64,
+    start: u32,
 }
 
 impl Behavior for Generator {
     fn step(&mut self, ctx: &Ctx, out: &mut [f64]) {
         if ctx.flag(0) {
-            let period = (ctx.param(0) + ctx.param(1)).max(1.0);
-            let phase = ((ctx.now_ms - self.start) as f64) % period;
-            out[0] = b(phase < ctx.param(0));
+            let on = num::ms(ctx.param(0));
+            let period = on.wrapping_add(num::ms(ctx.param(1))).max(1);
+            let phase = num::elapsed(ctx.now_ms, self.start) % period;
+            out[0] = b(phase < on);
         } else {
-            self.start = ctx.now_ms;
+            self.start = ctx.now_ms as u32;
             out[0] = 0.0;
         }
     }
@@ -832,7 +865,7 @@ impl Behavior for Generator {
 #[derive(Default)]
 struct Debounce {
     last: bool,
-    changed: u64,
+    changed: u32,
 }
 
 impl Behavior for Debounce {
@@ -840,9 +873,9 @@ impl Behavior for Debounce {
         let now = ctx.flag(0);
         if now != self.last {
             self.last = now;
-            self.changed = ctx.now_ms;
+            self.changed = ctx.now_ms as u32;
         }
-        if (ctx.now_ms - self.changed) as f64 >= ctx.param(0) {
+        if num::elapsed(ctx.now_ms, self.changed) >= num::ms(ctx.param(0)) {
             out[0] = b(self.last);
         }
     }
@@ -859,12 +892,14 @@ impl Behavior for Counter {
         if ctx.flag(2) {
             out[0] = 0.0;
         } else {
+            let mut n = out[0] as i32;
             if ctx.flag(0) && !self.up {
-                out[0] += 1.0;
+                n = n.wrapping_add(1);
             }
             if ctx.flag(1) && !self.down {
-                out[0] -= 1.0;
+                n = n.wrapping_sub(1);
             }
+            out[0] = f64::from(n);
         }
         self.up = ctx.flag(0);
         self.down = ctx.flag(1);

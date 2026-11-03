@@ -28,7 +28,9 @@ pub mod vars;
 mod toml_io;
 
 pub use boards::{BoardDef, Boards, UserBoard};
-pub use check::{bindable_type, check, check_project, DiagKind, Diagnostic, Report, Severity};
+pub use check::{
+    bindable_type, check, check_project, port_types, DiagKind, Diagnostic, Report, Severity,
+};
 pub use edit::{EditError, Fragment};
 pub use error::{Error, Result};
 pub use expander::{Expander, ExpanderChip};

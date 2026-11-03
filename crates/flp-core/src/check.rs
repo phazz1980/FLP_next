@@ -246,6 +246,38 @@ pub fn resolved_outputs<'a>(
     types
 }
 
+/// Port types by (block index, port name).
+pub type PortTypes = HashMap<(usize, String), SignalType>;
+
+/// Real types of all active ports of every block, by (block index, port name): `(inputs, outputs)`.
+/// A `number` or `same` input has the type of the signal that feeds it (a declared type otherwise).
+pub fn port_types(logic: &Logic, lib: &Library, order: &[usize]) -> (PortTypes, PortTypes) {
+    let defs: Vec<Option<&BlockDef>> = logic
+        .blocks
+        .iter()
+        .map(|b| lib.resolve(logic, b).map(|l| &l.def))
+        .collect();
+    let outs = resolved_outputs(logic, &defs, order);
+    let mut ins = HashMap::new();
+    for (bi, block) in logic.blocks.iter().enumerate() {
+        let Some(def) = defs[bi] else { continue };
+        for port in def.active_inputs(&block.params) {
+            let ty = match port.ty {
+                SignalType::Number | SignalType::Same | SignalType::Any => {
+                    input_type(logic, &defs, &outs, block, port)
+                }
+                ty => ty,
+            };
+            ins.insert((bi, port.name.clone()), ty);
+        }
+    }
+    let outs = outs
+        .into_iter()
+        .map(|((bi, name), ty)| ((bi, name.to_owned()), ty))
+        .collect();
+    (ins, outs)
+}
+
 /// Type shared by the `same` inputs of a block: of the fed ones (link, variable or
 /// constant), or of the defaults when none is fed; `float` for a block without them.
 /// `Err` with two types that cannot meet. `types` holds the outputs resolved so far.

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use flp_blocks::{ds18b20_channel, Bench, Signal, OWN_SLAVE};
+use flp_blocks::{ds18b20_channel, Bench, Signal, Types, OWN_SLAVE};
 use flp_core::value::{parse_duration_ms, ParamValue};
 use flp_core::vars::{VAR_GET, VAR_SET};
 use flp_core::{check, Library, Logic, Severity};
@@ -44,6 +44,8 @@ struct Node {
     id: String,
     def: BlockDef,
     behavior: Option<Box<dyn Behavior>>,
+    /// Real port types and parameter kinds: the numeric model works by them.
+    types: Types,
     module: Option<SimModule>,
     /// `block.wasm` of the block and its modification time at the last load.
     wasm: Option<(PathBuf, Option<SystemTime>)>,
@@ -206,7 +208,8 @@ impl Simulation {
         let mut nodes = Vec::with_capacity(logic.blocks.len());
         let mut index = HashMap::new();
         let mut notes = Vec::new();
-        for block in &logic.blocks {
+        let (port_in, port_out) = flp_core::port_types(logic, lib, &report.order);
+        for (bi, block) in logic.blocks.iter().enumerate() {
             let lb = lib
                 .resolve(logic, block)
                 .ok_or_else(|| format!("нет блока «{}» в библиотеке", block.kind))?;
@@ -259,10 +262,26 @@ impl Simulation {
                     Err(e) => notes.push(format!("{}: {e}", block.id)),
                 }
             }
+            let types = Types {
+                ins: def
+                    .inputs
+                    .iter()
+                    .map(|p| port_in.get(&(bi, p.name.clone())).copied().unwrap_or(p.ty))
+                    .collect(),
+                outs: def
+                    .outputs
+                    .iter()
+                    .map(|p| port_out.get(&(bi, p.name.clone())).copied().unwrap_or(p.ty))
+                    .collect(),
+                params: def.params.iter().map(|p| p.kind).collect(),
+            };
             let behavior = if module.is_some() {
                 None
             } else {
-                builtin::behavior(&def.info.kind)
+                builtin::behavior(&def.info.kind).map(|mut b| {
+                    b.set_types(&types);
+                    b
+                })
             };
             index.insert(block.id.clone(), nodes.len());
             nodes.push(Node {
@@ -283,6 +302,7 @@ impl Simulation {
                 param_texts,
                 param_inputs,
                 behavior,
+                types,
                 module,
                 wasm,
                 var: block.var_name().map(str::to_owned),
@@ -379,9 +399,10 @@ impl Simulation {
             node.texts_out.iter_mut().for_each(String::clear);
             node.inputs.iter_mut().for_each(|v| *v = 0.0);
             node.apply_initial();
-            if let Some(b) =
+            if let Some(mut b) =
                 builtin::behavior(&node.def.info.kind).filter(|_| node.module.is_none())
             {
+                b.set_types(&node.types);
                 node.behavior = Some(b);
             }
             if let Some(m) = &mut node.module {
@@ -454,6 +475,10 @@ impl Simulation {
                 };
                 b.step(&ctx, &mut node.outputs);
                 b.step_text(&ctx, &mut node.outputs, &mut node.texts_out);
+                // Whatever the block computed, the signal is a 32-bit value of its type.
+                for (k, v) in node.outputs.iter_mut().enumerate() {
+                    *v = node.types.quantize(k, *v);
+                }
                 if let (Some(pin), Some(state)) = (pin, b.drive()) {
                     self.bench.set_driven(pin, state);
                 } else if let (Some(state), "modbus_write") =
