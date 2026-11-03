@@ -12,6 +12,7 @@ pub mod lang;
 pub mod preview;
 pub mod program;
 pub mod retain;
+pub mod sheet;
 pub mod stats;
 pub mod tasks;
 
@@ -24,6 +25,7 @@ pub use error::GenError;
 pub use lang::Lang;
 pub use preview::{preview_block, preview_id};
 pub use program::{Input, Instance, Program, Signal, Source};
+pub use sheet::{LocalVar, SheetError, SheetModule, Tag, TagKind, TagUse};
 
 use flp_core::{Library, Project};
 
