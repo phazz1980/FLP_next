@@ -1,0 +1,115 @@
+[[var]]
+name = "k"
+type = "int"
+init = 1
+
+[[var]]
+name = "n"
+type = "int"
+init = 2147483644
+
+[[block]]
+id = "nr"
+type = "var_get"
+var = "n"
+
+[[block]]
+id = "one"
+type = "var_get"
+var = "k"
+
+[[block]]
+id = "inc"
+type = "add"
+
+[[block]]
+id = "nw"
+type = "var_set"
+var = "n"
+
+[[block]]
+id = "zero"
+type = "constant"
+value = 0.0
+
+[[block]]
+id = "seven"
+type = "constant"
+value = -7.0
+
+[[block]]
+id = "three"
+type = "constant"
+value = 3.0
+
+[[block]]
+id = "dz"
+type = "div"
+
+[[block]]
+id = "mz"
+type = "mod"
+
+[[block]]
+id = "mneg"
+type = "mod"
+
+[[block]]
+id = "lm"
+type = "limit"
+lo = -5.0
+hi = 5.0
+
+[[block]]
+id = "mixed"
+type = "add"
+
+[[block]]
+id = "half"
+type = "constant"
+value = 0.5
+
+[[block]]
+id = "lt"
+type = "less"
+b = 0.0
+
+[[link]]
+from = "nr.out"
+to = "inc.a"
+[[link]]
+from = "one.out"
+to = "inc.b"
+[[link]]
+from = "inc.out"
+to = "nw.in"
+[[link]]
+from = "nr.out"
+to = "dz.a"
+[[link]]
+from = "zero.out"
+to = "dz.b"
+[[link]]
+from = "nr.out"
+to = "mz.a"
+[[link]]
+from = "zero.out"
+to = "mz.b"
+[[link]]
+from = "seven.out"
+to = "mneg.a"
+[[link]]
+from = "three.out"
+to = "mneg.b"
+[[link]]
+from = "nr.out"
+to = "lm.in"
+[[link]]
+from = "nr.out"
+to = "mixed.a"
+[[link]]
+from = "half.out"
+to = "mixed.b"
+[[link]]
+from = "nr.out"
+to = "lt.a"

@@ -1,0 +1,6 @@
+[project]
+name = "wasm_edges"
+description = "Края числовой модели: i32 с переполнением, деление на 0, остаток, limit"
+
+[board]
+fqbn = "esp32:esp32:esp32"

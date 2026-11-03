@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use flp_codegen::Program;
-use flp_core::{Library, Project};
-use flp_sim::mcu::{Manifest, McuModule};
+use flp_core::{Library, Project, SignalType};
+use flp_sim::mcu::{Manifest, McuModule, Word};
 use flp_sim::schema::Simulation;
 
 fn repo_path(rel: &str) -> PathBuf {
@@ -17,6 +17,21 @@ fn library() -> Library {
     let (lib, errors) = Library::load(repo_path("library")).unwrap();
     assert!(errors.is_empty(), "{errors:?}");
     lib
+}
+
+/// The carrier value `expected` of the signal `label` as the 32-bit word the module must hold.
+fn word(program: &Program, label: &str, expected: f64) -> Word {
+    let name = label.replace('.', "_");
+    let ty = program
+        .signals
+        .iter()
+        .find(|s| s.name == name)
+        .map_or(SignalType::Float, |s| s.ty);
+    if ty == SignalType::Float {
+        Word::float(expected as f32)
+    } else {
+        Word::int(expected as i32)
+    }
 }
 
 /// Runs the sheet as a module next to the simulation and compares every output after every step.
@@ -34,7 +49,7 @@ fn compare(project_dir: &str, outputs: usize, steps: u32, dt: u32) {
         module.step(dt).unwrap();
         for (i, label) in built.watched.iter().enumerate() {
             let (block, port) = label.split_once('.').unwrap();
-            let expected = sim.output(block, port).unwrap();
+            let expected = word(&program, label, sim.output(block, port).unwrap());
             let got = module.outputs()[i];
             assert_eq!(got, expected, "step {step}: {label}");
         }
@@ -77,7 +92,7 @@ fn pins_match_the_simulation() {
         module.step(50).unwrap();
         for (i, label) in built.watched.iter().enumerate() {
             let (block, port) = label.split_once('.').unwrap();
-            let expected = sim.output(block, port).unwrap();
+            let expected = word(&program, label, sim.output(block, port).unwrap());
             assert_eq!(module.outputs()[i], expected, "step {step}: {label}");
         }
         let io = module.io();
@@ -89,8 +104,9 @@ fn pins_match_the_simulation() {
                 "step {step}: pin {pin}"
             );
         }
-        let duty = sim.bench().driven(18).unwrap_or(0.0);
-        let want = (duty * 2.55).round() as i32;
+        // Rounded half away from zero, in 32 bits like the module.
+        let duty = sim.bench().driven(18).unwrap_or(0.0) as f32;
+        let want = (duty * 2.55f32).round() as i32;
         assert_eq!(
             io.pwm_out.get(&18).copied().unwrap_or(0),
             want,
@@ -119,4 +135,10 @@ fn blink_example_drives_the_led_like_the_simulation() {
         levels.insert(got);
     }
     assert_eq!(levels.len(), 2, "the led must blink");
+}
+
+#[test]
+fn numeric_edges_match_the_simulation() {
+    // `n` starts 3 below i32::MAX and wraps; division by zero, remainders and mixed operands.
+    compare("crates/flp-sim/tests/fixtures/wasm_edges", 13, 12, 100);
 }

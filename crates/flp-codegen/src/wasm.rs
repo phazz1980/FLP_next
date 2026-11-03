@@ -1,13 +1,14 @@
-//! A sheet of the schema as an ABI v2 WASM module, written straight with `wasm-encoder`.
+//! A sheet of the schema as an ABI v3 WASM module, written straight with `wasm-encoder`.
 //!
-//! Every value is an `f64` (bool 0/1, int whole), the same as in `flp-blocks`, so a module
-//! gives the same numbers as `flp-sim`. Block outputs are mutable globals that keep their
-//! value between steps; values that cross the sheet border go through `tag_get` / `tag_set`.
+//! Values are 32 bit, as in the numeric model (`specs/numeric-model`): `bool` and `int` are `i32`
+//! (wrapping), `float` is `f32`, `now` is an `i32` of milliseconds that wraps; so a module gives
+//! the same bits as `flp-sim`. Block outputs are mutable globals that keep their value between
+//! steps; values that cross the sheet border go through `tag_get_*` / `tag_set_*`.
 
 use std::collections::HashMap;
 
 use flp_core::value::parse_duration_ms;
-use flp_core::{ParamKind, ParamValue};
+use flp_core::{ParamKind, ParamValue, SignalType};
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, Function,
     FunctionSection, GlobalSection, GlobalType, ImportSection, Instruction as I, MemorySection,
@@ -17,9 +18,14 @@ use wasm_encoder::{
 use crate::program::{Instance, Program, Source};
 use crate::sheet::{signal_label, SheetError, SheetModule, TagKind};
 
-const TAG_GET: u32 = 0;
-const TAG_SET: u32 = 1;
-const OUTPUT: u32 = 2;
+const TAG_GET_I: u32 = 0;
+const TAG_GET_F: u32 = 1;
+const TAG_SET_I: u32 = 2;
+const TAG_SET_F: u32 = 3;
+const OUTPUT_I: u32 = 4;
+const OUTPUT_F: u32 = 5;
+/// Imports every module declares; the hardware ones follow.
+const FIXED_IMPORTS: u32 = 6;
 const GLOBAL_NOW: u32 = 0;
 
 /// Hardware imports are numbered after the fixed ones once the used set is known; code is
@@ -32,6 +38,8 @@ const HW_PWM_WRITE: u32 = HW_BASE + 3;
 const HW_NAMES: [&str; 4] = ["gpio_read", "gpio_write", "adc_read", "pwm_write"];
 /// Bit of the pin number passed to `gpio_read` that asks for the pull-up.
 const PIN_PULLUP: i32 = 0x100;
+/// `f32` scratch locals are numbered from here until `finish` knows how many `i32` ones there are.
+const F_LOCAL_BASE: u32 = 1000;
 
 /// A finished module: the `.wasm` bytes and the text of `module.toml`.
 #[derive(Debug, Clone)]
@@ -62,7 +70,7 @@ impl Program<'_> {
         self.wasm_module_with(sheet, false)
     }
 
-    /// With `watch` the module reports every block output through `output(i, v)`:
+    /// With `watch` the module reports every block output through `output_i/f(i, v)`:
     /// for tests and the simulator, not for the board.
     pub fn wasm_module_with(&self, sheet: u32, watch: bool) -> Result<WasmModule, WasmError> {
         let module = self.sheet_module(sheet)?;
@@ -70,6 +78,47 @@ impl Program<'_> {
         em.watch = watch;
         em.step_body()?;
         Ok(em.finish())
+    }
+}
+
+/// The two machine types of the model: `i32` carries `bool` and `int`, `f32` carries `float`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Ty {
+    I,
+    F,
+}
+
+impl Ty {
+    fn of(ty: SignalType) -> Ty {
+        if ty == SignalType::Float {
+            Ty::F
+        } else {
+            Ty::I
+        }
+    }
+
+    fn of_kind(kind: ParamKind) -> Ty {
+        if kind == ParamKind::Float {
+            Ty::F
+        } else {
+            Ty::I
+        }
+    }
+
+    fn val(self) -> ValType {
+        match self {
+            Ty::I => ValType::I32,
+            Ty::F => ValType::F32,
+        }
+    }
+
+    /// `float` if either is.
+    fn widen(self, other: Ty) -> Ty {
+        if self == Ty::F || other == Ty::F {
+            Ty::F
+        } else {
+            Ty::I
+        }
     }
 }
 
@@ -92,19 +141,27 @@ fn num(value: &ParamValue, kind: ParamKind) -> f64 {
     }
 }
 
+/// A global: its type and the bits of the initial value.
+struct Global {
+    ty: Ty,
+    bits: u32,
+}
+
 struct Emitter<'a, 'p> {
     program: &'a Program<'p>,
     module: &'a SheetModule,
     table: Vec<crate::sheet::Tag>,
     code: Vec<I<'static>>,
-    /// Initial values of the globals; index 0 is `now`.
-    globals: Vec<f64>,
+    /// Globals; index 0 is `now`.
+    globals: Vec<Global>,
     signals: HashMap<usize, u32>,
     vars: HashMap<String, u32>,
-    /// Number of `f64` scratch locals (local 0 is `dt`).
-    scratch: u32,
+    /// `i32` and `f32` scratch locals in use by the current block (`i32` ones start at 1: local 0 is `dt`).
+    scratch_i: u32,
+    scratch_f: u32,
     /// Most scratch locals any block needed at once; blocks reuse the same locals.
-    scratch_peak: u32,
+    peak_i: u32,
+    peak_f: u32,
     watch: bool,
     watched: Vec<String>,
     /// Hardware imports the code calls (placeholders, see `HW_BASE`).
@@ -125,11 +182,13 @@ impl<'a, 'p> Emitter<'a, 'p> {
             module,
             table: program.tag_table(),
             code: Vec::new(),
-            globals: vec![0.0],
+            globals: vec![Global { ty: Ty::I, bits: 0 }],
             signals: HashMap::new(),
             vars: HashMap::new(),
-            scratch: 0,
-            scratch_peak: 0,
+            scratch_i: 0,
+            scratch_f: 0,
+            peak_i: 0,
+            peak_f: 0,
             watch: false,
             watched: Vec::new(),
             hw: Default::default(),
@@ -137,41 +196,124 @@ impl<'a, 'p> Emitter<'a, 'p> {
         };
         for &bi in &module.blocks {
             for &signal in program.blocks[bi].outputs.values() {
-                let g = em.global(0.0);
+                let g = em.global(Ty::of(program.signals[signal].ty), &ParamValue::Int(0));
                 em.signals.insert(signal, g);
             }
         }
         for local in &module.locals {
-            let g = em.global(pv(&local.init));
+            let g = em.global(Ty::of(local.ty), &local.init);
             em.vars.insert(local.name.clone(), g);
         }
         em
     }
 
-    fn global(&mut self, init: f64) -> u32 {
-        self.globals.push(init);
+    /// A new global of type `ty` with the initial value `init` converted as the model does.
+    fn global(&mut self, ty: Ty, init: &ParamValue) -> u32 {
+        let x = pv(init);
+        let bits = match ty {
+            Ty::I => (x as i32) as u32,
+            Ty::F => (x as f32).to_bits(),
+        };
+        self.globals.push(Global { ty, bits });
         (self.globals.len() - 1) as u32
     }
 
-    fn tmp(&mut self) -> u32 {
-        self.scratch += 1;
-        self.scratch_peak = self.scratch_peak.max(self.scratch);
-        self.scratch
+    fn state_i(&mut self) -> u32 {
+        self.global(Ty::I, &ParamValue::Int(0))
+    }
+
+    fn tmp_i(&mut self) -> u32 {
+        self.scratch_i += 1;
+        self.peak_i = self.peak_i.max(self.scratch_i);
+        self.scratch_i
+    }
+
+    fn tmp_f(&mut self) -> u32 {
+        self.scratch_f += 1;
+        self.peak_f = self.peak_f.max(self.scratch_f);
+        F_LOCAL_BASE + self.scratch_f - 1
+    }
+
+    fn tmp(&mut self, ty: Ty) -> u32 {
+        match ty {
+            Ty::I => self.tmp_i(),
+            Ty::F => self.tmp_f(),
+        }
     }
 
     fn op(&mut self, i: I<'static>) {
         self.code.push(i);
     }
 
-    fn c(&mut self, x: f64) {
-        self.op(I::F64Const(x.into()));
+    fn c_i(&mut self, x: i32) {
+        self.op(I::I32Const(x));
     }
 
-    /// `f64` on the stack → `1.0` if it was `0.0`, else `0.0`.
-    fn not(&mut self) {
-        self.c(0.0);
-        self.op(I::F64Eq);
-        self.op(I::F64ConvertI32U);
+    fn c_f(&mut self, x: f32) {
+        self.op(I::F32Const(x.into()));
+    }
+
+    /// A constant `x` of type `ty` (as the model casts a number to it).
+    fn c(&mut self, ty: Ty, x: f64) {
+        match ty {
+            Ty::I => self.c_i(x as i32),
+            Ty::F => self.c_f(x as f32),
+        }
+    }
+
+    /// Converts the value on the stack: `int` → `float` rounds, `float` → `int` saturates (NaN is 0).
+    fn coerce(&mut self, from: Ty, to: Ty) {
+        match (from, to) {
+            (Ty::I, Ty::F) => self.op(I::F32ConvertI32S),
+            (Ty::F, Ty::I) => self.op(I::I32TruncSatF32S),
+            _ => {}
+        }
+    }
+
+    /// Value on the stack → `1` if it is not zero, else `0` (an `i32`).
+    fn flagify(&mut self, ty: Ty) {
+        match ty {
+            Ty::I => {
+                self.c_i(0);
+                self.op(I::I32Ne);
+            }
+            Ty::F => {
+                self.c_f(0.0);
+                self.op(I::F32Ne);
+            }
+        }
+    }
+
+    /// Comparison `op` (0 `==`, 1 `!=`, 2 `<`, 3 `<=`, 4 `>`, else `>=`) of two values of type `ty`.
+    fn compare(&mut self, ty: Ty, op: i64) {
+        self.op(match (ty, op) {
+            (Ty::I, 0) => I::I32Eq,
+            (Ty::I, 1) => I::I32Ne,
+            (Ty::I, 2) => I::I32LtS,
+            (Ty::I, 3) => I::I32LeS,
+            (Ty::I, 4) => I::I32GtS,
+            (Ty::I, _) => I::I32GeS,
+            (Ty::F, 0) => I::F32Eq,
+            (Ty::F, 1) => I::F32Ne,
+            (Ty::F, 2) => I::F32Lt,
+            (Ty::F, 3) => I::F32Le,
+            (Ty::F, 4) => I::F32Gt,
+            (Ty::F, _) => I::F32Ge,
+        });
+    }
+
+    /// Two values of type `ty` on the stack → the smaller (`a < b ? a : b`) or the greater
+    /// (`a > b ? a : b`): the same select as in the simulation, NaN included.
+    fn pick(&mut self, ty: Ty, greater: bool) {
+        let (a, b) = (self.tmp(ty), self.tmp(ty));
+        self.op(I::LocalSet(b));
+        self.op(I::LocalSet(a));
+        self.op(I::LocalGet(a));
+        self.op(I::LocalGet(b));
+        self.op(I::LocalGet(a));
+        self.op(I::LocalGet(b));
+        self.compare(ty, if greater { 4 } else { 2 });
+        self.op(I::Select);
     }
 
     fn unsupported(&self, inst: &Instance, reason: &str) -> WasmError {
@@ -182,32 +324,56 @@ impl<'a, 'p> Emitter<'a, 'p> {
         }
     }
 
-    fn tag_of(&self, kind: &TagKind) -> Option<u32> {
+    fn tag_of(&self, kind: &TagKind) -> Option<(u32, Ty)> {
         self.table
             .iter()
             .find(|t| &t.kind == kind)
-            .map(|t| t.number)
+            .map(|t| (t.number, Ty::of(t.ty)))
     }
 
-    fn var_read(&mut self, name: &str) {
-        if let Some(n) = self.tag_of(&TagKind::Var(name.to_owned())) {
-            self.op(I::I32Const(n as i32));
-            self.op(I::Call(TAG_GET));
+    fn var_ty(&self, name: &str) -> Ty {
+        if let Some((_, ty)) = self.tag_of(&TagKind::Var(name.to_owned())) {
+            ty
         } else if let Some(&g) = self.vars.get(name) {
-            self.op(I::GlobalGet(g));
+            self.globals[g as usize].ty
         } else {
-            self.c(0.0);
+            Ty::I
         }
     }
 
-    /// Writes the `f64` on the stack into a variable.
-    fn var_write(&mut self, name: &str) {
-        if let Some(n) = self.tag_of(&TagKind::Var(name.to_owned())) {
-            let t = self.tmp();
+    fn tag_get(&mut self, n: u32, ty: Ty) {
+        self.c_i(n as i32);
+        self.op(I::Call(if ty == Ty::F { TAG_GET_F } else { TAG_GET_I }));
+    }
+
+    /// The tag number `n` and the value of type `ty` are on the stack.
+    fn tag_set_call(&mut self, ty: Ty) {
+        self.op(I::Call(if ty == Ty::F { TAG_SET_F } else { TAG_SET_I }));
+    }
+
+    fn var_read(&mut self, name: &str) -> Ty {
+        if let Some((n, ty)) = self.tag_of(&TagKind::Var(name.to_owned())) {
+            self.tag_get(n, ty);
+            ty
+        } else if let Some(&g) = self.vars.get(name) {
+            self.op(I::GlobalGet(g));
+            self.globals[g as usize].ty
+        } else {
+            self.c_i(0);
+            Ty::I
+        }
+    }
+
+    /// Writes the value of type `from` on the stack into a variable.
+    fn var_write(&mut self, name: &str, from: Ty) {
+        let ty = self.var_ty(name);
+        self.coerce(from, ty);
+        if let Some((n, _)) = self.tag_of(&TagKind::Var(name.to_owned())) {
+            let t = self.tmp(ty);
             self.op(I::LocalSet(t));
-            self.op(I::I32Const(n as i32));
+            self.c_i(n as i32);
             self.op(I::LocalGet(t));
-            self.op(I::Call(TAG_SET));
+            self.tag_set_call(ty);
         } else if let Some(&g) = self.vars.get(name) {
             self.op(I::GlobalSet(g));
         } else {
@@ -215,63 +381,141 @@ impl<'a, 'p> Emitter<'a, 'p> {
         }
     }
 
-    fn operand(&mut self, inst: &Instance, port: &str) -> Result<(), WasmError> {
+    /// Pushes the value on port `port` converted to the real type of the port.
+    fn operand(&mut self, inst: &Instance, port: &str) -> Ty {
         let input = &inst.inputs[port];
-        match &input.source {
-            Source::Default(v) => self.c(pv(v)),
+        let want = Ty::of(input.ty);
+        let from = match &input.source {
+            Source::Default(v) => {
+                self.c(want, pv(v));
+                want
+            }
             Source::Var(name) => self.var_read(name),
             Source::Signal { index, invert } => {
+                let ty = Ty::of(self.program.signals[*index].ty);
                 if let Some(&g) = self.signals.get(index) {
                     self.op(I::GlobalGet(g));
                 } else {
                     let label = signal_label(self.program, *index);
-                    let n = self
+                    let (n, tag_ty) = self
                         .tag_of(&TagKind::Signal(label))
                         .expect("cross-sheet link has a tag");
-                    self.op(I::I32Const(n as i32));
-                    self.op(I::Call(TAG_GET));
+                    self.tag_get(n, tag_ty);
+                    self.coerce(tag_ty, ty);
                 }
                 if *invert {
-                    self.not();
+                    self.op(I::I32Eqz);
                 }
+                ty
             }
-        }
+        };
+        self.coerce(from, want);
         if inst.block.inverted_inputs.contains(port) {
-            self.not();
+            self.op(I::I32Eqz);
         }
-        Ok(())
+        want
+    }
+
+    /// Type of input `i` in `block.toml` order (what `input` pushes); a port that is off counts as 0.
+    fn input_ty(&self, inst: &Instance, i: usize) -> Ty {
+        match inst.lib.def.inputs.get(i) {
+            Some(p) => match inst.inputs.get(p.name.as_str()) {
+                Some(input) => Ty::of(input.ty),
+                None => Ty::of(p.ty).widen(Ty::I),
+            },
+            None => Ty::I,
+        }
     }
 
     /// Input number `i` in `block.toml` order; zero if the port is off.
-    fn input(&mut self, inst: &Instance, i: usize) -> Result<(), WasmError> {
+    fn input(&mut self, inst: &Instance, i: usize) -> Ty {
         match inst.lib.def.inputs.get(i) {
             Some(p) if inst.inputs.contains_key(p.name.as_str()) => self.operand(inst, &p.name),
             _ => {
-                self.c(0.0);
-                Ok(())
+                let ty = self.input_ty(inst, i);
+                self.c(ty, 0.0);
+                ty
             }
         }
     }
 
-    /// Input `i` as an `i32` flag.
-    fn flag(&mut self, inst: &Instance, i: usize) -> Result<(), WasmError> {
-        self.input(inst, i)?;
-        self.c(0.0);
-        self.op(I::F64Ne);
-        Ok(())
+    /// Input `i` converted to `want`.
+    fn input_as(&mut self, inst: &Instance, i: usize, want: Ty) {
+        let ty = self.input(inst, i);
+        self.coerce(ty, want);
     }
 
-    fn param(&mut self, inst: &Instance, i: usize) {
+    /// Input `i` as an `i32` flag (not zero).
+    fn flag(&mut self, inst: &Instance, i: usize) {
+        let ty = self.input(inst, i);
+        self.flagify(ty);
+    }
+
+    /// Type of parameter `i`: by its kind, or of the variable that feeds it.
+    fn param_ty(&self, inst: &Instance, i: usize) -> Ty {
         let Some(p) = inst.lib.def.params.get(i) else {
-            return self.c(0.0);
+            return Ty::F;
+        };
+        match inst.param_vars.get(p.name.as_str()) {
+            Some(var) => self.var_ty(var),
+            None => Ty::of_kind(p.kind),
+        }
+    }
+
+    fn param(&mut self, inst: &Instance, i: usize) -> Ty {
+        let Some(p) = inst.lib.def.params.get(i) else {
+            self.c_f(0.0);
+            return Ty::F;
         };
         if let Some(var) = inst.param_vars.get(p.name.as_str()) {
-            self.var_read(var);
+            self.var_read(var)
         } else {
-            self.c(inst
+            let ty = Ty::of_kind(p.kind);
+            let x = inst
                 .params
                 .get(p.name.as_str())
-                .map_or(0.0, |v| num(v, p.kind)));
+                .map_or(0.0, |v| num(v, p.kind));
+            self.c(ty, x);
+            ty
+        }
+    }
+
+    fn param_as(&mut self, inst: &Instance, i: usize, want: Ty) {
+        let ty = self.param(inst, i);
+        self.coerce(ty, want);
+    }
+
+    /// Parameter `i` as a flag (not zero).
+    fn param_flag(&mut self, inst: &Instance, i: usize) {
+        let ty = self.param(inst, i);
+        self.flagify(ty);
+    }
+
+    /// A time parameter in milliseconds as an `i32` that stands for a `u32` (negative counts as 0).
+    fn param_ms(&mut self, inst: &Instance, i: usize) {
+        let Some(p) = inst.lib.def.params.get(i) else {
+            return self.c_i(0);
+        };
+        if let Some(var) = inst.param_vars.get(p.name.as_str()) {
+            match self.var_read(var) {
+                Ty::F => self.op(I::I32TruncSatF32U),
+                Ty::I => {
+                    let x = self.tmp_i();
+                    self.op(I::LocalSet(x));
+                    self.op(I::LocalGet(x));
+                    self.c_i(0);
+                    self.op(I::LocalGet(x));
+                    self.c_i(0);
+                    self.op(I::I32GtS);
+                    self.op(I::Select);
+                }
+            }
+        } else {
+            let ms = inst
+                .params
+                .get(p.name.as_str())
+                .map_or(0.0, |v| num(v, p.kind));
+            self.c_i((ms as u32) as i32);
         }
     }
 
@@ -291,17 +535,21 @@ impl<'a, 'p> Emitter<'a, 'p> {
     }
 
     /// Current value of output `i` (the previous one while the block has not written it).
-    fn out_get(&mut self, inst: &Instance, i: usize) {
+    fn out_get(&mut self, inst: &Instance, i: usize) -> Ty {
         let name = inst.lib.def.outputs[i].name.as_str();
         let g = self.signals[&inst.outputs[name]];
         self.op(I::GlobalGet(g));
+        self.globals[g as usize].ty
     }
 
-    /// Stores the `f64` on the stack as output `i`: global, tag for other sheets, bound variable.
-    fn set_out(&mut self, inst: &Instance, i: usize) {
+    /// Stores the value of type `from` on the stack as output `i`: global, tag for other sheets,
+    /// bound variable.
+    fn set_out(&mut self, inst: &Instance, i: usize, from: Ty) {
         let name = inst.lib.def.outputs[i].name.as_str();
         let signal = inst.outputs[name];
         let g = self.signals[&signal];
+        let ty = self.globals[g as usize].ty;
+        self.coerce(from, ty);
         self.op(I::GlobalSet(g));
         let label = signal_label(self.program, signal);
         if self.watch {
@@ -313,28 +561,24 @@ impl<'a, 'p> Emitter<'a, 'p> {
                     self.watched.push(label.clone());
                     self.watched.len() - 1
                 });
-            self.op(I::I32Const(k as i32));
+            self.c_i(k as i32);
             self.op(I::GlobalGet(g));
-            self.op(I::Call(OUTPUT));
+            self.op(I::Call(if ty == Ty::F { OUTPUT_F } else { OUTPUT_I }));
         }
-        if let Some(n) = self.tag_of(&TagKind::Signal(label)) {
-            self.op(I::I32Const(n as i32));
+        if let Some((n, tag_ty)) = self.tag_of(&TagKind::Signal(label)) {
+            self.c_i(n as i32);
             self.op(I::GlobalGet(g));
-            self.op(I::Call(TAG_SET));
+            self.coerce(ty, tag_ty);
+            self.tag_set_call(tag_ty);
         }
         if let Some(var) = inst.output_vars.get(name) {
             self.op(I::GlobalGet(g));
-            self.var_write(var);
+            self.var_write(var, ty);
         }
     }
 
     /// Live (active) inputs combined with `join`; `empty` when there are none.
-    fn fold_flags(
-        &mut self,
-        inst: &Instance,
-        join: I<'static>,
-        empty: i32,
-    ) -> Result<(), WasmError> {
+    fn fold_flags(&mut self, inst: &Instance, join: I<'static>, empty: i32) {
         let live: Vec<usize> = inst
             .lib
             .def
@@ -345,37 +589,37 @@ impl<'a, 'p> Emitter<'a, 'p> {
             .map(|(i, _)| i)
             .collect();
         if live.is_empty() {
-            self.op(I::I32Const(empty));
+            self.c_i(empty);
         }
         for (k, &i) in live.iter().enumerate() {
-            self.flag(inst, i)?;
+            self.flag(inst, i);
             if k > 0 {
                 self.op(join.clone());
             }
         }
-        self.op(I::F64ConvertI32U);
-        Ok(())
     }
 
-    /// `if cond { then } else { otherwise }` on `f64`; the condition (`i32`) is on the stack.
-    fn choose(
-        &mut self,
-        then: impl FnOnce(&mut Self) -> Result<(), WasmError>,
-        otherwise: impl FnOnce(&mut Self) -> Result<(), WasmError>,
-    ) -> Result<(), WasmError> {
-        self.op(I::If(BlockType::Result(ValType::F64)));
-        then(self)?;
+    /// `if cond { then } else { otherwise }` giving a value of type `ty`; the condition (`i32`)
+    /// is on the stack.
+    fn choose(&mut self, ty: Ty, then: impl FnOnce(&mut Self), otherwise: impl FnOnce(&mut Self)) {
+        self.op(I::If(BlockType::Result(ty.val())));
+        then(self);
         self.op(I::Else);
-        otherwise(self)?;
+        otherwise(self);
         self.op(I::End);
-        Ok(())
+    }
+
+    /// Milliseconds since the global `start` (an `i32` that stands for a `u32`).
+    fn since(&mut self, start: u32) {
+        self.op(I::GlobalGet(GLOBAL_NOW));
+        self.op(I::GlobalGet(start));
+        self.op(I::I32Sub);
     }
 
     fn step_body(&mut self) -> Result<(), WasmError> {
         self.op(I::GlobalGet(GLOBAL_NOW));
         self.op(I::LocalGet(0));
-        self.op(I::F64ConvertI32S);
-        self.op(I::F64Add);
+        self.op(I::I32Add);
         self.op(I::GlobalSet(GLOBAL_NOW));
         let blocks = self.module.blocks.clone();
         for (k, bi) in blocks.into_iter().enumerate() {
@@ -383,7 +627,8 @@ impl<'a, 'p> Emitter<'a, 'p> {
                 self.cuts.push(self.code.len());
             }
             // A block's temporaries never outlive it: state lives in globals.
-            self.scratch = 0;
+            self.scratch_i = 0;
+            self.scratch_f = 0;
             let program = self.program;
             self.block(&program.blocks[bi])?;
         }
@@ -395,22 +640,25 @@ impl<'a, 'p> Emitter<'a, 'p> {
         self.op(I::Call(import));
     }
 
-    /// Writes an output block: `level` (an `f64` global) goes to the pin when `en` allows.
-    fn hold_unless_enabled(
-        &mut self,
-        inst: &Instance,
-        store: impl FnOnce(&mut Self) -> Result<(), WasmError>,
-    ) -> Result<(), WasmError> {
+    /// Writes an output block: `store` runs only when `en` allows.
+    fn hold_unless_enabled(&mut self, inst: &Instance, store: impl FnOnce(&mut Self)) {
         let gated = inst.inputs.contains_key("en");
         if gated {
-            self.flag(inst, 1)?;
+            self.flag(inst, 1);
             self.op(I::If(BlockType::Empty));
         }
-        store(self)?;
+        store(self);
         if gated {
             self.op(I::End);
         }
-        Ok(())
+    }
+
+    /// `i32` on the stack → clamped into `[lo, hi]`.
+    fn clamp_int(&mut self, lo: i32, hi: i32) {
+        self.c_i(lo);
+        self.pick(Ty::I, true);
+        self.c_i(hi);
+        self.pick(Ty::I, false);
     }
 
     /// Digital/analog/PWM pins of the board: calls into the master.
@@ -427,37 +675,28 @@ impl<'a, 'p> Emitter<'a, 'p> {
             "digital_in" => {
                 let pullup = self.const_param(inst, 1)? != 0.0;
                 let inverted = self.const_param(inst, 2)? != 0.0;
-                self.op(I::I32Const(pin | if pullup { PIN_PULLUP } else { 0 }));
+                self.c_i(pin | if pullup { PIN_PULLUP } else { 0 });
                 self.hw_call(HW_GPIO_READ);
-                self.op(I::I32Const(0));
+                self.c_i(0);
                 self.op(I::I32Ne);
                 if inverted {
                     self.op(I::I32Eqz);
                 }
-                self.op(I::F64ConvertI32U);
             }
             "analog_in" => {
-                self.op(I::I32Const(pin));
+                self.c_i(pin);
                 self.hw_call(HW_ADC_READ);
-                self.op(I::F64ConvertI32S);
-                self.c(0.0);
-                self.op(I::F64Max);
-                self.c(4095.0);
-                self.op(I::F64Min);
+                self.clamp_int(0, 4095);
             }
             "digital_out" => {
                 let inverted = self.const_param(inst, 1)? != 0.0;
-                let logic = self.global(0.0);
+                let logic = self.state_i();
                 self.hold_unless_enabled(inst, |e| {
-                    e.flag(inst, 0)?;
-                    e.op(I::F64ConvertI32U);
+                    e.flag(inst, 0);
                     e.op(I::GlobalSet(logic));
-                    Ok(())
-                })?;
-                self.op(I::I32Const(pin));
+                });
+                self.c_i(pin);
                 self.op(I::GlobalGet(logic));
-                self.c(0.0);
-                self.op(I::F64Ne);
                 if inverted {
                     self.op(I::I32Eqz);
                 }
@@ -465,392 +704,437 @@ impl<'a, 'p> Emitter<'a, 'p> {
                 return Ok(true);
             }
             _ => {
-                let duty = self.global(0.0);
+                let duty = self.global(Ty::F, &ParamValue::Float(0.0));
                 self.hold_unless_enabled(inst, |e| {
-                    e.input(inst, 0)?;
-                    e.c(0.0);
-                    e.op(I::F64Max);
-                    e.c(100.0);
-                    e.op(I::F64Min);
+                    e.input_as(inst, 0, Ty::F);
+                    let x = e.tmp_f();
+                    e.op(I::LocalSet(x));
+                    // clamp(x, 0, 100) as selects
+                    e.c_f(100.0);
+                    e.op(I::LocalGet(x));
+                    e.op(I::LocalGet(x));
+                    e.c_f(100.0);
+                    e.op(I::F32Gt);
+                    e.op(I::Select);
+                    e.op(I::LocalSet(x));
+                    e.c_f(0.0);
+                    e.op(I::LocalGet(x));
+                    e.op(I::LocalGet(x));
+                    e.c_f(0.0);
+                    e.op(I::F32Lt);
+                    e.op(I::Select);
                     e.op(I::GlobalSet(duty));
-                    Ok(())
-                })?;
-                // The master passes the value to `analogWrite`: 8 bits, 0..255.
-                self.op(I::I32Const(pin));
+                });
+                // The master passes the value to `analogWrite`: 8 bits, 0..255, rounded half up.
+                self.c_i(pin);
                 self.op(I::GlobalGet(duty));
-                self.c(2.55);
-                self.op(I::F64Mul);
-                self.op(I::F64Nearest);
-                self.op(I::I32TruncF64U);
+                self.c_f(2.55);
+                self.op(I::F32Mul);
+                let y = self.tmp_f();
+                self.op(I::LocalSet(y));
+                self.op(I::LocalGet(y));
+                self.op(I::F32Trunc);
+                let t = self.tmp_f();
+                self.op(I::LocalSet(t));
+                self.op(I::LocalGet(t));
+                self.c_f(1.0);
+                self.c_f(0.0);
+                self.op(I::LocalGet(y));
+                self.op(I::LocalGet(t));
+                self.op(I::F32Sub);
+                self.c_f(0.5);
+                self.op(I::F32Ge);
+                self.op(I::Select);
+                self.op(I::F32Add);
+                self.op(I::I32TruncSatF32U);
                 self.hw_call(HW_PWM_WRITE);
                 return Ok(true);
             }
         }
-        self.set_out(inst, 0);
+        self.set_out(inst, 0, Ty::I);
         Ok(true)
     }
 
+    /// Emits the block; the value of type `Ty` it leaves on the stack is output 0.
     fn block(&mut self, inst: &Instance) -> Result<(), WasmError> {
         if self.hardware_block(inst)? {
             return Ok(());
         }
         let kind = inst.block.kind.as_str();
-        match kind {
-            "and" => self.fold_flags(inst, I::I32And, 1)?,
-            "or" => self.fold_flags(inst, I::I32Or, 0)?,
-            "xor" => self.fold_flags(inst, I::I32Xor, 0)?,
+        let ty = match kind {
+            "and" => {
+                self.fold_flags(inst, I::I32And, 1);
+                Ty::I
+            }
+            "or" => {
+                self.fold_flags(inst, I::I32Or, 0);
+                Ty::I
+            }
+            "xor" => {
+                self.fold_flags(inst, I::I32Xor, 0);
+                Ty::I
+            }
             "not" => {
-                self.flag(inst, 0)?;
+                self.flag(inst, 0);
                 self.op(I::I32Eqz);
-                self.op(I::F64ConvertI32U);
+                Ty::I
             }
             "rs_trigger" | "sr_trigger" => {
                 // rs: reset wins; sr: set wins. The output keeps its value otherwise.
                 let (first, second) = if kind == "rs_trigger" { (1, 0) } else { (0, 1) };
-                let (first_value, second_value) = if kind == "rs_trigger" {
-                    (0.0, 1.0)
-                } else {
-                    (1.0, 0.0)
-                };
-                self.flag(inst, first)?;
+                let (first_value, second_value) =
+                    if kind == "rs_trigger" { (0, 1) } else { (1, 0) };
+                self.flag(inst, first);
                 self.choose(
+                    Ty::I,
+                    |e| e.c_i(first_value),
                     |e| {
-                        e.c(first_value);
-                        Ok(())
-                    },
-                    |e| {
-                        e.flag(inst, second)?;
+                        e.flag(inst, second);
                         e.choose(
-                            |e| {
-                                e.c(second_value);
-                                Ok(())
-                            },
+                            Ty::I,
+                            |e| e.c_i(second_value),
                             |e| {
                                 e.out_get(inst, 0);
-                                Ok(())
                             },
-                        )
+                        );
                     },
-                )?;
+                );
+                Ty::I
             }
             "hysteresis" => {
-                let (x, on, off) = (self.tmp(), self.tmp(), self.tmp());
-                self.input(inst, 0)?;
+                let (x, on, off) = (self.tmp_f(), self.tmp_f(), self.tmp_f());
+                self.input_as(inst, 0, Ty::F);
                 self.op(I::LocalSet(x));
-                self.param(inst, 0);
+                self.param_as(inst, 0, Ty::F);
                 self.op(I::LocalSet(on));
-                self.param(inst, 1);
+                self.param_as(inst, 1, Ty::F);
                 self.op(I::LocalSet(off));
                 let get = |e: &mut Self, l: u32| e.op(I::LocalGet(l));
                 // Comparison direction depends on which threshold is higher.
-                let band = |e: &mut Self, hi_on: bool| -> Result<(), WasmError> {
+                let band = |e: &mut Self, hi_on: bool| {
                     // set when x crosses `on`, reset when it crosses `off`
                     get(e, x);
                     get(e, on);
-                    e.op(if hi_on { I::F64Ge } else { I::F64Le });
+                    e.op(if hi_on { I::F32Ge } else { I::F32Le });
                     e.choose(
-                        |e| {
-                            e.c(1.0);
-                            Ok(())
-                        },
+                        Ty::I,
+                        |e| e.c_i(1),
                         |e| {
                             get(e, x);
                             get(e, off);
-                            e.op(if hi_on { I::F64Le } else { I::F64Ge });
+                            e.op(if hi_on { I::F32Le } else { I::F32Ge });
                             e.choose(
-                                |e| {
-                                    e.c(0.0);
-                                    Ok(())
-                                },
+                                Ty::I,
+                                |e| e.c_i(0),
                                 |e| {
                                     e.out_get(inst, 0);
-                                    Ok(())
                                 },
-                            )
+                            );
                         },
-                    )
+                    );
                 };
                 get(self, on);
                 get(self, off);
-                self.op(I::F64Ge);
-                self.choose(|e| band(e, true), |e| band(e, false))?;
+                self.op(I::F32Ge);
+                self.choose(Ty::I, |e| band(e, true), |e| band(e, false));
+                Ty::I
             }
             "compare" => {
                 let mode = self.const_param(inst, 0)? as i64;
-                self.input(inst, 0)?;
-                self.input(inst, 1)?;
-                self.op(match mode {
-                    0 => I::F64Eq,
-                    1 => I::F64Ne,
-                    2 => I::F64Lt,
-                    3 => I::F64Le,
-                    4 => I::F64Gt,
-                    _ => I::F64Ge,
-                });
-                self.op(I::F64ConvertI32U);
+                let w = self.input_ty(inst, 0).widen(self.input_ty(inst, 1));
+                self.input_as(inst, 0, w);
+                self.input_as(inst, 1, w);
+                self.compare(w, mode);
+                Ty::I
             }
             "greater" | "less" => {
-                self.input(inst, 0)?;
-                self.param(inst, 0);
-                self.op(if kind == "greater" {
-                    I::F64Gt
-                } else {
-                    I::F64Lt
-                });
-                self.op(I::F64ConvertI32U);
+                let w = self.input_ty(inst, 0).widen(self.param_ty(inst, 0));
+                self.input_as(inst, 0, w);
+                self.param_as(inst, 0, w);
+                self.compare(w, if kind == "greater" { 4 } else { 2 });
+                Ty::I
             }
-            "add" | "sub" | "mul" | "min" | "max" => {
-                self.input(inst, 0)?;
-                self.input(inst, 1)?;
-                self.op(match kind {
-                    "add" => I::F64Add,
-                    "sub" => I::F64Sub,
-                    "mul" => I::F64Mul,
-                    "min" => I::F64Min,
-                    _ => I::F64Max,
+            "add" | "sub" | "mul" => {
+                let w = self.input_ty(inst, 0).widen(self.input_ty(inst, 1));
+                self.input_as(inst, 0, w);
+                self.input_as(inst, 1, w);
+                self.op(match (kind, w) {
+                    ("add", Ty::I) => I::I32Add,
+                    ("add", Ty::F) => I::F32Add,
+                    ("sub", Ty::I) => I::I32Sub,
+                    ("sub", Ty::F) => I::F32Sub,
+                    (_, Ty::I) => I::I32Mul,
+                    (_, Ty::F) => I::F32Mul,
                 });
+                w
             }
-            "div" | "mod" => {
-                let (a, b) = (self.tmp(), self.tmp());
-                self.input(inst, 0)?;
+            "min" | "max" => {
+                let w = self.input_ty(inst, 0).widen(self.input_ty(inst, 1));
+                self.input_as(inst, 0, w);
+                self.input_as(inst, 1, w);
+                self.pick(w, kind == "max");
+                w
+            }
+            "div" => {
+                // Always `float`; a zero divisor gives 0.
+                let (a, b) = (self.tmp_f(), self.tmp_f());
+                self.input_as(inst, 0, Ty::F);
                 self.op(I::LocalSet(a));
-                self.input(inst, 1)?;
+                self.input_as(inst, 1, Ty::F);
                 self.op(I::LocalSet(b));
                 self.op(I::LocalGet(b));
-                self.c(0.0);
-                self.op(I::F64Ne);
+                self.c_f(0.0);
+                self.op(I::F32Ne);
                 self.choose(
+                    Ty::F,
                     |e| {
                         e.op(I::LocalGet(a));
-                        if kind == "div" {
+                        e.op(I::LocalGet(b));
+                        e.op(I::F32Div);
+                    },
+                    |e| e.c_f(0.0),
+                );
+                Ty::F
+            }
+            "mod" => {
+                let w = self.input_ty(inst, 0).widen(self.input_ty(inst, 1));
+                let (a, b) = (self.tmp(w), self.tmp(w));
+                self.input_as(inst, 0, w);
+                self.op(I::LocalSet(a));
+                self.input_as(inst, 1, w);
+                self.op(I::LocalSet(b));
+                self.op(I::LocalGet(b));
+                self.flagify(w);
+                self.choose(
+                    w,
+                    |e| {
+                        e.op(I::LocalGet(a));
+                        if w == Ty::I {
                             e.op(I::LocalGet(b));
-                            e.op(I::F64Div);
+                            e.op(I::I32RemS);
                         } else {
-                            // a % b = a - b * trunc(a / b), as the C remainder
+                            // fmod through `f64`: a - b * trunc(a / b), with the sign of `a`
+                            e.op(I::F64PromoteF32);
                             e.op(I::LocalGet(b));
+                            e.op(I::F64PromoteF32);
                             e.op(I::LocalGet(a));
+                            e.op(I::F64PromoteF32);
                             e.op(I::LocalGet(b));
+                            e.op(I::F64PromoteF32);
                             e.op(I::F64Div);
                             e.op(I::F64Trunc);
                             e.op(I::F64Mul);
                             e.op(I::F64Sub);
+                            e.op(I::LocalGet(a));
+                            e.op(I::F64PromoteF32);
+                            e.op(I::F64Copysign);
+                            e.op(I::F32DemoteF64);
                         }
-                        Ok(())
                     },
-                    |e| {
-                        e.c(0.0);
-                        Ok(())
-                    },
-                )?;
+                    |e| e.c(w, 0.0),
+                );
+                w
             }
             "limit" => {
-                let (lo, hi) = (self.tmp(), self.tmp());
-                self.param(inst, 0);
-                self.param(inst, 1);
-                self.op(I::F64Min);
+                let tx = self.input_ty(inst, 0);
+                let w = tx
+                    .widen(self.param_ty(inst, 0))
+                    .widen(self.param_ty(inst, 1));
+                let (lo, hi) = (self.tmp(w), self.tmp(w));
+                self.param_as(inst, 0, w);
+                self.param_as(inst, 1, w);
+                self.pick(w, false);
                 self.op(I::LocalSet(lo));
-                self.param(inst, 0);
-                self.param(inst, 1);
-                self.op(I::F64Max);
+                self.param_as(inst, 0, w);
+                self.param_as(inst, 1, w);
+                self.pick(w, true);
                 self.op(I::LocalSet(hi));
-                self.input(inst, 0)?;
-                self.op(I::LocalGet(hi));
-                self.op(I::F64Min);
+                self.input_as(inst, 0, w);
                 self.op(I::LocalGet(lo));
-                self.op(I::F64Max);
+                self.pick(w, true);
+                self.op(I::LocalGet(hi));
+                self.pick(w, false);
+                self.coerce(w, tx);
+                tx
             }
             "scale" => {
-                let (in_min, in_max, out_min, out_max, span) =
-                    (self.tmp(), self.tmp(), self.tmp(), self.tmp(), self.tmp());
+                let (in_min, in_max, out_min, out_max, span, y) = (
+                    self.tmp_f(),
+                    self.tmp_f(),
+                    self.tmp_f(),
+                    self.tmp_f(),
+                    self.tmp_f(),
+                    self.tmp_f(),
+                );
                 for (i, l) in [in_min, in_max, out_min, out_max].into_iter().enumerate() {
-                    self.param(inst, i);
+                    self.param_as(inst, i, Ty::F);
                     self.op(I::LocalSet(l));
                 }
                 self.op(I::LocalGet(in_max));
                 self.op(I::LocalGet(in_min));
-                self.op(I::F64Sub);
+                self.op(I::F32Sub);
                 self.op(I::LocalSet(span));
                 self.op(I::LocalGet(span));
-                self.c(0.0);
-                self.op(I::F64Ne);
+                self.c_f(0.0);
+                self.op(I::F32Ne);
                 self.choose(
+                    Ty::F,
                     |e| {
                         e.op(I::LocalGet(out_min));
-                        e.input(inst, 0)?;
+                        e.input_as(inst, 0, Ty::F);
                         e.op(I::LocalGet(in_min));
-                        e.op(I::F64Sub);
+                        e.op(I::F32Sub);
                         e.op(I::LocalGet(out_max));
                         e.op(I::LocalGet(out_min));
-                        e.op(I::F64Sub);
-                        e.op(I::F64Mul);
+                        e.op(I::F32Sub);
+                        e.op(I::F32Mul);
                         e.op(I::LocalGet(span));
-                        e.op(I::F64Div);
-                        e.op(I::F64Add);
-                        Ok(())
+                        e.op(I::F32Div);
+                        e.op(I::F32Add);
                     },
-                    |e| {
-                        e.op(I::LocalGet(out_min));
-                        Ok(())
-                    },
-                )?;
-                // Optional clamp to the output range (parameter 4).
-                let y = self.tmp();
+                    |e| e.op(I::LocalGet(out_min)),
+                );
                 self.op(I::LocalSet(y));
+                // Optional clamp to the output range (parameter 4):
+                // `y < lo ? lo : y > hi ? hi : y` with lo = min(out_min, out_max), hi = max(..).
+                let (lo, hi) = (self.tmp_f(), self.tmp_f());
+                for (l, greater) in [(lo, false), (hi, true)] {
+                    self.op(I::LocalGet(out_min));
+                    self.op(I::LocalGet(out_max));
+                    self.pick(Ty::F, greater);
+                    self.op(I::LocalSet(l));
+                }
+                self.op(I::LocalGet(lo));
+                self.op(I::LocalGet(hi));
                 self.op(I::LocalGet(y));
-                self.op(I::LocalGet(out_max));
-                self.op(I::LocalGet(out_min));
-                self.op(I::F64Max);
-                self.op(I::F64Min);
-                self.op(I::LocalGet(out_max));
-                self.op(I::LocalGet(out_min));
-                self.op(I::F64Min);
-                self.op(I::F64Max);
                 self.op(I::LocalGet(y));
-                self.param(inst, 4);
-                self.c(0.0);
-                self.op(I::F64Ne);
+                self.op(I::LocalGet(hi));
+                self.op(I::F32Gt);
                 self.op(I::Select);
+                self.op(I::LocalGet(y));
+                self.op(I::LocalGet(lo));
+                self.op(I::F32Lt);
+                self.op(I::Select);
+                self.op(I::LocalGet(y));
+                self.param_flag(inst, 4);
+                self.op(I::Select);
+                Ty::F
             }
             "t_trigger" => {
-                let prev = self.global(0.0);
-                self.flag(inst, 1)?;
+                let prev = self.state_i();
+                self.flag(inst, 1);
                 self.choose(
+                    Ty::I,
+                    |e| e.c_i(0),
                     |e| {
-                        e.c(0.0);
-                        Ok(())
-                    },
-                    |e| {
-                        e.flag(inst, 0)?;
+                        e.flag(inst, 0);
                         e.op(I::GlobalGet(prev));
-                        e.c(0.0);
-                        e.op(I::F64Eq);
+                        e.op(I::I32Eqz);
                         e.op(I::I32And);
                         e.choose(
+                            Ty::I,
                             |e| {
                                 e.out_get(inst, 0);
-                                e.not();
-                                Ok(())
+                                e.op(I::I32Eqz);
                             },
                             |e| {
                                 e.out_get(inst, 0);
-                                Ok(())
                             },
-                        )
+                        );
                     },
-                )?;
-                self.flag(inst, 0)?;
-                self.op(I::F64ConvertI32U);
+                );
+                self.flag(inst, 0);
                 self.op(I::GlobalSet(prev));
+                Ty::I
             }
             "rising_edge" | "falling_edge" => {
-                let prev = self.global(0.0);
-                let n = self.tmp();
-                self.flag(inst, 0)?;
-                self.op(I::F64ConvertI32U);
+                let prev = self.state_i();
+                let n = self.tmp_i();
+                self.flag(inst, 0);
                 self.op(I::LocalSet(n));
                 if kind == "rising_edge" {
                     self.op(I::LocalGet(n));
-                    self.c(0.0);
-                    self.op(I::F64Ne);
                     self.op(I::GlobalGet(prev));
-                    self.c(0.0);
-                    self.op(I::F64Eq);
+                    self.op(I::I32Eqz);
                 } else {
                     self.op(I::LocalGet(n));
-                    self.c(0.0);
-                    self.op(I::F64Eq);
+                    self.op(I::I32Eqz);
                     self.op(I::GlobalGet(prev));
-                    self.c(0.0);
-                    self.op(I::F64Ne);
                 }
                 self.op(I::I32And);
-                self.op(I::F64ConvertI32U);
                 self.op(I::LocalGet(n));
                 self.op(I::GlobalSet(prev));
+                Ty::I
             }
             "timer_on" => {
-                let (running, start) = (self.global(0.0), self.global(0.0));
-                self.flag(inst, 0)?;
+                let (running, start) = (self.state_i(), self.state_i());
+                self.flag(inst, 0);
                 self.choose(
+                    Ty::I,
                     |e| {
                         e.op(I::GlobalGet(running));
-                        e.c(0.0);
-                        e.op(I::F64Eq);
+                        e.op(I::I32Eqz);
                         e.op(I::If(BlockType::Empty));
-                        e.c(1.0);
+                        e.c_i(1);
                         e.op(I::GlobalSet(running));
                         e.op(I::GlobalGet(GLOBAL_NOW));
                         e.op(I::GlobalSet(start));
                         e.op(I::End);
-                        e.op(I::GlobalGet(GLOBAL_NOW));
-                        e.op(I::GlobalGet(start));
-                        e.op(I::F64Sub);
-                        e.param(inst, 0);
-                        e.op(I::F64Ge);
-                        e.op(I::F64ConvertI32U);
-                        Ok(())
+                        e.since(start);
+                        e.param_ms(inst, 0);
+                        e.op(I::I32GeU);
                     },
                     |e| {
-                        e.c(0.0);
+                        e.c_i(0);
                         e.op(I::GlobalSet(running));
-                        e.c(0.0);
-                        Ok(())
+                        e.c_i(0);
                     },
-                )?;
+                );
+                Ty::I
             }
             "timer_off" => {
-                let (on, off_at) = (self.global(0.0), self.global(0.0));
-                self.flag(inst, 0)?;
+                let (on, off_at) = (self.state_i(), self.state_i());
+                self.flag(inst, 0);
                 self.choose(
+                    Ty::I,
                     |e| {
-                        e.c(1.0);
+                        e.c_i(1);
                         e.op(I::GlobalSet(on));
-                        e.c(1.0);
-                        Ok(())
+                        e.c_i(1);
                     },
                     |e| {
                         e.op(I::GlobalGet(on));
-                        e.c(0.0);
-                        e.op(I::F64Ne);
                         e.op(I::If(BlockType::Empty));
-                        e.c(0.0);
+                        e.c_i(0);
                         e.op(I::GlobalSet(on));
                         e.op(I::GlobalGet(GLOBAL_NOW));
                         e.op(I::GlobalSet(off_at));
                         e.op(I::End);
                         e.out_get(inst, 0);
-                        e.c(0.0);
-                        e.op(I::F64Ne);
-                        e.op(I::GlobalGet(GLOBAL_NOW));
-                        e.op(I::GlobalGet(off_at));
-                        e.op(I::F64Sub);
-                        e.param(inst, 0);
-                        e.op(I::F64Lt);
+                        e.c_i(0);
+                        e.op(I::I32Ne);
+                        e.since(off_at);
+                        e.param_ms(inst, 0);
+                        e.op(I::I32LtU);
                         e.op(I::I32And);
-                        e.op(I::F64ConvertI32U);
-                        Ok(())
                     },
-                )?;
+                );
+                Ty::I
             }
             "pulse" => {
-                let (prev, active, start) = (self.global(0.0), self.global(0.0), self.global(0.0));
-                let n = self.tmp();
-                self.flag(inst, 0)?;
-                self.op(I::F64ConvertI32U);
+                let (prev, active, start) = (self.state_i(), self.state_i(), self.state_i());
+                let n = self.tmp_i();
+                self.flag(inst, 0);
                 self.op(I::LocalSet(n));
                 self.op(I::LocalGet(n));
-                self.c(0.0);
-                self.op(I::F64Ne);
                 self.op(I::GlobalGet(prev));
-                self.c(0.0);
-                self.op(I::F64Eq);
+                self.op(I::I32Eqz);
                 self.op(I::I32And);
                 self.op(I::GlobalGet(active));
-                self.c(0.0);
-                self.op(I::F64Eq);
+                self.op(I::I32Eqz);
                 self.op(I::I32And);
                 self.op(I::If(BlockType::Empty));
-                self.c(1.0);
+                self.c_i(1);
                 self.op(I::GlobalSet(active));
                 self.op(I::GlobalGet(GLOBAL_NOW));
                 self.op(I::GlobalSet(start));
@@ -858,131 +1142,111 @@ impl<'a, 'p> Emitter<'a, 'p> {
                 self.op(I::LocalGet(n));
                 self.op(I::GlobalSet(prev));
                 self.op(I::GlobalGet(active));
-                self.c(0.0);
-                self.op(I::F64Ne);
-                self.op(I::GlobalGet(GLOBAL_NOW));
-                self.op(I::GlobalGet(start));
-                self.op(I::F64Sub);
-                self.param(inst, 0);
-                self.op(I::F64Ge);
+                self.since(start);
+                self.param_ms(inst, 0);
+                self.op(I::I32GeU);
                 self.op(I::I32And);
                 self.op(I::If(BlockType::Empty));
-                self.c(0.0);
+                self.c_i(0);
                 self.op(I::GlobalSet(active));
                 self.op(I::End);
                 self.op(I::GlobalGet(active));
+                Ty::I
             }
             "generator" => {
-                let start = self.global(0.0);
-                let (t_on, period, x) = (self.tmp(), self.tmp(), self.tmp());
-                self.flag(inst, 0)?;
+                let start = self.state_i();
+                let (t_on, period) = (self.tmp_i(), self.tmp_i());
+                self.flag(inst, 0);
                 self.choose(
+                    Ty::I,
                     |e| {
-                        e.param(inst, 0);
+                        e.param_ms(inst, 0);
                         e.op(I::LocalSet(t_on));
+                        // period = max(on + off, 1)
                         e.op(I::LocalGet(t_on));
-                        e.param(inst, 1);
-                        e.op(I::F64Add);
-                        e.c(1.0);
-                        e.op(I::F64Max);
+                        e.param_ms(inst, 1);
+                        e.op(I::I32Add);
                         e.op(I::LocalSet(period));
-                        e.op(I::GlobalGet(GLOBAL_NOW));
-                        e.op(I::GlobalGet(start));
-                        e.op(I::F64Sub);
-                        e.op(I::LocalSet(x));
-                        // phase = x % period = x - period * trunc(x / period)
-                        e.op(I::LocalGet(x));
+                        e.c_i(1);
                         e.op(I::LocalGet(period));
-                        e.op(I::LocalGet(x));
                         e.op(I::LocalGet(period));
-                        e.op(I::F64Div);
-                        e.op(I::F64Trunc);
-                        e.op(I::F64Mul);
-                        e.op(I::F64Sub);
+                        e.op(I::I32Eqz);
+                        e.op(I::Select);
+                        e.op(I::LocalSet(period));
+                        e.since(start);
+                        e.op(I::LocalGet(period));
+                        e.op(I::I32RemU);
                         e.op(I::LocalGet(t_on));
-                        e.op(I::F64Lt);
-                        e.op(I::F64ConvertI32U);
-                        Ok(())
+                        e.op(I::I32LtU);
                     },
                     |e| {
                         e.op(I::GlobalGet(GLOBAL_NOW));
                         e.op(I::GlobalSet(start));
-                        e.c(0.0);
-                        Ok(())
+                        e.c_i(0);
                     },
-                )?;
+                );
+                Ty::I
             }
             "debounce" => {
-                let (last, changed) = (self.global(0.0), self.global(0.0));
-                let n = self.tmp();
-                self.flag(inst, 0)?;
-                self.op(I::F64ConvertI32U);
+                let (last, changed) = (self.state_i(), self.state_i());
+                let n = self.tmp_i();
+                self.flag(inst, 0);
                 self.op(I::LocalSet(n));
                 self.op(I::LocalGet(n));
                 self.op(I::GlobalGet(last));
-                self.op(I::F64Ne);
+                self.op(I::I32Ne);
                 self.op(I::If(BlockType::Empty));
                 self.op(I::LocalGet(n));
                 self.op(I::GlobalSet(last));
                 self.op(I::GlobalGet(GLOBAL_NOW));
                 self.op(I::GlobalSet(changed));
                 self.op(I::End);
-                self.op(I::GlobalGet(GLOBAL_NOW));
-                self.op(I::GlobalGet(changed));
-                self.op(I::F64Sub);
-                self.param(inst, 0);
-                self.op(I::F64Ge);
+                self.since(changed);
+                self.param_ms(inst, 0);
+                self.op(I::I32GeU);
                 self.choose(
-                    |e| {
-                        e.op(I::GlobalGet(last));
-                        Ok(())
-                    },
+                    Ty::I,
+                    |e| e.op(I::GlobalGet(last)),
                     |e| {
                         e.out_get(inst, 0);
-                        Ok(())
                     },
-                )?;
+                );
+                Ty::I
             }
             "counter" => {
-                let (up, down) = (self.global(0.0), self.global(0.0));
-                self.flag(inst, 2)?;
+                let (up, down) = (self.state_i(), self.state_i());
+                self.flag(inst, 2);
                 self.choose(
-                    |e| {
-                        e.c(0.0);
-                        Ok(())
-                    },
+                    Ty::I,
+                    |e| e.c_i(0),
                     |e| {
                         e.out_get(inst, 0);
-                        e.flag(inst, 0)?;
+                        e.flag(inst, 0);
                         e.op(I::GlobalGet(up));
-                        e.c(0.0);
-                        e.op(I::F64Eq);
+                        e.op(I::I32Eqz);
                         e.op(I::I32And);
-                        e.op(I::F64ConvertI32U);
-                        e.op(I::F64Add);
-                        e.flag(inst, 1)?;
+                        e.op(I::I32Add);
+                        e.flag(inst, 1);
                         e.op(I::GlobalGet(down));
-                        e.c(0.0);
-                        e.op(I::F64Eq);
+                        e.op(I::I32Eqz);
                         e.op(I::I32And);
-                        e.op(I::F64ConvertI32U);
-                        e.op(I::F64Sub);
-                        Ok(())
+                        e.op(I::I32Sub);
                     },
-                )?;
-                self.flag(inst, 0)?;
-                self.op(I::F64ConvertI32U);
+                );
+                self.flag(inst, 0);
                 self.op(I::GlobalSet(up));
-                self.flag(inst, 1)?;
-                self.op(I::F64ConvertI32U);
+                self.flag(inst, 1);
                 self.op(I::GlobalSet(down));
+                Ty::I
             }
             "constant" => self.param(inst, 0),
             "switch" => {
-                self.input(inst, 2)?;
-                self.input(inst, 1)?;
-                self.flag(inst, 0)?;
+                let w = self.input_ty(inst, 1).widen(self.input_ty(inst, 2));
+                self.input_as(inst, 2, w);
+                self.input_as(inst, 1, w);
+                self.flag(inst, 0);
                 self.op(I::Select);
+                w
             }
             "mux" => {
                 let count = inst
@@ -994,27 +1258,30 @@ impl<'a, 'p> Emitter<'a, 'p> {
                     .filter(|p| inst.inputs.contains_key(p.name.as_str()))
                     .count()
                     .max(1);
-                let (s, r) = (self.tmp(), self.tmp());
-                self.input(inst, 0)?;
-                self.c(0.0);
-                self.op(I::F64Max);
+                let w = (1..=count).fold(Ty::I, |t, j| t.widen(self.input_ty(inst, j)));
+                let s = self.tmp_i();
+                let r = self.tmp(w);
+                self.input_as(inst, 0, Ty::I);
+                self.c_i(0);
+                self.pick(Ty::I, true);
                 self.op(I::LocalSet(s));
-                self.input(inst, count)?;
+                self.input_as(inst, count, w);
                 self.op(I::LocalSet(r));
                 for j in (0..count - 1).rev() {
-                    self.input(inst, 1 + j)?;
+                    self.input_as(inst, 1 + j, w);
                     self.op(I::LocalGet(r));
                     self.op(I::LocalGet(s));
-                    self.c((j + 1) as f64);
-                    self.op(I::F64Lt);
+                    self.c_i((j + 1) as i32);
+                    self.op(I::I32LtS);
                     self.op(I::Select);
                     self.op(I::LocalSet(r));
                 }
                 self.op(I::LocalGet(r));
+                w
             }
             "var_get" => {
                 let name = inst.block.var_name().unwrap_or_default().to_owned();
-                self.var_read(&name);
+                self.var_read(&name)
             }
             "var_set" => {
                 let name = inst.block.var_name().unwrap_or_default().to_owned();
@@ -1025,11 +1292,11 @@ impl<'a, 'p> Emitter<'a, 'p> {
                     .get(1)
                     .is_some_and(|p| inst.inputs.contains_key(p.name.as_str()));
                 if enable {
-                    self.flag(inst, 1)?;
+                    self.flag(inst, 1);
                     self.op(I::If(BlockType::Empty));
                 }
-                self.input(inst, 0)?;
-                self.var_write(&name);
+                let from = self.input(inst, 0);
+                self.var_write(&name, from);
                 if enable {
                     self.op(I::End);
                 }
@@ -1043,54 +1310,65 @@ impl<'a, 'p> Emitter<'a, 'p> {
                 };
                 return Err(self.unsupported(inst, reason));
             }
-        }
+        };
         if inst.lib.def.outputs.is_empty() {
             self.op(I::Drop);
         } else {
-            self.set_out(inst, 0);
+            self.set_out(inst, 0, ty);
         }
         Ok(())
     }
 
     fn finish(self) -> WasmModule {
         let mut types = TypeSection::new();
-        types.ty().function([ValType::I32], [ValType::F64]); // tag_get
-        types.ty().function([ValType::I32, ValType::F64], []); // tag_set
-        types.ty().function([], [ValType::I32]); // abi_version
-        types.ty().function([ValType::I32], []); // step
-        types.ty().function([], []); // init
-        types.ty().function([ValType::I32], [ValType::I32]); // gpio_read, adc_read
-        types.ty().function([ValType::I32, ValType::I32], []); // gpio_write, pwm_write
+        types.ty().function([ValType::I32], [ValType::I32]); // 0: tag_get_i, gpio_read, adc_read
+        types.ty().function([ValType::I32], [ValType::F32]); // 1: tag_get_f
+        types.ty().function([ValType::I32, ValType::I32], []); // 2: tag_set_i, output_i, gpio_write, pwm_write
+        types.ty().function([ValType::I32, ValType::F32], []); // 3: tag_set_f, output_f
+        types.ty().function([], [ValType::I32]); // 4: abi_version
+        types.ty().function([ValType::I32], []); // 5: step
+        types.ty().function([], []); // 6: init
 
         let mut imports = ImportSection::new();
-        imports.import("flp", "tag_get", EntityType::Function(0));
-        imports.import("flp", "tag_set", EntityType::Function(1));
-        imports.import("flp", "output", EntityType::Function(1));
+        imports.import("flp", "tag_get_i", EntityType::Function(0));
+        imports.import("flp", "tag_get_f", EntityType::Function(1));
+        imports.import("flp", "tag_set_i", EntityType::Function(2));
+        imports.import("flp", "tag_set_f", EntityType::Function(3));
+        imports.import("flp", "output_i", EntityType::Function(2));
+        imports.import("flp", "output_f", EntityType::Function(3));
         // Hardware imports follow in placeholder order; defined functions come after them.
         let used: Vec<u32> = self.hw.iter().copied().collect();
         let mut allow = Vec::new();
         for &h in &used {
             let name = HW_NAMES[(h - HW_BASE) as usize];
             let ty = if h == HW_GPIO_READ || h == HW_ADC_READ {
-                5
+                0
             } else {
-                6
+                2
             };
             imports.import("flp", name, EntityType::Function(ty));
             allow.push(format!("\"{name}\""));
         }
-        let first = 3 + used.len() as u32;
+        let first = FIXED_IMPORTS + used.len() as u32;
         let remap = |n: u32| match used.iter().position(|&h| h == n) {
-            Some(k) => 3 + k as u32,
+            Some(k) => FIXED_IMPORTS + k as u32,
             None => n,
+        };
+        let peak_i = self.peak_i;
+        let local = |n: u32| {
+            if n >= F_LOCAL_BASE {
+                1 + peak_i + (n - F_LOCAL_BASE)
+            } else {
+                n
+            }
         };
 
         let mut funcs = FunctionSection::new();
-        funcs.function(2);
-        funcs.function(3);
         funcs.function(4);
+        funcs.function(5);
+        funcs.function(6);
         for _ in &self.cuts {
-            funcs.function(3);
+            funcs.function(5);
         }
 
         let mut memory = MemorySection::new();
@@ -1104,14 +1382,18 @@ impl<'a, 'p> Emitter<'a, 'p> {
         });
 
         let mut globals = GlobalSection::new();
-        for &init in &self.globals {
+        for g in &self.globals {
+            let init = match g.ty {
+                Ty::I => ConstExpr::i32_const(g.bits as i32),
+                Ty::F => ConstExpr::f32_const(f32::from_bits(g.bits).into()),
+            };
             globals.global(
                 GlobalType {
-                    val_type: ValType::F64,
+                    val_type: g.ty.val(),
                     mutable: true,
                     shared: false,
                 },
-                &ConstExpr::f64_const(init.into()),
+                &init,
             );
         }
 
@@ -1122,10 +1404,11 @@ impl<'a, 'p> Emitter<'a, 'p> {
         exports.export("init", ExportKind::Func, first + 2);
 
         let mut abi = Function::new([]);
-        abi.instruction(&I::I32Const(2)).instruction(&I::End);
+        abi.instruction(&I::I32Const(3)).instruction(&I::End);
 
         // `step` runs the first piece and calls the rest, each a function of its own with the same locals.
-        let locals = vec![ValType::F64; self.scratch_peak as usize];
+        let mut locals = vec![ValType::I32; self.peak_i as usize];
+        locals.extend(vec![ValType::F32; self.peak_f as usize]);
         let mut bounds = vec![0];
         bounds.extend(self.cuts.iter().copied());
         bounds.push(self.code.len());
@@ -1135,6 +1418,8 @@ impl<'a, 'p> Emitter<'a, 'p> {
             for i in &self.code[w[0]..w[1]] {
                 match i {
                     I::Call(n) if *n >= HW_BASE => f.instruction(&I::Call(remap(*n))),
+                    I::LocalGet(n) => f.instruction(&I::LocalGet(local(*n))),
+                    I::LocalSet(n) => f.instruction(&I::LocalSet(local(*n))),
                     other => f.instruction(other),
                 };
             }
@@ -1155,8 +1440,12 @@ impl<'a, 'p> Emitter<'a, 'p> {
         for t in &self.module.tags {
             if let Some(value) = &t.init {
                 init.instruction(&I::I32Const(t.tag.number as i32));
-                init.instruction(&I::F64Const(pv(value).into()));
-                init.instruction(&I::Call(TAG_SET));
+                let ty = Ty::of(t.tag.ty);
+                match ty {
+                    Ty::I => init.instruction(&I::I32Const(pv(value) as i32)),
+                    Ty::F => init.instruction(&I::F32Const((pv(value) as f32).into())),
+                };
+                init.instruction(&I::Call(if ty == Ty::F { TAG_SET_F } else { TAG_SET_I }));
             }
         }
         init.instruction(&I::End);
@@ -1180,7 +1469,7 @@ impl<'a, 'p> Emitter<'a, 'p> {
             .section(&code);
 
         let mut manifest = format!(
-            "name = \"{}\"\nabi = 2\nallow = [{}]\n",
+            "name = \"{}\"\nabi = 3\nallow = [{}]\n",
             self.module.name,
             allow.join(", ")
         );
