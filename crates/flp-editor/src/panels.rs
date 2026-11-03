@@ -258,7 +258,7 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
     ) {
         app.start_job(JobKind::Build, ui.ctx());
     }
-    if app.has_job() {
+    if app.job_running() {
         if icon(
             ui,
             true,
@@ -276,7 +276,7 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
         let port = app.port_choice();
         app.start_job(JobKind::Upload { port }, ui.ctx());
     }
-    if !app.has_job()
+    if !app.job_running()
         && icon(
             ui,
             has_doc && idle,
@@ -291,7 +291,7 @@ pub fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
         ui,
         &mut app.debug_firmware,
         "🛠",
-        crate::i18n::tr("С отладкой: собирать прошивку с модулем онлайн-отладки (и фоновую сборку тоже); после заливки редактор подключится к плате"),
+        crate::i18n::tr("С отладкой: собирать прошивку с модулем онлайн-отладки; после заливки редактор подключится к плате"),
     );
     ui.separator();
     if app.sim.is_none() {

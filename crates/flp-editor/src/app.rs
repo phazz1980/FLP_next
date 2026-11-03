@@ -30,8 +30,9 @@ use crate::selfupdate;
 use crate::theme::{self, Theme};
 use crate::update::{self, Check, Release};
 
-/// What a build was made from: project folder, schema revision, debug firmware.
-type BuildKey = (PathBuf, u64, bool);
+/// What the master firmware build depends on: project folder (build folder), board with
+/// its settings, and the embedded master sketch.
+type MasterKey = (PathBuf, u64, u64);
 
 /// Identifies the board and its settings: what, besides libraries, decides the core build.
 fn board_hash(board: &impl std::fmt::Debug) -> u64 {
@@ -180,14 +181,12 @@ pub struct EditorApp {
     /// Live values published for the AI while debugging.
     ai_live: crate::ai::SharedLive,
     job: Option<Job>,
-    /// Project and revision the running job was started for.
-    job_rev: Option<BuildKey>,
     /// Build requested while precompilation runs; starts right after it.
     queued: Option<JobKind>,
-    /// Project and revision the build folder holds a release build of.
-    precompiled: Option<BuildKey>,
-    /// Last seen revision and when it changed: precompile after a pause in edits.
-    seen_rev: Option<(u64, Instant)>,
+    /// What the build folder holds a master firmware build of.
+    precompiled: Option<MasterKey>,
+    /// Last seen master key and when it changed: precompile after a pause.
+    seen_rev: Option<(MasterKey, Instant)>,
     pending: Option<Pending>,
     allow_close: bool,
     /// Autosave period in minutes; 0 means off.
@@ -299,7 +298,6 @@ impl EditorApp {
             allow_close: false,
             autosave_minutes: theme::autosave_minutes(),
             last_autosave: Instant::now(),
-            job_rev: None,
             queued: None,
             precompiled: None,
             seen_rev: None,
@@ -1547,18 +1545,21 @@ impl EditorApp {
     }
 
     pub fn start_job(&mut self, kind: JobKind, ctx: &egui::Context) {
-        if let Some(job) = &self.job {
-            // The user's build waits for precompilation, which shares the build folder.
-            if job.background && !matches!(kind, JobKind::Precompile) && self.queued.is_none() {
-                let current = self
-                    .doc
-                    .as_ref()
-                    .map(|d| (d.project.path.clone(), d.revision, self.debug_firmware));
-                // A direct build of an older schema takes seconds to redo: drop it.
-                if job.is_direct() && self.job_rev != current {
-                    job.cancel();
+        if let Some(job) = &mut self.job {
+            // Upload joins the background master build: it stops being background and goes
+            // on as a normal master upload.
+            if let (JobKind::Upload { port }, false) = (&kind, self.debug_firmware) {
+                if job.promote(port.clone()) {
+                    let title = job.title;
+                    self.stop_debug();
+                    self.console.release();
+                    self.info(LogLevel::Info, format!("{title}..."));
+                    return;
                 }
-                // Otherwise it is raised to normal priority: the user waits for it now.
+            }
+            // The user's build waits for precompilation, which shares the core and libraries.
+            if job.background && !matches!(kind, JobKind::Precompile) && self.queued.is_none() {
+                // It is raised to normal priority: the user waits for it now.
                 if !job.is_cancelled() {
                     job.raise_priority();
                     self.info(
@@ -1576,7 +1577,7 @@ impl EditorApp {
             self.console.release();
         }
         let Some(doc) = &self.doc else { return };
-        if doc.report.has_errors() {
+        if doc.report.has_errors() && !matches!(kind, JobKind::Precompile) {
             self.run_check();
             self.info(
                 LogLevel::Error,
@@ -1584,7 +1585,6 @@ impl EditorApp {
             );
             return;
         }
-        self.job_rev = Some((doc.project.path.clone(), doc.revision, self.debug_firmware));
         let ctx = ctx.clone();
         let job = Job::start(
             kind,
@@ -1608,53 +1608,41 @@ impl EditorApp {
         }
     }
 
-    /// Any job runs, background precompilation included.
-    pub fn has_job(&self) -> bool {
-        self.job.is_some()
-    }
-
     /// A foreground job runs; precompilation does not block build buttons.
     pub fn job_running(&self) -> bool {
         self.job.as_ref().is_some_and(|j| !j.background) || self.queued.is_some()
     }
 
-    /// Starts precompilation once the schema has been unchanged for a while.
-    fn precompile(&mut self, ctx: &egui::Context) {
-        const PAUSE: Duration = Duration::from_secs(3);
-        let Some(doc) = &self.doc else { return };
-        let rev = doc.revision;
-        let now = Instant::now();
-        match self.seen_rev {
-            Some((seen, _)) if seen == rev => {}
-            _ => self.seen_rev = Some((rev, now)),
-        }
-        let current = Some((doc.project.path.clone(), rev, self.debug_firmware));
-        // Edits of the schema do not start a build: the core and libraries compile once per
-        // project and board (the schema itself is built by the user's build or module upload).
-        let stable = Some((
+    /// Key of the master firmware build the current project and board need.
+    fn master_key(&self) -> Option<MasterKey> {
+        let doc = self.doc.as_ref()?;
+        Some((
             doc.project.path.clone(),
             board_hash(&doc.project.config.board),
-            self.debug_firmware,
-        ));
-        let quiet = self.seen_rev.is_some_and(|(_, t)| now - t >= PAUSE);
-        // A direct build of an older schema is cancelled, and the latest one starts after
-        // the pause. An arduino-cli build is left to finish: it compiles the core and
-        // libraries, which the next build reuses whatever the schema.
-        if let Some(job) = &self.job {
-            if job.background && job.is_direct() && !job.is_cancelled() && self.job_rev != current {
-                job.cancel();
-            }
+            flp_build::master_sketch_id(),
+        ))
+    }
+
+    /// Builds the master firmware in the background when the project, the board (or its
+    /// settings) or the embedded master sketch changed. Schema edits do not start it:
+    /// the schema goes to the board as modules.
+    fn precompile(&mut self, ctx: &egui::Context) {
+        const PAUSE: Duration = Duration::from_secs(3);
+        let Some(key) = self.master_key() else { return };
+        let now = Instant::now();
+        match &self.seen_rev {
+            Some((seen, _)) if *seen == key => {}
+            _ => self.seen_rev = Some((key.clone(), now)),
         }
-        if self.job.is_some()
-            || self.debug.is_some()
-            || !quiet
-            || doc.report.has_errors()
-            || self.precompiled == stable
-        {
+        let quiet = self
+            .seen_rev
+            .as_ref()
+            .is_some_and(|(_, t)| now - *t >= PAUSE);
+        if self.job.is_some() || !quiet || self.precompiled.as_ref() == Some(&key) {
             return;
         }
-        // Mark it tried even if the build fails, so a broken sketch is not rebuilt in a loop.
-        self.precompiled = stable;
+        // Mark it tried even if the build fails, so a broken build is not repeated in a loop.
+        self.precompiled = Some(key);
         self.start_job(JobKind::Precompile, ctx);
     }
 
@@ -1688,13 +1676,6 @@ impl EditorApp {
                     done = true;
                 }
                 JobEvent::Done(Ok(result)) => {
-                    if let Some(doc) = &self.doc {
-                        self.precompiled = Some((
-                            doc.project.path.clone(),
-                            board_hash(&doc.project.config.board),
-                            self.debug_firmware,
-                        ));
-                    }
                     self.info(LogLevel::Ok, result.message);
                     if let (true, Some(port)) = (result.debug, result.port) {
                         connect = Some(port);

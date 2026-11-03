@@ -2,7 +2,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use flp_build::{
@@ -17,8 +17,8 @@ pub enum JobKind {
     Build,
     /// Build even if the last build is up to date (library or core changed).
     Rebuild,
-    /// Quiet low-priority build after edits, so the user's build finds the firmware
-    /// ready (or at least the core and libraries compiled).
+    /// Quiet low-priority build of the master firmware (no upload), so the upload finds
+    /// it ready. Pressing upload meanwhile promotes it (`Job::promote`).
     Precompile,
     Upload {
         port: Option<String>,
@@ -43,6 +43,15 @@ pub enum JobEvent {
     Done(Result<Done, String>),
 }
 
+/// How far a background master build has gone: upload can still join it until it ends.
+#[derive(Default)]
+struct Promotion {
+    /// The user asked for an upload: flash right after the build (the inner port is
+    /// `None` for automatic choice).
+    upload: Option<Option<String>>,
+    finished: bool,
+}
+
 pub struct Job {
     pub title: &'static str,
     /// Precompilation: no log output, buttons stay enabled.
@@ -50,8 +59,7 @@ pub struct Job {
     /// Upload: the serial port must stay free.
     pub uses_port: bool,
     control: Arc<BuildControl>,
-    /// The build goes without arduino-cli (or is up to date).
-    direct: Arc<AtomicBool>,
+    promotion: Arc<Mutex<Promotion>>,
     rx: Receiver<JobEvent>,
 }
 
@@ -80,8 +88,8 @@ impl Job {
         let uses_port = matches!(kind, JobKind::Upload { .. } | JobKind::UploadModules { .. });
         let control = Arc::new(BuildControl::default());
         let worker = control.clone();
-        let direct = Arc::new(AtomicBool::new(false));
-        let direct_flag = direct.clone();
+        let promotion = Arc::new(Mutex::new(Promotion::default()));
+        let worker_promotion = promotion.clone();
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
             let send = |e: JobEvent| {
@@ -91,7 +99,8 @@ impl Job {
             let report = Report {
                 out: &mut |level, line| send(JobEvent::Line(level, line.to_owned())),
                 note: &mut |level, line| send(JobEvent::Note(level, line.to_owned())),
-                direct: &direct_flag,
+                direct: &AtomicBool::new(false),
+                promotion: &worker_promotion,
             };
             let result = run(kind, debug, &project, &source, &lib, worker, report);
             send(JobEvent::Done(result));
@@ -101,19 +110,35 @@ impl Job {
             background,
             uses_port,
             control,
-            direct,
+            promotion,
             rx,
         }
+    }
+
+    /// Turns a running background master build into a normal upload to `port`: the log
+    /// opens, the priority rises, and the firmware is flashed when the build ends.
+    /// `false` if the build is not a background one or has already finished.
+    pub fn promote(&mut self, port: Option<String>) -> bool {
+        if !self.background {
+            return false;
+        }
+        {
+            let mut state = self.promotion.lock().unwrap();
+            if state.finished {
+                return false;
+            }
+            state.upload = Some(port);
+        }
+        self.background = false;
+        self.uses_port = true;
+        self.title = crate::i18n::tr("Заливка мастер-прошивки");
+        self.control.raise_priority();
+        true
     }
 
     /// Stops the job; it ends with an error soon after.
     pub fn cancel(&self) {
         self.control.cancel();
-    }
-
-    /// Compiles without arduino-cli: cheap to cancel and start again.
-    pub fn is_direct(&self) -> bool {
-        self.direct.load(Ordering::Relaxed)
     }
 
     pub fn is_cancelled(&self) -> bool {
@@ -137,6 +162,7 @@ struct Report<'a> {
     out: &'a mut dyn FnMut(LogLevel, &str),
     note: &'a mut dyn FnMut(LogLevel, &str),
     direct: &'a AtomicBool,
+    promotion: &'a Mutex<Promotion>,
 }
 
 fn run(
@@ -148,8 +174,16 @@ fn run(
     control: Arc<BuildControl>,
     report: Report,
 ) -> Result<Done, String> {
-    let Report { out, note, direct } = report;
+    let Report {
+        out,
+        note,
+        direct,
+        promotion,
+    } = report;
     let background = matches!(kind, JobKind::Precompile);
+    if background {
+        return precompile_master(project, control, promotion, out);
+    }
     if let JobKind::UploadModules { port } = &kind {
         return upload_modules(port.as_deref(), project, lib, debug, out);
     }
@@ -309,6 +343,75 @@ fn run(
             })
         }
     }
+}
+
+/// Background build of the master firmware. If the user presses upload meanwhile, the
+/// finished build is flashed to the chosen port, like a normal master upload.
+fn precompile_master(
+    project: &Project,
+    control: Arc<BuildControl>,
+    promotion: &Mutex<Promotion>,
+    out: &mut dyn FnMut(LogLevel, &str),
+) -> Result<Done, String> {
+    let cli = ArduinoCli::locate()
+        .map_err(|e| e.to_string())?
+        .with_control(control);
+    let board = &project.config.board;
+    let mut log = |l: &str| match flp_build::classify(l) {
+        OutputLine::Stage(s) | OutputLine::Size(s) => out(LogLevel::Info, &s),
+        OutputLine::Warning(s) => out(LogLevel::Warning, &s),
+        OutputLine::Error(s) => out(LogLevel::Error, &s),
+        _ => {}
+    };
+    let build = cli
+        .compile_master(&project.work_dir(), board, true, &mut log)
+        .map_err(|e| e.to_string());
+    let port = {
+        let mut state = promotion.lock().unwrap();
+        state.finished = true;
+        state.upload.take()
+    };
+    let build = build?;
+    let Some(port) = port else {
+        return Ok(Done {
+            message: crate::i18n::tr("Мастер-прошивка собрана").into(),
+            port: None,
+            debug: false,
+        });
+    };
+    let port = cli
+        .choose_port(port.as_deref(), board)
+        .map_err(|e| e.to_string())?;
+    warn_if_other_board(&cli, &port, &board.fqbn, out);
+    out(
+        LogLevel::Info,
+        &crate::i18n::fmt("Заливка мастер-прошивки на {0}...", &[&port]),
+    );
+    let mut explained = None;
+    let result = cli.flash_master(
+        &build,
+        board,
+        &port,
+        &mut |l| match flp_build::explain_upload(l, &board.fqbn) {
+            Some(text) => {
+                out(LogLevel::Info, l);
+                out(LogLevel::Error, &text);
+                explained.get_or_insert(text);
+            }
+            None => match flp_build::classify(l) {
+                OutputLine::Stage(s) | OutputLine::Size(s) => out(LogLevel::Info, &s),
+                OutputLine::Warning(s) => out(LogLevel::Warning, &s),
+                OutputLine::Error(s) => out(LogLevel::Error, &s),
+                _ => {}
+            },
+        },
+    );
+    result.map_err(|e| explained.unwrap_or_else(|| e.to_string()))?;
+    Ok(Done {
+        message: crate::i18n::fmt("Мастер-прошивка залита на {0}", &[&port]),
+        port: Some(port),
+        debug: false,
+    })
 }
 
 /// Builds the master firmware and uploads it: the schema itself goes to the board as

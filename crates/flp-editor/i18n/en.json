@@ -1226,5 +1226,9 @@
  "Путь к w2c2:": "Path to w2c2:",
  "Нужен блокам на Rust/WASM без шаблона C++: переводит block.wasm в C для прошивки": "Needed by Rust/WASM blocks without a C++ template: translates block.wasm to C for the firmware",
  "Проверить w2c2": "Check w2c2",
- "w2c2 найден": "w2c2 found"
+ "w2c2 найден": "w2c2 found",
+ "Заливка мастер-прошивки": "Uploading master firmware",
+ "Заливка мастер-прошивки на {0}...": "Uploading master firmware to {0}...",
+ "Мастер-прошивка собрана": "Master firmware built",
+ "Мастер-прошивка залита на {0}": "Master firmware uploaded to {0}"
 }

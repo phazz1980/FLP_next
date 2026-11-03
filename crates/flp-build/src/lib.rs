@@ -20,6 +20,7 @@ use serde::Deserialize;
 
 mod direct;
 mod master;
+pub use master::{master_sketch_id, MasterBuild};
 pub mod mcu_module;
 mod output;
 pub mod wasm;
