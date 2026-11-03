@@ -549,6 +549,19 @@ static void cmdLine(String line) {
   }
 }
 
+#ifdef FLP_WEB  // memory measurement: Wi-Fi access point + HTTP server (build with -DFLP_WEB)
+#include <WiFi.h>
+#include <WebServer.h>
+static WebServer g_web(80);
+static void webStart() {
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP("flp-test", "12345678");
+  g_web.on("/", []() { g_web.send(200, "text/html", "<!doctype html><title>FLP</title><h1>FLP master</h1>"); });
+  g_web.on("/heap", []() { g_web.send(200, "text/plain", String(ESP.getFreeHeap()) + " " + ESP.getMaxAllocHeap()); });
+  g_web.begin();
+}
+#endif
+
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);  // `tick` and `put` run wasm3 on the loop task
 
 void setup() {
@@ -567,6 +580,9 @@ void setup() {
     }
   }
   xTaskCreatePinnedToCore(watchdogTask, "wdt", 4096, nullptr, 3, nullptr, 1);  // same core + higher priority than modules: deleting a hung task never crosses cores
+#ifdef FLP_WEB
+  webStart();
+#endif
   Serial.println("master ready");
 }
 
@@ -581,5 +597,8 @@ void loop() {
       line += c;
     }
   }
+#ifdef FLP_WEB
+  g_web.handleClient();
+#endif
   delay(2);
 }
