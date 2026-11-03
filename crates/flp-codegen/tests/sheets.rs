@@ -94,3 +94,13 @@ fn empty_sheet_is_refused() {
     let program = Program::build(&project, &lib).unwrap();
     assert_eq!(program.sheet_module(7).unwrap_err(), SheetError::Empty(7));
 }
+
+#[test]
+fn hardware_block_is_refused_with_its_name() {
+    let lib = library();
+    let mut project = background();
+    project.logic.vars[0].retain = false;
+    let program = Program::build(&project, &lib).unwrap();
+    let err = program.wasm_module(1).unwrap_err().to_string();
+    assert!(err.contains("не поддержан"), "{err}");
+}

@@ -329,7 +329,7 @@ fn zero(ty: SignalType) -> ParamValue {
 }
 
 /// `block.port` of a signal.
-fn signal_label(program: &Program, index: usize) -> String {
+pub(crate) fn signal_label(program: &Program, index: usize) -> String {
     for b in &program.blocks {
         for (port, &s) in &b.outputs {
             if s == index {

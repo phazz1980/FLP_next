@@ -10,6 +10,7 @@ flp-core = { path = "../flp-core" }
 flp-debug = { path = "../flp-debug" }
 minijinja = { version = "2", features = ["unicode"] }
 thiserror.workspace = true
+wasm-encoder = "0.263.0"
 
 [dev-dependencies]
 toml.workspace = true

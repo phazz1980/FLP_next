@@ -1,0 +1,78 @@
+[[block]]
+id = "gen"
+type = "generator"
+time_on = "300ms"
+time_off = "500ms"
+
+[[block]]
+id = "slow"
+type = "generator"
+time_on = "1s"
+time_off = "700ms"
+
+[[block]]
+id = "rise"
+type = "rising_edge"
+
+[[block]]
+id = "fall"
+type = "falling_edge"
+
+[[block]]
+id = "tog"
+type = "t_trigger"
+
+[[block]]
+id = "ton"
+type = "timer_on"
+time = "400ms"
+
+[[block]]
+id = "toff"
+type = "timer_off"
+time = "400ms"
+
+[[block]]
+id = "pls"
+type = "pulse"
+time = "700ms"
+
+[[block]]
+id = "deb"
+type = "debounce"
+time = "200ms"
+
+[[block]]
+id = "cnt"
+type = "counter"
+
+[[link]]
+from = "gen.out"
+to = "rise.in"
+[[link]]
+from = "gen.out"
+to = "fall.in"
+[[link]]
+from = "gen.out"
+to = "tog.in"
+[[link]]
+from = "slow.out"
+to = "tog.reset"
+[[link]]
+from = "slow.out"
+to = "ton.in"
+[[link]]
+from = "slow.out"
+to = "toff.in"
+[[link]]
+from = "gen.out"
+to = "pls.in"
+[[link]]
+from = "slow.out"
+to = "deb.in"
+[[link]]
+from = "gen.out"
+to = "cnt.up"
+[[link]]
+from = "slow.out"
+to = "cnt.down"

@@ -15,6 +15,7 @@ pub mod retain;
 pub mod sheet;
 pub mod stats;
 pub mod tasks;
+pub mod wasm;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,6 +27,7 @@ pub use lang::Lang;
 pub use preview::{preview_block, preview_id};
 pub use program::{Input, Instance, Program, Signal, Source};
 pub use sheet::{LocalVar, SheetError, SheetModule, Tag, TagKind, TagUse};
+pub use wasm::{WasmError, WasmModule};
 
 use flp_core::{Library, Project};
 

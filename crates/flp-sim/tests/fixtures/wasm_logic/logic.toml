@@ -1,0 +1,201 @@
+[[var]]
+name = "x"
+type = "float"
+
+[[block]]
+id = "xr"
+type = "var_get"
+var = "x"
+
+[[block]]
+id = "one"
+type = "constant"
+value = 1.0
+
+[[block]]
+id = "nx"
+type = "add"
+
+[[block]]
+id = "xw"
+type = "var_set"
+var = "x"
+
+[[block]]
+id = "three"
+type = "constant"
+value = 3.0
+
+[[block]]
+id = "md"
+type = "mod"
+
+[[block]]
+id = "dv"
+type = "div"
+
+[[block]]
+id = "sc"
+type = "scale"
+in_min = 0.0
+in_max = 10.0
+out_min = 0.0
+out_max = 100.0
+clamp = true
+
+[[block]]
+id = "lm"
+type = "limit"
+lo = 2.0
+hi = 6.0
+
+[[block]]
+id = "gt"
+type = "greater"
+b = 4.5
+
+[[block]]
+id = "cmp"
+type = "compare"
+op = 3
+const = { b = 5.0 }
+
+[[block]]
+id = "hy"
+type = "hysteresis"
+on = 7.0
+off = 3.0
+
+[[block]]
+id = "neg"
+type = "not"
+
+[[block]]
+id = "both"
+type = "and"
+
+[[block]]
+id = "any"
+type = "or"
+
+[[block]]
+id = "one_of"
+type = "xor"
+
+[[block]]
+id = "ff"
+type = "rs_trigger"
+
+[[block]]
+id = "sw"
+type = "switch"
+
+[[block]]
+id = "mx"
+type = "mux"
+count = 3
+
+[[block]]
+id = "lo"
+type = "min"
+
+[[block]]
+id = "hi"
+type = "max"
+
+[[link]]
+from = "xr.out"
+to = "nx.a"
+[[link]]
+from = "one.out"
+to = "nx.b"
+[[link]]
+from = "nx.out"
+to = "xw.in"
+[[link]]
+from = "xr.out"
+to = "md.a"
+[[link]]
+from = "three.out"
+to = "md.b"
+[[link]]
+from = "xr.out"
+to = "dv.a"
+[[link]]
+from = "three.out"
+to = "dv.b"
+[[link]]
+from = "xr.out"
+to = "sc.in"
+[[link]]
+from = "xr.out"
+to = "lm.in"
+[[link]]
+from = "xr.out"
+to = "gt.a"
+[[link]]
+from = "xr.out"
+to = "cmp.a"
+[[link]]
+from = "xr.out"
+to = "hy.in"
+[[link]]
+from = "gt.out"
+to = "neg.in"
+[[link]]
+from = "gt.out"
+to = "both.a"
+[[link]]
+from = "cmp.out"
+to = "both.b"
+[[link]]
+from = "gt.out"
+to = "any.a"
+[[link]]
+from = "cmp.out"
+to = "any.b"
+[[link]]
+from = "gt.out"
+to = "one_of.a"
+[[link]]
+from = "cmp.out"
+to = "one_of.b"
+[[link]]
+from = "gt.out"
+to = "ff.s"
+[[link]]
+from = "hy.out"
+to = "ff.r"
+[[link]]
+from = "cmp.out"
+to = "sw.sel"
+[[link]]
+from = "xr.out"
+to = "sw.a"
+[[link]]
+from = "md.out"
+to = "sw.b"
+[[link]]
+from = "md.out"
+to = "mx.sel"
+[[link]]
+from = "xr.out"
+to = "mx.a"
+[[link]]
+from = "three.out"
+to = "mx.b"
+[[link]]
+from = "sc.out"
+to = "mx.c"
+[[link]]
+from = "xr.out"
+to = "lo.a"
+[[link]]
+from = "three.out"
+to = "lo.b"
+[[link]]
+from = "xr.out"
+to = "hi.a"
+[[link]]
+from = "three.out"
+to = "hi.b"
