@@ -1,0 +1,185 @@
+[[block]]
+id = "t1"
+type = "text_const"
+value = "Hello, World 42"
+
+[[block]]
+id = "t2"
+type = "text_const"
+value = "World"
+
+[[block]]
+id = "t3"
+type = "text_const"
+value = "3,5"
+
+[[block]]
+id = "len"
+type = "text_length"
+
+[[block]]
+id = "find"
+type = "text_find"
+from = 2
+
+[[block]]
+id = "cmp"
+type = "text_compare"
+b = "hello"
+mode = 2
+ignore_case = true
+
+[[block]]
+id = "cmp2"
+type = "text_compare"
+b = "42"
+mode = 3
+
+[[block]]
+id = "cmp3"
+type = "text_compare"
+b = "lo, w"
+mode = 1
+ignore_case = true
+
+[[block]]
+id = "sub"
+type = "text_substring"
+start = 7
+len = 5
+
+[[block]]
+id = "sublen"
+type = "text_length"
+
+[[block]]
+id = "chr"
+type = "text_char"
+const = { index = 4 }
+
+[[block]]
+id = "num"
+type = "text_to_num"
+
+[[block]]
+id = "ntt"
+type = "num_to_text"
+decimals = 2
+prefix = "x="
+
+[[block]]
+id = "nttlen"
+type = "text_length"
+
+[[block]]
+id = "ip"
+type = "ip_to_text"
+const = { a = 192, b = 168, c = 1, d = 7 }
+
+[[block]]
+id = "iplen"
+type = "text_length"
+
+[[block]]
+id = "ipback"
+type = "text_to_ip"
+
+[[block]]
+id = "add"
+type = "text_add_char"
+const = { code = 33 }
+
+[[block]]
+id = "addlen"
+type = "text_length"
+
+[[block]]
+id = "cat"
+type = "text_concat"
+count = 3
+separator = "-"
+
+[[block]]
+id = "catlen"
+type = "text_length"
+
+[[link]]
+from = "t1.out"
+to   = "len.in"
+
+[[link]]
+from = "t1.out"
+to   = "find.text"
+
+[[link]]
+from = "t2.out"
+to   = "find.sub"
+
+[[link]]
+from = "t1.out"
+to   = "cmp.a"
+
+[[link]]
+from = "t1.out"
+to   = "cmp2.a"
+
+[[link]]
+from = "t1.out"
+to   = "cmp3.a"
+
+[[link]]
+from = "t1.out"
+to   = "sub.in"
+
+[[link]]
+from = "sub.out"
+to   = "sublen.in"
+
+[[link]]
+from = "t1.out"
+to   = "chr.text"
+
+[[link]]
+from = "t3.out"
+to   = "num.in"
+
+[[link]]
+from = "num.out"
+to   = "ntt.in"
+
+[[link]]
+from = "ntt.out"
+to   = "nttlen.in"
+
+[[link]]
+from = "ip.out"
+to   = "iplen.in"
+
+[[link]]
+from = "ip.out"
+to   = "ipback.in"
+
+[[link]]
+from = "t1.out"
+to   = "add.text"
+
+[[link]]
+from = "add.out"
+to   = "addlen.in"
+
+[[link]]
+from = "t1.out"
+to   = "cat.a"
+
+[[link]]
+from = "t2.out"
+to   = "cat.b"
+
+[[link]]
+from = "t3.out"
+to   = "cat.c"
+
+[[link]]
+from = "cat.out"
+to   = "catlen.in"
+

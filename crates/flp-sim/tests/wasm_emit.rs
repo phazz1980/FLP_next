@@ -319,3 +319,47 @@ fn uart_bytes_go_through_the_master() {
     module.step(10).unwrap();
     assert_eq!(module.io().uart_cfg.len(), n, "settings are sent once");
 }
+
+#[test]
+fn uart_lines_and_strings_work_in_a_module() {
+    let lib = library();
+    let project = Project::load(repo_path("examples/text_wasm")).unwrap();
+    let program = Program::build(&project, &lib).unwrap();
+    let built = program.wasm_module_with(1, true).unwrap();
+    let manifest = Manifest::parse(&built.manifest).unwrap();
+    assert!(manifest.allow.iter().any(|a| a == "text"), "{manifest:?}");
+    let mut module = McuModule::load(&built.wasm, &manifest, built.watched.len()).unwrap();
+    let out = |module: &McuModule, label: &str| {
+        let i = built.watched.iter().position(|l| l == label).unwrap();
+        module.outputs()[i]
+    };
+    let rx = |module: &mut McuModule, text: &str| {
+        module
+            .io_mut()
+            .uart_rx
+            .entry(2)
+            .or_default()
+            .extend(text.bytes());
+    };
+    // One line per step, as in the C++ block; CR before LF is skipped.
+    rx(&mut module, "25.55\r\nOn\n");
+    module.step(10).unwrap();
+    assert_eq!(module.io().uart_text[&2], b"T=25.5C\r\n");
+    assert_eq!(out(&module, "len.out"), Word::int(5));
+    module.step(10).unwrap();
+    assert_eq!(module.io().uart_text[&2], b"T=25.5C\r\nT=25.5C\r\n");
+    assert_eq!(out(&module, "is_on.out"), Word::int(1));
+    assert_eq!(out(&module, "len.out"), Word::int(2));
+    // A half line waits for its end.
+    rx(&mut module, "7");
+    module.step(10).unwrap();
+    assert_eq!(out(&module, "len.out"), Word::int(2));
+    rx(&mut module, "\n");
+    module.step(10).unwrap();
+    assert_eq!(out(&module, "len.out"), Word::int(1));
+}
+
+#[test]
+fn text_blocks_match_the_simulation() {
+    compare("crates/flp-sim/tests/fixtures/wasm_text", 19, 3, 100);
+}

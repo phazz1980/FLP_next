@@ -52,6 +52,7 @@ const HARDWARE: &[&str] = &[
     "pcf_write",
     "modbus",
     "uart",
+    "text",
 ];
 
 const FUEL_PER_CALL: u64 = 5_000_000;
@@ -152,6 +153,8 @@ pub struct StubIo {
     pub uart_tx: HashMap<i32, Vec<(i32, i32)>>,
     /// Speed changes the module asked for, by port.
     pub uart_speed: HashMap<i32, i32>,
+    /// Text the module sent (op 6), by port.
+    pub uart_text: HashMap<i32, Vec<u8>>,
     /// Milliseconds since the module started; advances with every step.
     pub now_ms: u32,
 }
@@ -533,8 +536,20 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
             "flp",
             "uart",
             |mut c: Caller<'_, Host>, op: i32, port: i32, a: i32, b: i32| -> i32 {
+                let text = if op == 6 {
+                    read_bytes(&mut c, a, b, 1024)
+                } else {
+                    None
+                };
                 let io = &mut c.data_mut().io;
                 match op {
+                    6 => match text {
+                        Some(t) => {
+                            io.uart_text.entry(port).or_default().extend(t);
+                            1
+                        }
+                        None => 0,
+                    },
                     0 => {
                         io.uart_cfg.push((port, a, b));
                         0
@@ -560,6 +575,25 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
         .map_err(bad)?
         .func_wrap(
             "flp",
+            "text",
+            |mut c: Caller<'_, Host>,
+             op: i32,
+             out: i32,
+             cap: i32,
+             a: i32,
+             alen: i32,
+             b: i32,
+             blen: i32|
+             -> i32 {
+                let Some(memory) = c.get_export("memory").and_then(|e| e.into_memory()) else {
+                    return 0;
+                };
+                text_op(memory.data_mut(&mut c), [op, out, cap, a, alen, b, blen])
+            },
+        )
+        .map_err(bad)?
+        .func_wrap(
+            "flp",
             "pcf_write",
             |mut c: Caller<'_, Host>, key: i32, v: i32| -> i32 {
                 c.data_mut().io.pcf_out.insert(key, v);
@@ -572,6 +606,154 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
         })
         .map_err(bad)?;
     Ok(())
+}
+
+/// Port of `h_text` of the master (`master.ino`): operations on strings in the module memory.
+fn text_op(m: &mut [u8], args: [i32; 7]) -> i32 {
+    let [op, out, cap, a, alen, b, blen] = args;
+    let size = m.len();
+    let inm = |p: i32, l: i32| p >= 0 && l >= 0 && p as usize + l as usize <= size;
+    let reads_a = op == 1 || (5..=10).contains(&op);
+    let reads_b = op == 5 || op == 8;
+    let mut ok = (1..=11).contains(&op) && (!reads_a || inm(a, alen)) && (!reads_b || inm(b, blen));
+    if (1..=4).contains(&op) || op == 7 || op == 11 {
+        ok = ok && inm(out, cap);
+    }
+    if op == 6 || op == 10 {
+        ok = ok && inm(out, 4);
+    }
+    if !ok {
+        return if op == 8 || op == 9 { -1 } else { 0 };
+    }
+    let slice = |m: &[u8], p: i32, l: i32| m[p as usize..(p + l) as usize].to_vec();
+    let put = |m: &mut [u8], cur: i32, s: &[u8]| -> i32 {
+        let cur = cur.clamp(0, cap);
+        let n = s.len().min((cap - cur) as usize);
+        let at = (out + cur) as usize;
+        m[at..at + n].copy_from_slice(&s[..n]);
+        cur + n as i32
+    };
+    match op {
+        1 => {
+            let s = slice(m, a, alen);
+            put(m, b, &s)
+        }
+        2 => {
+            let t = format!(
+                "{:.*}",
+                alen.clamp(0, 9) as usize,
+                f64::from(f32::from_bits(a as u32))
+            );
+            put(m, b, &t.as_bytes()[..t.len().min(47)])
+        }
+        3 => put(m, b, a.to_string().as_bytes()),
+        4 => put(m, b, &[(a & 0xFF) as u8]),
+        5 => {
+            let (x, y) = (slice(m, a, alen), slice(m, b, blen));
+            i32::from(text_match(&x, &y, out, cap != 0))
+        }
+        6 => {
+            let n = (alen as usize).min(47);
+            let t = String::from_utf8_lossy(&m[a as usize..a as usize + n]).replace(',', ".");
+            let t = t.trim_matches([' ', '\t', '\r', '\n']);
+            match t.parse::<f64>() {
+                Ok(v) if !t.is_empty() && alen < 48 && v.is_finite() => {
+                    m[out as usize..out as usize + 4].copy_from_slice(&(v as f32).to_le_bytes());
+                    1
+                }
+                _ => 0,
+            }
+        }
+        7 => {
+            let start = b.clamp(0, alen);
+            let end = if blen < 0 || start + blen > alen {
+                alen
+            } else {
+                start + blen
+            };
+            let s = slice(m, a + start, end - start);
+            put(m, 0, &s)
+        }
+        8 => {
+            let from = out.max(0);
+            if from > alen {
+                return -1;
+            }
+            if blen == 0 {
+                return from;
+            }
+            let (x, y) = (slice(m, a, alen), slice(m, b, blen));
+            (from as usize..)
+                .take_while(|&at| at + y.len() <= x.len())
+                .find(|&at| x[at..at + y.len()] == y[..])
+                .map_or(-1, |at| at as i32)
+        }
+        9 => {
+            if b >= 0 && b < alen {
+                i32::from(m[(a + b) as usize])
+            } else {
+                -1
+            }
+        }
+        10 => {
+            let (mut v, mut part, mut digits, mut good) = ([0i32; 4], 0usize, false, true);
+            for &ch in &m[a as usize..(a + alen) as usize] {
+                if ch.is_ascii_digit() {
+                    v[part] = v[part] * 10 + i32::from(ch - b'0');
+                    digits = true;
+                    good &= v[part] <= 255;
+                } else if ch == b'.' && digits && part < 3 {
+                    part += 1;
+                    digits = false;
+                } else {
+                    good = false;
+                }
+                if !good {
+                    break;
+                }
+            }
+            if good && digits && part == 3 {
+                for (i, x) in v.iter().enumerate() {
+                    m[out as usize + i] = *x as u8;
+                }
+                1
+            } else {
+                0
+            }
+        }
+        _ => {
+            let t = format!(
+                "{}.{}.{}.{}",
+                a & 255,
+                (a >> 8) & 255,
+                (a >> 16) & 255,
+                (a >> 24) & 255
+            );
+            put(m, 0, t.as_bytes())
+        }
+    }
+}
+
+/// `textMatch` of the master: mode 0 equal, 1 contains, 2 starts with, 3 ends with.
+fn text_match(a: &[u8], b: &[u8], mode: i32, nocase: bool) -> bool {
+    if (mode == 0 && a.len() != b.len()) || b.len() > a.len() {
+        return false;
+    }
+    let first = if mode == 3 { a.len() - b.len() } else { 0 };
+    let last = match mode {
+        1 => a.len() - b.len(),
+        0 => 0,
+        _ => first,
+    };
+    (first..=last).any(|at| {
+        a[at..at + b.len()].iter().zip(b).all(|(x, y)| {
+            if nocase {
+                x.eq_ignore_ascii_case(y)
+            } else {
+                x == y
+            }
+        })
+    })
 }
 
 fn slot(slots: &[Word], i: i32) -> Word {

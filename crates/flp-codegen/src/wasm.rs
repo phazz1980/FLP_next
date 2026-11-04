@@ -18,6 +18,9 @@ use wasm_encoder::{
 use crate::program::{Instance, Program, Source};
 use crate::sheet::{signal_label, SheetError, SheetModule, TagKind};
 
+mod text;
+use text::{Buf, MEM_START};
+
 const TAG_GET_I: u32 = 0;
 const TAG_GET_F: u32 = 1;
 const TAG_SET_I: u32 = 2;
@@ -40,7 +43,8 @@ const HW_PCF_READ: u32 = HW_BASE + 5;
 const HW_PCF_WRITE: u32 = HW_BASE + 6;
 const HW_MODBUS: u32 = HW_BASE + 7;
 const HW_UART: u32 = HW_BASE + 8;
-const HW_NAMES: [&str; 9] = [
+const HW_TEXT: u32 = HW_BASE + 9;
+const HW_NAMES: [&str; 10] = [
     "gpio_read",
     "gpio_write",
     "adc_read",
@@ -50,6 +54,7 @@ const HW_NAMES: [&str; 9] = [
     "pcf_write",
     "modbus",
     "uart",
+    "text",
 ];
 /// Bit of the pin number passed to `gpio_read` that asks for the pull-up.
 const PIN_PULLUP: i32 = 0x100;
@@ -92,6 +97,13 @@ impl Program<'_> {
         let mut em = Emitter::new(self, &module);
         em.watch = watch;
         em.step_body()?;
+        if em.mem_overflow {
+            return Err(WasmError::Unsupported {
+                block: String::new(),
+                kind: String::new(),
+                reason: "строки не помещаются в 64 КБ памяти модуля".to_owned(),
+            });
+        }
         Ok(em.finish())
     }
 }
@@ -184,6 +196,14 @@ struct Emitter<'a, 'p> {
     /// Offsets in `code` where `step` is cut into separate functions (block boundaries only):
     /// wasm3 refuses a function that overruns its stack height limit.
     cuts: Vec<usize>,
+    /// Next free byte of the module memory (strings live there), see `text.rs`.
+    mem_top: u32,
+    mem_overflow: bool,
+    /// Constant bytes of the data segment: (offset, bytes) and the same by content.
+    data: Vec<(u32, Vec<u8>)>,
+    consts: HashMap<Vec<u8>, u32>,
+    /// Buffers of string signals by signal index.
+    bufs: HashMap<usize, Buf>,
 }
 
 /// Blocks per generated function. wasm3 without tail-call optimization (ESP32 build) recurses once
@@ -219,9 +239,18 @@ impl<'a, 'p> Emitter<'a, 'p> {
             watched: Vec::new(),
             hw: Default::default(),
             cuts: Vec::new(),
+            mem_top: MEM_START,
+            mem_overflow: false,
+            data: Vec::new(),
+            consts: HashMap::new(),
+            bufs: HashMap::new(),
         };
         for &bi in &module.blocks {
             for &signal in program.blocks[bi].outputs.values() {
+                if program.signals[signal].ty == SignalType::String {
+                    em.string_signal(&program.blocks[bi], signal);
+                    continue;
+                }
                 let g = em.global(Ty::of(program.signals[signal].ty), &ParamValue::Int(0));
                 em.signals.insert(signal, g);
             }
@@ -1037,10 +1066,11 @@ impl<'a, 'p> Emitter<'a, 'p> {
         };
         match kind {
             "uart_read" => {
-                if self.named_param(inst, "mode")? == 0 {
-                    return Err(self.unsupported(inst, "чтение строк пока не поддержано в модулях"));
-                }
                 self.uart_setup(port, &u);
+                if self.named_param(inst, "mode")? == 0 {
+                    self.uart_read_line(inst, port)?;
+                    return Ok(true);
+                }
                 let r = self.tmp_i();
                 self.uart_call(1, port, |e| e.c_i(0), 0);
                 self.op(I::LocalSet(r));
@@ -1124,9 +1154,9 @@ impl<'a, 'p> Emitter<'a, 'p> {
     /// `uart_send` in binary mode: the value goes out as 1, 2 or 4 bytes when the trigger fires.
     fn uart_send(&mut self, inst: &Instance, port: i32) -> Result<(), WasmError> {
         let value_ty = inst.inputs.get("value").map(|i| i.ty);
-        if self.named_param(inst, "send_as")? == 0 || value_ty == Some(SignalType::String) {
-            return Err(self.unsupported(inst, "отправка текстом пока не поддержана в модулях"));
-        }
+        let text_mode =
+            self.named_param(inst, "send_as")? == 0 || value_ty == Some(SignalType::String);
+        let is_str = value_ty == Some(SignalType::String);
         let trigger = self.named_param(inst, "trigger")?;
         let ty = self.input_ty(inst, 1);
         let is_bool = value_ty == Some(SignalType::Bool);
@@ -1143,6 +1173,11 @@ impl<'a, 'p> Emitter<'a, 'p> {
         self.flag(inst, 0);
         self.op(I::LocalSet(en));
         let (started, last) = (self.state_i(), self.global(ty, &ParamValue::Int(0)));
+        let last_str = if is_str && trigger == 2 {
+            Some(self.str_last(inst)?)
+        } else {
+            None
+        };
         match trigger {
             0 => {
                 let prev = self.state_i();
@@ -1162,17 +1197,22 @@ impl<'a, 'p> Emitter<'a, 'p> {
                 let deadband = self.named_param_f(inst, "deadband");
                 self.op(I::GlobalGet(started));
                 self.op(I::I32Eqz);
-                self.input_as(inst, 1, ty);
-                self.op(I::GlobalGet(last));
-                if ty == Ty::F && deadband > 0.0 {
-                    self.op(I::F32Sub);
-                    self.op(I::F32Abs);
-                    self.c_f(deadband as f32);
-                    self.op(I::F32Ge);
-                } else if ty == Ty::F {
-                    self.op(I::F32Ne);
+                if let Some(keep) = last_str {
+                    self.str_same(inst, keep)?;
+                    self.op(I::I32Eqz);
                 } else {
-                    self.op(I::I32Ne);
+                    self.input_as(inst, 1, ty);
+                    self.op(I::GlobalGet(last));
+                    if ty == Ty::F && deadband > 0.0 {
+                        self.op(I::F32Sub);
+                        self.op(I::F32Abs);
+                        self.c_f(deadband as f32);
+                        self.op(I::F32Ge);
+                    } else if ty == Ty::F {
+                        self.op(I::F32Ne);
+                    } else {
+                        self.op(I::I32Ne);
+                    }
                 }
                 self.op(I::I32Or);
                 self.op(I::LocalGet(en));
@@ -1185,33 +1225,41 @@ impl<'a, 'p> Emitter<'a, 'p> {
         self.op(I::LocalSet(sent));
         self.op(I::LocalGet(fire));
         self.op(I::If(BlockType::Empty));
-        self.uart_call(
-            3,
-            port,
-            |e| {
-                if ty == Ty::F {
-                    e.input_as(inst, 1, Ty::F);
-                    e.op(I::I32ReinterpretF32);
-                } else {
-                    e.input_as(inst, 1, Ty::I);
-                    if is_bool {
-                        e.c_i(0);
-                        e.op(I::I32Ne);
-                    } else if size == 0 {
-                        e.clamp_int(0, 255);
-                    } else if size == 1 {
-                        e.clamp_int(-32768, 32767);
+        if text_mode {
+            self.uart_send_text(inst, port)?;
+        } else {
+            self.uart_call(
+                3,
+                port,
+                |e| {
+                    if ty == Ty::F {
+                        e.input_as(inst, 1, Ty::F);
+                        e.op(I::I32ReinterpretF32);
+                    } else {
+                        e.input_as(inst, 1, Ty::I);
+                        if is_bool {
+                            e.c_i(0);
+                            e.op(I::I32Ne);
+                        } else if size == 0 {
+                            e.clamp_int(0, 255);
+                        } else if size == 1 {
+                            e.clamp_int(-32768, 32767);
+                        }
                     }
-                }
-            },
-            size,
-        );
+                },
+                size,
+            );
+        }
         self.op(I::LocalSet(sent));
         if trigger == 2 {
             self.op(I::LocalGet(sent));
             self.op(I::If(BlockType::Empty));
-            self.input_as(inst, 1, ty);
-            self.op(I::GlobalSet(last));
+            if let Some(keep) = last_str {
+                self.str_keep(inst, keep)?;
+            } else {
+                self.input_as(inst, 1, ty);
+                self.op(I::GlobalSet(last));
+            }
             self.c_i(1);
             self.op(I::GlobalSet(started));
             self.op(I::End);
@@ -1237,6 +1285,7 @@ impl<'a, 'p> Emitter<'a, 'p> {
             || self.pcf_block(inst)?
             || self.modbus_block(inst)?
             || self.uart_block(inst)?
+            || self.text_block(inst)?
         {
             return Ok(true);
         }
@@ -1336,6 +1385,14 @@ impl<'a, 'p> Emitter<'a, 'p> {
     fn block(&mut self, inst: &Instance) -> Result<(), WasmError> {
         if self.hardware_block(inst)? {
             return Ok(());
+        }
+        let has_string = inst.inputs.values().any(|i| i.ty == SignalType::String)
+            || inst
+                .outputs
+                .values()
+                .any(|&s| self.program.signals[s].ty == SignalType::String);
+        if has_string {
+            return Err(self.unsupported(inst, "строки в этом блоке пока не поддержаны в модулях"));
         }
         let kind = inst.block.kind.as_str();
         let ty = match kind {
@@ -1919,6 +1976,7 @@ impl<'a, 'p> Emitter<'a, 'p> {
             .function([ValType::I32, ValType::I32, ValType::I32], [ValType::I32]); // 10: pcf_read
         types.ty().function([ValType::I32; 5], [ValType::I32]); // 11: modbus
         types.ty().function([ValType::I32; 4], [ValType::I32]); // 12: uart
+        types.ty().function([ValType::I32; 7], [ValType::I32]); // 13: text
 
         let mut imports = ImportSection::new();
         imports.import("flp", "tag_get_i", EntityType::Function(0));
@@ -1939,6 +1997,7 @@ impl<'a, 'p> Emitter<'a, 'p> {
                 HW_PCF_WRITE => 7,
                 HW_MODBUS => 11,
                 HW_UART => 12,
+                HW_TEXT => 13,
                 _ => 2,
             };
             imports.import("flp", name, EntityType::Function(ty));
@@ -1972,8 +2031,8 @@ impl<'a, 'p> Emitter<'a, 'p> {
 
         let mut memory = MemorySection::new();
         memory.memory(MemoryType {
-            // No strings or messages in sheet modules: a page (64 KB) would be taken from the board's heap.
-            minimum: 0,
+            // A page (64 KB) is taken from the board's heap, so only modules with strings ask for it.
+            minimum: u64::from(self.mem_top > MEM_START || self.hw.contains(&HW_TEXT)),
             maximum: None,
             memory64: false,
             shared: false,
@@ -2088,6 +2147,13 @@ impl<'a, 'p> Emitter<'a, 'p> {
             .section(&globals)
             .section(&exports)
             .section(&code);
+        if !self.data.is_empty() {
+            let mut data = wasm_encoder::DataSection::new();
+            for (at, bytes) in &self.data {
+                data.active(0, &ConstExpr::i32_const(*at as i32), bytes.iter().copied());
+            }
+            module.section(&data);
+        }
 
         let mut manifest = format!(
             "name = \"{}\"\nabi = 3\nallow = [{}]\n",

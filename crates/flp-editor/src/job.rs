@@ -347,7 +347,21 @@ fn run(
 
 /// The master drivers the project's blocks need.
 pub fn master_features(project: &Project) -> flp_build::MasterFeatures {
-    flp_build::MasterFeatures::of_blocks(project.logic.blocks.iter().map(|b| b.kind.as_str()))
+    let mut features =
+        flp_build::MasterFeatures::of_blocks(project.logic.blocks.iter().map(|b| b.kind.as_str()));
+    // UART lines and text sending are the default modes of these two blocks.
+    features.text |= project.logic.blocks.iter().any(|b| {
+        let mode = match b.kind.as_str() {
+            "uart_read" => "mode",
+            "uart_send" => "send_as",
+            _ => return false,
+        };
+        matches!(
+            b.params.get(mode),
+            None | Some(flp_core::ParamValue::Int(0))
+        )
+    });
+    features
 }
 
 /// Background build of the master firmware. If the user presses upload meanwhile, the

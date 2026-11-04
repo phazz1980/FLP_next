@@ -21,6 +21,8 @@ pub struct MasterFeatures {
     pub modbus: bool,
     /// UART bytes (`uart`): `uart_read`, `uart_send`, `uart_config`.
     pub uart: bool,
+    /// Text operations (`text`): the `text_*` blocks, UART lines and text sending.
+    pub text: bool,
 }
 
 impl MasterFeatures {
@@ -33,6 +35,9 @@ impl MasterFeatures {
                 "pcf8574_in" | "pcf8574_out" => f.pcf = true,
                 "modbus_rtu_master" | "modbus_rtu_slave" => f.modbus = true,
                 "uart_read" | "uart_send" | "uart_config" => f.uart = true,
+                "ip_to_text" | "text_to_ip" | "text_const" | "text_concat" | "text_length"
+                | "num_to_text" | "text_compare" | "text_to_num" | "text_substring"
+                | "text_find" | "text_char" | "text_add_char" => f.text = true,
                 _ => {}
             }
         }
@@ -46,6 +51,7 @@ impl MasterFeatures {
             (self.pcf, "FLP_PCF"),
             (self.modbus, "FLP_MODBUS"),
             (self.uart, "FLP_UART"),
+            (self.text, "FLP_TEXT"),
         ] {
             if on {
                 text.push_str(&format!(
@@ -200,6 +206,13 @@ mod tests {
         let uart = MasterFeatures::of_blocks(["uart_send"]);
         assert_eq!(uart.defines(), "#define FLP_UART 1\n");
         assert_ne!(master_sketch_id(&none), master_sketch_id(&uart));
+        let text = MasterFeatures::of_blocks(["text_concat", "uart_read"]);
+        assert_eq!(
+            text.defines(),
+            "#define FLP_UART 1
+#define FLP_TEXT 1
+"
+        );
         assert!(sketch_text(&both).ends_with(SKETCH));
     }
 }

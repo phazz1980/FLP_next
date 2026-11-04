@@ -42,7 +42,7 @@ static const uint32_t kStepLimitMs = 100;  // watchdog: a longer step means a ha
 static const int kJournal = 50;
 
 enum { P_GPIO_READ = 1, P_GPIO_WRITE = 2, P_ADC = 4, P_PWM = 8, P_MILLIS = 16, P_SENSOR = 32,
-       P_PCF_READ = 64, P_PCF_WRITE = 128, P_MODBUS = 256, P_UART = 512 };
+       P_PCF_READ = 64, P_PCF_WRITE = 128, P_MODBUS = 256, P_UART = 512, P_TEXT = 1024 };
 
 #if defined(FLP_SENSORS) || defined(FLP_PCF) || defined(FLP_MODBUS)
 #define FLP_HWTASK 1
@@ -571,6 +571,130 @@ m3ApiRawFunction(h_modbus) {
 }
 #endif
 
+#ifdef FLP_TEXT
+// ---- text operations over the module memory ----
+// text(op, out, cap, a, alen, b, blen); a string is (ptr, len), `cur` is where an append continues.
+//  1 append a to out at cur=b             2 append float (bits in a, alen decimals) at cur=b
+//  3 append int a at cur=b                4 append byte a at cur=b        (all return the new length, cap is the room)
+//  5 compare a with b: mode out (0 equal, 1 contains, 2 starts, 3 ends), ignore case cap -> 0/1
+//  6 a as number -> float bits at out, returns 1 if it is one
+//  7 a from b, blen bytes (-1: to the end) -> out (cap), returns the length
+//  8 position of b in a from out, or -1     9 byte of a at b, or -1
+// 10 a as "x.y.z.w" -> 4 bytes at out, returns 1 if valid     11 four bytes packed in a -> "x.y.z.w" in out
+static bool lowerEq(char x, char y) { return tolower((unsigned char)x) == tolower((unsigned char)y); }
+
+static int textMatch(const char *a, int la, const char *b, int lb, int mode, bool nocase) {
+  if (mode == 0 && la != lb) return 0;
+  if (lb > la) return 0;
+  int first = mode == 3 ? la - lb : 0;
+  int last = mode == 1 ? la - lb : mode == 0 ? 0 : first;
+  for (int at = first; at <= last; at++) {
+    int i = 0;
+    while (i < lb && (nocase ? lowerEq(a[at + i], b[i]) : a[at + i] == b[i])) i++;
+    if (i == lb) return 1;
+  }
+  return 0;
+}
+
+// Appends n bytes of s to out at cur (the room is cap); returns the new length.
+static int textPut(char *out, int cap, int cur, const char *s, int n) {
+  if (cur < 0) cur = 0;
+  if (cur > cap) cur = cap;
+  if (n > cap - cur) n = cap - cur;
+  if (n > 0) memmove(out + cur, s, n);
+  return cur + (n > 0 ? n : 0);
+}
+
+m3ApiRawFunction(h_text) {
+  m3ApiReturnType(int32_t);
+  m3ApiGetArg(int32_t, op);
+  m3ApiGetArg(int32_t, out);
+  m3ApiGetArg(int32_t, cap);
+  m3ApiGetArg(int32_t, a);
+  m3ApiGetArg(int32_t, alen);
+  m3ApiGetArg(int32_t, b);
+  m3ApiGetArg(int32_t, blen);
+  char *m = (char *)_mem;
+  bool readsA = op == 1 || (op >= 5 && op <= 10);
+  bool readsB = op == 5 || op == 8;
+  bool writesOut = op >= 1 && op <= 4;
+  bool ok = op >= 1 && op <= 11 && (!readsA || inMem(runtime, a, alen)) && (!readsB || inMem(runtime, b, blen));
+  if (op == 7 || op == 11) writesOut = true;
+  if (writesOut) ok = ok && inMem(runtime, out, cap);
+  if (op == 6 || op == 10) ok = ok && inMem(runtime, out, 4);
+  if (!ok) m3ApiReturn(op == 8 || op == 9 ? -1 : 0);
+  int32_t r = 0;
+  char t[48];
+  switch (op) {
+    case 1: r = textPut(m + out, cap, b, m + a, alen); break;
+    case 2: {
+      float f;
+      memcpy(&f, &a, 4);
+      int n = snprintf(t, sizeof t, "%.*f", alen < 0 ? 0 : alen > 9 ? 9 : alen, (double)f);
+      r = textPut(m + out, cap, b, t, n < 0 ? 0 : n > 47 ? 47 : n);
+      break;
+    }
+    case 3: r = textPut(m + out, cap, b, t, snprintf(t, sizeof t, "%ld", (long)a)); break;
+    case 4: { char c = (char)(a & 0xFF); r = textPut(m + out, cap, b, &c, 1); break; }
+    case 5: r = textMatch(m + a, alen, m + b, blen, out, cap != 0); break;
+    case 6: {
+      // Spaces around are skipped, a decimal comma is accepted.
+      int n = alen < 47 ? alen : 47;
+      memcpy(t, m + a, n);
+      t[n] = 0;
+      char *s = t;
+      while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
+      char *e = s + strlen(s);
+      while (e > s && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r' || e[-1] == '\n')) *--e = 0;
+      for (char *p = s; *p; p++) if (*p == ',') *p = '.';
+      char *end = nullptr;
+      double v = *s ? strtod(s, &end) : 0;
+      if (*s && *end == 0 && alen < 48 && isfinite(v)) {
+        float f = (float)v;
+        memcpy(m + out, &f, 4);
+        r = 1;
+      }
+      break;
+    }
+    case 7: {
+      int start = b < 0 ? 0 : b > alen ? alen : b;
+      int end = blen < 0 || start + blen > alen ? alen : start + blen;
+      r = textPut(m + out, cap, 0, m + a + start, end - start);
+      break;
+    }
+    case 8: {
+      int from = out < 0 ? 0 : out;
+      r = -1;
+      if (from <= alen) {
+        if (blen == 0) r = from;
+        else for (int at = from; at + blen <= alen; at++)
+          if (!memcmp(m + a + at, m + b, blen)) { r = at; break; }
+      }
+      break;
+    }
+    case 9: r = (b >= 0 && b < alen) ? (uint8_t)m[a + b] : -1; break;
+    case 10: {
+      int v[4] = {0, 0, 0, 0}, part = 0;
+      bool digits = false, good = true;
+      for (int i = 0; i < alen && good; i++) {
+        char ch = m[a + i];
+        if (ch >= '0' && ch <= '9') { v[part] = v[part] * 10 + (ch - '0'); digits = true; if (v[part] > 255) good = false; }
+        else if (ch == '.' && digits && part < 3) { part++; digits = false; }
+        else good = false;
+      }
+      if (good && digits && part == 3) { for (int i = 0; i < 4; i++) m[out + i] = (char)v[i]; r = 1; }
+      break;
+    }
+    case 11: {
+      int n = snprintf(t, sizeof t, "%u.%u.%u.%u", (unsigned)(a & 255), (unsigned)((a >> 8) & 255), (unsigned)((a >> 16) & 255), (unsigned)((a >> 24) & 255));
+      r = textPut(m + out, cap, 0, t, n);
+      break;
+    }
+  }
+  m3ApiReturn(r);
+}
+#endif
+
 #ifdef FLP_UART
 // ---- UART bytes of ports 1 and 2 (port 0 is the console of the master's own protocol) ----
 // uart(op, port, a, b):
@@ -578,6 +702,7 @@ m3ApiRawFunction(h_modbus) {
 //        codes: 1 speed, 2 data bits, 3 parity (0 N, 1 E, 2 O), 4 stop bits, 5 rx, 6 tx, 7 de, 8 receive buffer
 //   op 1 next byte or -1      op 2 bytes waiting      op 3 write: a = value bits, b = size code (0: 1 byte, 1: 2, 2: 4);
 //   returns 1 if it fitted into the transmit buffer      op 4 speed now      op 5 set speed a
+//   op 6 write text: a = pointer, b = length; returns 1 if it fitted
 static int32_t g_ua[3][16];
 static bool g_uaOn[3];
 
@@ -627,6 +752,10 @@ m3ApiRawFunction(h_uart) {
       if ((size_t)s->availableForWrite() >= n) { s->write((const uint8_t *)&a, n); r = 1; }
     } else if (op == 4) r = s->baudRate();
     else if (op == 5 && a > 0) s->updateBaudRate(a);
+    else if (op == 6 && inMem(runtime, a, b)) {
+      // Text: b bytes at a, all or nothing.
+      if (s->availableForWrite() >= (b < 64 ? b : 64)) { s->write((const uint8_t *)_mem + a, b); r = 1; }
+    }
   } else if (op == 1) r = -1;
   m3ApiReturn(r);
 }
@@ -665,6 +794,9 @@ static void linkAll(Slot &s, IM3Module m) {
 #ifdef FLP_UART
   if (s.perms & P_UART) L("uart", "i(iiii)", h_uart);
 #endif
+#ifdef FLP_TEXT
+  if (s.perms & P_TEXT) L("text", "i(iiiiiii)", h_text);
+#endif
 }
 
 // ---- module lifecycle (call with g_mgmt held) ----
@@ -680,6 +812,7 @@ static uint16_t parsePerms(const String &a) {
   if (a.indexOf("pcf_write") >= 0) p |= P_PCF_WRITE;
   if (a.indexOf("modbus") >= 0) p |= P_MODBUS;
   if (a.indexOf("uart") >= 0) p |= P_UART;
+  if (a.indexOf("text") >= 0) p |= P_TEXT;
   return p;
 }
 

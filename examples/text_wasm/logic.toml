@@ -1,0 +1,82 @@
+# Строки в модуле: строка с UART2 («25.5» или «ON») разбирается, а ответ собирается
+# из частей и уходит обратно текстом: «T=25.5C» или «команда ON».
+
+[[block]]
+id = "rx"
+type = "uart_read"
+port = 2
+mode = 0
+max_len = 32
+
+[[block]]
+id = "num"
+type = "text_to_num"
+
+[[block]]
+id = "is_on"
+type = "text_compare"
+b = "on"
+ignore_case = true
+
+[[block]]
+id = "temp_text"
+type = "num_to_text"
+decimals = 1
+prefix = "T="
+suffix = "C"
+
+[[block]]
+id = "cmd_text"
+type = "text_concat"
+count = 2
+const = { a = "команда " }
+
+[[block]]
+id = "reply"
+type = "uart_send"
+port = 2
+send_as = 0
+trigger = 1
+ending = 2
+
+[[block]]
+id = "len"
+type = "text_length"
+
+[[block]]
+id = "cfg"
+type = "uart_config"
+uart = 2
+runtime = true
+speed = 115200
+rx = 16
+tx = 17
+const = { new_speed = 115200, apply = false }
+
+[[link]]
+from = "rx.line"
+to   = "num.in"
+
+[[link]]
+from = "rx.line"
+to   = "is_on.a"
+
+[[link]]
+from = "rx.line"
+to   = "len.in"
+
+[[link]]
+from = "num.out"
+to   = "temp_text.in"
+
+[[link]]
+from = "rx.line"
+to   = "cmd_text.b"
+
+[[link]]
+from = "temp_text.out"
+to   = "reply.value"
+
+[[link]]
+from = "rx.ready"
+to   = "reply.en"
