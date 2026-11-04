@@ -36,12 +36,16 @@ const HW_GPIO_WRITE: u32 = HW_BASE + 1;
 const HW_ADC_READ: u32 = HW_BASE + 2;
 const HW_PWM_WRITE: u32 = HW_BASE + 3;
 const HW_SENSOR_READ: u32 = HW_BASE + 4;
-const HW_NAMES: [&str; 5] = [
+const HW_PCF_READ: u32 = HW_BASE + 5;
+const HW_PCF_WRITE: u32 = HW_BASE + 6;
+const HW_NAMES: [&str; 7] = [
     "gpio_read",
     "gpio_write",
     "adc_read",
     "pwm_write",
     "sensor_read",
+    "pcf_read",
+    "pcf_write",
 ];
 /// Bit of the pin number passed to `gpio_read` that asks for the pull-up.
 const PIN_PULLUP: i32 = 0x100;
@@ -714,9 +718,78 @@ impl<'a, 'p> Emitter<'a, 'p> {
         Ok(true)
     }
 
+    /// PCF8574 on I²C: the master talks to the chip, the module takes the last byte
+    /// (`pcf_read(key, period_ms, field)`: 0 byte, 1 answered) or hands over the byte to write
+    /// (`pcf_write(key, byte)` returns whether the chip answered the last write).
+    fn pcf_block(&mut self, inst: &Instance) -> Result<bool, WasmError> {
+        let reading = match inst.block.kind.as_str() {
+            "pcf8574_in" => true,
+            "pcf8574_out" => false,
+            _ => return Ok(false),
+        };
+        if inst.block.expander.is_some() {
+            return Err(self.unsupported(inst, "микросхема PCF8574 на расширителе не поддержана"));
+        }
+        let address = self.const_param(inst, 0)? as i32;
+        let sda = self.const_param(inst, 1)? as i32;
+        let scl = self.const_param(inst, 2)? as i32;
+        let inverted = self.const_param(inst, 3)? != 0.0;
+        let count = (self.const_param(inst, 4)? as usize).clamp(1, 8);
+        // One byte per pin; a negative pin (board default) becomes 0xFF.
+        let key = address & 0x7F | (sda & 0xFF) << 8 | (scl & 0xFF) << 16;
+        if reading {
+            let period_ms = self.const_param(inst, 5)? as i32;
+            let raw = self.tmp_i();
+            self.c_i(key);
+            self.c_i(period_ms);
+            self.c_i(0);
+            self.hw_call(HW_PCF_READ);
+            if inverted {
+                self.c_i(0xFF);
+                self.op(I::I32Xor);
+            }
+            self.op(I::LocalSet(raw));
+            for i in 0..count {
+                if !inst
+                    .outputs
+                    .contains_key(inst.lib.def.outputs[i].name.as_str())
+                {
+                    continue;
+                }
+                self.op(I::LocalGet(raw));
+                self.c_i(1 << i);
+                self.op(I::I32And);
+                self.c_i(0);
+                self.op(I::I32Ne);
+                self.set_out(inst, i, Ty::I);
+            }
+            self.c_i(key);
+            self.c_i(period_ms);
+            self.c_i(1);
+            self.hw_call(HW_PCF_READ);
+            self.set_out(inst, 8, Ty::I);
+        } else {
+            self.c_i(key);
+            self.c_i(0);
+            for i in 0..count {
+                self.input_as(inst, i, Ty::I);
+                self.c_i(1 << i);
+                self.op(I::I32Mul);
+                self.op(I::I32Or);
+            }
+            if inverted {
+                self.c_i(0xFF);
+                self.op(I::I32Xor);
+            }
+            self.hw_call(HW_PCF_WRITE);
+            self.set_out(inst, 0, Ty::I);
+        }
+        Ok(true)
+    }
+
     /// Digital/analog/PWM pins of the board: calls into the master.
     fn hardware_block(&mut self, inst: &Instance) -> Result<bool, WasmError> {
-        if self.sensor_block(inst)? {
+        if self.sensor_block(inst)? || self.pcf_block(inst)? {
             return Ok(true);
         }
         let kind = inst.block.kind.as_str();
@@ -1393,6 +1466,9 @@ impl<'a, 'p> Emitter<'a, 'p> {
         types
             .ty()
             .function([ValType::I32, ValType::I32, ValType::I32], [ValType::F32]); // 9: sensor_read
+        types
+            .ty()
+            .function([ValType::I32, ValType::I32, ValType::I32], [ValType::I32]); // 10: pcf_read
 
         let mut imports = ImportSection::new();
         imports.import("flp", "tag_get_i", EntityType::Function(0));
@@ -1409,6 +1485,8 @@ impl<'a, 'p> Emitter<'a, 'p> {
             let ty = match h {
                 HW_GPIO_READ | HW_ADC_READ => 0,
                 HW_SENSOR_READ => 9,
+                HW_PCF_READ => 10,
+                HW_PCF_WRITE => 7,
                 _ => 2,
             };
             imports.import("flp", name, EntityType::Function(ty));

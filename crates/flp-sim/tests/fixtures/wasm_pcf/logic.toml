@@ -1,0 +1,25 @@
+[[block]]
+id = "inputs"
+type = "pcf8574_in"
+address = 34
+sda = 21
+scl = 22
+inverted = true
+count = 4
+
+[[block]]
+id = "relays"
+type = "pcf8574_out"
+address = 36
+sda = 21
+scl = 22
+inverted = true
+count = 4
+
+[[link]]
+from = "inputs.p0"
+to = "relays.p0"
+
+[[link]]
+from = "inputs.p1"
+to = "relays.p3"

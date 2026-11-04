@@ -13,6 +13,7 @@
 //   swap <name>      reload the module from LittleFS      list      stats      log      del <name>
 #include <LittleFS.h>
 #include <esp_crc.h>
+#include <Wire.h>
 #include <DHT.h>
 #include <DallasTemperature.h>
 #include <OneWire.h>
@@ -30,7 +31,8 @@ static const uint32_t kStepPeriodMs = 10;
 static const uint32_t kStepLimitMs = 100;  // watchdog: a longer step means a hang
 static const int kJournal = 50;
 
-enum { P_GPIO_READ = 1, P_GPIO_WRITE = 2, P_ADC = 4, P_PWM = 8, P_MILLIS = 16, P_SENSOR = 32 };
+enum { P_GPIO_READ = 1, P_GPIO_WRITE = 2, P_ADC = 4, P_PWM = 8, P_MILLIS = 16, P_SENSOR = 32,
+       P_PCF_READ = 64, P_PCF_WRITE = 128 };
 
 // ---- sensors: one task polls them (a read blocks for milliseconds), modules take the last values ----
 enum { SENSOR_DS18B20 = 0, SENSOR_DHT22 = 1 };
@@ -51,6 +53,23 @@ struct Sensor {
 static const int kMaxSensors = 8;
 static Sensor g_sensors[kMaxSensors];
 static SemaphoreHandle_t g_sensorLock;
+
+// ---- PCF8574 expanders on I2C: the same task talks to them, modules take the last byte / hand over a new one ----
+struct Pcf {
+  volatile bool used = false;
+  int32_t key = 0;       // address | sda << 8 | scl << 16 (a pin is one byte, 0xFF = board default)
+  bool writer = false;   // a chip is either read or written by the modules
+  uint32_t period = 20;
+  volatile uint8_t value = 0xFF;  // last byte read / byte to write
+  volatile bool ok = false;
+  // task state
+  bool ready = false;
+  int16_t sent = -1;     // last byte written, -1 = none yet
+  uint32_t last = 0;
+};
+static const int kMaxPcf = 8;
+static Pcf g_pcf[kMaxPcf];
+static bool g_wireStarted = false;
 
 struct Msg { char topic[24]; uint8_t data[64]; uint8_t len; };
 
@@ -307,11 +326,16 @@ static void sensorPoll(Sensor &s, uint32_t now) {
   }
 }
 
+static void pcfPoll(Pcf &c, uint32_t now);
+
 static void sensorTask(void *) {
   for (;;) {
     uint32_t now = millis();
     for (auto &s : g_sensors) {
       if (s.used) sensorPoll(s, now);
+    }
+    for (auto &c : g_pcf) {
+      if (c.used) pcfPoll(c, now);
     }
     vTaskDelay(pdMS_TO_TICKS(20));
   }
@@ -326,6 +350,83 @@ m3ApiRawFunction(h_sensor_read) {
   float v = 0;
   if (s) v = field == 0 ? s->temp : field == 1 ? s->hum : (s->ok ? 1.0f : 0.0f);
   m3ApiReturn(v);
+}
+
+// ---- PCF8574 access ----
+static Pcf *pcfFor(int32_t key, bool writer, uint32_t period, uint8_t first) {
+  Pcf *found = nullptr;
+  xSemaphoreTake(g_sensorLock, portMAX_DELAY);
+  for (auto &c : g_pcf) {
+    if (c.used && c.key == key) { found = &c; break; }
+  }
+  if (!found) {
+    for (auto &c : g_pcf) {
+      if (c.used) continue;
+      c.key = key;
+      c.writer = writer;
+      c.value = first;  // a writer's first byte goes out as the module wants it, not as 0xFF
+      c.period = period < 5 ? 5 : period;
+      c.used = true;  // last: the task sees a complete entry
+      found = &c;
+      break;
+    }
+  }
+  xSemaphoreGive(g_sensorLock);
+  return found;
+}
+
+static void pcfPoll(Pcf &c, uint32_t now) {
+  uint8_t addr = c.key & 0x7F;
+  if (!g_wireStarted) {
+    int sda = c.key >> 8 & 0xFF, scl = c.key >> 16 & 0xFF;
+    if (sda == 0xFF || scl == 0xFF) Wire.begin(); else Wire.begin(sda, scl);
+    g_wireStarted = true;
+  }
+  if (!c.ready) {
+    // A pin reads as an input while the chip holds it high.
+    Wire.beginTransmission(addr);
+    Wire.write(c.writer ? c.value : 0xFF);
+    c.ok = Wire.endTransmission() == 0;
+    if (c.writer && c.ok) c.sent = c.value;
+    c.last = now;
+    c.ready = true;
+    return;
+  }
+  if (c.writer) {
+    // Write on change; while the chip does not answer, retry twice a second.
+    uint8_t want = c.value;
+    if (c.ok ? want != c.sent : now - c.last >= 500) {
+      Wire.beginTransmission(addr);
+      Wire.write(want);
+      c.ok = Wire.endTransmission() == 0;
+      c.last = now;
+      if (c.ok) c.sent = want;
+    }
+  } else if (now - c.last >= c.period) {
+    c.last = now;
+    if (Wire.requestFrom(addr, (uint8_t)1) == 1) { c.value = Wire.read(); c.ok = true; }
+    else c.ok = false;
+  }
+}
+
+m3ApiRawFunction(h_pcf_read) {
+  m3ApiReturnType(int32_t);
+  m3ApiGetArg(int32_t, key);
+  m3ApiGetArg(int32_t, period);
+  m3ApiGetArg(int32_t, field);  // 0 last byte read, 1 chip answered (1 or 0)
+  Pcf *c = pcfFor(key, false, period < 0 ? 0 : period, 0xFF);
+  int32_t v = 0;
+  if (c) v = field == 0 ? c->value : (c->ok ? 1 : 0);
+  m3ApiReturn(v);
+}
+
+m3ApiRawFunction(h_pcf_write) {
+  m3ApiReturnType(int32_t);
+  m3ApiGetArg(int32_t, key);
+  m3ApiGetArg(int32_t, value);
+  Pcf *c = pcfFor(key, true, 0, value & 0xFF);
+  if (c) c->value = value & 0xFF;
+  m3ApiReturn(c && c->ok ? 1 : 0);  // whether the chip answered the last write
 }
 
 static void linkAll(Slot &s, IM3Module m) {
@@ -349,6 +450,8 @@ static void linkAll(Slot &s, IM3Module m) {
   if (s.perms & P_PWM) L("pwm_write", "v(ii)", h_pwm_write);
   if (s.perms & P_MILLIS) L("millis", "i()", h_millis);
   if (s.perms & P_SENSOR) L("sensor_read", "f(iii)", h_sensor_read);
+  if (s.perms & P_PCF_READ) L("pcf_read", "i(iii)", h_pcf_read);
+  if (s.perms & P_PCF_WRITE) L("pcf_write", "i(ii)", h_pcf_write);
 }
 
 // ---- module lifecycle (call with g_mgmt held) ----
@@ -360,6 +463,8 @@ static uint8_t parsePerms(const String &a) {
   if (a.indexOf("pwm_write") >= 0) p |= P_PWM;
   if (a.indexOf("millis") >= 0) p |= P_MILLIS;
   if (a.indexOf("sensor_read") >= 0) p |= P_SENSOR;
+  if (a.indexOf("pcf_read") >= 0) p |= P_PCF_READ;
+  if (a.indexOf("pcf_write") >= 0) p |= P_PCF_WRITE;
   return p;
 }
 

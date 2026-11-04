@@ -1,0 +1,6 @@
+[project]
+name = "wasm_pcf"
+description = "PCF8574 для проверки модуля WASM"
+
+[board]
+fqbn = "esp32:esp32:esp32"

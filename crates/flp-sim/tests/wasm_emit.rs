@@ -181,6 +181,36 @@ fn sensors_read_what_the_master_reports() {
 }
 
 #[test]
+fn pcf8574_goes_through_the_master() {
+    let lib = library();
+    let project = Project::load(repo_path("crates/flp-sim/tests/fixtures/wasm_pcf")).unwrap();
+    let program = Program::build(&project, &lib).unwrap();
+    let built = program.wasm_module_with(1, true).unwrap();
+    let manifest = Manifest::parse(&built.manifest).unwrap();
+    assert_eq!(manifest.allow, ["pcf_read", "pcf_write"]);
+    let mut module = McuModule::load(&built.wasm, &manifest, built.watched.len()).unwrap();
+    let out = |module: &McuModule, label: &str| {
+        let i = built.watched.iter().position(|l| l == label).unwrap();
+        module.outputs()[i]
+    };
+    // Keys are `address | sda << 8 | scl << 16`; fields: 0 the byte, 1 the chip answered.
+    let inputs = 0x22 | 21 << 8 | 22 << 16;
+    let relays = 0x24 | 21 << 8 | 22 << 16;
+    // Optocouplers pull to ground: P1 low and the rest high means "second input pressed".
+    module.io_mut().pcf_in.insert((inputs, 0), 0b1111_1101);
+    module.io_mut().pcf_in.insert((inputs, 1), 1);
+    module.step(50).unwrap();
+    assert_eq!(out(&module, "inputs.p0"), Word::int(0));
+    assert_eq!(out(&module, "inputs.p1"), Word::int(1));
+    assert_eq!(out(&module, "inputs.ok"), Word::int(1));
+    // Inverted relays: P3 on is a low bit, the rest stay high.
+    assert_eq!(module.io().pcf_out[&relays], 0b1111_0111);
+    module.io_mut().pcf_in.insert((inputs, 0), 0b1111_1110);
+    module.step(50).unwrap();
+    assert_eq!(module.io().pcf_out[&relays], 0b1111_1110);
+}
+
+#[test]
 fn sensors_example_switches_pins_from_sensor_values() {
     let lib = library();
     let project = Project::load(repo_path("examples/sensors")).unwrap();

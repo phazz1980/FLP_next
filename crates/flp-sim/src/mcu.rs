@@ -48,6 +48,8 @@ const HARDWARE: &[&str] = &[
     "pwm_write",
     "millis",
     "sensor_read",
+    "pcf_read",
+    "pcf_write",
 ];
 
 const FUEL_PER_CALL: u64 = 5_000_000;
@@ -127,6 +129,11 @@ pub struct StubIo {
     /// What the master reports for a sensor: `(key, field)` as the module passes them
     /// (`kind | index << 4 | pin << 8`; field 0 temperature, 1 humidity, 2 read ok).
     pub sensors: HashMap<(i32, i32), f32>,
+    /// What the master reports for a PCF8574: `(key, field)` as the module passes them
+    /// (`address | sda << 8 | scl << 16`; field 0 the byte read, 1 the chip answered).
+    pub pcf_in: HashMap<(i32, i32), i32>,
+    /// The last byte the module handed over for a chip, by key.
+    pub pcf_out: HashMap<i32, i32>,
     /// Milliseconds since the module started; advances with every step.
     pub now_ms: u32,
 }
@@ -473,6 +480,23 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
                     .get(&(key, field))
                     .copied()
                     .unwrap_or(0.0)
+            },
+        )
+        .map_err(bad)?
+        .func_wrap(
+            "flp",
+            "pcf_read",
+            |c: Caller<'_, Host>, key: i32, _period: i32, field: i32| -> i32 {
+                c.data().io.pcf_in.get(&(key, field)).copied().unwrap_or(0)
+            },
+        )
+        .map_err(bad)?
+        .func_wrap(
+            "flp",
+            "pcf_write",
+            |mut c: Caller<'_, Host>, key: i32, v: i32| -> i32 {
+                c.data_mut().io.pcf_out.insert(key, v);
+                1
             },
         )
         .map_err(bad)?
