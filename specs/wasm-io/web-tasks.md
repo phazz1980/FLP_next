@@ -6,4 +6,4 @@
 - [x] 4 Симулятор: заглушка операций 17–22, тест обмена значениями — проверка: `wasm_emit`
 - [x] 5 Пример `examples/web_wasm`, справка, `docs.md` — проверка: `flp check`
 - [x] 6 Второй шаг: график (`hist`) и «Система» — проверка: `web_page_goes_through_the_master`, сборка мастера
-- [ ] 7 `web_net`: Preferences в мастере, подмена настроек `wifi`/`ethernet` — отдельным шагом
+- [x] 7 `web_net`: Preferences в мастере, подмена настроек `wifi`/`ethernet` (не проверено на железе)

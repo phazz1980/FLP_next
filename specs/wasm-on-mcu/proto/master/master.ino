@@ -34,6 +34,10 @@
 #ifdef FLP_WEB
 #include "flprogWebServer.h"
 #include <esp_mac.h>
+#include <Preferences.h>
+#ifdef FLP_WIFI
+#include <WiFi.h>
+#endif
 #endif
 #endif
 
@@ -801,9 +805,10 @@ m3ApiRawFunction(h_uart) {
 //   Web page (FLP_WEB, ops 17..22; the page and its server are the master's, the module gives layout and values):
 //   op 17 setup: a = 1 layout JSON (b, c pointer, length), 2 widget table (b pointer, c count; 16 bytes each: kind 0 number / 1 text shown /
 //         2 text input / 3 secret text input, rw, dec, reserved, lo, hi, initial as f32), 3 interfaces (b: 1 Wi-Fi, 2 Ethernet, 3 both),
-//         4 password (b, c), 63 setup complete; interfaces mask also has bit 4 = the «Система» page
+//         4 password (b, c), 5 network form defaults (b, c: ten lines ssid, password, dhcp, ip, gateway, subnet, ap ssid, ap password, mode, ap delay; d widget), 63 setup complete; interfaces mask also has bit 4 = the «Система» page
 //   (a chart is kind 4: reserved byte = points, initial = period in seconds; the master samples its value itself)
 //   op 19 show number: a = widget, b = f32 bits;  op 20 show text: a = widget, b, c pointer and length
+//   op 23 network form: a = 0..9 field as text (b pointer, c capacity; returns length), 10 saved flag (cleared), 11 DHCP, 12 mode
 //   op 21 number written by the page: a = widget; returns f32 bits;  op 22 text written by the page: a = widget, b = pointer, c = capacity; returns the length
 // SPI pins, cs and MAC are taken when the Ethernet interface is created (first start); changing them needs a reset.
 #ifdef FLP_WIFI
@@ -833,6 +838,28 @@ struct NetSettings {
 };
 static NetSettings g_net;
 
+#ifdef FLP_WEB
+// Settings of the web page network form (web_net): they replace the ones the Wi-Fi and Ethernet blocks gave.
+// Fields: ssid, password, dhcp, ip, gateway, subnet, ap ssid, ap password, mode, ap delay.
+static String g_wnf[10];
+static bool g_wnOn = false;
+static int g_wnItem = -1;
+static volatile bool g_wnChanged = false;
+static uint32_t g_wnSig = 0;
+static Preferences g_wnPrefs;
+static const char *const kWnKeys[10] = {"wn_s", "wn_p", "wn_d", "wn_i", "wn_g", "wn_m", "wn_a", "wn_b", "wn_o", "wn_w"};
+
+// Changes with the fields that need the radio or the address to be set again (not mode and delay).
+static void wnSign() {
+  uint32_t h = 2166136261UL;
+  for (int k = 0; k < 8; k++) {
+    for (size_t n = 0; n < g_wnf[k].length(); n++) h = (h ^ (uint8_t)g_wnf[k][n]) * 16777619UL;
+    h = (h ^ 0xFF) * 16777619UL;
+  }
+  g_wnSig = h;
+}
+#endif
+
 static uint32_t netHashOf(char (*t)[65], int count, int32_t dhcp) {
   uint32_t h = 2166136261u;
   for (int i = 0; i < count; i++) {
@@ -857,17 +884,52 @@ static void netAddress(FLProgNetworkInterface &net, int32_t dhcp, const char *ip
 
 #ifdef FLP_WIFI
 static void wifiApply() {
-  g_wifi.setClientSsid(g_net.text[0]);
-  g_wifi.setClientPassword(g_net.text[1]);
-  netAddress(g_wifi, g_net.dhcp, g_net.text[2], g_net.text[3], g_net.text[4]);
-  g_wifi.setApSsid(g_net.text[5]);
-  g_wifi.setApPassword(g_net.text[6]);
+  const char *ssid = g_net.text[0], *pass = g_net.text[1], *ip = g_net.text[2], *gw = g_net.text[3], *sn = g_net.text[4];
+  const char *apSsid = g_net.text[5], *apPass = g_net.text[6];
+  int32_t dhcp = g_net.dhcp;
+#ifdef FLP_WEB
+  if (g_wnOn) {
+    ssid = g_wnf[0].c_str(); pass = g_wnf[1].c_str(); dhcp = g_wnf[2] != "0";
+    ip = g_wnf[3].c_str(); gw = g_wnf[4].c_str(); sn = g_wnf[5].c_str();
+    apSsid = g_wnf[6].c_str(); apPass = g_wnf[7].c_str();
+  }
+#endif
+  g_wifi.setClientSsid(ssid);
+  g_wifi.setClientPassword(pass);
+  netAddress(g_wifi, dhcp, ip, gw, sn);
+  g_wifi.setApSsid(apSsid);
+  g_wifi.setApPassword(apPass);
 }
+
+#ifdef FLP_WEB
+// Radio use chosen on the page: 0 client, 1 access point, 2 both, 3 client and the access point only without a connection.
+static uint8_t wnWant() {
+  int m = g_wnf[8].toInt();
+  if (m == 3) {
+    static uint32_t since = 0, joined = 0;
+    static bool apUp = false;
+    if (g_wifi.clientIsReady()) {
+      // The access point stays up for 10 s after the client got connected.
+      if (!joined) joined = millis();
+      if (millis() - joined >= 10000UL) apUp = false;
+      since = millis();
+    } else {
+      joined = 0;
+      if (!apUp && millis() - since >= (uint32_t)g_wnf[9].toInt() * 1000UL) apUp = true;
+    }
+    m = apUp ? 2 : 0;
+  }
+  return m == 0 ? 1 : m == 1 ? 2 : 3;
+}
+#endif
 
 static void wifiPoll() {
   NetSettings &n = g_net;
   if (!n.complete) return;
   uint32_t h = netHashOf(n.text, 8, n.dhcp);
+#ifdef FLP_WEB
+  if (g_wnOn) h ^= g_wnSig;
+#endif
   if (h != n.applied) {
     // New settings (first start, or a new module with other ones): re-apply and restart the radio.
     wifiApply();
@@ -876,6 +938,9 @@ static void wifiPoll() {
     n.appliedOnce = true;
   }
   uint8_t want = (uint8_t)(n.want & 3);
+#ifdef FLP_WEB
+  if (g_wnOn) want = wnWant();
+#endif
   if (want != n.state) {
     n.state = want;
     if (want & 1) g_wifi.clientOn(); else g_wifi.clientOff();
@@ -900,8 +965,16 @@ static void ethPoll() {
     if (n.ethNum[2] != 18 || n.ethNum[3] != 19 || n.ethNum[4] != 23) g_eth->setSpiPins(n.ethNum[2], n.ethNum[3], n.ethNum[4]);
   }
   uint32_t h = netHashOf(n.ethText, 3, n.ethNum[1]);
+  int32_t dhcp = n.ethNum[1];
+  const char *ip = n.ethText[0], *gw = n.ethText[1], *sn = n.ethText[2];
+#ifdef FLP_WEB
+  if (g_wnOn) {
+    h ^= g_wnSig;
+    dhcp = g_wnf[2] != "0"; ip = g_wnf[3].c_str(); gw = g_wnf[4].c_str(); sn = g_wnf[5].c_str();
+  }
+#endif
   if (h != n.ethApplied) {
-    netAddress(*g_eth, n.ethNum[1], n.ethText[0], n.ethText[1], n.ethText[2]);
+    netAddress(*g_eth, dhcp, ip, gw, sn);
     n.ethApplied = h;
   }
   g_eth->pool();
@@ -1077,6 +1150,7 @@ static portMUX_TYPE g_webMux = portMUX_INITIALIZER_UNLOCKED;
 
 static void webEsc(String &o, const char *s) {
   for (; *s; s++) {
+    if (*s == '\n') { o += "\\n"; continue; }
     if (*s == '"' || *s == '\\') o += '\\';
     if ((uint8_t)*s >= 32) o += *s;
   }
@@ -1159,6 +1233,108 @@ static void webHist(FLProgNetworkHttpServer *server) {
   o += ']';
   server->send(200, "application/json", o);
 }
+// Network settings form: the master validates, saves to flash and applies what the page sends.
+static void wnShow() {
+  if (g_wnItem < 0 || g_wnItem >= g_webCount || !g_webItems[g_wnItem].text) return;
+  // Passwords are never sent back.
+  String t = g_wnf[0] + "\n\n" + g_wnf[2] + "\n" + g_wnf[3] + "\n" + g_wnf[4] + "\n" + g_wnf[5] + "\n" + g_wnf[6] + "\n\n" + g_wnf[8] + "\n" + g_wnf[9];
+  portENTER_CRITICAL(&g_webMux);
+  strncpy(g_webItems[g_wnItem].text, t.c_str(), 128);
+  g_webItems[g_wnItem].text[128] = 0;
+  portEXIT_CRITICAL(&g_webMux);
+}
+// The module hands the defaults as ten lines; when they change (another module), the saved page values are dropped.
+static void wnLoad(const String &t, int item) {
+  String init[10], cur;
+  int k = 0;
+  for (size_t i = 0; i < t.length() && k < 10; i++) {
+    if (t[i] == '\n') { init[k++] = cur; cur = ""; } else cur += t[i];
+  }
+  if (k < 10) init[k] = cur;
+  g_wnPrefs.begin("flp", false);
+  uint32_t sig = 2166136261UL;
+  for (int j = 0; j < 10; j++) {
+    for (size_t n = 0; n < init[j].length(); n++) sig = (sig ^ (uint8_t)init[j][n]) * 16777619UL;
+    sig = (sig ^ 0xFF) * 16777619UL;
+  }
+  if (g_wnPrefs.getUInt("wn_h", 0) != sig) {
+    for (int j = 0; j < 10; j++) g_wnPrefs.remove(kWnKeys[j]);
+    g_wnPrefs.putUInt("wn_h", sig);
+  }
+  for (int j = 0; j < 10; j++) g_wnf[j] = g_wnPrefs.getString(kWnKeys[j], init[j]);
+  g_wnItem = item;
+  g_wnOn = true;
+  wnSign();
+  wnShow();
+}
+static bool wnPwOk(const String &p) {
+  if (p.length() == 0) return true;
+  for (size_t k = 0; k < p.length(); k++) if (p[k] < 32 || p[k] > 126) return false;
+  if (p.length() >= 8 && p.length() <= 63) return true;
+  if (p.length() != 64) return false;
+  for (size_t k = 0; k < 64; k++) if (!isxdigit(p[k])) return false;
+  return true;
+}
+static bool wnSsidOk(const String &s) {
+  if (s.length() > 32) return false;
+  for (size_t k = 0; k < s.length(); k++) if ((uint8_t)s[k] < 32) return false;
+  return true;
+}
+static void webNet(FLProgNetworkHttpServer *server) {
+  if (!webAllowed(server)) return;
+  static const char *const a[10] = {"s", "p", "d", "i", "g", "m", "a", "b", "o", "w"};
+  String nf[10];
+  for (int k = 0; k < 10; k++) {
+    nf[k] = server->argumentValueAtKey(a[k]);
+    nf[k].replace("\n", " ");
+    nf[k].replace("\r", " ");
+  }
+  // An empty password keeps the saved one.
+  if (!nf[1].length()) nf[1] = g_wnf[1];
+  if (!nf[7].length()) nf[7] = g_wnf[7];
+  if (!g_wnOn || !wnPwOk(nf[1]) || !wnPwOk(nf[7]) || !wnSsidOk(nf[0]) || !wnSsidOk(nf[6])) {
+    server->send(400, "text/plain", "bad");
+    return;
+  }
+  for (int k = 0; k < 10; k++) {
+    if (nf[k] != g_wnf[k]) {
+      g_wnf[k] = nf[k];
+      // Flash wears out: only changed fields are written.
+      g_wnPrefs.putString(kWnKeys[k], nf[k]);
+      g_wnChanged = true;
+    }
+  }
+  wnSign();
+  wnShow();
+  server->send(200, "text/plain", "ok");
+}
+// Wi-Fi scan: the first call starts it, "?" means still running, then one "ssid<TAB>rssi" per line.
+static void webScan(FLProgNetworkHttpServer *server) {
+  if (!webAllowed(server)) return;
+  String o;
+#ifdef FLP_WIFI
+  int n = WiFi.scanComplete();
+  if (n == WIFI_SCAN_FAILED) {
+    if (WiFi.getMode() == WIFI_MODE_NULL) WiFi.mode(WIFI_STA);
+    else if (WiFi.getMode() == WIFI_MODE_AP) WiFi.mode(WIFI_MODE_APSTA);
+    WiFi.scanNetworks(true);
+    o = "?";
+  } else if (n == WIFI_SCAN_RUNNING) {
+    o = "?";
+  } else {
+    for (int k = 0; k < n; k++) {
+      String s = WiFi.SSID(k);
+      if (!s.length() || o.startsWith(s + "\t") || o.indexOf("\n" + s + "\t") >= 0) continue;
+      String line = s + "\t" + String(WiFi.RSSI(k)) + "\n";
+      // The server answers with at most 2 KB: the strongest networks, each name once.
+      if (o.length() + line.length() > 1800) break;
+      o += line;
+    }
+    WiFi.scanDelete();
+  }
+#endif
+  server->send(200, "text/plain", o);
+}
 // Technical data for the «Система» page; there is no firmware upload over the air in the master.
 static void webInfo(FLProgNetworkHttpServer *server) {
   if (!webAllowed(server)) return;
@@ -1225,6 +1401,10 @@ static void webPoll() {
   g_web.addHandler("/ui/set", webSet);
   g_web.addHandler("/ui/hist", webHist);
   if (g_webSystem) g_web.addHandler("/ui/info", webInfo);
+  if (g_wnOn) {
+    g_web.addHandler("/ui/net", webNet);
+    g_web.addHandler("/ui/scan", webScan);
+  }
 #if defined(FLP_WIFI) && defined(FLP_ETH)
   if (iface == &g_wifi && (g_webMask & 2) && g_eth) g_web.addSharedListener(*g_eth);
 #endif
@@ -1433,6 +1613,12 @@ m3ApiRawFunction(h_net) {
       int32_t k = c < 64 ? c : 64;
       memcpy(g_webPass, (const uint8_t *)_mem + b, k);
       g_webPass[k] = 0;
+    } else if (a == 5 && c > 0 && c < 700 && inMem(runtime, b, c)) {
+      // Network form defaults, ten lines; d = widget of the form.
+      String t;
+      t.reserve(c);
+      for (int32_t i = 0; i < c; i++) t += (char)((const uint8_t *)_mem)[b + i];
+      wnLoad(t, d);
     } else if (a == 63) {
       g_webComplete = true;
     }
@@ -1467,6 +1653,22 @@ m3ApiRawFunction(h_net) {
       memcpy((uint8_t *)_mem + b, g_webItems[a].text, k);
       ((uint8_t *)_mem)[b + k] = 0;
       portEXIT_CRITICAL(&g_webMux);
+      r = k;
+    }
+  } else if (op == 23) {
+    // Network form: a = 0..9 reads a field as text (b pointer, c capacity; returns the length), 10 the "saved" flag (cleared by the read), 11 DHCP, 12 mode.
+    if (a == 10) {
+      r = g_wnChanged;
+      g_wnChanged = false;
+    } else if (a == 11) {
+      r = g_wnf[2] != "0";
+    } else if (a == 12) {
+      r = g_wnf[8].toInt();
+    } else if (a >= 0 && a < 10 && b >= 0 && c > 0 && inMem(runtime, b, c)) {
+      int32_t k = g_wnf[a].length();
+      if (k > c - 1) k = c - 1;
+      memcpy((uint8_t *)_mem + b, g_wnf[a].c_str(), k);
+      ((uint8_t *)_mem)[b + k] = 0;
       r = k;
     }
 #endif

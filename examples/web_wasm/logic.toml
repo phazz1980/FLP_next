@@ -117,3 +117,24 @@ to = "hello.in"
 [[link]]
 from = "level.out"
 to = "trend.in"
+
+[[block]]
+id = "netform"
+type = "web_net"
+caption = "Сеть"
+init_ssid = "home"
+init_dhcp = true
+row = 7
+col = 1
+w = 12
+
+[[block]]
+id = "ssid_shown"
+type = "web_text"
+caption = "Сеть Wi-Fi"
+row = 5
+col = 1
+
+[[link]]
+from = "netform.ssid"
+to = "ssid_shown.in"

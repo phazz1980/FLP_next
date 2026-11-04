@@ -160,6 +160,11 @@ impl Emitter<'_, '_> {
                     3
                 };
             }
+            "web_net" => {
+                // The form is a text widget for the page; the master keeps the settings.
+                w.kind = "net";
+                w.table_kind = 1;
+            }
             "web_text_input" => {
                 w.kind = "textin";
                 w.rw = true;
@@ -279,6 +284,36 @@ impl Emitter<'_, '_> {
         }
         let password = self.text_param(ui, "password");
 
+        let nets: Vec<usize> = widgets
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.block.kind == "web_net")
+            .map(|(n, _)| n)
+            .collect();
+        if nets.len() > 1 {
+            return Err(self.unsupported(
+                widgets[nets[1]],
+                "форма сети на странице может быть только одна",
+            ));
+        }
+        let mut net_init: Option<(String, i32)> = None;
+        if let Some(&n) = nets.first() {
+            let inst = widgets[n];
+            let text = |name: &str| self.text_param(inst, name).replace('\n', " ");
+            let lines = [
+                text("init_ssid"),
+                text("init_password"),
+                ((self.web_num(inst, "init_dhcp") != 0.0) as u8).to_string(),
+                text("init_ip"),
+                text("init_gateway"),
+                text("init_subnet"),
+                text("init_ap_ssid"),
+                text("init_ap_password"),
+                (self.web_num(inst, "init_mode") as i32).to_string(),
+                (self.web_num(inst, "init_ap_delay") as i32).to_string(),
+            ];
+            net_init = Some((lines.join("\n"), n as i32));
+        }
         let done = self.state_i();
         self.op(I::GlobalGet(done));
         self.op(I::I32Eqz);
@@ -289,6 +324,11 @@ impl Emitter<'_, '_> {
         if !ids.is_empty() {
             let t = self.const_str(&table);
             self.net_call4(17, [A::C(2), t.ptr(), A::C(ids.len() as i32), A::C(0)]);
+            self.op(I::Drop);
+        }
+        if let Some((payload, n)) = net_init {
+            let t = self.const_str(payload.as_bytes());
+            self.net_call4(17, [A::C(5), t.ptr(), t.len(), A::C(n)]);
             self.op(I::Drop);
         }
         self.net_call4(17, [A::C(3), A::C(mask), A::C(0), A::C(0)]);
@@ -370,6 +410,27 @@ impl Emitter<'_, '_> {
                     self.op(I::F32Nearest);
                     self.op(I::I32TruncSatF32S);
                     self.set_named(inst, "out_i", Ty::I);
+                }
+            }
+            "web_net" => {
+                // Fields of the form as text: ssid, password, ip, gateway, subnet.
+                for (name, field) in [
+                    ("ssid", 0),
+                    ("password", 1),
+                    ("ip", 3),
+                    ("gateway", 4),
+                    ("subnet", 5),
+                ] {
+                    if let Some(buf) = self.out_buf(inst, name) {
+                        self.net_call4(23, [A::C(field), buf.ptr(), buf.cap(), A::C(0)]);
+                        self.op(I::GlobalSet(buf.len));
+                    }
+                }
+                for (name, field) in [("dhcp", 11), ("mode", 12), ("changed", 10)] {
+                    if inst.outputs.contains_key(name) {
+                        self.net_call4(23, [A::C(field), A::C(0), A::C(0), A::C(0)]);
+                        self.set_named(inst, name, Ty::I);
+                    }
                 }
             }
             "web_text_input" => {

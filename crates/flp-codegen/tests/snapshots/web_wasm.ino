@@ -1,11 +1,16 @@
 // Сгенерировано CrabLogic из проекта «web_wasm». Ручные правки будут перезаписаны.
-// Порядок выполнения: wifi → page → sw → level → name → shown → lamp → trend → prefix → join → hello → led
+// Порядок выполнения: wifi → page → sw → level → name → shown → lamp → trend → prefix → join → hello → led → netform → ssid_shown
+
+// Tells the web page block to add the network form handlers (/ui/net, /ui/scan).
+#define FLP_WEB_NET
 
 #include <Arduino.h>
 #include <flprogNetwork.h>
 #include <flprogWebServer.h>
 #include <service/flprogNetworkOta.h>
 #include <Update.h>
+#include <Preferences.h>
+#include <WiFi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
@@ -18,6 +23,14 @@ float level_out = 0.0f;
 String name_out = String();
 String prefix_out = String();
 String join_out = String();
+String netform_ssid = String();
+String netform_password = String();
+bool netform_dhcp = false;
+String netform_ip = String();
+String netform_gateway = String();
+String netform_subnet = String();
+int32_t netform_mode = 0;
+bool netform_changed = false;
 
 // Обмен сигналами между основной и фоновой задачами
 SemaphoreHandle_t flp_bg_lock;
@@ -67,6 +80,15 @@ void flpUiSample(FlpUiItem *it) {
 }
 #define FLP_WEBUI 1
 
+// web_net: общий код
+// Network settings shared with the Wi-Fi and Ethernet blocks: ssid, password, dhcp, ip, gateway, subnet, ap ssid, ap password, mode, ap delay.
+struct FlpNet {
+  String f[10];
+  // Mode actually applied: differs from f[8] in the automatic access point mode.
+  int eff = 0;
+};
+FlpNet flpNet;
+
 // wifi: wifi
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgOnBoardWifiInterface flpWifi;
@@ -75,6 +97,14 @@ uint32_t wifi_net_t = 0;
 bool wifi_net_due = true;
 // Applied radio state: 0 off, 1 client, 2 access point, 3 both; 255 not yet.
 uint8_t wifi_state = 255;
+// Settings signature (FNV-1a): compared every cycle without building a String.
+uint32_t wifi_cfg = 0;
+bool wifi_cfg_set = false;
+static void wifi_mix(uint32_t &h, const char *s) {
+  for (; *s; s++) h = (h ^ (uint8_t)*s) * 16777619u;
+  h = (h ^ '|') * 16777619u;
+}
+static void wifi_mix(uint32_t &h, const String &s) { wifi_mix(h, s.c_str()); }
 // Address shown on the address output; the text is rebuilt only when it changes.
 uint32_t wifi_ip_raw = 0;
 // Web server (port 80): the web_ui block adds its pages to it.
@@ -212,7 +242,7 @@ function mk(d,i){
     else if(v&&!(v.length>=8&&v.length<=63)&&!/^[0-9a-fA-F]{64}$/.test(v))e=r[1]+': нужно 8-63 символа'});
    return e}
   bt.onclick=function(){var er=chk();if(er){ms.textContent=er;return}var q='';nm.forEach(function(r){q+='&'+r[0]+'='+encodeURIComponent(r[0]=='d'?(nf.d.checked?'1':'0'):nf[r[0]].value)});
-   F('/ui/net?i='+i+q).then(function(){ms.textContent='Сохранено и применено';nf.p.value=nf.b.value=''}).catch(function(){ms.textContent='Ошибка'})};
+   F('/ui/net?n='+i+q).then(function(){ms.textContent='Сохранено и применено';nf.p.value=nf.b.value=''}).catch(function(){ms.textContent='Ошибка'})};
   sl.style.display='none';sl.onchange=function(){if(sl.value)nf.s.value=sl.value};
   function scn(){F('/ui/scan').then(function(r){return r.text()}).then(function(t){
    if(t=='?'){setTimeout(scn,1500);return}
@@ -328,6 +358,13 @@ FlpUiItem trend_ui = {"web_chart", "История уровня", "%", 1, 7, 24,
 // hello: web_text
 FlpUiItem hello_ui = {"web_text", "Привет", "", 13, 5, 12, 2, 1, false, 0, 0, 0, 0, 0};
 
+// netform: web_net
+FlpUiItem netform_ui = {"web_net", "Сеть", "", 1, 7, 12, 18, 1, true, 0, 0, 0, 0, 0};
+Preferences netform_prefs;
+
+// ssid_shown: web_text
+FlpUiItem ssid_shown_ui = {"web_text", "Сеть Wi-Fi", "", 1, 5, 12, 2, 1, false, 0, 0, 0, 0, 0};
+
 // page: web_ui
 void page_esc(String &o, const char *s) {
   for (; *s; s++) {
@@ -426,7 +463,8 @@ void page_set(FLProgNetworkHttpServer *server) {
 // Network settings form: the widget block validates and saves what is stored here.
 void page_net(FLProgNetworkHttpServer *server) {
   if (!page_allowed(server)) return;
-  int i = server->argumentValueAtKey("i").toInt();
+  // The widget is `n`: `i` is the IP address of the form.
+  int i = server->argumentValueAtKey("n").toInt();
   if (i >= 0 && i < flpUiCount && !strcmp(flpUiItems[i]->kind, "web_net")) {
     String a[10] = {"s", "p", "d", "i", "g", "m", "a", "b", "o", "w"};
     String t;
@@ -513,6 +551,35 @@ void page_info(FLProgNetworkHttpServer *server) {
   server->send(200, "application/json", o);
 }
 
+// netform: web_net
+// The page sends the whole form as ten lines (ssid, password, dhcp, ip, gateway, subnet, ap ssid, ap password, mode, ap delay); an empty password keeps the saved one.
+String netform_line(const String &s, int n) {
+  int from = 0;
+  for (int k = 0; k < n; k++) {
+    int p = s.indexOf('\n', from);
+    if (p < 0) return String();
+    from = p + 1;
+  }
+  int e = s.indexOf('\n', from);
+  return e < 0 ? s.substring(from) : s.substring(from, e);
+}
+void netform_show() {
+  netform_ui.text = flpNet.f[0] + "\n\n" + flpNet.f[2] + "\n" + flpNet.f[3] + "\n" + flpNet.f[4] + "\n" + flpNet.f[5] + "\n" + flpNet.f[6] + "\n\n" + flpNet.f[8] + "\n" + flpNet.f[9];
+}
+static bool netform_pwok(const String &p) {
+  if (p.length() == 0) return true;
+  for (size_t k = 0; k < p.length(); k++) if (p[k] < 32 || p[k] > 126) return false;
+  if (p.length() >= 8 && p.length() <= 63) return true;
+  if (p.length() != 64) return false;
+  for (size_t k = 0; k < 64; k++) if (!isxdigit(p[k])) return false;
+  return true;
+}
+static bool netform_ssidok(const String &s) {
+  if (s.length() > 32) return false;
+  for (size_t k = 0; k < s.length(); k++) if ((uint8_t)s[k] < 32) return false;
+  return true;
+}
+
 // Фоновая задача: ядро 0, блоки плат с признаком «фоновая задача»
 void flp_bg_task(void *) {
   for (;;) {
@@ -522,9 +589,54 @@ void flp_bg_task(void *) {
 
     // wifi: wifi
     {
+      // Settings written while running are applied when they change.
+      uint32_t cfg = 2166136261u;
+      wifi_mix(cfg, flpNet.f[0].c_str());
+      wifi_mix(cfg, flpNet.f[1].c_str());
+      wifi_mix(cfg, ((flpNet.f[2] != "0")) ? "1" : "0");
+      wifi_mix(cfg, flpNet.f[3].c_str());
+      wifi_mix(cfg, flpNet.f[4].c_str());
+      wifi_mix(cfg, flpNet.f[5].c_str());
+      wifi_mix(cfg, flpNet.f[6].c_str());
+      wifi_mix(cfg, flpNet.f[7].c_str());
+      if (!wifi_cfg_set || cfg != wifi_cfg) {
+        bool first = !wifi_cfg_set;
+        wifi_cfg_set = true;
+        wifi_cfg = cfg;
+        flpWifi.setClientSsid(flpNet.f[0].c_str());
+        flpWifi.setClientPassword(flpNet.f[1].c_str());
+        if ((flpNet.f[2] != "0")) {
+          flpWifi.setDhcp();
+        } else {
+          IPAddress addr;
+          addr.fromString(flpNet.f[3].c_str());
+          flpWifi.localIP(addr);
+          addr.fromString(flpNet.f[4].c_str());
+          flpWifi.gateway(addr);
+          flpWifi.dns(addr);
+          addr.fromString(flpNet.f[5].c_str());
+          flpWifi.subnet(addr);
+          flpWifi.resetDhcp();
+        }
+        flpWifi.setApSsid(flpNet.f[6].c_str());
+        flpWifi.setApPassword(flpNet.f[7].c_str());
+        if (!first) {
+          flpWifi.clientOff();
+          flpWifi.apOff();
+          wifi_state = 255;
+        }
+      }
+    }
+    {
       // Client and access point follow the inputs; switched only when they change.
-      int32_t mode = 0;
+      int32_t mode = flpNet.eff;
+      if (mode < 0 || mode > 2) {
+        mode = 0;
+      }
       uint8_t state = (uint8_t)(mode + 1);
+      if (!String(flpNet.f[0].c_str()).length()) {
+        state &= ~1;
+      }
       if (state != wifi_state) {
         wifi_state = state;
         if (state & 1) {
@@ -598,6 +710,59 @@ void flp_bg_task(void *) {
     // hello: web_text
     hello_ui.text = join_out_in;
 
+    // netform: web_net
+    netform_changed = false;
+    if (netform_ui.value != 0) {
+      netform_ui.value = 0;
+      String t = netform_ui.text;
+      String pw = netform_line(t, 1);
+      String apw = netform_line(t, 7);
+      String nf[10] = { netform_line(t, 0), pw.length() ? pw : flpNet.f[1], netform_line(t, 2), netform_line(t, 3), netform_line(t, 4), netform_line(t, 5), netform_line(t, 6), apw.length() ? apw : flpNet.f[7], netform_line(t, 8), netform_line(t, 9)};
+      bool valid = netform_pwok(pw) && netform_pwok(apw) && netform_ssidok(nf[0]) && netform_ssidok(nf[6]);
+      static const char *keys[10] = {"_s", "_p", "_d", "_i", "_g", "_m", "_a", "_b", "_o", "_w"};
+      for (int k = 0; k < 10 && valid; k++) {
+        if (nf[k] != flpNet.f[k]) {
+          flpNet.f[k] = nf[k];
+          // Flash wears out: only changed fields are written.
+          netform_prefs.putString((String("netform") + keys[k]).c_str(), nf[k]);
+          netform_changed = true;
+        }
+      }
+      netform_show();
+    }
+    {
+      // Automatic mode: client only, the access point joins when there is no connection for the delay.
+      static uint32_t since = 0;
+      static bool apUp = false;
+      static uint32_t joined = 0;
+      int m = flpNet.f[8].toInt();
+      if (m == 3) {
+        if (WiFi.status() == WL_CONNECTED) {
+          // The access point stays up for 10 s after the client got connected, then goes off.
+          if (!joined) joined = millis();
+          if (millis() - joined >= 10000UL) apUp = false;
+          since = millis();
+        } else {
+          joined = 0;
+          if (!apUp && millis() - since >= (uint32_t)flpNet.f[9].toInt() * 1000UL) {
+            apUp = true;
+          }
+        }
+        m = apUp ? 2 : 0;
+      }
+      flpNet.eff = m;
+    }
+    netform_ssid = flpNet.f[0];
+    netform_password = flpNet.f[1];
+    netform_dhcp = flpNet.f[2] != "0";
+    netform_ip = flpNet.f[3];
+    netform_gateway = flpNet.f[4];
+    netform_subnet = flpNet.f[5];
+    netform_mode = flpNet.f[8].toInt();
+
+    // ssid_shown: web_text
+    ssid_shown_ui.text = netform_ssid;
+
     xSemaphoreTake(flp_bg_lock, portMAX_DELAY);
     sw_out_pub = sw_out;
     sw_out_pend = sw_out_pend || sw_out;
@@ -616,23 +781,13 @@ void setup() {
   name_out.reserve(32);
   prefix_out.reserve(14);
   join_out.reserve(32);
+  netform_ssid.reserve(32);
+  netform_password.reserve(32);
+  netform_ip.reserve(32);
+  netform_gateway.reserve(32);
+  netform_subnet.reserve(32);
 
   // wifi: wifi
-  flpWifi.setClientSsid("MyNetwork");
-  flpWifi.setClientPassword("secret123");
-  if (true) {
-    flpWifi.setDhcp();
-  } else {
-    IPAddress addr;
-    addr.fromString("192.168.1.177");
-    flpWifi.localIP(addr);
-    addr.fromString("192.168.1.1");
-    flpWifi.gateway(addr);
-    flpWifi.dns(addr);
-    addr.fromString("255.255.255.0");
-    flpWifi.subnet(addr);
-    flpWifi.resetDhcp();
-  }
   wifi_ota.setHostname("wifi");
 
   // page: web_ui
@@ -688,6 +843,42 @@ void setup() {
 
   // led: digital_out
   pinMode(2, OUTPUT);
+
+  // netform: web_net
+  netform_prefs.begin("flp", false);
+  // Defaults come from the editor: when they change (a new flash with other settings), the saved page values are dropped.
+  {
+    String init[10] = { "MyNetwork", "secret123", "1", "192.168.1.177", "192.168.1.1", "255.255.255.0", "FLP_ESP32", "", "0", "30"};
+    uint32_t sig = 2166136261UL;
+    for (int k = 0; k < 10; k++) {
+      for (size_t n = 0; n < init[k].length(); n++) sig = (sig ^ (uint8_t)init[k][n]) * 16777619UL;
+      sig = (sig ^ 0xFF) * 16777619UL;
+    }
+    if (netform_prefs.getUInt("netform_h", 0) != sig) {
+      static const char *keys[10] = {"_s", "_p", "_d", "_i", "_g", "_m", "_a", "_b", "_o", "_w"};
+      for (int k = 0; k < 10; k++) netform_prefs.remove((String("netform") + keys[k]).c_str());
+      netform_prefs.putUInt("netform_h", sig);
+    }
+  }
+  flpNet.f[0] = netform_prefs.getString("netform_s", "MyNetwork");
+  flpNet.f[1] = netform_prefs.getString("netform_p", "secret123");
+  flpNet.f[2] = netform_prefs.getString("netform_d", "1");
+  flpNet.f[3] = netform_prefs.getString("netform_i", "192.168.1.177");
+  flpNet.f[4] = netform_prefs.getString("netform_g", "192.168.1.1");
+  flpNet.f[5] = netform_prefs.getString("netform_m", "255.255.255.0");
+  flpNet.f[6] = netform_prefs.getString("netform_a", "FLP_ESP32");
+  flpNet.f[7] = netform_prefs.getString("netform_b", "");
+  flpNet.f[8] = netform_prefs.getString("netform_o", "0");
+  flpNet.f[9] = netform_prefs.getString("netform_w", "30");
+  netform_show();
+  flpUiAdd(&netform_ui);
+  netform_ui.color = "";
+  netform_ui.back = "";
+
+  // ssid_shown: web_text
+  flpUiAdd(&ssid_shown_ui);
+  ssid_shown_ui.color = "";
+  ssid_shown_ui.back = "";
 
   // Фоновая задача стартует после настройки всех блоков
   xTaskCreatePinnedToCore(flp_bg_task, "flp_bg", 10240, nullptr, 1, nullptr, 0);

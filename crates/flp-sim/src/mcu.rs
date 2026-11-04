@@ -193,6 +193,12 @@ pub struct StubIo {
     pub web_pass: String,
     /// The module finished the setup (op 17, code 63).
     pub web_complete: bool,
+    /// Network form (op 17, code 5): the ten fields (ssid, password, dhcp, ip, gateway, subnet, ap ssid,
+    /// ap password, mode, ap delay) and the widget of the form; empty until the module sets it up.
+    pub web_net: Vec<String>,
+    pub web_net_item: i32,
+    /// The page saved new settings; read (and cleared) by op 23, code 10.
+    pub web_net_changed: bool,
     /// Unix time (UTC) the NTP service knows; `None` until the first sync.
     pub net_unix: Option<u32>,
     /// Seconds since the last sync.
@@ -698,6 +704,17 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
                                         String::from_utf8_lossy(&t).into_owned();
                                 }
                             }
+                            5 => {
+                                let t = read_bytes(&mut c, b, len, 700);
+                                if let Some(t) = t {
+                                    let io = &mut c.data_mut().io;
+                                    io.web_net = String::from_utf8_lossy(&t)
+                                        .split('\n')
+                                        .map(str::to_string)
+                                        .collect();
+                                    io.web_net_item = d;
+                                }
+                            }
                             63 => c.data_mut().io.web_complete = true,
                             _ => {}
                         }
@@ -749,6 +766,32 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
                         data[p..p + n].copy_from_slice(&text.as_bytes()[..n]);
                         data[p + n] = 0;
                         return n as i32;
+                    }
+                    23 => {
+                        let io = &mut c.data_mut().io;
+                        return match a {
+                            10 => std::mem::take(&mut io.web_net_changed) as i32,
+                            11 => io.web_net.get(2).is_some_and(|v| v != "0") as i32,
+                            12 => io.web_net.get(8).and_then(|v| v.parse().ok()).unwrap_or(0),
+                            0..=9 => {
+                                let text = io.web_net.get(a as usize).cloned().unwrap_or_default();
+                                let Some(memory) =
+                                    c.get_export("memory").and_then(|e| e.into_memory())
+                                else {
+                                    return 0;
+                                };
+                                let data = memory.data_mut(&mut c);
+                                let (p, cap) = (b as usize, len.max(0) as usize);
+                                if cap == 0 || p + cap > data.len() {
+                                    return 0;
+                                }
+                                let n = text.len().min(cap - 1);
+                                data[p..p + n].copy_from_slice(&text.as_bytes()[..n]);
+                                data[p + n] = 0;
+                                n as i32
+                            }
+                            _ => 0,
+                        };
                     }
                     14 => {
                         let Some(f) = read_bytes(&mut c, a, b, 128) else {

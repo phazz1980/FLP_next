@@ -194,7 +194,7 @@ function mk(d,i){
     else if(v&&!(v.length>=8&&v.length<=63)&&!/^[0-9a-fA-F]{64}$/.test(v))e=r[1]+': нужно 8-63 символа'});
    return e}
   bt.onclick=function(){var er=chk();if(er){ms.textContent=er;return}var q='';nm.forEach(function(r){q+='&'+r[0]+'='+encodeURIComponent(r[0]=='d'?(nf.d.checked?'1':'0'):nf[r[0]].value)});
-   F('/ui/net?i='+i+q).then(function(){ms.textContent='Сохранено и применено';nf.p.value=nf.b.value=''}).catch(function(){ms.textContent='Ошибка'})};
+   F('/ui/net?n='+i+q).then(function(){ms.textContent='Сохранено и применено';nf.p.value=nf.b.value=''}).catch(function(){ms.textContent='Ошибка'})};
   sl.style.display='none';sl.onchange=function(){if(sl.value)nf.s.value=sl.value};
   function scn(){F('/ui/scan').then(function(r){return r.text()}).then(function(t){
    if(t=='?'){setTimeout(scn,1500);return}
@@ -528,7 +528,8 @@ void ui_set(FLProgNetworkHttpServer *server) {
 // Network settings form: the widget block validates and saves what is stored here.
 void ui_net(FLProgNetworkHttpServer *server) {
   if (!ui_allowed(server)) return;
-  int i = server->argumentValueAtKey("i").toInt();
+  // The widget is `n`: `i` is the IP address of the form.
+  int i = server->argumentValueAtKey("n").toInt();
   if (i >= 0 && i < flpUiCount && !strcmp(flpUiItems[i]->kind, "web_net")) {
     String a[10] = {"s", "p", "d", "i", "g", "m", "a", "b", "o", "w"};
     String t;
