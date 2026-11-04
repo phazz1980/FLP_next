@@ -1,0 +1,102 @@
+# Веб-страница в модуле WASM: страницей занимается мастер. Переключатель на странице включает
+# светодиод, ползунок показывается числом и индикатором, введённое имя возвращается строкой.
+
+[[block]]
+id = "wifi"
+type = "wifi"
+ssid = "MyNetwork"
+password = "secret123"
+web_update = false
+
+[[block]]
+id = "page"
+type = "web_ui"
+title = "Модуль"
+password = "1234"
+
+[[block]]
+id = "sw"
+type = "web_switch"
+caption = "Светодиод"
+row = 1
+col = 1
+
+[[block]]
+id = "level"
+type = "web_slider"
+caption = "Уровень"
+min = 0.0
+max = 100.0
+initial = 25.0
+unit = "%"
+row = 3
+col = 1
+
+[[block]]
+id = "name"
+type = "web_text_input"
+caption = "Имя"
+initial = "FLP"
+row = 5
+col = 1
+
+[[block]]
+id = "shown"
+type = "web_value"
+caption = "Уровень"
+unit = "%"
+decimals = 0
+row = 1
+col = 13
+
+[[block]]
+id = "lamp"
+type = "web_led"
+caption = "Горит"
+row = 3
+col = 13
+
+[[block]]
+id = "hello"
+type = "web_text"
+caption = "Привет"
+row = 5
+col = 13
+
+[[block]]
+id = "prefix"
+type = "text_const"
+value = "Привет, "
+
+[[block]]
+id = "join"
+type = "text_concat"
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[link]]
+from = "sw.out"
+to = "led.in"
+
+[[link]]
+from = "sw.out"
+to = "lamp.in"
+
+[[link]]
+from = "level.out"
+to = "shown.in"
+
+[[link]]
+from = "prefix.out"
+to = "join.a"
+
+[[link]]
+from = "name.out"
+to = "join.b"
+
+[[link]]
+from = "join.out"
+to = "hello.in"

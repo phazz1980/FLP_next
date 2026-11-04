@@ -10,7 +10,7 @@ const MSG_CAP: u32 = 128;
 
 impl Emitter<'_, '_> {
     /// `net(op, a, b, c, d)`; leaves the result on the stack.
-    fn net_call4(&mut self, op: i32, args: [A; 4]) {
+    pub(super) fn net_call4(&mut self, op: i32, args: [A; 4]) {
         self.c_i(op);
         for a in args {
             self.push_arg(a);

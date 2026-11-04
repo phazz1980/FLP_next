@@ -31,6 +31,9 @@
 #endif
 #ifdef FLP_NET
 #include "flprogNetwork.h"
+#ifdef FLP_WEB
+#include "flprogWebServer.h"
+#endif
 #endif
 
 static const int kMaxSlots = 4;
@@ -794,6 +797,12 @@ m3ApiRawFunction(h_uart) {
 //   op 14 subscribe: a, b filter (pointer, length); returns the slot (the same for equal filters of any module), -1 when full
 //   op 15 slot text: a = slot, b = pointer, c = capacity; returns the length
 //   op 16 slot counter: a = slot; grows with every message that matched the filter
+//   Web page (FLP_WEB, ops 17..22; the page and its server are the master's, the module gives layout and values):
+//   op 17 setup: a = 1 layout JSON (b, c pointer, length), 2 widget table (b pointer, c count; 16 bytes each: kind 0 number / 1 text shown /
+//         2 text input / 3 secret text input, rw, dec, reserved, lo, hi, initial as f32), 3 interfaces (b: 1 Wi-Fi, 2 Ethernet, 3 both),
+//         4 password (b, c), 63 setup complete
+//   op 19 show number: a = widget, b = f32 bits;  op 20 show text: a = widget, b, c pointer and length
+//   op 21 number written by the page: a = widget; returns f32 bits;  op 22 text written by the page: a = widget, b = pointer, c = capacity; returns the length
 // SPI pins, cs and MAC are taken when the Ethernet interface is created (first start); changing them needs a reset.
 #ifdef FLP_WIFI
 static FLProgOnBoardWifiInterface g_wifi;
@@ -1036,6 +1045,128 @@ static int32_t mqttSubscribe(const char *filter) {
 }
 #endif
 
+#ifdef FLP_WEB
+// ---- Web page: one per board, served by the master from the registry the module fills (ops 17..22 of net) ----
+// The page (flp_html, put in front of the sketch by the build) is the same as in a C++ sketch; the module gives the
+// layout JSON, a table of the widgets and then the values of every widget each step.
+struct WebItem {
+  uint8_t kind;  // 0 number, 1 text shown, 2 text input, 3 secret text input
+  bool rw;       // the page may change the value
+  uint8_t dec;   // digits after the point
+  float lo, hi;
+  volatile float value;
+  char *text;    // 129 bytes for the text kinds
+};
+static const int kWebMax = 32;
+static WebItem g_webItems[kWebMax];
+static int g_webCount = 0;
+static char *g_webLayout = nullptr;
+static int g_webLayoutCap = 0;
+static char g_webPass[65];
+static int32_t g_webMask = 1;  // 1 Wi-Fi, 2 Ethernet
+static volatile bool g_webComplete = false;
+static bool g_webBegun = false;
+static FLProgNetworkHttpServer g_web;
+static portMUX_TYPE g_webMux = portMUX_INITIALIZER_UNLOCKED;
+
+static void webEsc(String &o, const char *s) {
+  for (; *s; s++) {
+    if (*s == '"' || *s == '\\') o += '\\';
+    if ((uint8_t)*s >= 32) o += *s;
+  }
+}
+// The page itself is public; everything it reads or writes needs the password (argument k).
+static bool webAllowed(FLProgNetworkHttpServer *server) {
+  if (!g_webPass[0] || server->argumentValueAtKey("k") == g_webPass) return true;
+  server->send(403, "text/plain", "auth");
+  return false;
+}
+static void webPage(FLProgNetworkHttpServer *server) {
+  if (!server->sendStreamProgmem(200, "text/html; charset=utf-8", flp_html, strlen(flp_html))) {
+    server->write((const uint8_t *)flp_html, strlen(flp_html));
+  }
+}
+static void webLayout(FLProgNetworkHttpServer *server) {
+  if (!webAllowed(server)) return;
+  server->send(200, "application/json", g_webLayout ? g_webLayout : "{\"i\":[]}");
+}
+static void webState(FLProgNetworkHttpServer *server) {
+  if (!webAllowed(server)) return;
+  String o = "[";
+  char buf[129];
+  for (int i = 0; i < g_webCount; i++) {
+    WebItem &it = g_webItems[i];
+    if (i) o += ',';
+    if (it.kind == 0) {
+      o += String((float)it.value, (unsigned int)it.dec);
+    } else {
+      buf[0] = 0;
+      // A secret field is never sent back to the page.
+      if (it.text && it.kind != 3) {
+        portENTER_CRITICAL(&g_webMux);
+        strcpy(buf, it.text);
+        portEXIT_CRITICAL(&g_webMux);
+      }
+      o += '"';
+      webEsc(o, buf);
+      o += '"';
+    }
+  }
+  o += ']';
+  server->send(200, "application/json", o);
+}
+static void webSet(FLProgNetworkHttpServer *server) {
+  if (!webAllowed(server)) return;
+  if (server->hasArgumentKey("i") && server->hasArgumentKey("v")) {
+    int i = server->argumentValueAtKey("i").toInt();
+    if (i >= 0 && i < g_webCount && g_webItems[i].rw) {
+      WebItem &it = g_webItems[i];
+      String v = server->argumentValueAtKey("v");
+      if (it.kind >= 2 && it.text) {
+        v.replace("\n", " ");
+        v.replace("\r", " ");
+        portENTER_CRITICAL(&g_webMux);
+        strncpy(it.text, v.c_str(), 128);
+        it.text[128] = 0;
+        portEXIT_CRITICAL(&g_webMux);
+      } else if (it.kind == 0) {
+        float f = v.toFloat();
+        if (it.hi > it.lo) f = constrain(f, it.lo, it.hi);
+        it.value = f;
+      }
+    }
+  }
+  server->send(200, "text/plain", "ok");
+}
+static void webHist(FLProgNetworkHttpServer *server) {
+  if (!webAllowed(server)) return;
+  server->send(200, "application/json", "[]");
+}
+
+static void webPoll() {
+  if (!g_webComplete || g_webBegun) return;
+  FLProgNetworkInterface *iface = nullptr;
+#ifdef FLP_WIFI
+  if ((g_webMask & 1) && g_net.complete) iface = &g_wifi;
+#endif
+#ifdef FLP_ETH
+  if (!iface && (g_webMask & 2) && g_eth) iface = g_eth;
+#endif
+  if (!iface) return;
+  g_web.setBrowserHeaderCompatibility(true);
+  g_webBegun = g_web.begin(*iface, 80);
+  if (!g_webBegun) return;
+  g_web.addHandler("/", webPage);
+  g_web.addHandler("/ui/layout", webLayout);
+  g_web.addHandler("/ui/state", webState);
+  g_web.addHandler("/ui/set", webSet);
+  g_web.addHandler("/ui/hist", webHist);
+#if defined(FLP_WIFI) && defined(FLP_ETH)
+  if (iface == &g_wifi && (g_webMask & 2) && g_eth) g_web.addSharedListener(*g_eth);
+#endif
+}
+#endif
+
 static void netPoll() {
   NetSettings &n = g_net;
 #ifdef FLP_WIFI
@@ -1073,6 +1204,9 @@ static void netPoll() {
   }
 #ifdef FLP_MQTT
   mqttPoll();
+#endif
+#ifdef FLP_WEB
+  webPoll();
 #endif
 }
 
@@ -1185,6 +1319,79 @@ m3ApiRawFunction(h_net) {
     }
   } else if (op == 16) {
     r = (a >= 0 && a < g_mqttSlotCount) ? (int32_t)g_mqttSlots[a].seq : 0;
+#endif
+#ifdef FLP_WEB
+  } else if (op == 17) {
+    if (a == 1 && c > 0 && c < 8192 && inMem(runtime, b, c)) {
+      // The layout JSON; the buffer is reused when the module is loaded again.
+      if (!g_webLayout || c + 1 > g_webLayoutCap) {
+        free(g_webLayout);
+        g_webLayout = (char *)malloc(c + 1);
+        g_webLayoutCap = g_webLayout ? c + 1 : 0;
+      }
+      if (g_webLayout) {
+        memcpy(g_webLayout, (const uint8_t *)_mem + b, c);
+        g_webLayout[c] = 0;
+      }
+    } else if (a == 2 && c > 0 && c <= kWebMax && inMem(runtime, b, c * 16)) {
+      // Table of the widgets, 16 bytes each: kind, rw, dec, reserved, lo, hi, initial (f32).
+      const uint8_t *t = (const uint8_t *)_mem + b;
+      for (int i = 0; i < c; i++, t += 16) {
+        WebItem &it = g_webItems[i];
+        it.kind = t[0];
+        it.rw = t[1] != 0;
+        it.dec = t[2];
+        memcpy(&it.lo, t + 4, 4);
+        memcpy(&it.hi, t + 8, 4);
+        float init;
+        memcpy(&init, t + 12, 4);
+        it.value = init;
+        if (it.kind >= 1 && !it.text) it.text = (char *)calloc(129, 1);
+        if (it.text) it.text[0] = 0;
+      }
+      g_webCount = c;
+    } else if (a == 3) {
+      g_webMask = b;
+    } else if (a == 4 && c >= 0 && inMem(runtime, b, c)) {
+      int32_t k = c < 64 ? c : 64;
+      memcpy(g_webPass, (const uint8_t *)_mem + b, k);
+      g_webPass[k] = 0;
+    } else if (a == 63) {
+      g_webComplete = true;
+    }
+  } else if (op == 19) {
+    // Show a number: a = widget, b = f32 bits.
+    if (a >= 0 && a < g_webCount) {
+      float f;
+      memcpy(&f, &b, 4);
+      g_webItems[a].value = f;
+    }
+  } else if (op == 20) {
+    // Show a text: a = widget, b, c = pointer and length.
+    if (a >= 0 && a < g_webCount && g_webItems[a].text && c >= 0 && inMem(runtime, b, c)) {
+      int32_t k = c < 128 ? c : 128;
+      portENTER_CRITICAL(&g_webMux);
+      memcpy(g_webItems[a].text, (const uint8_t *)_mem + b, k);
+      g_webItems[a].text[k] = 0;
+      portEXIT_CRITICAL(&g_webMux);
+    }
+  } else if (op == 21) {
+    // The number the page wrote, as f32 bits.
+    if (a >= 0 && a < g_webCount) {
+      float f = g_webItems[a].value;
+      memcpy(&r, &f, 4);
+    }
+  } else if (op == 22) {
+    // The text the page wrote: a = widget, b = pointer, c = capacity; returns the length.
+    if (a >= 0 && a < g_webCount && g_webItems[a].text && b >= 0 && c > 0 && inMem(runtime, b, c)) {
+      portENTER_CRITICAL(&g_webMux);
+      int32_t k = strlen(g_webItems[a].text);
+      if (k > c - 1) k = c - 1;
+      memcpy((uint8_t *)_mem + b, g_webItems[a].text, k);
+      ((uint8_t *)_mem)[b + k] = 0;
+      portEXIT_CRITICAL(&g_webMux);
+      r = k;
+    }
 #endif
   }
   m3ApiReturn(r);
@@ -1586,19 +1793,6 @@ static void cmdLine(String line) {
   }
 }
 
-#ifdef FLP_WEB  // memory measurement: Wi-Fi access point + HTTP server (build with -DFLP_WEB)
-#include <WiFi.h>
-#include <WebServer.h>
-static WebServer g_web(80);
-static void webStart() {
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP("flp-test", "12345678");
-  g_web.on("/", []() { g_web.send(200, "text/html", "<!doctype html><title>FLP</title><h1>FLP master</h1>"); });
-  g_web.on("/heap", []() { g_web.send(200, "text/plain", String(ESP.getFreeHeap()) + " " + ESP.getMaxAllocHeap()); });
-  g_web.begin();
-}
-#endif
-
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);  // `tick` and `put` run wasm3 on the loop task
 
 void setup() {
@@ -1622,9 +1816,6 @@ void setup() {
     }
   }
   xTaskCreatePinnedToCore(watchdogTask, "wdt", 4096, nullptr, 3, nullptr, kCore);  // same core + higher priority than modules: deleting a hung task never crosses cores
-#ifdef FLP_WEB
-  webStart();
-#endif
   Serial.println("master ready");
 }
 
@@ -1639,8 +1830,5 @@ void loop() {
       line += c;
     }
   }
-#ifdef FLP_WEB
-  g_web.handleClient();
-#endif
   delay(2);
 }

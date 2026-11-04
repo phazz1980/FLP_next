@@ -487,3 +487,47 @@ fn mqtt_goes_through_the_master() {
         [("flp/echo".to_string(), "1".to_string(), false)]
     );
 }
+
+#[test]
+fn web_page_goes_through_the_master() {
+    let lib = library();
+    let project = Project::load(repo_path("examples/web_wasm")).unwrap();
+    let program = Program::build(&project, &lib).unwrap();
+    let built = program.wasm_module_with(1, true).unwrap();
+    let manifest = Manifest::parse(&built.manifest).unwrap();
+    assert!(manifest.allow.iter().any(|a| a == "net"), "{manifest:?}");
+    let mut module = McuModule::load(&built.wasm, &manifest, built.watched.len()).unwrap();
+    module.step(10).unwrap();
+    let io = module.io();
+    // The setup comes once, before any widget works: layout, table, interface, password.
+    assert!(io.web_complete);
+    assert_eq!(io.web_mask, 1);
+    assert_eq!(io.web_pass, "1234");
+    assert!(
+        io.web_layout.starts_with("{\"t\":\"Модуль\""),
+        "{}",
+        io.web_layout
+    );
+    assert!(io.web_layout.contains("\"k\":\"slider\""));
+    assert!(io.web_layout.contains("\"k\":\"textin\""));
+    let kinds: Vec<u8> = io.web_items.iter().map(|i| i.kind).collect();
+    assert_eq!(kinds, [0, 0, 2, 0, 0, 1]);
+    // The slider keeps its initial value; the text input its initial text.
+    assert_eq!(io.web_items[1].value, 25.0);
+    assert_eq!(io.web_items[2].text, "FLP");
+    module.step(10).unwrap();
+    let io = module.io();
+    assert_eq!(io.web_items[3].value, 25.0, "value shown from the slider");
+    assert_eq!(io.web_items[5].text, "Привет, FLP");
+    // The page changes the switch, the slider and the name.
+    let io = module.io_mut();
+    io.web_items[0].value = 1.0;
+    io.web_items[1].value = 70.0;
+    io.web_items[2].text = "Мир".to_string();
+    module.step(10).unwrap();
+    module.step(10).unwrap();
+    let io = module.io();
+    assert_eq!(io.web_items[3].value, 70.0);
+    assert_eq!(io.web_items[4].value, 1.0, "led follows the switch");
+    assert_eq!(io.web_items[5].text, "Привет, Мир");
+}

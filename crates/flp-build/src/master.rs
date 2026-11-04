@@ -31,6 +31,8 @@ pub struct MasterFeatures {
     pub eth: bool,
     /// The MQTT client (`mqtt`).
     pub mqtt: bool,
+    /// The web page (`web_ui` and widgets): the master serves the page and the module fills it.
+    pub web: bool,
 }
 
 impl MasterFeatures {
@@ -63,6 +65,14 @@ impl MasterFeatures {
                     f.mqtt = true;
                     f.text = true;
                 }
+                "web_ui" | "web_net" | "web_button" | "web_switch" | "web_label" | "web_clock"
+                | "web_led" | "web_text" | "web_icon" | "web_image" | "web_shape" | "web_gauge"
+                | "web_tank" | "web_value" | "web_slider" | "web_text_input" | "web_input"
+                | "web_chart" => {
+                    f.net = true;
+                    f.web = true;
+                    f.text = true;
+                }
                 "ip_to_text" | "text_to_ip" | "text_const" | "text_concat" | "text_length"
                 | "num_to_text" | "text_compare" | "text_to_num" | "text_substring"
                 | "text_find" | "text_char" | "text_add_char" => f.text = true,
@@ -84,6 +94,7 @@ impl MasterFeatures {
             (self.wifi, "FLP_WIFI"),
             (self.eth, "FLP_ETH"),
             (self.mqtt, "FLP_MQTT"),
+            (self.web, "FLP_WEB"),
         ] {
             if on {
                 text.push_str(&format!(
@@ -133,7 +144,21 @@ const MASTER_PARTITIONS: &str = "no_ota";
 
 /// The master sketch with the defines of its drivers in front.
 fn sketch_text(features: &MasterFeatures) -> String {
-    format!("{}{SKETCH}", features.defines())
+    format!("{}{}{SKETCH}", features.defines(), page_text(features))
+}
+
+/// The web page as a flash constant: the same page a C++ sketch serves, so it is not copied into
+/// the sketch file.
+fn page_text(features: &MasterFeatures) -> String {
+    if features.web {
+        format!(
+            "const char flp_html[] PROGMEM = R\"FLPUI({})FLPUI\";
+",
+            flp_blocks::device_page()
+        )
+    } else {
+        String::new()
+    }
 }
 
 /// Identifies the master sketch with these drivers: changes when the firmware (protocol,
@@ -149,6 +174,8 @@ pub fn master_sketch_id(features: &MasterFeatures) -> u64 {
     });
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     (base, features).hash(&mut hasher);
+    // The page is part of the firmware: a new page needs a new master.
+    page_text(features).hash(&mut hasher);
     hasher.finish()
 }
 
@@ -290,6 +317,11 @@ mod tests {
         let mqtt = MasterFeatures::of_blocks(["mqtt", "mqtt_publish", "wifi"]);
         assert!(mqtt.defines().contains("FLP_MQTT") && mqtt.defines().contains("FLP_NET"));
         assert_ne!(master_sketch_id(&net), master_sketch_id(&mqtt));
+        let web = MasterFeatures::of_blocks(["web_ui", "web_slider", "wifi"]);
+        assert!(web.defines().contains("FLP_WEB") && web.defines().contains("FLP_NET"));
+        assert!(sketch_text(&web).contains("const char flp_html[] PROGMEM"));
+        assert!(!sketch_text(&mqtt).contains("const char flp_html[] PROGMEM"));
+        assert_ne!(master_sketch_id(&net), master_sketch_id(&web));
         assert_ne!(master_sketch_id(&none), master_sketch_id(&net));
         assert!(sketch_text(&both).ends_with(SKETCH));
     }

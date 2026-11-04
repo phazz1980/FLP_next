@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+flp-blocks = { path = "../flp-blocks" }
 flp-codegen = { path = "../flp-codegen" }
 flp-core = { path = "../flp-core" }
 serde.workspace = true

@@ -182,6 +182,17 @@ pub struct StubIo {
     pub mqtt_filters: Vec<String>,
     /// Last message and counter of each slot (ops 15, 16).
     pub mqtt_slots: Vec<(String, i32)>,
+    /// Layout JSON the module gave the web page (`net` op 17, code 1).
+    pub web_layout: String,
+    /// Widgets of the page (op 17, code 2); the module writes values (ops 19, 20) and reads what
+    /// the page set (ops 21, 22). Tests play the page by changing `value` and `text`.
+    pub web_items: Vec<WebStubItem>,
+    /// Interfaces the page is served on (op 17, code 3): 1 Wi-Fi, 2 Ethernet.
+    pub web_mask: i32,
+    /// Password of the page (op 17, code 4).
+    pub web_pass: String,
+    /// The module finished the setup (op 17, code 63).
+    pub web_complete: bool,
     /// Unix time (UTC) the NTP service knows; `None` until the first sync.
     pub net_unix: Option<u32>,
     /// Seconds since the last sync.
@@ -649,6 +660,95 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
                             _ => 0,
                         };
                     }
+                    17 => {
+                        match a {
+                            1 => {
+                                let t = read_bytes(&mut c, b, len, 8191);
+                                if let Some(t) = t {
+                                    c.data_mut().io.web_layout =
+                                        String::from_utf8_lossy(&t).into_owned();
+                                }
+                            }
+                            2 => {
+                                let t = read_bytes(&mut c, b, len * 16, 32 * 16);
+                                if let Some(t) = t {
+                                    let f = |r: &[u8]| f32::from_le_bytes(r.try_into().unwrap());
+                                    c.data_mut().io.web_items = t
+                                        .as_chunks::<16>()
+                                        .0
+                                        .iter()
+                                        .map(|r| WebStubItem {
+                                            kind: r[0],
+                                            rw: r[1] != 0,
+                                            dec: r[2],
+                                            lo: f(&r[4..8]),
+                                            hi: f(&r[8..12]),
+                                            value: f(&r[12..16]),
+                                            text: String::new(),
+                                        })
+                                        .collect();
+                                }
+                            }
+                            3 => c.data_mut().io.web_mask = b,
+                            4 => {
+                                let t = read_bytes(&mut c, b, len, 64);
+                                if let Some(t) = t {
+                                    c.data_mut().io.web_pass =
+                                        String::from_utf8_lossy(&t).into_owned();
+                                }
+                            }
+                            63 => c.data_mut().io.web_complete = true,
+                            _ => {}
+                        }
+                        return 0;
+                    }
+                    19 => {
+                        if let Some(it) = c.data_mut().io.web_items.get_mut(a as usize) {
+                            it.value = f32::from_bits(b as u32);
+                        }
+                        return 0;
+                    }
+                    20 => {
+                        let t = read_bytes(&mut c, b, len, 128);
+                        if let (Some(t), Some(it)) =
+                            (t, c.data_mut().io.web_items.get_mut(a as usize))
+                        {
+                            it.text = String::from_utf8_lossy(&t).into_owned();
+                        }
+                        return 0;
+                    }
+                    21 => {
+                        return c
+                            .data()
+                            .io
+                            .web_items
+                            .get(a as usize)
+                            .map_or(0, |it| it.value.to_bits() as i32);
+                    }
+                    22 => {
+                        let Some(memory) = c.get_export("memory").and_then(|e| e.into_memory())
+                        else {
+                            return 0;
+                        };
+                        let Some(text) = c
+                            .data()
+                            .io
+                            .web_items
+                            .get(a as usize)
+                            .map(|it| it.text.clone())
+                        else {
+                            return 0;
+                        };
+                        let data = memory.data_mut(&mut c);
+                        let (p, cap) = (b as usize, len.max(0) as usize);
+                        if cap == 0 || p + cap > data.len() {
+                            return 0;
+                        }
+                        let n = text.len().min(cap - 1);
+                        data[p..p + n].copy_from_slice(&text.as_bytes()[..n]);
+                        data[p + n] = 0;
+                        return n as i32;
+                    }
                     14 => {
                         let Some(f) = read_bytes(&mut c, a, b, 128) else {
                             return -1;
@@ -782,6 +882,19 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
         })
         .map_err(bad)?;
     Ok(())
+}
+
+/// A widget of the web page as the simulator keeps it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WebStubItem {
+    /// 0 number, 1 text shown, 2 text input, 3 secret text input.
+    pub kind: u8,
+    pub rw: bool,
+    pub dec: u8,
+    pub lo: f32,
+    pub hi: f32,
+    pub value: f32,
+    pub text: String,
 }
 
 impl StubIo {

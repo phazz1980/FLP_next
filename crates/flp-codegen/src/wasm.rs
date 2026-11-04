@@ -21,6 +21,7 @@ use crate::sheet::{signal_label, SheetError, SheetModule, TagKind};
 mod mqtt;
 mod net;
 mod text;
+mod web;
 use text::{Buf, MEM_START};
 
 const TAG_GET_I: u32 = 0;
@@ -682,6 +683,19 @@ impl<'a, 'p> Emitter<'a, 'p> {
         self.op(I::LocalGet(0));
         self.op(I::I32Add);
         self.op(I::GlobalSet(GLOBAL_NOW));
+        let module = self.module;
+        let program = self.program;
+        if let Some(ui) = module
+            .blocks
+            .iter()
+            .map(|&bi| &program.blocks[bi])
+            .find(|i| i.block.kind == "web_ui")
+        {
+            // The page is set up before any widget reads or writes a value.
+            self.scratch_i = 0;
+            self.scratch_f = 0;
+            self.web_setup(ui)?;
+        }
         let blocks = self.module.blocks.clone();
         for (k, bi) in blocks.into_iter().enumerate() {
             if k > 0 && k % BLOCKS_PER_CHUNK == 0 {
@@ -1292,6 +1306,7 @@ impl<'a, 'p> Emitter<'a, 'p> {
             || self.text_block(inst)?
             || self.net_block(inst)?
             || self.mqtt_block(inst)?
+            || self.web_block(inst)?
         {
             return Ok(true);
         }

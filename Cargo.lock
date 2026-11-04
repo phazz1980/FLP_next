@@ -1714,6 +1714,7 @@ dependencies = [
 name = "flp-build"
 version = "1.2.0"
 dependencies = [
+ "flp-blocks",
  "flp-codegen",
  "flp-core",
  "serde",
