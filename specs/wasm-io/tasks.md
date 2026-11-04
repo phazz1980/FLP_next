@@ -1,6 +1,6 @@
 # Задачи
-- [ ] 1 Права шире 8 бит (проверка: мастер собирается, старые модули грузятся)
-- [ ] 2 UART-байты и Modbus RTU/TCP master+slave (проверка: тест `wasm_modbus`, `examples/modbus`)
+- [x] 1 Права шире 8 бит (проверка: мастер собирается, старые модули грузятся)
+- [~] 2 Modbus RTU master+slave готов (тест `modbus_rtu_goes_through_the_master`, пример `examples/modbus_rtu`, мастер на C3 собирается: 51% flash, 11% RAM; на плате не проверено). Осталось: UART-байты, Modbus TCP (после сети)
 - [ ] 3 Строки в WASM: `Ty::S`, `text_*` (проверка: сравнение со симулятором `sim-strings`)
 - [ ] 4 UART-строки (`uart_read`/`uart_send`) (проверка: тест + пример)
 - [ ] 5 Wi-Fi/Ethernet, NTP (проверка: тест + пример)

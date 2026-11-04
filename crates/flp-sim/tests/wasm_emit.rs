@@ -211,6 +211,48 @@ fn pcf8574_goes_through_the_master() {
 }
 
 #[test]
+fn modbus_rtu_goes_through_the_master() {
+    let lib = library();
+    let project = Project::load(repo_path("examples/modbus_rtu")).unwrap();
+    let program = Program::build(&project, &lib).unwrap();
+    let built = program.wasm_module(1).unwrap();
+    let manifest = Manifest::parse(&built.manifest).unwrap();
+    assert_eq!(manifest.allow, ["modbus"]);
+    let mut module = McuModule::load(&built.wasm, &manifest, 0).unwrap();
+    // Master reads: slave 10, input table (1), float (1), master (1); the coil of the panel is a slave read.
+    let temp = (10, 1 | 1 << 4 | 1 << 8, 0);
+    let coil = (0, 2 | 2 << 4, 0);
+    module
+        .io_mut()
+        .modbus_in
+        .insert(temp, 21.5f32.to_bits() as i32);
+    module.io_mut().modbus_in.insert(coil, 1);
+    module.io_mut().modbus_status.insert(10, 1);
+    module.step(50).unwrap();
+    let io = module.io();
+    // Both roles are set up once, each list starting with its role (code 0) and ending with code 63.
+    let roles: Vec<_> = io.modbus_cfg.iter().filter(|(c, _)| *c == 0).collect();
+    assert_eq!(roles, [&(0, 1), &(0, 2)]);
+    assert_eq!(io.modbus_cfg.iter().filter(|(c, _)| *c == 63).count(), 2);
+    assert!(
+        io.modbus_cfg.contains(&(2, 9600)),
+        "master speed from UART2"
+    );
+    assert!(
+        io.modbus_cfg.contains(&(2, 19200)),
+        "slave speed from UART1"
+    );
+    assert!(io.modbus_cfg.contains(&(16, 10)) && io.modbus_cfg.contains(&(24, 11)));
+    // The temperature goes to the panel's input registers, the relay command to slave 11.
+    assert_eq!(io.modbus_out[&(0, 1 | 1 << 4, 0)], 21.5f32.to_bits() as i32);
+    assert_eq!(io.modbus_out[&(0, 3 | 2 << 4, 0)], 1);
+    assert_eq!(io.modbus_out[&(11, 2 | 2 << 4 | 1 << 8, 0)], 1);
+    let n = module.io().modbus_cfg.len();
+    module.step(50).unwrap();
+    assert_eq!(module.io().modbus_cfg.len(), n, "settings are sent once");
+}
+
+#[test]
 fn sensors_example_switches_pins_from_sensor_values() {
     let lib = library();
     let project = Project::load(repo_path("examples/sensors")).unwrap();

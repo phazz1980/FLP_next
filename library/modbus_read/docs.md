@@ -6,3 +6,5 @@
 от него зависит выход (`out`, `out_f`, `out_b`).
 
 Примеры: `examples/modbus_wifi`, `examples/modbus_rtu`.
+
+В модуле WASM работает со slave `rtu` (протокол ведёт мастер-прошивка); `tcp` пока только в обычном скетче.

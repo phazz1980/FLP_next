@@ -24,6 +24,11 @@
 #endif
 #include <wasm3.h>
 #include <m3_env.h>
+#ifdef FLP_MODBUS
+// After wasm3: the Modbus library redefines names the sensor libraries use.
+#include "flprogUart.h"
+#include "flprogModbusRTU.h"
+#endif
 
 static const int kMaxSlots = 4;
 static const int kMaxOutputs = 128;  // watched signals per module
@@ -37,9 +42,9 @@ static const uint32_t kStepLimitMs = 100;  // watchdog: a longer step means a ha
 static const int kJournal = 50;
 
 enum { P_GPIO_READ = 1, P_GPIO_WRITE = 2, P_ADC = 4, P_PWM = 8, P_MILLIS = 16, P_SENSOR = 32,
-       P_PCF_READ = 64, P_PCF_WRITE = 128 };
+       P_PCF_READ = 64, P_PCF_WRITE = 128, P_MODBUS = 256 };
 
-#if defined(FLP_SENSORS) || defined(FLP_PCF)
+#if defined(FLP_SENSORS) || defined(FLP_PCF) || defined(FLP_MODBUS)
 #define FLP_HWTASK 1
 #endif
 
@@ -92,7 +97,7 @@ struct Msg { char topic[24]; uint8_t data[64]; uint8_t len; };
 struct Slot {
   bool used = false;
   char name[16] = "";
-  uint8_t perms = 0;
+  uint16_t perms = 0;
   uint8_t *wasm = nullptr;  // wasm3 keeps pointing into these bytes
   size_t wasmLen = 0;
   IM3Environment env = nullptr;
@@ -346,6 +351,9 @@ static void sensorPoll(Sensor &s, uint32_t now) {
 #ifdef FLP_PCF
 static void pcfPoll(Pcf &c, uint32_t now);
 #endif
+#ifdef FLP_MODBUS
+static void modbusPoll();
+#endif
 
 #ifdef FLP_HWTASK
 static void hwTask(void *) {
@@ -360,6 +368,9 @@ static void hwTask(void *) {
     for (auto &c : g_pcf) {
       if (c.used) pcfPoll(c, now);
     }
+#endif
+#ifdef FLP_MODBUS
+    modbusPoll();
 #endif
     vTaskDelay(pdMS_TO_TICKS(20));
   }
@@ -458,6 +469,108 @@ m3ApiRawFunction(h_pcf_write) {
 }
 #endif
 
+#ifdef FLP_MODBUS
+// ---- Modbus RTU: the master task runs the protocol, modules read and write the tables ----
+// One call does it all: modbus(op, a, b, c, d); floats travel as their bits.
+//   op 0 setting: a = code, b = value; code 0 starts a new setting list, code 63 applies it (once per role)
+//   op 1 read:   a = slave address (master), b = table | kind << 4 | master << 8, c = register
+//   op 2 write:  as read, d = value
+//   op 3 status: a >= 0 slave of the master answers (1/0), a < 0 last error of our slave
+// Setting codes: 0 role (1 master, 2 slave), 1 uart, 2 speed, 3 parity, 4 rx, 5 tx, 6 de, 7 count / address,
+// 8..11 slave tables (holding, input, coils, discrete), 16 + 8 n + k master slave n: 0 address, 1 period,
+// 2 timeout, 3..6 table sizes.
+static FlprogUartExecutor g_mbUart;
+static ModbusMasterRTU *g_mbMaster = nullptr;
+static ModbusSlaveRTU *g_mbSlave = nullptr;
+static int32_t g_mb[64];
+static const uint8_t kMbTables[4] = {FLPROG_HOLDING_REGISTR, FLPROG_INPUT_REGISTR, FLPROG_COIL, FLPROG_DISCRETE_INPUT};
+
+// A macro, not a template: the Arduino prototype generator cannot handle templates.
+#define MB_SETUP(o)   do {     (o)->setSpeedUart(g_mb[2]);     (o)->setParityUart(g_mb[3]);     if (g_mb[4] >= 0) (o)->setPinRxUart(g_mb[4]);     if (g_mb[5] >= 0) (o)->setPinTxUart(g_mb[5]);     if (g_mb[6] >= 0) (o)->setPinPeDe(g_mb[6]);   } while (0)
+
+static void modbusCommit() {
+  if (g_mb[0] == 1 && !g_mbMaster) {
+    int n = g_mb[7] < 1 ? 1 : g_mb[7] > 4 ? 4 : g_mb[7];
+    auto *m = new ModbusMasterRTU(g_mb[1], n, &g_mbUart);
+    MB_SETUP(m);
+    for (int i = 0; i < n; i++) {
+      int b = 16 + 8 * i;
+      uint8_t addr = g_mb[b];
+      m->setSlaveAddress(i, addr);
+      m->setPollingPeriod(addr, (uint32_t)g_mb[b + 1]);
+      m->setTimeOutTime(addr, (uint32_t)g_mb[b + 2]);
+      for (int t = 0; t < 4; t++) {
+        if (g_mb[b + 3 + t] > 0) m->configDataTable(addr, kMbTables[t], g_mb[b + 3 + t]);
+      }
+    }
+    m->begin();
+    g_mbMaster = m;
+  } else if (g_mb[0] == 2 && !g_mbSlave) {
+    auto *m = new ModbusSlaveRTU(g_mb[1], &g_mbUart);
+    MB_SETUP(m);
+    m->setSlaveAddress(g_mb[7]);
+    for (int t = 0; t < 4; t++) {
+      if (g_mb[8 + t] > 0) m->configDataTable(kMbTables[t], g_mb[8 + t]);
+    }
+    m->begin();
+    g_mbSlave = m;
+  }
+}
+
+static void modbusPoll() {
+  xSemaphoreTake(g_sensorLock, portMAX_DELAY);
+  if (g_mbMaster) g_mbMaster->pool();
+  if (g_mbSlave) g_mbSlave->pool();
+  xSemaphoreGive(g_sensorLock);
+}
+
+m3ApiRawFunction(h_modbus) {
+  m3ApiReturnType(int32_t);
+  m3ApiGetArg(int32_t, op);
+  m3ApiGetArg(int32_t, a);
+  m3ApiGetArg(int32_t, b);
+  m3ApiGetArg(int32_t, c);
+  m3ApiGetArg(int32_t, d);
+  int32_t r = 0;
+  xSemaphoreTake(g_sensorLock, portMAX_DELAY);
+  uint8_t table = kMbTables[b & 3];
+  int kind = b >> 4 & 15;
+  bool master = b >> 8 & 1;
+  if (op == 0) {
+    if (a == 0) memset(g_mb, 0, sizeof g_mb);
+    if (a == 63) modbusCommit();
+    else if (a >= 0 && a < 63) g_mb[a] = b;
+  } else if (op == 1) {
+    if (master && g_mbMaster) {
+      if (kind == 1) { float f = g_mbMaster->readFloat(a, table, c); memcpy(&r, &f, 4); }
+      else if (kind == 2) r = g_mbMaster->readBool(a, table, c);
+      else r = (int16_t)g_mbMaster->readInteger(a, table, c);
+    } else if (!master && g_mbSlave) {
+      if (kind == 1) { float f = g_mbSlave->readFloat(table, c); memcpy(&r, &f, 4); }
+      else if (kind == 2) r = g_mbSlave->readBool(table, c);
+      else r = (int16_t)g_mbSlave->readInteger(table, c);
+    }
+  } else if (op == 2) {
+    float f;
+    memcpy(&f, &d, 4);
+    if (master && g_mbMaster) {
+      if (kind == 1) g_mbMaster->saveFloat(a, f, table, c);
+      else if (kind == 2) g_mbMaster->saveBool(a, d != 0, table, c);
+      else g_mbMaster->saveInteger(a, (int16_t)d, table, c);
+    } else if (!master && g_mbSlave) {
+      if (kind == 1) g_mbSlave->saveFloat(f, table, c);
+      else if (kind == 2) g_mbSlave->saveBool(d != 0, table, c);
+      else g_mbSlave->saveInteger((int16_t)d, table, c);
+    }
+  } else if (op == 3) {
+    if (a >= 0) r = g_mbMaster && g_mbMaster->slaveStatus(a, false) ? 1 : 0;
+    else r = g_mbSlave ? g_mbSlave->getLastError() : 0;
+  }
+  xSemaphoreGive(g_sensorLock);
+  m3ApiReturn(r);
+}
+#endif
+
 static void linkAll(Slot &s, IM3Module m) {
   auto L = [&](const char *n, const char *sig, M3RawCall f) { m3_LinkRawFunctionEx(m, "flp", n, sig, f, &s); };
   L("input_i", "i(i)", h_input_i);
@@ -485,11 +598,14 @@ static void linkAll(Slot &s, IM3Module m) {
   if (s.perms & P_PCF_READ) L("pcf_read", "i(iii)", h_pcf_read);
   if (s.perms & P_PCF_WRITE) L("pcf_write", "i(ii)", h_pcf_write);
 #endif
+#ifdef FLP_MODBUS
+  if (s.perms & P_MODBUS) L("modbus", "i(iiiii)", h_modbus);
+#endif
 }
 
 // ---- module lifecycle (call with g_mgmt held) ----
-static uint8_t parsePerms(const String &a) {
-  uint8_t p = 0;
+static uint16_t parsePerms(const String &a) {
+  uint16_t p = 0;
   if (a.indexOf("gpio_read") >= 0) p |= P_GPIO_READ;
   if (a.indexOf("gpio_write") >= 0) p |= P_GPIO_WRITE;
   if (a.indexOf("adc_read") >= 0) p |= P_ADC;
@@ -498,6 +614,7 @@ static uint8_t parsePerms(const String &a) {
   if (a.indexOf("sensor_read") >= 0) p |= P_SENSOR;
   if (a.indexOf("pcf_read") >= 0) p |= P_PCF_READ;
   if (a.indexOf("pcf_write") >= 0) p |= P_PCF_WRITE;
+  if (a.indexOf("modbus") >= 0) p |= P_MODBUS;
   return p;
 }
 

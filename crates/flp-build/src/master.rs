@@ -17,6 +17,8 @@ pub struct MasterFeatures {
     pub sensors: bool,
     /// PCF8574 expanders on I²C (`pcf_read`, `pcf_write`).
     pub pcf: bool,
+    /// Modbus RTU master and slave (`modbus`); the libraries come from `libs/`.
+    pub modbus: bool,
 }
 
 impl MasterFeatures {
@@ -27,6 +29,7 @@ impl MasterFeatures {
             match kind {
                 "ds18b20" | "dht22" => f.sensors = true,
                 "pcf8574_in" | "pcf8574_out" => f.pcf = true,
+                "modbus_rtu_master" | "modbus_rtu_slave" => f.modbus = true,
                 _ => {}
             }
         }
@@ -35,7 +38,11 @@ impl MasterFeatures {
 
     fn defines(&self) -> String {
         let mut text = String::new();
-        for (on, name) in [(self.sensors, "FLP_SENSORS"), (self.pcf, "FLP_PCF")] {
+        for (on, name) in [
+            (self.sensors, "FLP_SENSORS"),
+            (self.pcf, "FLP_PCF"),
+            (self.modbus, "FLP_MODBUS"),
+        ] {
             if on {
                 text.push_str(&format!(
                     "#define {name} 1
@@ -120,6 +127,12 @@ impl ArduinoCli {
         args.extend(board_args(board));
         args.push("--build-path".into());
         args.push(out.clone().into());
+        if features.modbus {
+            for dir in crate::bundled_libraries(work_dir) {
+                args.push("--libraries".into());
+                args.push(dir.into());
+            }
+        }
         args.push(sketch_dir.clone().into());
         let status = self.run(&args, low_priority, on_line)?;
         check_status("сборка мастера", status)?;
@@ -173,6 +186,13 @@ mod tests {
         assert_eq!(both.defines(), "#define FLP_SENSORS 1\n#define FLP_PCF 1\n");
         assert!(both.libraries().contains(&"DHT sensor library"));
         assert_ne!(master_sketch_id(&none), master_sketch_id(&both));
+        let modbus = MasterFeatures::of_blocks(["modbus_rtu_slave"]);
+        assert_eq!(
+            modbus.defines(),
+            "#define FLP_MODBUS 1
+"
+        );
+        assert_ne!(master_sketch_id(&none), master_sketch_id(&modbus));
         assert!(sketch_text(&both).ends_with(SKETCH));
     }
 }

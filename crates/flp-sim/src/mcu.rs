@@ -50,6 +50,7 @@ const HARDWARE: &[&str] = &[
     "sensor_read",
     "pcf_read",
     "pcf_write",
+    "modbus",
 ];
 
 const FUEL_PER_CALL: u64 = 5_000_000;
@@ -134,6 +135,14 @@ pub struct StubIo {
     pub pcf_in: HashMap<(i32, i32), i32>,
     /// The last byte the module handed over for a chip, by key.
     pub pcf_out: HashMap<i32, i32>,
+    /// Modbus settings the module handed over, as `(code, value)` in order (the apply call is code 63).
+    pub modbus_cfg: Vec<(i32, i32)>,
+    /// What a Modbus read returns, by `(slave, table | kind << 4 | master << 8, register)`; the bits of an int or float.
+    pub modbus_in: HashMap<(i32, i32, i32), i32>,
+    /// What a module wrote, by the same key.
+    pub modbus_out: HashMap<(i32, i32, i32), i32>,
+    /// Status of a master's slave by address (-1: error of our slave).
+    pub modbus_status: HashMap<i32, i32>,
     /// Milliseconds since the module started; advances with every step.
     pub now_ms: u32,
 }
@@ -488,6 +497,26 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
             "pcf_read",
             |c: Caller<'_, Host>, key: i32, _period: i32, field: i32| -> i32 {
                 c.data().io.pcf_in.get(&(key, field)).copied().unwrap_or(0)
+            },
+        )
+        .map_err(bad)?
+        .func_wrap(
+            "flp",
+            "modbus",
+            |mut c: Caller<'_, Host>, op: i32, a: i32, b: i32, reg: i32, d: i32| -> i32 {
+                let io = &mut c.data_mut().io;
+                match op {
+                    0 => {
+                        io.modbus_cfg.push((a, b));
+                        0
+                    }
+                    1 => io.modbus_in.get(&(a, b, reg)).copied().unwrap_or(0),
+                    2 => {
+                        io.modbus_out.insert((a, b, reg), d);
+                        0
+                    }
+                    _ => io.modbus_status.get(&a).copied().unwrap_or(0),
+                }
             },
         )
         .map_err(bad)?
