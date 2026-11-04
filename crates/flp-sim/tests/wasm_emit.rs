@@ -501,7 +501,8 @@ fn web_page_goes_through_the_master() {
     let io = module.io();
     // The setup comes once, before any widget works: layout, table, interface, password.
     assert!(io.web_complete);
-    assert_eq!(io.web_mask, 1);
+    // Wi-Fi (bit 1) and the «Система» page (bit 4).
+    assert_eq!(io.web_mask, 5);
     assert_eq!(io.web_pass, "1234");
     assert!(
         io.web_layout.starts_with("{\"t\":\"Модуль\""),
@@ -510,15 +511,20 @@ fn web_page_goes_through_the_master() {
     );
     assert!(io.web_layout.contains("\"k\":\"slider\""));
     assert!(io.web_layout.contains("\"k\":\"textin\""));
+    assert!(io.web_layout.contains("\"y\":1"));
+    assert!(io.web_layout.contains("\"k\":\"chart\""));
     let kinds: Vec<u8> = io.web_items.iter().map(|i| i.kind).collect();
-    assert_eq!(kinds, [0, 0, 2, 0, 0, 1]);
+    assert_eq!(kinds, [0, 0, 2, 0, 0, 4, 1]);
     // The slider keeps its initial value; the text input its initial text.
     assert_eq!(io.web_items[1].value, 25.0);
     assert_eq!(io.web_items[2].text, "FLP");
+    // The chart: 30 points and a period of 2 s go to the master, which samples the value itself.
+    assert_eq!(io.web_items[5].points, 30);
+    assert_eq!(io.web_items[5].value, 25.0);
     module.step(10).unwrap();
     let io = module.io();
     assert_eq!(io.web_items[3].value, 25.0, "value shown from the slider");
-    assert_eq!(io.web_items[5].text, "Привет, FLP");
+    assert_eq!(io.web_items[6].text, "Привет, FLP");
     // The page changes the switch, the slider and the name.
     let io = module.io_mut();
     io.web_items[0].value = 1.0;
@@ -529,5 +535,5 @@ fn web_page_goes_through_the_master() {
     let io = module.io();
     assert_eq!(io.web_items[3].value, 70.0);
     assert_eq!(io.web_items[4].value, 1.0, "led follows the switch");
-    assert_eq!(io.web_items[5].text, "Привет, Мир");
+    assert_eq!(io.web_items[6].text, "Привет, Мир");
 }

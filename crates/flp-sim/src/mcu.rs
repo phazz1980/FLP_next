@@ -681,6 +681,7 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
                                             kind: r[0],
                                             rw: r[1] != 0,
                                             dec: r[2],
+                                            points: r[3],
                                             lo: f(&r[4..8]),
                                             hi: f(&r[8..12]),
                                             value: f(&r[12..16]),
@@ -887,10 +888,12 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
 /// A widget of the web page as the simulator keeps it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WebStubItem {
-    /// 0 number, 1 text shown, 2 text input, 3 secret text input.
+    /// 0 number, 1 text shown, 2 text input, 3 secret text input, 4 chart.
     pub kind: u8,
     pub rw: bool,
     pub dec: u8,
+    /// Chart: points the master keeps.
+    pub points: u8,
     pub lo: f32,
     pub hi: f32,
     pub value: f32,

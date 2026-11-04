@@ -24,6 +24,8 @@ struct Widget {
     /// The page may change the value.
     rw: bool,
     init: f64,
+    /// Chart only: points kept by the master.
+    points: u8,
 }
 
 fn json_text(out: &mut String, s: &str) {
@@ -72,6 +74,7 @@ impl Emitter<'_, '_> {
             table_kind: 0,
             rw: false,
             init: 0.0,
+            points: 0,
         };
         let unit = self.text_param(inst, "unit");
         match kind {
@@ -122,6 +125,17 @@ impl Emitter<'_, '_> {
                 w.lo = self.web_num(inst, "min");
                 w.hi = self.web_num(inst, "max");
                 w.dec = self.web_num(inst, "decimals").clamp(0.0, 9.0) as u8;
+            }
+            "web_chart" => {
+                w.kind = "chart";
+                w.unit = unit;
+                w.lo = self.web_num(inst, "min");
+                w.hi = self.web_num(inst, "max");
+                w.step = self.web_num(inst, "period").max(1.0);
+                w.init = w.step;
+                w.dec = 1;
+                w.table_kind = 4;
+                w.points = self.web_num(inst, "points").clamp(10.0, 120.0) as u8;
             }
             "web_value" => {
                 w.kind = "value";
@@ -195,12 +209,17 @@ impl Emitter<'_, '_> {
                 &format!("на листе больше {MAX_WIDGETS} виджетов — столько держит мастер"),
             ));
         }
-        let mask = self.web_mask();
+        let mut mask = self.web_mask();
         if mask == 0 {
             return Err(self.unsupported(
                 ui,
                 "нужен блок Wi-Fi или Ethernet с включённой веб-страницей",
             ));
+        }
+        let system = self.web_num(ui, "system") != 0.0;
+        if system {
+            // Bit 4 of the interfaces: the master serves /ui/info.
+            mask |= 4;
         }
         let mut layout = String::from("{\"t\":\"");
         json_text(&mut layout, &self.text_param(ui, "title"));
@@ -208,8 +227,7 @@ impl Emitter<'_, '_> {
         json_text(&mut layout, &self.text_param(ui, "pages"));
         layout.push_str("\",\"bg\":\"");
         json_text(&mut layout, &self.text_param(ui, "bg"));
-        // The «Система» page is not served by the master yet.
-        layout.push_str("\",\"y\":0,\"i\":[");
+        layout.push_str(&format!("\",\"y\":{},\"i\":[", system as u8));
         let mut table = Vec::new();
         let mut texts: Vec<(usize, String)> = Vec::new();
         let widgets: Vec<&Instance> = self.web_widgets();
@@ -238,7 +256,7 @@ impl Emitter<'_, '_> {
             layout.push_str("\",\"q\":\"");
             json_text(&mut layout, &self.text_param(inst, "back"));
             layout.push_str("\"}");
-            table.extend_from_slice(&[w.table_kind, w.rw as u8, w.dec, 0]);
+            table.extend_from_slice(&[w.table_kind, w.rw as u8, w.dec, w.points]);
             for x in [w.lo, w.hi, w.init] {
                 table.extend_from_slice(&(x as f32).to_le_bytes());
             }
@@ -319,7 +337,7 @@ impl Emitter<'_, '_> {
         // Fails for a widget the master cannot show yet.
         self.web_widget(inst)?;
         match kind {
-            "web_led" | "web_icon" | "web_gauge" | "web_tank" | "web_value" => {
+            "web_led" | "web_icon" | "web_gauge" | "web_tank" | "web_value" | "web_chart" => {
                 let x = self.tmp_f();
                 self.input_as(inst, 0, Ty::F);
                 self.op(I::LocalSet(x));

@@ -1,5 +1,5 @@
 // Сгенерировано CrabLogic из проекта «web_wasm». Ручные правки будут перезаписаны.
-// Порядок выполнения: wifi → page → sw → level → name → shown → lamp → prefix → join → hello → led
+// Порядок выполнения: wifi → page → sw → level → name → shown → lamp → trend → prefix → join → hello → led
 
 #include <Arduino.h>
 #include <flprogNetwork.h>
@@ -321,6 +321,10 @@ FlpUiItem shown_ui = {"web_value", "Уровень", "%", 13, 1, 6, 4, 1, false,
 // lamp: web_led
 FlpUiItem lamp_ui = {"web_led", "Горит", "", 13, 3, 6, 2, 1, false, 0, 0, 0, 0, 0};
 
+// trend: web_chart
+float trend_buf[30];
+FlpUiItem trend_ui = {"web_chart", "История уровня", "%", 1, 7, 24, 8, 1, false, 0, 0.0f, 100.0f, 2, 1, String(), trend_buf, 30};
+
 // hello: web_text
 FlpUiItem hello_ui = {"web_text", "Привет", "", 13, 5, 12, 2, 1, false, 0, 0, 0, 0, 0};
 
@@ -587,6 +591,10 @@ void flp_bg_task(void *) {
     // lamp: web_led
     lamp_ui.value = sw_out ? 1 : 0;
 
+    // trend: web_chart
+    trend_ui.value = level_out;
+    flpUiSample(&trend_ui);
+
     // hello: web_text
     hello_ui.text = join_out_in;
 
@@ -664,6 +672,11 @@ void setup() {
   flpUiAdd(&lamp_ui);
   lamp_ui.color = "";
   lamp_ui.back = "";
+
+  // trend: web_chart
+  flpUiAdd(&trend_ui);
+  trend_ui.color = "";
+  trend_ui.back = "";
 
   // prefix: text_const
   prefix_out = "Привет, ";

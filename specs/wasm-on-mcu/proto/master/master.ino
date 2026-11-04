@@ -33,6 +33,7 @@
 #include "flprogNetwork.h"
 #ifdef FLP_WEB
 #include "flprogWebServer.h"
+#include <esp_mac.h>
 #endif
 #endif
 
@@ -800,7 +801,8 @@ m3ApiRawFunction(h_uart) {
 //   Web page (FLP_WEB, ops 17..22; the page and its server are the master's, the module gives layout and values):
 //   op 17 setup: a = 1 layout JSON (b, c pointer, length), 2 widget table (b pointer, c count; 16 bytes each: kind 0 number / 1 text shown /
 //         2 text input / 3 secret text input, rw, dec, reserved, lo, hi, initial as f32), 3 interfaces (b: 1 Wi-Fi, 2 Ethernet, 3 both),
-//         4 password (b, c), 63 setup complete
+//         4 password (b, c), 63 setup complete; interfaces mask also has bit 4 = the «Система» page
+//   (a chart is kind 4: reserved byte = points, initial = period in seconds; the master samples its value itself)
 //   op 19 show number: a = widget, b = f32 bits;  op 20 show text: a = widget, b, c pointer and length
 //   op 21 number written by the page: a = widget; returns f32 bits;  op 22 text written by the page: a = widget, b = pointer, c = capacity; returns the length
 // SPI pins, cs and MAC are taken when the Ethernet interface is created (first start); changing them needs a reset.
@@ -1050,12 +1052,15 @@ static int32_t mqttSubscribe(const char *filter) {
 // The page (flp_html, put in front of the sketch by the build) is the same as in a C++ sketch; the module gives the
 // layout JSON, a table of the widgets and then the values of every widget each step.
 struct WebItem {
-  uint8_t kind;  // 0 number, 1 text shown, 2 text input, 3 secret text input
+  uint8_t kind;  // 0 number, 1 text shown, 2 text input, 3 secret text input, 4 chart
   bool rw;       // the page may change the value
   uint8_t dec;   // digits after the point
   float lo, hi;
   volatile float value;
   char *text;    // 129 bytes for the text kinds
+  float *hist;   // chart: ring buffer of hn points
+  uint16_t hn, hpos, hfill;
+  uint32_t hlast, hperiod;  // ms
 };
 static const int kWebMax = 32;
 static WebItem g_webItems[kWebMax];
@@ -1066,6 +1071,7 @@ static char g_webPass[65];
 static int32_t g_webMask = 1;  // 1 Wi-Fi, 2 Ethernet
 static volatile bool g_webComplete = false;
 static bool g_webBegun = false;
+static bool g_webSystem = false;
 static FLProgNetworkHttpServer g_web;
 static portMUX_TYPE g_webMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -1140,10 +1146,67 @@ static void webSet(FLProgNetworkHttpServer *server) {
 }
 static void webHist(FLProgNetworkHttpServer *server) {
   if (!webAllowed(server)) return;
-  server->send(200, "application/json", "[]");
+  String o = "[";
+  int i = server->argumentValueAtKey("i").toInt();
+  if (i >= 0 && i < g_webCount && g_webItems[i].hist) {
+    WebItem &it = g_webItems[i];
+    uint16_t start = (it.hpos + it.hn - it.hfill) % it.hn;
+    for (uint16_t k = 0; k < it.hfill; k++) {
+      if (k) o += ',';
+      o += String(it.hist[(start + k) % it.hn], 2);
+    }
+  }
+  o += ']';
+  server->send(200, "application/json", o);
+}
+// Technical data for the «Система» page; there is no firmware upload over the air in the master.
+static void webInfo(FLProgNetworkHttpServer *server) {
+  if (!webAllowed(server)) return;
+  char mac[18];
+  uint8_t m[6];
+  esp_read_mac(m, ESP_MAC_WIFI_STA);
+  snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", m[0], m[1], m[2], m[3], m[4], m[5]);
+  uint32_t ip = 0;
+  int rssi = 0;
+#ifdef FLP_WIFI
+  if (g_net.complete) { ip = g_net.ip; rssi = g_wifi.rssi(); }
+#endif
+#ifdef FLP_ETH
+  if (!ip && g_eth) ip = (uint32_t)g_eth->localIP();
+#endif
+  String o = "{\"ip\":\"";
+  o += IPAddress(ip).toString();
+  o += "\",\"mac\":\""; o += mac;
+  o += "\",\"rssi\":"; o += String(rssi);
+  o += ",\"up\":"; o += String(millis() / 1000);
+  o += ",\"chip\":\""; o += ESP.getChipModel();
+  o += "\",\"cpu\":"; o += String(ESP.getCpuFreqMHz());
+  o += ",\"heap\":"; o += String(ESP.getFreeHeap());
+  o += ",\"heapAll\":"; o += String(ESP.getHeapSize());
+  o += ",\"flash\":"; o += String(ESP.getFlashChipSize());
+  o += ",\"sketch\":"; o += String(ESP.getSketchSize());
+  o += ",\"free\":"; o += String(ESP.getFreeSketchSpace());
+  o += ",\"build\":\"" __DATE__ " " __TIME__ "\"";
+  o += ",\"u\":false}";
+  server->send(200, "application/json", o);
+}
+// Charts store a point of the shown value once per period.
+static void webSample() {
+  uint32_t now = millis();
+  for (int i = 0; i < g_webCount; i++) {
+    WebItem &it = g_webItems[i];
+    if (!it.hist || (it.hfill && now - it.hlast < it.hperiod)) continue;
+    it.hlast = now;
+    float v = it.value;
+    if (isnan(v) || isinf(v)) v = 0;
+    it.hist[it.hpos] = v;
+    it.hpos = (it.hpos + 1) % it.hn;
+    if (it.hfill < it.hn) it.hfill++;
+  }
 }
 
 static void webPoll() {
+  webSample();
   if (!g_webComplete || g_webBegun) return;
   FLProgNetworkInterface *iface = nullptr;
 #ifdef FLP_WIFI
@@ -1161,6 +1224,7 @@ static void webPoll() {
   g_web.addHandler("/ui/state", webState);
   g_web.addHandler("/ui/set", webSet);
   g_web.addHandler("/ui/hist", webHist);
+  if (g_webSystem) g_web.addHandler("/ui/info", webInfo);
 #if defined(FLP_WIFI) && defined(FLP_ETH)
   if (iface == &g_wifi && (g_webMask & 2) && g_eth) g_web.addSharedListener(*g_eth);
 #endif
@@ -1346,12 +1410,25 @@ m3ApiRawFunction(h_net) {
         float init;
         memcpy(&init, t + 12, 4);
         it.value = init;
-        if (it.kind >= 1 && !it.text) it.text = (char *)calloc(129, 1);
+        if (it.kind == 4) {
+          // A chart: reserved byte = points, initial = period in seconds; the history survives a module reload of the same size.
+          uint16_t n = t[3] < 10 ? 10 : t[3] > 120 ? 120 : t[3];
+          if (!it.hist || it.hn != n) {
+            free(it.hist);
+            it.hist = (float *)calloc(n, sizeof(float));
+            it.hn = it.hist ? n : 0;
+            it.hpos = it.hfill = 0;
+          }
+          it.hperiod = (uint32_t)(init < 1 ? 1 : init) * 1000UL;
+          it.value = 0;
+        }
+        if ((it.kind == 1 || it.kind == 2 || it.kind == 3) && !it.text) it.text = (char *)calloc(129, 1);
         if (it.text) it.text[0] = 0;
       }
       g_webCount = c;
     } else if (a == 3) {
-      g_webMask = b;
+      g_webMask = b & 3;
+      g_webSystem = (b & 4) != 0;
     } else if (a == 4 && c >= 0 && inMem(runtime, b, c)) {
       int32_t k = c < 64 ? c : 64;
       memcpy(g_webPass, (const uint8_t *)_mem + b, k);
