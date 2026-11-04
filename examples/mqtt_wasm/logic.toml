@@ -1,0 +1,51 @@
+# MQTT в модуле WASM: клиентом занимается мастер. Светодиод включается сообщением 1/0 в топик
+# flp/led, а принятое число отправляется обратно в flp/echo (при каждом изменении).
+
+[[block]]
+id = "wifi"
+type = "wifi"
+ssid = "MyNetwork"
+password = "secret123"
+web = false
+web_update = false
+
+[[block]]
+id = "broker"
+type = "mqtt"
+broker = "broker.hivemq.com"
+port = 1883
+max_subscriptions = 2
+
+[[block]]
+id = "sub"
+type = "mqtt_subscribe"
+topic = "flp/led"
+kind = "int"
+
+[[block]]
+id = "echo"
+type = "mqtt_publish"
+topic = "flp/echo"
+trigger = 1
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[block]]
+id = "is_on"
+type = "greater"
+b = 0.5
+
+[[link]]
+from = "sub.out_i"
+to = "is_on.a"
+
+[[link]]
+from = "is_on.out"
+to = "led.in"
+
+[[link]]
+from = "sub.out_i"
+to = "echo.value"

@@ -29,6 +29,8 @@ pub struct MasterFeatures {
     pub wifi: bool,
     /// The W5500 Ethernet interface (`ethernet`).
     pub eth: bool,
+    /// The MQTT client (`mqtt`).
+    pub mqtt: bool,
 }
 
 impl MasterFeatures {
@@ -56,6 +58,11 @@ impl MasterFeatures {
                     f.net = true;
                     f.text = true;
                 }
+                "mqtt" | "mqtt_publish" | "mqtt_subscribe" => {
+                    f.net = true;
+                    f.mqtt = true;
+                    f.text = true;
+                }
                 "ip_to_text" | "text_to_ip" | "text_const" | "text_concat" | "text_length"
                 | "num_to_text" | "text_compare" | "text_to_num" | "text_substring"
                 | "text_find" | "text_char" | "text_add_char" => f.text = true,
@@ -76,6 +83,7 @@ impl MasterFeatures {
             (self.net, "FLP_NET"),
             (self.wifi, "FLP_WIFI"),
             (self.eth, "FLP_ETH"),
+            (self.mqtt, "FLP_MQTT"),
         ] {
             if on {
                 text.push_str(&format!(
@@ -279,6 +287,9 @@ mod tests {
         );
         let wifi_eth = MasterFeatures::of_blocks(["wifi", "ethernet"]);
         assert!(wifi_eth.defines().contains("FLP_WIFI") && wifi_eth.defines().contains("FLP_ETH"));
+        let mqtt = MasterFeatures::of_blocks(["mqtt", "mqtt_publish", "wifi"]);
+        assert!(mqtt.defines().contains("FLP_MQTT") && mqtt.defines().contains("FLP_NET"));
+        assert_ne!(master_sketch_id(&net), master_sketch_id(&mqtt));
         assert_ne!(master_sketch_id(&none), master_sketch_id(&net));
         assert!(sketch_text(&both).ends_with(SKETCH));
     }

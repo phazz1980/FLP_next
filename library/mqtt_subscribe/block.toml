@@ -41,6 +41,7 @@ description = "true в одном цикле, когда пришло сообщ
 name = "topic"
 label = "топик"
 type = "string"
+runtime = true
 default = "flp/command"
 description = "Топик или шаблон: + — один уровень, # — весь остаток"
 

@@ -252,7 +252,7 @@ pub(crate) fn mqtt_publish(e: &CppCtx) -> CppParts {
     };
     l.line(format!(
         "    if (flpMqtt.publish({}, text.c_str(), {})) {{",
-        e.param("topic"),
+        c_text(e, "topic"),
         if e.flag("retain") { "true" } else { "false" }
     ))
     .line(format!("      {sent} = true;"))
@@ -274,13 +274,26 @@ pub(crate) fn mqtt_publish(e: &CppCtx) -> CppParts {
 
 pub(crate) fn mqtt_subscribe(e: &CppCtx) -> CppParts {
     let id = &e.id;
-    let (topic, received) = (e.param("topic"), e.output("received"));
+    let (topic, received) = (c_text(e, "topic"), e.output("received"));
     let mut g = Lines::default();
     g.line(format!("uint32_t {id}_seq = 0;"))
         .line(format!("bool {id}_subscribed = false;"));
+    if e.is_bound("topic") {
+        // The topic comes from an input: subscribe again when it changes (the client has no unsubscribe).
+        g.line(format!("String {id}_topic;"));
+    }
     let mut l = Lines::default();
-    l.line("{")
-        .line("  // The client keeps the subscription across reconnects; ask again only until it is accepted.")
+    l.line("{");
+    if e.is_bound("topic") {
+        l.line(format!(
+            "  if ({id}_topic != String({})) {{",
+            e.param("topic")
+        ))
+        .line(format!("    {id}_topic = String({});", e.param("topic")))
+        .line(format!("    {id}_subscribed = false;"))
+        .line("  }");
+    }
+    l.line("  // The client keeps the subscription across reconnects; ask again only until it is accepted.")
         .line(format!(
             "  if (!{id}_subscribed && flpMqtt.connected()) {{"
         ))

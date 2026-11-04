@@ -18,6 +18,7 @@ use wasm_encoder::{
 use crate::program::{Instance, Program, Source};
 use crate::sheet::{signal_label, SheetError, SheetModule, TagKind};
 
+mod mqtt;
 mod net;
 mod text;
 use text::{Buf, MEM_START};
@@ -1290,6 +1291,7 @@ impl<'a, 'p> Emitter<'a, 'p> {
             || self.uart_block(inst)?
             || self.text_block(inst)?
             || self.net_block(inst)?
+            || self.mqtt_block(inst)?
         {
             return Ok(true);
         }

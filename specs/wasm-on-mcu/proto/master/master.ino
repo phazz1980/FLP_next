@@ -786,6 +786,14 @@ m3ApiRawFunction(h_uart) {
 //   op 6 Ethernet number: a = code (1 dhcp, 2 sck, 3 miso, 4 mosi, 5 cs, 6 last MAC byte, 63 settings are complete), b = value
 //   op 7 Ethernet text: a = code (1 ip, 2 gateway, 3 subnet), b = pointer, c = length
 //   op 8 Ethernet: a = field (0 ready, 1 address as a number)
+//   MQTT (FLP_MQTT, ops 9..16; the client works on the interface chosen by code 3):
+//   op 9 number: a = code (1 port, 2 keep-alive s, 3 network 0 Wi-Fi / 1 Ethernet, 4 max subscriptions, 63 settings are complete), b = value
+//   op 10 text setting: a = code (1 broker, 2 client id, 3 user, 4 password), b = pointer, c = length
+//   op 11 read: a = field (0 connected, 1 error)
+//   op 12 / 13 publish without / with retain: a, b topic (pointer, length), c, d payload (pointer, length); 1 queued, 0 no link or queue full
+//   op 14 subscribe: a, b filter (pointer, length); returns the slot (the same for equal filters of any module), -1 when full
+//   op 15 slot text: a = slot, b = pointer, c = capacity; returns the length
+//   op 16 slot counter: a = slot; grows with every message that matched the filter
 // SPI pins, cs and MAC are taken when the Ethernet interface is created (first start); changing them needs a reset.
 #ifdef FLP_WIFI
 static FLProgOnBoardWifiInterface g_wifi;
@@ -891,6 +899,143 @@ static void ethPoll() {
 }
 #endif
 
+#ifdef FLP_MQTT
+// ---- MQTT client: one per board, on the interface chosen by the module (ops 9..16 of net) ----
+// Modules only queue publications, register filters and read the last message of a filter; the hardware task owns the client.
+struct MqttSlot {
+  char filter[129];
+  char text[129];
+  volatile int32_t len = 0;
+  volatile uint32_t seq = 0;
+  bool subscribed = false;
+};
+struct MqttPublish {
+  char topic[129];
+  char text[129];
+  uint8_t len;
+  bool retain;
+};
+static const int kMqttQueue = 4;
+static FLProgNetworkMqttClient g_mqtt;
+static portMUX_TYPE g_mqttMux = portMUX_INITIALIZER_UNLOCKED;
+static char g_mqttText[4][65];  // broker, client id, user, password
+static int32_t g_mqttNum[5] = {0, 1883, 60, 0, 4};  // [1] port, [2] keepalive s, [3] network, [4] max subscriptions
+static volatile bool g_mqttComplete = false;
+static bool g_mqttBegun = false;
+static uint32_t g_mqttApplied = 0;
+static MqttSlot *g_mqttSlots = nullptr;
+static int g_mqttSlotCount = 0;
+static MqttPublish g_mqttQueue[kMqttQueue];
+static volatile int g_mqttHead = 0, g_mqttTail = 0;
+
+// Topic against a filter with + (one level) and # (the rest).
+static bool mqttMatch(const char *f, const char *t) {
+  for (;;) {
+    const char *fe = strchr(f, '/');
+    const char *te = strchr(t, '/');
+    size_t fn = fe ? (size_t)(fe - f) : strlen(f);
+    size_t tn = te ? (size_t)(te - t) : strlen(t);
+    if (fn == 1 && *f == '#') return true;
+    if (!(fn == 1 && *f == '+') && (fn != tn || strncmp(f, t, fn) != 0)) return false;
+    if (!fe || !te) return !fe && !te;
+    f = fe + 1;
+    t = te + 1;
+  }
+}
+
+static void mqttReceive(const char *topic, const uint8_t *payload, size_t length, bool retained) {
+  (void)retained;
+  if (length > 128) length = 128;  // longer messages are cut, like every module string
+  for (int i = 0; i < g_mqttSlotCount; i++) {
+    MqttSlot &s = g_mqttSlots[i];
+    if (!s.filter[0] || !mqttMatch(s.filter, topic)) continue;
+    portENTER_CRITICAL(&g_mqttMux);
+    memcpy(s.text, payload, length);
+    s.text[length] = 0;
+    s.len = (int32_t)length;
+    s.seq = s.seq + 1;
+    portEXIT_CRITICAL(&g_mqttMux);
+  }
+}
+
+static void mqttApply() {
+  g_mqtt.setBroker(g_mqttText[0]);
+  g_mqtt.setPort((uint16_t)g_mqttNum[1]);
+  if (g_mqttText[2][0]) g_mqtt.setCredentials(g_mqttText[2], g_mqttText[3]);
+  else g_mqtt.clearCredentials();
+  if (g_mqttText[1][0]) g_mqtt.setClientId(g_mqttText[1]);
+  else {
+    char cid[24];
+    snprintf(cid, sizeof(cid), "flp-%08lx", (unsigned long)ESP.getEfuseMac());
+    g_mqtt.setClientId(cid);
+  }
+  g_mqtt.setKeepAlive((uint16_t)g_mqttNum[2]);
+}
+
+static void mqttPoll() {
+  if (!g_mqttComplete) return;
+  if (!g_mqttBegun) {
+    FLProgNetworkInterface *iface = nullptr;
+#ifdef FLP_WIFI
+    if (g_mqttNum[3] == 0 && g_net.complete) iface = &g_wifi;
+#endif
+#ifdef FLP_ETH
+    if (g_mqttNum[3] == 1 && g_eth) iface = g_eth;
+#endif
+    if (!iface) return;
+    g_mqtt.setSubscriptionLimit((size_t)g_mqttNum[4]);
+    g_mqttBegun = g_mqtt.begin(*iface);
+    if (!g_mqttBegun) return;
+    mqttApply();
+    g_mqtt.setMessageCallback(mqttReceive);
+    g_mqtt.setAutoReconnect(true);
+    g_mqttApplied = netHashOf(g_mqttText, 4, g_mqttNum[1] ^ (g_mqttNum[2] << 16));
+    g_mqtt.connect();
+  } else {
+    uint32_t h = netHashOf(g_mqttText, 4, g_mqttNum[1] ^ (g_mqttNum[2] << 16));
+    if (h != g_mqttApplied) {
+      // Settings written while running: reconnect with the new ones.
+      g_mqttApplied = h;
+      g_mqtt.disconnect();
+      mqttApply();
+      g_mqtt.connect();
+    }
+  }
+  if (g_mqtt.connected()) {
+    for (int i = 0; i < g_mqttSlotCount; i++) {
+      MqttSlot &s = g_mqttSlots[i];
+      if (s.filter[0] && !s.subscribed) s.subscribed = g_mqtt.subscribe(s.filter);
+    }
+    while (g_mqttTail != g_mqttHead) {
+      MqttPublish &p = g_mqttQueue[g_mqttTail];
+      if (!g_mqtt.publish(p.topic, (const uint8_t *)p.text, p.len, p.retain)) break;
+      g_mqttTail = (g_mqttTail + 1) % kMqttQueue;
+    }
+  }
+}
+
+// Slot of a filter (the same one for every module); -1 when there is no room.
+static int32_t mqttSubscribe(const char *filter) {
+  if (!g_mqttComplete) return -1;
+  if (!g_mqttSlots) {
+    int n = g_mqttNum[4] < 1 ? 1 : g_mqttNum[4] > 16 ? 16 : g_mqttNum[4];
+    MqttSlot *slots = new MqttSlot[n]();
+    g_mqttSlots = slots;
+    g_mqttSlotCount = n;
+  }
+  int free = -1;
+  for (int i = 0; i < g_mqttSlotCount; i++) {
+    if (!strcmp(g_mqttSlots[i].filter, filter)) return i;
+    if (free < 0 && !g_mqttSlots[i].filter[0]) free = i;
+  }
+  if (free < 0) return -1;
+  portENTER_CRITICAL(&g_mqttMux);
+  strcpy(g_mqttSlots[free].filter, filter);
+  portEXIT_CRITICAL(&g_mqttMux);
+  return free;
+}
+#endif
+
 static void netPoll() {
   NetSettings &n = g_net;
 #ifdef FLP_WIFI
@@ -926,6 +1071,9 @@ static void netPoll() {
       n.syncAge = (uint32_t)(now - g_ntp.lastSyncMillis()) / 1000;
     }
   }
+#ifdef FLP_MQTT
+  mqttPoll();
+#endif
 }
 
 // The NTP time shifted by `offset` seconds, broken down.
@@ -943,7 +1091,6 @@ m3ApiRawFunction(h_net) {
   m3ApiGetArg(int32_t, b);
   m3ApiGetArg(int32_t, c);
   m3ApiGetArg(int32_t, d);
-  (void)d;
   NetSettings &n = g_net;
   int32_t r = 0;
   if (op == 0) {
@@ -990,6 +1137,55 @@ m3ApiRawFunction(h_net) {
     }
   } else if (op == 8) {
     r = a == 0 ? n.ethReady : a == 1 ? (int32_t)n.ethIp : 0;
+#ifdef FLP_MQTT
+  } else if (op == 9) {
+    if (a >= 1 && a <= 4) g_mqttNum[a] = b;
+    else if (a == 63) g_mqttComplete = true;
+  } else if (op == 10) {
+    if (a >= 1 && a <= 4 && c >= 0 && inMem(runtime, b, c)) {
+      char *t = g_mqttText[a - 1];
+      int32_t k = c < 64 ? c : 64;
+      memcpy(t, (const uint8_t *)_mem + b, k);
+      t[k] = 0;
+    }
+  } else if (op == 11) {
+    r = a == 0 ? (g_mqttBegun && g_mqtt.connected()) : a == 1 ? g_mqtt.error() : 0;
+  } else if (op == 12 || op == 13) {
+    // Queued for the hardware task: topic (a, b) and payload (c, d), at most 128 bytes each.
+    if (g_mqttBegun && g_mqtt.connected() && b > 0 && b <= 128 && d >= 0 && d <= 128 && inMem(runtime, a, b) && inMem(runtime, c, d)) {
+      int next = (g_mqttHead + 1) % kMqttQueue;
+      if (next != g_mqttTail) {
+        MqttPublish &p = g_mqttQueue[g_mqttHead];
+        memcpy(p.topic, (const uint8_t *)_mem + a, b);
+        p.topic[b] = 0;
+        memcpy(p.text, (const uint8_t *)_mem + c, d);
+        p.text[d] = 0;
+        p.len = (uint8_t)d;
+        p.retain = op == 13;
+        g_mqttHead = next;
+        r = 1;
+      }
+    }
+  } else if (op == 14) {
+    char filter[129];
+    r = -1;
+    if (b > 0 && b <= 128 && inMem(runtime, a, b)) {
+      memcpy(filter, (const uint8_t *)_mem + a, b);
+      filter[b] = 0;
+      r = mqttSubscribe(filter);
+    }
+  } else if (op == 15) {
+    if (a >= 0 && a < g_mqttSlotCount && b >= 0 && c > 0 && inMem(runtime, b, c)) {
+      MqttSlot &s = g_mqttSlots[a];
+      portENTER_CRITICAL(&g_mqttMux);
+      int32_t k = s.len < c ? s.len : c;
+      memcpy((uint8_t *)_mem + b, s.text, k);
+      portEXIT_CRITICAL(&g_mqttMux);
+      r = k;
+    }
+  } else if (op == 16) {
+    r = (a >= 0 && a < g_mqttSlotCount) ? (int32_t)g_mqttSlots[a].seq : 0;
+#endif
   }
   m3ApiReturn(r);
 }

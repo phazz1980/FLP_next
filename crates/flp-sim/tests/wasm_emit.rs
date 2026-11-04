@@ -455,3 +455,35 @@ fn ethernet_and_wifi_work_together_in_a_module() {
     assert_eq!(out(&module, "wifi_len.out"), Word::int(12));
     assert_eq!(out(&module, "work.out"), Word::int(1));
 }
+
+#[test]
+fn mqtt_goes_through_the_master() {
+    let lib = library();
+    let project = Project::load(repo_path("examples/mqtt_wasm")).unwrap();
+    let program = Program::build(&project, &lib).unwrap();
+    let built = program.wasm_module_with(1, true).unwrap();
+    let manifest = Manifest::parse(&built.manifest).unwrap();
+    assert!(manifest.allow.iter().any(|a| a == "net"), "{manifest:?}");
+    let mut module = McuModule::load(&built.wasm, &manifest, built.watched.len()).unwrap();
+    module.step(10).unwrap();
+    // Settings go out once, the filter is registered in the first slot.
+    let io = module.io();
+    assert_eq!(io.mqtt_text[&1], "broker.hivemq.com");
+    assert_eq!(io.mqtt_num[&1], 1883);
+    assert_eq!(io.mqtt_num[&4], 2);
+    assert!(io.mqtt_num.contains_key(&63));
+    assert_eq!(io.mqtt_filters, ["flp/led"]);
+    // No link, nothing published.
+    assert!(io.mqtt_published.is_empty());
+    // A message arrives and the module echoes it back once the client is connected.
+    let io = module.io_mut();
+    io.mqtt_state.insert(0, 1);
+    io.mqtt_receive("flp/led", "1");
+    module.step(10).unwrap();
+    module.step(10).unwrap();
+    let io = module.io();
+    assert_eq!(
+        io.mqtt_published,
+        [("flp/echo".to_string(), "1".to_string(), false)]
+    );
+}

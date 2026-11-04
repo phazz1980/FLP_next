@@ -73,3 +73,13 @@ to = "broker.client_id"
 [[link]]
 from = "pass_r.out"
 to = "wifi.ota_password"
+
+[[block]]
+id = "sub"
+type = "mqtt_subscribe"
+param_in = ["topic"]
+kind = "string"
+
+[[link]]
+from = "login_r.out"
+to = "sub.topic"

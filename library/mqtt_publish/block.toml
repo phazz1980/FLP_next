@@ -28,6 +28,7 @@ description = "true в цикле, когда сообщение ушло бро
 name = "topic"
 label = "топик"
 type = "string"
+runtime = true
 default = "flp/value"
 description = "Топик, например home/kitchen/temperature"
 

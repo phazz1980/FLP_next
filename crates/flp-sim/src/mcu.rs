@@ -170,6 +170,18 @@ pub struct StubIo {
     pub eth_text: HashMap<i32, String>,
     /// What the master reports for Ethernet (`net` op 8), by field: 0 ready, 1 address.
     pub eth_state: HashMap<i32, i32>,
+    /// MQTT numbers the module set (`net` op 9), by code: 1 port, 2 keep-alive, 3 network, 4 max subscriptions, 63 complete.
+    pub mqtt_num: HashMap<i32, i32>,
+    /// MQTT text settings (`net` op 10), by code: 1 broker, 2 client id, 3 user, 4 password.
+    pub mqtt_text: HashMap<i32, String>,
+    /// What the master reports for the client (`net` op 11), by field: 0 connected, 1 error.
+    pub mqtt_state: HashMap<i32, i32>,
+    /// Publications the module queued (ops 12, 13): topic, payload, retain.
+    pub mqtt_published: Vec<(String, String, bool)>,
+    /// Filters the module subscribed to (op 14); the index is the slot.
+    pub mqtt_filters: Vec<String>,
+    /// Last message and counter of each slot (ops 15, 16).
+    pub mqtt_slots: Vec<(String, i32)>,
     /// Unix time (UTC) the NTP service knows; `None` until the first sync.
     pub net_unix: Option<u32>,
     /// Seconds since the last sync.
@@ -614,12 +626,66 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
         .func_wrap(
             "flp",
             "net",
-            |mut c: Caller<'_, Host>, op: i32, a: i32, b: i32, len: i32, _d: i32| -> i32 {
-                let text = if op == 1 || op == 7 {
+            |mut c: Caller<'_, Host>, op: i32, a: i32, b: i32, len: i32, d: i32| -> i32 {
+                let text = if op == 1 || op == 7 || op == 10 {
                     read_bytes(&mut c, b, len, 128)
                 } else {
                     None
                 };
+                match op {
+                    12 | 13 => {
+                        let topic = read_bytes(&mut c, a, b, 128);
+                        let payload = read_bytes(&mut c, len, d, 128);
+                        let io = &mut c.data_mut().io;
+                        return match (topic, payload) {
+                            (Some(t), Some(p)) if b > 0 && io.mqtt_state.get(&0) == Some(&1) => {
+                                io.mqtt_published.push((
+                                    String::from_utf8_lossy(&t).into_owned(),
+                                    String::from_utf8_lossy(&p).into_owned(),
+                                    op == 13,
+                                ));
+                                1
+                            }
+                            _ => 0,
+                        };
+                    }
+                    14 => {
+                        let Some(f) = read_bytes(&mut c, a, b, 128) else {
+                            return -1;
+                        };
+                        let f = String::from_utf8_lossy(&f).into_owned();
+                        let io = &mut c.data_mut().io;
+                        let limit = io.mqtt_num.get(&4).copied().unwrap_or(4).clamp(1, 16) as usize;
+                        if let Some(i) = io.mqtt_filters.iter().position(|x| *x == f) {
+                            return i as i32;
+                        }
+                        if io.mqtt_filters.len() >= limit {
+                            return -1;
+                        }
+                        io.mqtt_filters.push(f);
+                        io.mqtt_slots.push((String::new(), 0));
+                        return io.mqtt_filters.len() as i32 - 1;
+                    }
+                    15 => {
+                        let Some(memory) = c.get_export("memory").and_then(|e| e.into_memory())
+                        else {
+                            return 0;
+                        };
+                        let Some((text, _)) = c.data().io.mqtt_slots.get(a as usize).cloned()
+                        else {
+                            return 0;
+                        };
+                        let data = memory.data_mut(&mut c);
+                        let (p, cap) = (b as usize, len.max(0) as usize);
+                        if p + cap > data.len() {
+                            return 0;
+                        }
+                        let n = text.len().min(cap);
+                        data[p..p + n].copy_from_slice(&text.as_bytes()[..n]);
+                        return n as i32;
+                    }
+                    _ => {}
+                }
                 if op == 5 {
                     let Some(memory) = c.get_export("memory").and_then(|e| e.into_memory()) else {
                         return 0;
@@ -683,6 +749,20 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
                         None => 0,
                     },
                     8 => io.eth_state.get(&a).copied().unwrap_or(0),
+                    9 => {
+                        io.mqtt_num.insert(a, b);
+                        0
+                    }
+                    10 => match text {
+                        Some(t) => {
+                            io.mqtt_text
+                                .insert(a, String::from_utf8_lossy(&t).into_owned());
+                            1
+                        }
+                        None => 0,
+                    },
+                    11 => io.mqtt_state.get(&a).copied().unwrap_or(0),
+                    16 => io.mqtt_slots.get(a as usize).map_or(0, |s| s.1),
                     _ => 0,
                 }
             },
@@ -702,6 +782,34 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
         })
         .map_err(bad)?;
     Ok(())
+}
+
+impl StubIo {
+    /// A message from the broker: every slot whose filter matches takes it (up to 128 bytes).
+    pub fn mqtt_receive(&mut self, topic: &str, payload: &str) {
+        for (i, f) in self.mqtt_filters.iter().enumerate() {
+            if mqtt_match(f, topic) {
+                let cut = payload.len().min(128);
+                self.mqtt_slots[i].0 =
+                    String::from_utf8_lossy(&payload.as_bytes()[..cut]).into_owned();
+                self.mqtt_slots[i].1 += 1;
+            }
+        }
+    }
+}
+
+/// Topic against a filter with `+` and `#`.
+fn mqtt_match(filter: &str, topic: &str) -> bool {
+    let (mut f, mut t) = (filter.split('/'), topic.split('/'));
+    loop {
+        match (f.next(), t.next()) {
+            (Some("#"), _) => return true,
+            (Some("+"), Some(_)) => {}
+            (Some(a), Some(b)) if a == b => {}
+            (None, None) => return true,
+            _ => return false,
+        }
+    }
 }
 
 /// Date and time of a Unix second: hour, minute, second, day, month, year, weekday (1 = Monday... 7 = Sunday, as the C++ block).

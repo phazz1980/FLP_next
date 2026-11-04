@@ -1,0 +1,6 @@
+[project]
+name = "mqtt_wasm"
+description = "MQTT в модуле: клиентом занимается мастер, модуль подписывается, публикует и читает сообщения"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

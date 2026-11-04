@@ -60,11 +60,11 @@ pub(super) enum A {
 }
 
 impl Str {
-    fn ptr(self) -> A {
+    pub(super) fn ptr(self) -> A {
         A::C(self.ptr as i32)
     }
 
-    fn len(self) -> A {
+    pub(super) fn len(self) -> A {
         match self.len {
             Len::Const(n) => A::C(n as i32),
             Len::Global(g) => A::G(g),
@@ -164,7 +164,7 @@ impl Emitter<'_, '_> {
     }
 
     /// The string on input `port`; an input that is off is an empty string.
-    fn str_in(&mut self, inst: &Instance, port: &str) -> Result<Str, WasmError> {
+    pub(super) fn str_in(&mut self, inst: &Instance, port: &str) -> Result<Str, WasmError> {
         let empty = Str {
             ptr: 0,
             len: Len::Const(0),
@@ -189,7 +189,7 @@ impl Emitter<'_, '_> {
     }
 
     /// Room a copy of the string on `value` needs.
-    fn value_cap(&mut self, inst: &Instance) -> Result<u32, WasmError> {
+    pub(super) fn value_cap(&mut self, inst: &Instance) -> Result<u32, WasmError> {
         Ok(match self.str_in(inst, "value")?.len {
             Len::Global(g) => self
                 .bufs
@@ -222,7 +222,7 @@ impl Emitter<'_, '_> {
     }
 
     /// Appends `s` to `out` at the length in local `at` (0 when `None`); the new length stays on the stack.
-    fn append(&mut self, out: Buf, s: Str, at: Option<u32>) {
+    pub(super) fn append(&mut self, out: Buf, s: Str, at: Option<u32>) {
         let cur = at.map_or(A::C(0), A::L);
         self.text_call(1, [out.ptr(), out.cap(), s.ptr(), s.len(), cur, A::C(0)]);
     }
@@ -252,7 +252,7 @@ impl Emitter<'_, '_> {
         }
     }
 
-    fn mem_arg(offset: u64, align: u32) -> wasm_encoder::MemArg {
+    pub(super) fn mem_arg(offset: u64, align: u32) -> wasm_encoder::MemArg {
         wasm_encoder::MemArg {
             offset,
             align,

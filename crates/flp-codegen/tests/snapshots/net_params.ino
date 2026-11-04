@@ -1,5 +1,5 @@
 // Сгенерировано CrabLogic из проекта «net_params». Ручные правки будут перезаписаны.
-// Порядок выполнения: net_r → pass_r → wifi → broker_r → login_r → broker
+// Порядок выполнения: net_r → pass_r → wifi → broker_r → login_r → broker → sub
 
 #define FLPROG_MQTT_MAX_SUBSCRIPTIONS 4U
 
@@ -21,6 +21,8 @@ String broker_r_out = String();
 String login_r_out = String();
 bool broker_connected = false;
 int32_t broker_error = 0;
+String sub_out = String();
+bool sub_received = false;
 
 // Обмен сигналами между основной и фоновой задачами
 SemaphoreHandle_t flp_bg_lock;
@@ -93,6 +95,11 @@ bool broker_bound = false;
 String flpMqttTopic;
 String flpMqttPayload;
 uint32_t flpMqttSeq = 0;
+
+// sub: mqtt_subscribe
+uint32_t sub_seq = 0;
+bool sub_subscribed = false;
+String sub_topic;
 
 // mqtt: общий код
 void flp_mqtt_receive(const char *topic, const uint8_t *payload, size_t length, bool retained) {
@@ -415,6 +422,26 @@ void flp_bg_task(void *) {
     broker_connected = flpMqtt.connected();
     broker_error = flpMqtt.error();
 
+    // sub: mqtt_subscribe
+    {
+      if (sub_topic != String((login_r_out_in))) {
+        sub_topic = String((login_r_out_in));
+        sub_subscribed = false;
+      }
+      // The client keeps the subscription across reconnects; ask again only until it is accepted.
+      if (!sub_subscribed && flpMqtt.connected()) {
+        sub_subscribed = flpMqtt.subscribe(String((login_r_out_in)).c_str());
+      }
+      sub_received = false;
+      if (sub_seq != flpMqttSeq) {
+        sub_seq = flpMqttSeq;
+        if (flp_mqtt_match(String((login_r_out_in)).c_str(), flpMqttTopic.c_str())) {
+          sub_received = true;
+          sub_out = flpMqttPayload;
+        }
+      }
+    }
+
     vTaskDelay(1);
   }
 }
@@ -428,6 +455,7 @@ void setup() {
   wifi_address.reserve(32);
   broker_r_out.reserve(32);
   login_r_out.reserve(32);
+  sub_out.reserve(32);
   var_Set_d8006b.reserve(32);
   var_Parol_23764f.reserve(32);
   var_Broker_a91631.reserve(32);
