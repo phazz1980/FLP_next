@@ -771,9 +771,11 @@ m3ApiRawFunction(h_uart) {
 #endif
 
 #ifdef FLP_NET
-// ---- Wi-Fi and NTP (FLProg_Network): modules ask, the hardware task does the work ----
-// net(op, a, b, c, d); modules only write requests and read the last snapshot, the task owns the interface.
-//   op 0 number: a = code (1 dhcp, 2 NTP period ms, 63 settings are complete, 64 start NTP), b = value
+// ---- Wi-Fi, Ethernet and NTP (FLProg_Network): modules ask, the hardware task does the work ----
+// net(op, a, b, c, d); modules only write requests and read the last snapshot, the task owns the interfaces.
+// FLP_WIFI and FLP_ETH say which interfaces the master carries.
+//   op 0 number: a = code (1 dhcp, 2 NTP period ms, 3 NTP interface 0 Wi-Fi / 1 Ethernet, 63 Wi-Fi settings are complete,
+//        64 start NTP), b = value
 //   op 1 text setting: a = code (1 ssid, 2 password, 3 ip, 4 gateway, 5 subnet, 6 ap ssid, 7 ap password, 8 NTP server),
 //        b = pointer, c = length
 //   op 2 radio: a = 0 off, 1 client, 2 access point, 3 both
@@ -781,56 +783,75 @@ m3ApiRawFunction(h_uart) {
 //   op 4 NTP: a = field (0 has time, 1 age in s, 2 hour, 3 minute, 4 second, 5 day, 6 month, 7 year, 8 weekday 1..7,
 //        9 Unix UTC), b = offset from UTC in seconds
 //   op 5 time as text "HH:MM:SS": a = pointer, b = capacity, c = offset; returns the length
+//   op 6 Ethernet number: a = code (1 dhcp, 2 sck, 3 miso, 4 mosi, 5 cs, 6 last MAC byte, 63 settings are complete), b = value
+//   op 7 Ethernet text: a = code (1 ip, 2 gateway, 3 subnet), b = pointer, c = length
+//   op 8 Ethernet: a = field (0 ready, 1 address as a number)
+// SPI pins, cs and MAC are taken when the Ethernet interface is created (first start); changing them needs a reset.
+#ifdef FLP_WIFI
 static FLProgOnBoardWifiInterface g_wifi;
+#endif
+#ifdef FLP_ETH
+static FLProgWiznetInterface *g_eth = nullptr;
+#endif
 static FLProgNetworkNtp g_ntp;
 struct NetSettings {
   char text[8][65];
-  int32_t dhcp = 1, ntpPeriod = 3600000;
+  int32_t dhcp = 1, ntpPeriod = 3600000, ntpIface = 0;
   volatile bool complete = false, ntpAsked = false;
   volatile int32_t want = 0;
+  // Ethernet settings: ethNum is indexed by the code of op 6
+  char ethText[3][65];
+  int32_t ethNum[7] = {0, 1, 18, 19, 23, 5, 40};
+  volatile bool ethComplete = false;
   // task state
-  uint32_t applied = 0;
+  uint32_t applied = 0, ethApplied = 0;
   bool appliedOnce = false, ntpOn = false;
   uint8_t state = 255;
   uint32_t tick = 0, retry = 0;
   // snapshot for modules
-  volatile int32_t clientReady = 0, apReady = 0, status = 0, error = 0, hasTime = 0;
-  volatile uint32_t ip = 0, unixTime = 0, syncAge = 0;
+  volatile int32_t clientReady = 0, apReady = 0, status = 0, error = 0, hasTime = 0, ethReady = 0;
+  volatile uint32_t ip = 0, ethIp = 0, unixTime = 0, syncAge = 0;
 };
 static NetSettings g_net;
 
-static uint32_t netHash() {
+static uint32_t netHashOf(char (*t)[65], int count, int32_t dhcp) {
   uint32_t h = 2166136261u;
-  for (auto &t : g_net.text) {
-    for (const char *c = t; *c; c++) h = (h ^ (uint8_t)*c) * 16777619u;
+  for (int i = 0; i < count; i++) {
+    for (const char *c = t[i]; *c; c++) h = (h ^ (uint8_t)*c) * 16777619u;
     h = (h ^ 0xFF) * 16777619u;
   }
-  return (h ^ (uint32_t)g_net.dhcp) * 16777619u;
+  return (h ^ (uint32_t)dhcp) * 16777619u;
 }
 
-static void netApply() {
+// DHCP or the fixed address, as the C++ blocks do it.
+static void netAddress(FLProgNetworkInterface &net, int32_t dhcp, const char *ip, const char *gateway, const char *subnet) {
   auto addr = [](const char *t) { IPAddress a; a.fromString(t); return a; };
+  if (dhcp) net.setDhcp();
+  else {
+    net.localIP(addr(ip));
+    net.gateway(addr(gateway));
+    net.dns(addr(gateway));
+    net.subnet(addr(subnet));
+    net.resetDhcp();
+  }
+}
+
+#ifdef FLP_WIFI
+static void wifiApply() {
   g_wifi.setClientSsid(g_net.text[0]);
   g_wifi.setClientPassword(g_net.text[1]);
-  if (g_net.dhcp) g_wifi.setDhcp();
-  else {
-    g_wifi.localIP(addr(g_net.text[2]));
-    g_wifi.gateway(addr(g_net.text[3]));
-    g_wifi.dns(addr(g_net.text[3]));
-    g_wifi.subnet(addr(g_net.text[4]));
-    g_wifi.resetDhcp();
-  }
+  netAddress(g_wifi, g_net.dhcp, g_net.text[2], g_net.text[3], g_net.text[4]);
   g_wifi.setApSsid(g_net.text[5]);
   g_wifi.setApPassword(g_net.text[6]);
 }
 
-static void netPoll() {
+static void wifiPoll() {
   NetSettings &n = g_net;
   if (!n.complete) return;
-  uint32_t h = netHash();
+  uint32_t h = netHashOf(n.text, 8, n.dhcp);
   if (h != n.applied) {
     // New settings (first start, or a new module with other ones): re-apply and restart the radio.
-    netApply();
+    wifiApply();
     if (n.appliedOnce) { g_wifi.clientOff(); g_wifi.apOff(); n.state = 255; }
     n.applied = h;
     n.appliedOnce = true;
@@ -841,19 +862,59 @@ static void netPoll() {
     if (want & 1) g_wifi.clientOn(); else g_wifi.clientOff();
     if (want & 2) g_wifi.apOn(); else g_wifi.apOff();
   }
-  if (n.ntpAsked && !n.ntpOn) {
-    n.ntpOn = g_ntp.begin(g_wifi);
-    if (n.ntpOn) {
-      g_ntp.setServer(n.text[7]);
-      g_ntp.setRequestPeriodMs((uint32_t)n.ntpPeriod);
-    }
-  }
   g_wifi.pool();
   n.clientReady = g_wifi.clientIsReady();
   n.apReady = g_wifi.apIsReady();
   n.status = g_wifi.getStatus();
   n.error = g_wifi.getError();
   n.ip = n.clientReady ? (uint32_t)g_wifi.localIP() : n.apReady ? (uint32_t)g_wifi.accessPointIP() : 0;
+}
+#endif
+
+#ifdef FLP_ETH
+static void ethPoll() {
+  NetSettings &n = g_net;
+  if (!n.ethComplete) return;
+  if (!g_eth) {
+    g_eth = new FLProgWiznetInterface(n.ethNum[5]);
+    g_eth->mac(0x78, 0xAC, 0xC0, 0x2C, 0x3E, (uint8_t)n.ethNum[6]);
+    if (n.ethNum[2] != 18 || n.ethNum[3] != 19 || n.ethNum[4] != 23) g_eth->setSpiPins(n.ethNum[2], n.ethNum[3], n.ethNum[4]);
+  }
+  uint32_t h = netHashOf(n.ethText, 3, n.ethNum[1]);
+  if (h != n.ethApplied) {
+    netAddress(*g_eth, n.ethNum[1], n.ethText[0], n.ethText[1], n.ethText[2]);
+    n.ethApplied = h;
+  }
+  g_eth->pool();
+  n.ethReady = g_eth->ethernetIsReady();
+  n.ethIp = n.ethReady ? (uint32_t)g_eth->localIP() : 0;
+}
+#endif
+
+static void netPoll() {
+  NetSettings &n = g_net;
+#ifdef FLP_WIFI
+  wifiPoll();
+#endif
+#ifdef FLP_ETH
+  ethPoll();
+#endif
+  if (n.ntpAsked && !n.ntpOn) {
+    FLProgNetworkInterface *iface = nullptr;
+#ifdef FLP_WIFI
+    if (n.ntpIface == 0 && n.complete) iface = &g_wifi;
+#endif
+#ifdef FLP_ETH
+    if (n.ntpIface == 1 && g_eth) iface = g_eth;
+#endif
+    if (iface) {
+      n.ntpOn = g_ntp.begin(*iface);
+      if (n.ntpOn) {
+        g_ntp.setServer(n.text[7]);
+        g_ntp.setRequestPeriodMs((uint32_t)n.ntpPeriod);
+      }
+    }
+  }
   uint32_t now = millis();
   if (n.ntpOn && (uint32_t)(now - n.tick) >= 1000) {
     n.tick = now;
@@ -888,6 +949,7 @@ m3ApiRawFunction(h_net) {
   if (op == 0) {
     if (a == 1) n.dhcp = b;
     else if (a == 2 && b > 0) n.ntpPeriod = b;
+    else if (a == 3) n.ntpIface = b;
     else if (a == 63) n.complete = true;
     else if (a == 64) n.ntpAsked = true;
   } else if (op == 1) {
@@ -916,6 +978,18 @@ m3ApiRawFunction(h_net) {
       snprintf((char *)_mem + a, 9, "%02d:%02d:%02d", lt.tm_hour, lt.tm_min, lt.tm_sec);
       r = 8;
     }
+  } else if (op == 6) {
+    if (a >= 1 && a <= 6) n.ethNum[a] = b;
+    else if (a == 63) n.ethComplete = true;
+  } else if (op == 7) {
+    if (a >= 1 && a <= 3 && c >= 0 && inMem(runtime, b, c)) {
+      char *t = n.ethText[a - 1];
+      int32_t k = c < 64 ? c : 64;
+      memcpy(t, (const uint8_t *)_mem + b, k);
+      t[k] = 0;
+    }
+  } else if (op == 8) {
+    r = a == 0 ? n.ethReady : a == 1 ? (int32_t)n.ethIp : 0;
   }
   m3ApiReturn(r);
 }

@@ -523,8 +523,24 @@ pub(crate) fn ethernet(e: &CppCtx) -> CppParts {
         period_globals(&mut g, id);
     }
     service_globals(&mut g, e, &s, "flpEth", false);
+    if e.flag("out_address") {
+        g.line("// Address shown on the address output; the text is rebuilt only when it changes.")
+            .line(format!("uint32_t {id}_ip_raw = 0;"));
+    }
 
     let mut su = Lines::default();
+    // The module sits on the default SPI pins unless the block moves them.
+    if [("sck", 18), ("miso", 19), ("mosi", 23)]
+        .iter()
+        .any(|(n, d)| e.int(n, *d) != *d)
+    {
+        su.line(format!(
+            "flpEth.setSpiPins({}, {}, {});",
+            e.param("sck"),
+            e.param("miso"),
+            e.param("mosi")
+        ));
+    }
     su.line(format!(
         "flpEth.mac(0x78, 0xAC, 0xC0, 0x2C, 0x3E, {});",
         e.param("mac")
@@ -560,6 +576,18 @@ pub(crate) fn ethernet(e: &CppCtx) -> CppParts {
     }
     pool(&mut l, e, "flpEth");
     l.line(format!("{} = flpEth.ethernetIsReady();", e.output("ready")));
+    if e.flag("out_address") {
+        l.line("{")
+            .line("  uint32_t ip = flpEth.ethernetIsReady() ? (uint32_t)flpEth.localIP() : 0;")
+            .line(format!("  if (ip != {id}_ip_raw) {{"))
+            .line(format!("    {id}_ip_raw = ip;"))
+            .line(format!(
+                "    {} = ip ? IPAddress(ip).toString() : String();",
+                e.output("address")
+            ))
+            .line("  }")
+            .line("}");
+    }
     service_loop(&mut l, e, &s, "flpEth");
 
     CppParts {

@@ -164,6 +164,12 @@ pub struct StubIo {
     pub net_radio: i32,
     /// What the master reports for Wi-Fi (`net` op 3), by field: 0 client ready, 1 AP ready, 2 status, 3 error, 4 address.
     pub net_wifi: HashMap<i32, i32>,
+    /// Ethernet numbers the module set (`net` op 6), by code: 1 dhcp, 2 sck, 3 miso, 4 mosi, 5 cs, 6 MAC byte, 63 complete.
+    pub eth_num: HashMap<i32, i32>,
+    /// Ethernet text settings (`net` op 7), by code: 1 ip, 2 gateway, 3 subnet.
+    pub eth_text: HashMap<i32, String>,
+    /// What the master reports for Ethernet (`net` op 8), by field: 0 ready, 1 address.
+    pub eth_state: HashMap<i32, i32>,
     /// Unix time (UTC) the NTP service knows; `None` until the first sync.
     pub net_unix: Option<u32>,
     /// Seconds since the last sync.
@@ -609,7 +615,7 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
             "flp",
             "net",
             |mut c: Caller<'_, Host>, op: i32, a: i32, b: i32, len: i32, _d: i32| -> i32 {
-                let text = if op == 1 {
+                let text = if op == 1 || op == 7 {
                     read_bytes(&mut c, b, len, 128)
                 } else {
                     None
@@ -664,6 +670,19 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
                                 .unwrap_or(0)
                         }
                     },
+                    6 => {
+                        io.eth_num.insert(a, b);
+                        0
+                    }
+                    7 => match text {
+                        Some(t) => {
+                            io.eth_text
+                                .insert(a, String::from_utf8_lossy(&t).into_owned());
+                            1
+                        }
+                        None => 0,
+                    },
+                    8 => io.eth_state.get(&a).copied().unwrap_or(0),
                     _ => 0,
                 }
             },

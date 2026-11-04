@@ -39,6 +39,7 @@ impl Emitter<'_, '_> {
     pub(super) fn net_block(&mut self, inst: &Instance) -> Result<bool, WasmError> {
         match inst.block.kind.as_str() {
             "wifi" => self.wifi_block(inst)?,
+            "ethernet" => self.ethernet_block(inst)?,
             "ntp" => self.ntp_block(inst)?,
             _ => return Ok(false),
         }
@@ -130,11 +131,73 @@ impl Emitter<'_, '_> {
         Ok(())
     }
 
+    /// Same as `net_text` for the Ethernet settings (op 7).
+    fn eth_text(&mut self, inst: &Instance, code: i32, name: &str) -> Result<(), WasmError> {
+        if inst.param_vars.contains_key(name) {
+            return Err(self.unsupported(
+                inst,
+                &format!("параметр «{name}» из переменной пока не поддержан"),
+            ));
+        }
+        let text = self.text_param(inst, name);
+        let s = self.const_str(text.as_bytes());
+        self.net_call(7, code, A::C(s.ptr as i32), A::C(text.len() as i32));
+        self.op(I::Drop);
+        Ok(())
+    }
+
+    fn ethernet_block(&mut self, inst: &Instance) -> Result<(), WasmError> {
+        self.string_outputs_ok(inst)?;
+        let done = self.state_i();
+        self.op(I::GlobalGet(done));
+        self.op(I::I32Eqz);
+        self.op(I::If(BlockType::Empty));
+        // Pins and MAC are taken by the master when it creates the interface.
+        for (code, name) in [(2, "sck"), (3, "miso"), (4, "mosi"), (5, "cs"), (6, "mac")] {
+            let value = self.named_param(inst, name)?;
+            self.net_call(6, code, A::C(value), A::C(0));
+            self.op(I::Drop);
+        }
+        let dhcp = self.named_param(inst, "dhcp")?;
+        self.net_call(6, 1, A::C(dhcp), A::C(0));
+        self.op(I::Drop);
+        if dhcp == 0 {
+            self.eth_text(inst, 1, "ip")?;
+            self.eth_text(inst, 2, "gateway")?;
+            self.eth_text(inst, 3, "subnet")?;
+        }
+        self.net_call(6, 63, A::C(0), A::C(0));
+        self.op(I::Drop);
+        self.c_i(1);
+        self.op(I::GlobalSet(done));
+        self.op(I::End);
+
+        if inst.outputs.contains_key("ready") {
+            self.net_call(8, 0, A::C(0), A::C(0));
+            self.set_named(inst, "ready", Ty::I);
+        }
+        if let Some(out) = self.out_buf(inst, "address") {
+            self.net_call(8, 1, A::C(0), A::C(0));
+            let ip = self.tmp_i();
+            self.op(I::LocalSet(ip));
+            self.op(I::LocalGet(ip));
+            self.op(I::If(BlockType::Empty));
+            self.text_call(
+                11,
+                [out.ptr(), out.cap(), A::L(ip), A::C(0), A::C(0), A::C(0)],
+            );
+            self.op(I::GlobalSet(out.len));
+            self.op(I::Else);
+            self.c_i(0);
+            self.op(I::GlobalSet(out.len));
+            self.op(I::End);
+        }
+        Ok(())
+    }
+
     fn ntp_block(&mut self, inst: &Instance) -> Result<(), WasmError> {
         self.string_outputs_ok(inst)?;
-        if self.text_param(inst, "net") == "ethernet" {
-            return Err(self.unsupported(inst, "NTP через Ethernet пока не поддержан в модулях"));
-        }
+        let eth = self.text_param(inst, "net") == "ethernet";
         let period = self.named_param(inst, "period")?;
         let done = self.state_i();
         self.op(I::GlobalGet(done));
@@ -142,6 +205,7 @@ impl Emitter<'_, '_> {
         self.op(I::If(BlockType::Empty));
         self.net_text(inst, 8, "server")?;
         self.net_num(2, period);
+        self.net_num(3, eth as i32);
         self.net_num(64, 0);
         self.c_i(1);
         self.op(I::GlobalSet(done));

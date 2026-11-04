@@ -409,3 +409,49 @@ fn wifi_and_ntp_work_in_a_module() {
     assert_eq!(out(&module, "time_len.out"), Word::int(8));
     assert_eq!(out(&module, "work.out"), Word::int(1));
 }
+
+#[test]
+fn ethernet_and_wifi_work_together_in_a_module() {
+    let lib = library();
+    let project = Project::load(repo_path("examples/net_eth_wasm")).unwrap();
+    let program = Program::build(&project, &lib).unwrap();
+    let built = program.wasm_module_with(1, true).unwrap();
+    let manifest = Manifest::parse(&built.manifest).unwrap();
+    assert!(manifest.allow.iter().any(|a| a == "net"), "{manifest:?}");
+    let mut module = McuModule::load(&built.wasm, &manifest, built.watched.len()).unwrap();
+    let out = |module: &McuModule, label: &str| {
+        let i = built
+            .watched
+            .iter()
+            .position(|l| l == label)
+            .unwrap_or_else(|| panic!("{label}: {:?}", built.watched));
+        module.outputs()[i]
+    };
+    module.step(10).unwrap();
+    // The pins, the chip select and the MAC byte go to the master once; DHCP is on.
+    let io = module.io();
+    assert_eq!(io.eth_num[&2], 14);
+    assert_eq!(io.eth_num[&3], 12);
+    assert_eq!(io.eth_num[&4], 13);
+    assert_eq!(io.eth_num[&5], 15);
+    assert_eq!(io.eth_num[&6], 41);
+    assert_eq!(io.eth_num[&1], 1);
+    assert!(io.eth_num.contains_key(&63));
+    assert!(!io.eth_text.contains_key(&1));
+    // NTP asks for the Ethernet interface; Wi-Fi settings are independent.
+    assert_eq!(io.net_num[&3], 1);
+    assert_eq!(io.net_text[&1], "MyNetwork");
+    assert_eq!(out(&module, "work.out"), Word::int(0));
+    assert_eq!(out(&module, "eth_len.out"), Word::int(0));
+    // Both up, time known.
+    let io = module.io_mut();
+    io.eth_state.insert(0, 1);
+    io.eth_state.insert(1, i32::from_le_bytes([10, 0, 0, 5]));
+    io.net_wifi.insert(0, 1);
+    io.net_wifi.insert(4, i32::from_le_bytes([192, 168, 1, 77]));
+    io.net_unix = Some(1_793_788_215);
+    module.step(10).unwrap();
+    assert_eq!(out(&module, "eth_len.out"), Word::int(8));
+    assert_eq!(out(&module, "wifi_len.out"), Word::int(12));
+    assert_eq!(out(&module, "work.out"), Word::int(1));
+}

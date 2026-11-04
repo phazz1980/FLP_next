@@ -23,8 +23,12 @@ pub struct MasterFeatures {
     pub uart: bool,
     /// Text operations (`text`): the `text_*` blocks, UART lines and text sending.
     pub text: bool,
-    /// Wi-Fi and NTP (`net`): the `wifi` and `ntp` blocks; the library comes from `libs/`.
+    /// Network (`net`): the `wifi`, `ethernet` and `ntp` blocks; the library comes from `libs/`.
     pub net: bool,
+    /// The Wi-Fi interface (`wifi`).
+    pub wifi: bool,
+    /// The W5500 Ethernet interface (`ethernet`).
+    pub eth: bool,
 }
 
 impl MasterFeatures {
@@ -38,7 +42,17 @@ impl MasterFeatures {
                 "modbus_rtu_master" | "modbus_rtu_slave" => f.modbus = true,
                 "uart_read" | "uart_send" | "uart_config" => f.uart = true,
                 // The address and the time are texts: they come through `text` too.
-                "wifi" | "ntp" => {
+                "wifi" => {
+                    f.net = true;
+                    f.wifi = true;
+                    f.text = true;
+                }
+                "ethernet" => {
+                    f.net = true;
+                    f.eth = true;
+                    f.text = true;
+                }
+                "ntp" => {
                     f.net = true;
                     f.text = true;
                 }
@@ -60,6 +74,8 @@ impl MasterFeatures {
             (self.uart, "FLP_UART"),
             (self.text, "FLP_TEXT"),
             (self.net, "FLP_NET"),
+            (self.wifi, "FLP_WIFI"),
+            (self.eth, "FLP_ETH"),
         ] {
             if on {
                 text.push_str(&format!(
@@ -250,8 +266,19 @@ mod tests {
             net.defines(),
             "#define FLP_TEXT 1
 #define FLP_NET 1
+#define FLP_WIFI 1
 "
         );
+        let eth = MasterFeatures::of_blocks(["ethernet", "ntp"]);
+        assert_eq!(
+            eth.defines(),
+            "#define FLP_TEXT 1
+#define FLP_NET 1
+#define FLP_ETH 1
+"
+        );
+        let wifi_eth = MasterFeatures::of_blocks(["wifi", "ethernet"]);
+        assert!(wifi_eth.defines().contains("FLP_WIFI") && wifi_eth.defines().contains("FLP_ETH"));
         assert_ne!(master_sketch_id(&none), master_sketch_id(&net));
         assert!(sketch_text(&both).ends_with(SKETCH));
     }

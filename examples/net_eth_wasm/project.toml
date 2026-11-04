@@ -1,0 +1,6 @@
+[project]
+name = "net_eth_wasm"
+description = "Ethernet W5500 и Wi-Fi в модуле одновременно: свои выводы SPI, время по кабелю"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

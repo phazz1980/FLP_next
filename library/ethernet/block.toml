@@ -15,12 +15,48 @@ name = "ready"
 type = "bool"
 description = "true, пока кабель подключён и адрес получен"
 
+[[output]]
+name = "address"
+type = "string"
+label = "IP"
+when = "out_address"
+description = "IP-адрес в проводной сети; пустая строка, пока нет связи"
+
 [[param]]
 name = "cs"
 type = "pin"
 mode = "out"
 default = 5
-description = "Вывод CS модуля (SPI по умолчанию: SCK 18, MISO 19, MOSI 23)"
+description = "Вывод CS модуля"
+
+[[param]]
+name = "sck"
+type = "pin"
+mode = "out"
+default = 18
+description = "Вывод SCK модуля (SPI)"
+
+[[param]]
+name = "miso"
+type = "pin"
+mode = "in"
+default = 19
+description = "Вывод MISO модуля (SPI)"
+
+[[param]]
+name = "mosi"
+type = "pin"
+mode = "out"
+default = 23
+description = "Вывод MOSI модуля (SPI)"
+
+[[param]]
+name = "out_address"
+type = "bool"
+label = "Выход IP"
+default = false
+show = "hidden"
+description = "Показать выход IP-адреса"
 
 [[param]]
 name = "mac"

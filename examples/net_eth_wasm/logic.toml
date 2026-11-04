@@ -1,0 +1,71 @@
+# Ethernet (модуль W5500 на других выводах SPI) и Wi-Fi работают одновременно: у каждого свой адрес.
+# Время берётся по кабелю (net = "ethernet"). Светодиод горит, когда оба интерфейса готовы и время известно.
+
+[[block]]
+id = "eth"
+type = "ethernet"
+cs = 15
+sck = 14
+miso = 12
+mosi = 13
+mac = 41
+web = false
+web_update = false
+out_address = true
+
+[[block]]
+id = "wifi"
+type = "wifi"
+ssid = "MyNetwork"
+password = "secret123"
+web = false
+web_update = false
+out_address = true
+
+[[block]]
+id = "clock"
+type = "ntp"
+net = "ethernet"
+zone = 3.0
+
+[[block]]
+id = "work"
+type = "and"
+count = 3
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[block]]
+id = "eth_len"
+type = "text_length"
+
+[[block]]
+id = "wifi_len"
+type = "text_length"
+
+[[link]]
+from = "eth.ready"
+to   = "work.a"
+
+[[link]]
+from = "wifi.ready"
+to   = "work.b"
+
+[[link]]
+from = "clock.valid"
+to   = "work.c"
+
+[[link]]
+from = "work.out"
+to   = "led.in"
+
+[[link]]
+from = "eth.address"
+to   = "eth_len.in"
+
+[[link]]
+from = "wifi.address"
+to   = "wifi_len.in"
