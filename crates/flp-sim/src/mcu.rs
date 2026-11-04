@@ -53,6 +53,7 @@ const HARDWARE: &[&str] = &[
     "modbus",
     "uart",
     "text",
+    "net",
 ];
 
 const FUEL_PER_CALL: u64 = 5_000_000;
@@ -155,6 +156,18 @@ pub struct StubIo {
     pub uart_speed: HashMap<i32, i32>,
     /// Text the module sent (op 6), by port.
     pub uart_text: HashMap<i32, Vec<u8>>,
+    /// Network numbers the module set (`net` op 0), by code.
+    pub net_num: HashMap<i32, i32>,
+    /// Network text settings (`net` op 1), by code.
+    pub net_text: HashMap<i32, String>,
+    /// The radio request of the last step: 0 off, 1 client, 2 access point, 3 both.
+    pub net_radio: i32,
+    /// What the master reports for Wi-Fi (`net` op 3), by field: 0 client ready, 1 AP ready, 2 status, 3 error, 4 address.
+    pub net_wifi: HashMap<i32, i32>,
+    /// Unix time (UTC) the NTP service knows; `None` until the first sync.
+    pub net_unix: Option<u32>,
+    /// Seconds since the last sync.
+    pub net_age: i32,
     /// Milliseconds since the module started; advances with every step.
     pub now_ms: u32,
 }
@@ -594,6 +607,70 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
         .map_err(bad)?
         .func_wrap(
             "flp",
+            "net",
+            |mut c: Caller<'_, Host>, op: i32, a: i32, b: i32, len: i32, _d: i32| -> i32 {
+                let text = if op == 1 {
+                    read_bytes(&mut c, b, len, 128)
+                } else {
+                    None
+                };
+                if op == 5 {
+                    let Some(memory) = c.get_export("memory").and_then(|e| e.into_memory()) else {
+                        return 0;
+                    };
+                    let Some(unix) = c.data().io.net_unix else {
+                        return 0;
+                    };
+                    let (h, m, sec, ..) = civil(unix as i64 + len as i64);
+                    let line = format!("{h:02}:{m:02}:{sec:02}");
+                    let data = memory.data_mut(&mut c);
+                    let (p, cap) = (a as usize, b as usize);
+                    if p + cap > data.len() || cap == 0 {
+                        return 0;
+                    }
+                    let n = line.len().min(cap);
+                    data[p..p + n].copy_from_slice(&line.as_bytes()[..n]);
+                    return n as i32;
+                }
+                let io = &mut c.data_mut().io;
+                match op {
+                    0 => {
+                        io.net_num.insert(a, b);
+                        0
+                    }
+                    1 => match text {
+                        Some(t) => {
+                            io.net_text
+                                .insert(a, String::from_utf8_lossy(&t).into_owned());
+                            1
+                        }
+                        None => 0,
+                    },
+                    2 => {
+                        io.net_radio = a;
+                        0
+                    }
+                    3 => io.net_wifi.get(&a).copied().unwrap_or(0),
+                    4 => match (a, io.net_unix) {
+                        (0, u) => i32::from(u.is_some()),
+                        (1, _) => io.net_age,
+                        (_, None) => 0,
+                        (9, Some(u)) => u as i32,
+                        (f, Some(u)) => {
+                            let (h, m, sec, day, month, year, wd) = civil(u as i64 + b as i64);
+                            [h, m, sec, day, month, year, wd]
+                                .get(f as usize - 2)
+                                .copied()
+                                .unwrap_or(0)
+                        }
+                    },
+                    _ => 0,
+                }
+            },
+        )
+        .map_err(bad)?
+        .func_wrap(
+            "flp",
             "pcf_write",
             |mut c: Caller<'_, Host>, key: i32, v: i32| -> i32 {
                 c.data_mut().io.pcf_out.insert(key, v);
@@ -606,6 +683,31 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
         })
         .map_err(bad)?;
     Ok(())
+}
+
+/// Date and time of a Unix second: hour, minute, second, day, month, year, weekday (1 = Monday... 7 = Sunday, as the C++ block).
+fn civil(t: i64) -> (i32, i32, i32, i32, i32, i32, i32) {
+    let days = t.div_euclid(86400);
+    let rest = t.rem_euclid(86400);
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    let weekday = (days + 3).rem_euclid(7) + 1;
+    (
+        (rest / 3600) as i32,
+        (rest % 3600 / 60) as i32,
+        (rest % 60) as i32,
+        day as i32,
+        month as i32,
+        year as i32,
+        weekday as i32,
+    )
 }
 
 /// Port of `h_text` of the master (`master.ino`): operations on strings in the module memory.

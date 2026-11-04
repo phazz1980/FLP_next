@@ -18,6 +18,7 @@ use wasm_encoder::{
 use crate::program::{Instance, Program, Source};
 use crate::sheet::{signal_label, SheetError, SheetModule, TagKind};
 
+mod net;
 mod text;
 use text::{Buf, MEM_START};
 
@@ -44,7 +45,8 @@ const HW_PCF_WRITE: u32 = HW_BASE + 6;
 const HW_MODBUS: u32 = HW_BASE + 7;
 const HW_UART: u32 = HW_BASE + 8;
 const HW_TEXT: u32 = HW_BASE + 9;
-const HW_NAMES: [&str; 10] = [
+const HW_NET: u32 = HW_BASE + 10;
+const HW_NAMES: [&str; 11] = [
     "gpio_read",
     "gpio_write",
     "adc_read",
@@ -55,6 +57,7 @@ const HW_NAMES: [&str; 10] = [
     "modbus",
     "uart",
     "text",
+    "net",
 ];
 /// Bit of the pin number passed to `gpio_read` that asks for the pull-up.
 const PIN_PULLUP: i32 = 0x100;
@@ -1286,6 +1289,7 @@ impl<'a, 'p> Emitter<'a, 'p> {
             || self.modbus_block(inst)?
             || self.uart_block(inst)?
             || self.text_block(inst)?
+            || self.net_block(inst)?
         {
             return Ok(true);
         }
@@ -1995,7 +1999,7 @@ impl<'a, 'p> Emitter<'a, 'p> {
                 HW_SENSOR_READ => 9,
                 HW_PCF_READ => 10,
                 HW_PCF_WRITE => 7,
-                HW_MODBUS => 11,
+                HW_MODBUS | HW_NET => 11,
                 HW_UART => 12,
                 HW_TEXT => 13,
                 _ => 2,

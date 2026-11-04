@@ -363,3 +363,49 @@ fn uart_lines_and_strings_work_in_a_module() {
 fn text_blocks_match_the_simulation() {
     compare("crates/flp-sim/tests/fixtures/wasm_text", 19, 3, 100);
 }
+
+#[test]
+fn wifi_and_ntp_work_in_a_module() {
+    let lib = library();
+    let project = Project::load(repo_path("examples/net_wasm")).unwrap();
+    let program = Program::build(&project, &lib).unwrap();
+    let built = program.wasm_module_with(1, true).unwrap();
+    let manifest = Manifest::parse(&built.manifest).unwrap();
+    assert!(manifest.allow.iter().any(|a| a == "net"), "{manifest:?}");
+    let mut module = McuModule::load(&built.wasm, &manifest, built.watched.len()).unwrap();
+    let out = |module: &McuModule, label: &str| {
+        let i = built
+            .watched
+            .iter()
+            .position(|l| l == label)
+            .unwrap_or_else(|| panic!("{label}: {:?}", built.watched));
+        module.outputs()[i]
+    };
+    module.step(10).unwrap();
+    // Settings go out once, the radio request is the client every step.
+    let io = module.io();
+    assert_eq!(io.net_text[&1], "MyNetwork");
+    assert_eq!(io.net_text[&2], "secret123");
+    assert_eq!(io.net_text[&8], "pool.ntp.org");
+    assert_eq!(io.net_num[&1], 1);
+    assert_eq!(io.net_num[&2], 3_600_000);
+    assert!(io.net_num.contains_key(&63) && io.net_num.contains_key(&64));
+    assert_eq!(io.net_radio, 1);
+    assert_eq!(out(&module, "clock.valid"), Word::int(0));
+    assert_eq!(out(&module, "addr_len.out"), Word::int(0));
+    assert_eq!(out(&module, "work.out"), Word::int(0));
+    // Connected, time known: 2026-11-04 (Wednesday) 10:30:15 UTC, zone +3 -> 13:30:15.
+    let unix = 1_793_788_215u32;
+    let io = module.io_mut();
+    io.net_wifi.insert(0, 1);
+    io.net_wifi.insert(4, i32::from_le_bytes([192, 168, 1, 77]));
+    io.net_unix = Some(unix);
+    module.step(10).unwrap();
+    assert_eq!(out(&module, "clock.valid"), Word::int(1));
+    assert_eq!(out(&module, "clock.hour"), Word::int(13));
+    assert_eq!(out(&module, "clock.minute"), Word::int(30));
+    assert_eq!(out(&module, "clock.unix"), Word::int(unix as i32));
+    assert_eq!(out(&module, "addr_len.out"), Word::int(12));
+    assert_eq!(out(&module, "time_len.out"), Word::int(8));
+    assert_eq!(out(&module, "work.out"), Word::int(1));
+}

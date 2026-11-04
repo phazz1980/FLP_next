@@ -23,6 +23,8 @@ pub struct MasterFeatures {
     pub uart: bool,
     /// Text operations (`text`): the `text_*` blocks, UART lines and text sending.
     pub text: bool,
+    /// Wi-Fi and NTP (`net`): the `wifi` and `ntp` blocks; the library comes from `libs/`.
+    pub net: bool,
 }
 
 impl MasterFeatures {
@@ -35,6 +37,11 @@ impl MasterFeatures {
                 "pcf8574_in" | "pcf8574_out" => f.pcf = true,
                 "modbus_rtu_master" | "modbus_rtu_slave" => f.modbus = true,
                 "uart_read" | "uart_send" | "uart_config" => f.uart = true,
+                // The address and the time are texts: they come through `text` too.
+                "wifi" | "ntp" => {
+                    f.net = true;
+                    f.text = true;
+                }
                 "ip_to_text" | "text_to_ip" | "text_const" | "text_concat" | "text_length"
                 | "num_to_text" | "text_compare" | "text_to_num" | "text_substring"
                 | "text_find" | "text_char" | "text_add_char" => f.text = true,
@@ -52,6 +59,7 @@ impl MasterFeatures {
             (self.modbus, "FLP_MODBUS"),
             (self.uart, "FLP_UART"),
             (self.text, "FLP_TEXT"),
+            (self.net, "FLP_NET"),
         ] {
             if on {
                 text.push_str(&format!(
@@ -76,6 +84,28 @@ impl MasterFeatures {
         libs
     }
 }
+
+/// The board as the master is built for. The master is flashed over USB and never updates itself
+/// over the air, so it takes the "No OTA" partitions (2 MB app, 2 MB for modules) instead of the
+/// default 1.2 MB app, in which the network stack alone does not fit. A scheme or flash size set
+/// in the project wins.
+fn master_board(board: &BoardConfig) -> BoardConfig {
+    let mut board = board.clone();
+    let small_flash = board
+        .options
+        .get("FlashSize")
+        .is_some_and(|v| matches!(v.as_str(), "1M" | "2M"));
+    if board.fqbn.starts_with("esp32:esp32:") && !small_flash {
+        board
+            .options
+            .entry("PartitionScheme".into())
+            .or_insert_with(|| MASTER_PARTITIONS.into());
+    }
+    board
+}
+
+/// Partition scheme of the master (see `master_board`).
+const MASTER_PARTITIONS: &str = "no_ota";
 
 /// The master sketch with the defines of its drivers in front.
 fn sketch_text(features: &MasterFeatures) -> String {
@@ -115,6 +145,7 @@ impl ArduinoCli {
         low_priority: bool,
         on_line: &mut dyn FnMut(&str),
     ) -> Result<MasterBuild, BuildError> {
+        let board = &master_board(board);
         let root = plain_path(work_dir).join("master");
         let sketch_dir = root.join("master");
         let sketch = sketch_dir.join("master.ino");
@@ -137,7 +168,7 @@ impl ArduinoCli {
         args.extend(board_args(board));
         args.push("--build-path".into());
         args.push(out.clone().into());
-        if features.modbus {
+        if features.modbus || features.net {
             for dir in crate::bundled_libraries(work_dir) {
                 args.push("--libraries".into());
                 args.push(dir.into());
@@ -157,6 +188,7 @@ impl ArduinoCli {
         port: &str,
         on_line: &mut dyn FnMut(&str),
     ) -> Result<(), BuildError> {
+        let board = &master_board(board);
         let mut args: Vec<OsString> = vec!["upload".into()];
         args.extend(board_args(board));
         args.push("--port".into());
@@ -213,6 +245,32 @@ mod tests {
 #define FLP_TEXT 1
 "
         );
+        let net = MasterFeatures::of_blocks(["ntp", "wifi"]);
+        assert_eq!(
+            net.defines(),
+            "#define FLP_TEXT 1
+#define FLP_NET 1
+"
+        );
+        assert_ne!(master_sketch_id(&none), master_sketch_id(&net));
         assert!(sketch_text(&both).ends_with(SKETCH));
+    }
+
+    #[test]
+    fn master_takes_the_no_ota_partitions() {
+        let mut board = BoardConfig {
+            fqbn: "esp32:esp32:esp32c3".into(),
+            model: None,
+            port: None,
+            options: Default::default(),
+        };
+        assert_eq!(master_board(&board).options["PartitionScheme"], "no_ota");
+        board
+            .options
+            .insert("PartitionScheme".into(), "huge_app".into());
+        assert_eq!(master_board(&board).options["PartitionScheme"], "huge_app");
+        board.options.clear();
+        board.options.insert("FlashSize".into(), "2M".into());
+        assert!(!master_board(&board).options.contains_key("PartitionScheme"));
     }
 }

@@ -38,21 +38,21 @@ pub(super) enum Len {
 /// A string operand: where the bytes are and how many.
 #[derive(Clone, Copy)]
 pub(super) struct Str {
-    ptr: u32,
-    len: Len,
+    pub(super) ptr: u32,
+    pub(super) len: Len,
 }
 
 /// The buffer of a string signal: `cap` bytes at `ptr`, the length is in global `len`.
 #[derive(Clone, Copy)]
 pub(super) struct Buf {
-    ptr: u32,
-    cap: u32,
-    len: u32,
+    pub(super) ptr: u32,
+    pub(super) cap: u32,
+    pub(super) len: u32,
 }
 
 /// An argument of `text`: a constant, a local, a global or a float local (as bits).
 #[derive(Clone, Copy)]
-enum A {
+pub(super) enum A {
     C(i32),
     L(u32),
     G(u32),
@@ -73,11 +73,11 @@ impl Str {
 }
 
 impl Buf {
-    fn ptr(self) -> A {
+    pub(super) fn ptr(self) -> A {
         A::C(self.ptr as i32)
     }
 
-    fn cap(self) -> A {
+    pub(super) fn cap(self) -> A {
         A::C(self.cap as i32)
     }
 }
@@ -107,7 +107,7 @@ impl Emitter<'_, '_> {
         at
     }
 
-    fn const_str(&mut self, bytes: &[u8]) -> Str {
+    pub(super) fn const_str(&mut self, bytes: &[u8]) -> Str {
         Str {
             ptr: self.data(bytes),
             len: Len::Const(bytes.len() as u32),
@@ -141,7 +141,7 @@ impl Emitter<'_, '_> {
     }
 
     /// A string signal can be used only inside its sheet and not copied to a variable.
-    fn string_outputs_ok(&self, inst: &Instance) -> Result<(), WasmError> {
+    pub(super) fn string_outputs_ok(&self, inst: &Instance) -> Result<(), WasmError> {
         for (&name, &signal) in &inst.outputs {
             if !self.bufs.contains_key(&signal) {
                 continue;
@@ -158,7 +158,7 @@ impl Emitter<'_, '_> {
         Ok(())
     }
 
-    fn out_buf(&self, inst: &Instance, name: &str) -> Option<Buf> {
+    pub(super) fn out_buf(&self, inst: &Instance, name: &str) -> Option<Buf> {
         let signal = inst.outputs.get(name)?;
         self.bufs.get(signal).copied()
     }
@@ -200,7 +200,7 @@ impl Emitter<'_, '_> {
         })
     }
 
-    fn push_arg(&mut self, a: A) {
+    pub(super) fn push_arg(&mut self, a: A) {
         match a {
             A::C(x) => self.c_i(x),
             A::L(l) => self.op(I::LocalGet(l)),
@@ -213,7 +213,7 @@ impl Emitter<'_, '_> {
     }
 
     /// `text(op, out, cap, a, alen, b, blen)`; leaves the result on the stack.
-    fn text_call(&mut self, op: i32, args: [A; 6]) {
+    pub(super) fn text_call(&mut self, op: i32, args: [A; 6]) {
         self.c_i(op);
         for a in args {
             self.push_arg(a);
@@ -227,7 +227,7 @@ impl Emitter<'_, '_> {
         self.text_call(1, [out.ptr(), out.cap(), s.ptr(), s.len(), cur, A::C(0)]);
     }
 
-    fn in_pos(inst: &Instance, name: &str) -> usize {
+    pub(super) fn in_pos(inst: &Instance, name: &str) -> usize {
         inst.lib
             .def
             .inputs
@@ -237,7 +237,7 @@ impl Emitter<'_, '_> {
     }
 
     /// Stores the value of type `ty` on the stack as output `name`, or drops it when it is off.
-    fn set_named(&mut self, inst: &Instance, name: &str, ty: Ty) {
+    pub(super) fn set_named(&mut self, inst: &Instance, name: &str, ty: Ty) {
         if inst.outputs.contains_key(name) {
             let i = inst
                 .lib

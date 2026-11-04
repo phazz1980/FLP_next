@@ -1,0 +1,79 @@
+# Wi-Fi и NTP в модуле WASM: сетью и временем занимается мастер, модуль настраивает их и читает
+# состояние. Светодиод горит с 8 до 20 часов, пока время известно; длины адреса и времени —
+# для проверки строк.
+
+[[block]]
+id = "wifi"
+type = "wifi"
+ssid = "MyNetwork"
+password = "secret123"
+web = false
+web_update = false
+out_address = true
+
+[[block]]
+id = "clock"
+type = "ntp"
+zone = 3.0
+out_text = true
+out_unix = true
+
+[[block]]
+id = "after8"
+type = "greater"
+b = 7.5
+
+[[block]]
+id = "before20"
+type = "less"
+b = 20.0
+
+[[block]]
+id = "work"
+type = "and"
+count = 3
+
+[[block]]
+id = "led"
+type = "digital_out"
+pin = 2
+
+[[block]]
+id = "addr_len"
+type = "text_length"
+
+[[block]]
+id = "time_len"
+type = "text_length"
+
+[[link]]
+from = "clock.hour"
+to   = "after8.a"
+
+[[link]]
+from = "clock.hour"
+to   = "before20.a"
+
+[[link]]
+from = "after8.out"
+to   = "work.a"
+
+[[link]]
+from = "before20.out"
+to   = "work.b"
+
+[[link]]
+from = "clock.valid"
+to   = "work.c"
+
+[[link]]
+from = "work.out"
+to   = "led.in"
+
+[[link]]
+from = "wifi.address"
+to   = "addr_len.in"
+
+[[link]]
+from = "clock.text"
+to   = "time_len.in"

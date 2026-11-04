@@ -29,6 +29,9 @@
 #include "flprogUart.h"
 #include "flprogModbusRTU.h"
 #endif
+#ifdef FLP_NET
+#include "flprogNetwork.h"
+#endif
 
 static const int kMaxSlots = 4;
 static const int kMaxOutputs = 128;  // watched signals per module
@@ -42,9 +45,9 @@ static const uint32_t kStepLimitMs = 100;  // watchdog: a longer step means a ha
 static const int kJournal = 50;
 
 enum { P_GPIO_READ = 1, P_GPIO_WRITE = 2, P_ADC = 4, P_PWM = 8, P_MILLIS = 16, P_SENSOR = 32,
-       P_PCF_READ = 64, P_PCF_WRITE = 128, P_MODBUS = 256, P_UART = 512, P_TEXT = 1024 };
+       P_PCF_READ = 64, P_PCF_WRITE = 128, P_MODBUS = 256, P_UART = 512, P_TEXT = 1024, P_NET = 2048 };
 
-#if defined(FLP_SENSORS) || defined(FLP_PCF) || defined(FLP_MODBUS)
+#if defined(FLP_SENSORS) || defined(FLP_PCF) || defined(FLP_MODBUS) || defined(FLP_NET)
 #define FLP_HWTASK 1
 #endif
 
@@ -354,6 +357,9 @@ static void pcfPoll(Pcf &c, uint32_t now);
 #ifdef FLP_MODBUS
 static void modbusPoll();
 #endif
+#ifdef FLP_NET
+static void netPoll();
+#endif
 
 #ifdef FLP_HWTASK
 static void hwTask(void *) {
@@ -371,6 +377,9 @@ static void hwTask(void *) {
 #endif
 #ifdef FLP_MODBUS
     modbusPoll();
+#endif
+#ifdef FLP_NET
+    netPoll();
 #endif
     vTaskDelay(pdMS_TO_TICKS(20));
   }
@@ -761,6 +770,157 @@ m3ApiRawFunction(h_uart) {
 }
 #endif
 
+#ifdef FLP_NET
+// ---- Wi-Fi and NTP (FLProg_Network): modules ask, the hardware task does the work ----
+// net(op, a, b, c, d); modules only write requests and read the last snapshot, the task owns the interface.
+//   op 0 number: a = code (1 dhcp, 2 NTP period ms, 63 settings are complete, 64 start NTP), b = value
+//   op 1 text setting: a = code (1 ssid, 2 password, 3 ip, 4 gateway, 5 subnet, 6 ap ssid, 7 ap password, 8 NTP server),
+//        b = pointer, c = length
+//   op 2 radio: a = 0 off, 1 client, 2 access point, 3 both
+//   op 3 Wi-Fi: a = field (0 client ready, 1 access point ready, 2 status, 3 error, 4 address as a number)
+//   op 4 NTP: a = field (0 has time, 1 age in s, 2 hour, 3 minute, 4 second, 5 day, 6 month, 7 year, 8 weekday 1..7,
+//        9 Unix UTC), b = offset from UTC in seconds
+//   op 5 time as text "HH:MM:SS": a = pointer, b = capacity, c = offset; returns the length
+static FLProgOnBoardWifiInterface g_wifi;
+static FLProgNetworkNtp g_ntp;
+struct NetSettings {
+  char text[8][65];
+  int32_t dhcp = 1, ntpPeriod = 3600000;
+  volatile bool complete = false, ntpAsked = false;
+  volatile int32_t want = 0;
+  // task state
+  uint32_t applied = 0;
+  bool appliedOnce = false, ntpOn = false;
+  uint8_t state = 255;
+  uint32_t tick = 0, retry = 0;
+  // snapshot for modules
+  volatile int32_t clientReady = 0, apReady = 0, status = 0, error = 0, hasTime = 0;
+  volatile uint32_t ip = 0, unixTime = 0, syncAge = 0;
+};
+static NetSettings g_net;
+
+static uint32_t netHash() {
+  uint32_t h = 2166136261u;
+  for (auto &t : g_net.text) {
+    for (const char *c = t; *c; c++) h = (h ^ (uint8_t)*c) * 16777619u;
+    h = (h ^ 0xFF) * 16777619u;
+  }
+  return (h ^ (uint32_t)g_net.dhcp) * 16777619u;
+}
+
+static void netApply() {
+  auto addr = [](const char *t) { IPAddress a; a.fromString(t); return a; };
+  g_wifi.setClientSsid(g_net.text[0]);
+  g_wifi.setClientPassword(g_net.text[1]);
+  if (g_net.dhcp) g_wifi.setDhcp();
+  else {
+    g_wifi.localIP(addr(g_net.text[2]));
+    g_wifi.gateway(addr(g_net.text[3]));
+    g_wifi.dns(addr(g_net.text[3]));
+    g_wifi.subnet(addr(g_net.text[4]));
+    g_wifi.resetDhcp();
+  }
+  g_wifi.setApSsid(g_net.text[5]);
+  g_wifi.setApPassword(g_net.text[6]);
+}
+
+static void netPoll() {
+  NetSettings &n = g_net;
+  if (!n.complete) return;
+  uint32_t h = netHash();
+  if (h != n.applied) {
+    // New settings (first start, or a new module with other ones): re-apply and restart the radio.
+    netApply();
+    if (n.appliedOnce) { g_wifi.clientOff(); g_wifi.apOff(); n.state = 255; }
+    n.applied = h;
+    n.appliedOnce = true;
+  }
+  uint8_t want = (uint8_t)(n.want & 3);
+  if (want != n.state) {
+    n.state = want;
+    if (want & 1) g_wifi.clientOn(); else g_wifi.clientOff();
+    if (want & 2) g_wifi.apOn(); else g_wifi.apOff();
+  }
+  if (n.ntpAsked && !n.ntpOn) {
+    n.ntpOn = g_ntp.begin(g_wifi);
+    if (n.ntpOn) {
+      g_ntp.setServer(n.text[7]);
+      g_ntp.setRequestPeriodMs((uint32_t)n.ntpPeriod);
+    }
+  }
+  g_wifi.pool();
+  n.clientReady = g_wifi.clientIsReady();
+  n.apReady = g_wifi.apIsReady();
+  n.status = g_wifi.getStatus();
+  n.error = g_wifi.getError();
+  n.ip = n.clientReady ? (uint32_t)g_wifi.localIP() : n.apReady ? (uint32_t)g_wifi.accessPointIP() : 0;
+  uint32_t now = millis();
+  if (n.ntpOn && (uint32_t)(now - n.tick) >= 1000) {
+    n.tick = now;
+    // After a failed request the service would wait for the whole period: ask again in 30 s.
+    if (g_ntp.failed() && (uint32_t)(now - n.retry) >= 30000) { n.retry = now; g_ntp.syncNow(); }
+    n.hasTime = g_ntp.hasTime();
+    if (n.hasTime) {
+      n.unixTime = g_ntp.unixTime();
+      n.syncAge = (uint32_t)(now - g_ntp.lastSyncMillis()) / 1000;
+    }
+  }
+}
+
+// The NTP time shifted by `offset` seconds, broken down.
+static bool netTime(int32_t offset, struct tm *lt) {
+  if (!g_net.hasTime) return false;
+  time_t t = (time_t)((int64_t)g_net.unixTime + offset);
+  gmtime_r(&t, lt);
+  return true;
+}
+
+m3ApiRawFunction(h_net) {
+  m3ApiReturnType(int32_t);
+  m3ApiGetArg(int32_t, op);
+  m3ApiGetArg(int32_t, a);
+  m3ApiGetArg(int32_t, b);
+  m3ApiGetArg(int32_t, c);
+  m3ApiGetArg(int32_t, d);
+  (void)d;
+  NetSettings &n = g_net;
+  int32_t r = 0;
+  if (op == 0) {
+    if (a == 1) n.dhcp = b;
+    else if (a == 2 && b > 0) n.ntpPeriod = b;
+    else if (a == 63) n.complete = true;
+    else if (a == 64) n.ntpAsked = true;
+  } else if (op == 1) {
+    if (a >= 1 && a <= 8 && c >= 0 && inMem(runtime, b, c)) {
+      char *t = n.text[a - 1];
+      int32_t k = c < 64 ? c : 64;
+      memcpy(t, (const uint8_t *)_mem + b, k);
+      t[k] = 0;
+    }
+  } else if (op == 2) {
+    n.want = a;
+  } else if (op == 3) {
+    r = a == 0 ? n.clientReady : a == 1 ? n.apReady : a == 2 ? n.status : a == 3 ? n.error : a == 4 ? (int32_t)n.ip : 0;
+  } else if (op == 4) {
+    struct tm lt;
+    if (a == 0) r = n.hasTime;
+    else if (a == 1) r = n.hasTime ? (int32_t)n.syncAge : -1;
+    else if (a == 9) r = n.hasTime ? (int32_t)n.unixTime : 0;
+    else if (netTime(b, &lt)) {
+      r = a == 2 ? lt.tm_hour : a == 3 ? lt.tm_min : a == 4 ? lt.tm_sec : a == 5 ? lt.tm_mday
+        : a == 6 ? lt.tm_mon + 1 : a == 7 ? lt.tm_year + 1900 : a == 8 ? (lt.tm_wday == 0 ? 7 : lt.tm_wday) : 0;
+    }
+  } else if (op == 5) {
+    struct tm lt;
+    if (b >= 9 && inMem(runtime, a, b) && netTime(c, &lt)) {
+      snprintf((char *)_mem + a, 9, "%02d:%02d:%02d", lt.tm_hour, lt.tm_min, lt.tm_sec);
+      r = 8;
+    }
+  }
+  m3ApiReturn(r);
+}
+#endif
+
 static void linkAll(Slot &s, IM3Module m) {
   auto L = [&](const char *n, const char *sig, M3RawCall f) { m3_LinkRawFunctionEx(m, "flp", n, sig, f, &s); };
   L("input_i", "i(i)", h_input_i);
@@ -797,6 +957,9 @@ static void linkAll(Slot &s, IM3Module m) {
 #ifdef FLP_TEXT
   if (s.perms & P_TEXT) L("text", "i(iiiiiii)", h_text);
 #endif
+#ifdef FLP_NET
+  if (s.perms & P_NET) L("net", "i(iiiii)", h_net);
+#endif
 }
 
 // ---- module lifecycle (call with g_mgmt held) ----
@@ -813,6 +976,7 @@ static uint16_t parsePerms(const String &a) {
   if (a.indexOf("modbus") >= 0) p |= P_MODBUS;
   if (a.indexOf("uart") >= 0) p |= P_UART;
   if (a.indexOf("text") >= 0) p |= P_TEXT;
+  if (a.indexOf("net") >= 0) p |= P_NET;
   return p;
 }
 
