@@ -9,22 +9,77 @@ use flp_core::BoardConfig;
 
 /// The master sketch (wasm3, LittleFS, serial protocol).
 const SKETCH: &str = include_str!("../../../specs/wasm-on-mcu/proto/master/master.ino");
-/// Identifies the embedded master sketch: changes when the firmware (protocol, ABI) does.
-pub fn master_sketch_id() -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    SKETCH.hash(&mut hasher);
-    hasher.finish()
+/// Hardware drivers the master carries. Each one costs flash and RAM, so the master is built
+/// with only those the project's blocks need (`#define FLP_<NAME>` in front of the sketch).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct MasterFeatures {
+    /// DS18B20 and DHT22 (`sensor_read`).
+    pub sensors: bool,
+    /// PCF8574 expanders on I²C (`pcf_read`, `pcf_write`).
+    pub pcf: bool,
 }
 
-/// Arduino libraries the master needs: wasm3 and the sensor drivers.
-const LIBRARIES: [&str; 5] = [
-    "Wasm3",
-    "OneWire",
-    "DallasTemperature",
-    "DHT sensor library",
-    "Adafruit Unified Sensor",
-];
+impl MasterFeatures {
+    /// The drivers the given block types (`ds18b20`, `pcf8574_in`...) need.
+    pub fn of_blocks<'a>(kinds: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut f = Self::default();
+        for kind in kinds {
+            match kind {
+                "ds18b20" | "dht22" => f.sensors = true,
+                "pcf8574_in" | "pcf8574_out" => f.pcf = true,
+                _ => {}
+            }
+        }
+        f
+    }
+
+    fn defines(&self) -> String {
+        let mut text = String::new();
+        for (on, name) in [(self.sensors, "FLP_SENSORS"), (self.pcf, "FLP_PCF")] {
+            if on {
+                text.push_str(&format!(
+                    "#define {name} 1
+"
+                ));
+            }
+        }
+        text
+    }
+
+    fn libraries(&self) -> Vec<&'static str> {
+        let mut libs = vec!["Wasm3"];
+        if self.sensors {
+            libs.extend([
+                "OneWire",
+                "DallasTemperature",
+                "DHT sensor library",
+                "Adafruit Unified Sensor",
+            ]);
+        }
+        libs
+    }
+}
+
+/// The master sketch with the defines of its drivers in front.
+fn sketch_text(features: &MasterFeatures) -> String {
+    format!("{}{SKETCH}", features.defines())
+}
+
+/// Identifies the master sketch with these drivers: changes when the firmware (protocol,
+/// ABI, drivers) does.
+pub fn master_sketch_id(features: &MasterFeatures) -> u64 {
+    use std::hash::{Hash, Hasher};
+    use std::sync::OnceLock;
+    static BASE: OnceLock<u64> = OnceLock::new();
+    let base = *BASE.get_or_init(|| {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        SKETCH.hash(&mut hasher);
+        hasher.finish()
+    });
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (base, features).hash(&mut hasher);
+    hasher.finish()
+}
 
 /// Compiled master firmware, ready to be flashed.
 pub struct MasterBuild {
@@ -39,6 +94,7 @@ impl ArduinoCli {
         &self,
         work_dir: &Path,
         board: &BoardConfig,
+        features: &MasterFeatures,
         low_priority: bool,
         on_line: &mut dyn FnMut(&str),
     ) -> Result<MasterBuild, BuildError> {
@@ -47,13 +103,14 @@ impl ArduinoCli {
         let sketch = sketch_dir.join("master.ino");
         std::fs::create_dir_all(&sketch_dir).map_err(|e| BuildError::BadOutput(e.to_string()))?;
         // Untouched sources keep arduino-cli's cache valid.
-        if std::fs::read_to_string(&sketch).ok().as_deref() != Some(SKETCH) {
-            std::fs::write(&sketch, SKETCH).map_err(|e| BuildError::BadOutput(e.to_string()))?;
+        let text = sketch_text(features);
+        if std::fs::read_to_string(&sketch).ok().as_deref() != Some(text.as_str()) {
+            std::fs::write(&sketch, &text).map_err(|e| BuildError::BadOutput(e.to_string()))?;
         }
         if let Some(core) = self.ensure_core(&board.fqbn, on_line)? {
             on_line(&format!("Установлено ядро {core}"));
         }
-        let installed = self.ensure_libraries(&LIBRARIES, on_line)?;
+        let installed = self.ensure_libraries(&features.libraries(), on_line)?;
         if !installed.is_empty() {
             on_line(&format!("Установлены библиотеки: {}", installed.join(", ")));
         }
@@ -93,10 +150,29 @@ impl ArduinoCli {
         &self,
         work_dir: &Path,
         board: &BoardConfig,
+        features: &MasterFeatures,
         port: &str,
         on_line: &mut dyn FnMut(&str),
     ) -> Result<(), BuildError> {
-        let build = self.compile_master(work_dir, board, false, on_line)?;
+        let build = self.compile_master(work_dir, board, features, false, on_line)?;
         self.flash_master(&build, board, port, on_line)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drivers_follow_the_blocks() {
+        let none = MasterFeatures::of_blocks(["timer_on", "digital_in"]);
+        assert_eq!(none, MasterFeatures::default());
+        assert_eq!(none.defines(), "");
+        assert_eq!(none.libraries(), ["Wasm3"]);
+        let both = MasterFeatures::of_blocks(["dht22", "pcf8574_out"]);
+        assert_eq!(both.defines(), "#define FLP_SENSORS 1\n#define FLP_PCF 1\n");
+        assert!(both.libraries().contains(&"DHT sensor library"));
+        assert_ne!(master_sketch_id(&none), master_sketch_id(&both));
+        assert!(sketch_text(&both).ends_with(SKETCH));
     }
 }

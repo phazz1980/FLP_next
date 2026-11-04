@@ -13,10 +13,15 @@
 //   swap <name>      reload the module from LittleFS      list      stats      log      del <name>
 #include <LittleFS.h>
 #include <esp_crc.h>
+// Drivers are compiled in only when the project needs them (FLP_SENSORS, FLP_PCF defined by the editor).
+#ifdef FLP_PCF
 #include <Wire.h>
+#endif
+#ifdef FLP_SENSORS
 #include <DHT.h>
 #include <DallasTemperature.h>
 #include <OneWire.h>
+#endif
 #include <wasm3.h>
 #include <m3_env.h>
 
@@ -34,6 +39,11 @@ static const int kJournal = 50;
 enum { P_GPIO_READ = 1, P_GPIO_WRITE = 2, P_ADC = 4, P_PWM = 8, P_MILLIS = 16, P_SENSOR = 32,
        P_PCF_READ = 64, P_PCF_WRITE = 128 };
 
+#if defined(FLP_SENSORS) || defined(FLP_PCF)
+#define FLP_HWTASK 1
+#endif
+
+#ifdef FLP_SENSORS
 // ---- sensors: one task polls them (a read blocks for milliseconds), modules take the last values ----
 enum { SENSOR_DS18B20 = 0, SENSOR_DHT22 = 1 };
 struct Sensor {
@@ -52,7 +62,12 @@ struct Sensor {
 };
 static const int kMaxSensors = 8;
 static Sensor g_sensors[kMaxSensors];
+#endif
+#ifdef FLP_HWTASK
 static SemaphoreHandle_t g_sensorLock;
+#endif
+
+#ifdef FLP_PCF
 
 // ---- PCF8574 expanders on I2C: the same task talks to them, modules take the last byte / hand over a new one ----
 struct Pcf {
@@ -70,6 +85,7 @@ struct Pcf {
 static const int kMaxPcf = 8;
 static Pcf g_pcf[kMaxPcf];
 static bool g_wireStarted = false;
+#endif
 
 struct Msg { char topic[24]; uint8_t data[64]; uint8_t len; };
 
@@ -267,7 +283,7 @@ m3ApiRawFunction(h_millis) {
   m3ApiReturn((int32_t)millis());
 }
 
-// ---- sensors: one task polls them (a read blocks for milliseconds), modules take the last values ----
+#ifdef FLP_SENSORS
 // ---- sensor access ----
 // key = kind | index << 4 | pin << 8
 static Sensor *sensorFor(int32_t key, uint32_t period) {
@@ -326,21 +342,31 @@ static void sensorPoll(Sensor &s, uint32_t now) {
   }
 }
 
+#endif
+#ifdef FLP_PCF
 static void pcfPoll(Pcf &c, uint32_t now);
+#endif
 
-static void sensorTask(void *) {
+#ifdef FLP_HWTASK
+static void hwTask(void *) {
   for (;;) {
     uint32_t now = millis();
+#ifdef FLP_SENSORS
     for (auto &s : g_sensors) {
       if (s.used) sensorPoll(s, now);
     }
+#endif
+#ifdef FLP_PCF
     for (auto &c : g_pcf) {
       if (c.used) pcfPoll(c, now);
     }
+#endif
     vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
+#endif
 
+#ifdef FLP_SENSORS
 m3ApiRawFunction(h_sensor_read) {
   m3ApiReturnType(float);
   m3ApiGetArg(int32_t, key);
@@ -351,7 +377,9 @@ m3ApiRawFunction(h_sensor_read) {
   if (s) v = field == 0 ? s->temp : field == 1 ? s->hum : (s->ok ? 1.0f : 0.0f);
   m3ApiReturn(v);
 }
+#endif
 
+#ifdef FLP_PCF
 // ---- PCF8574 access ----
 static Pcf *pcfFor(int32_t key, bool writer, uint32_t period, uint8_t first) {
   Pcf *found = nullptr;
@@ -428,6 +456,7 @@ m3ApiRawFunction(h_pcf_write) {
   if (c) c->value = value & 0xFF;
   m3ApiReturn(c && c->ok ? 1 : 0);  // whether the chip answered the last write
 }
+#endif
 
 static void linkAll(Slot &s, IM3Module m) {
   auto L = [&](const char *n, const char *sig, M3RawCall f) { m3_LinkRawFunctionEx(m, "flp", n, sig, f, &s); };
@@ -449,9 +478,13 @@ static void linkAll(Slot &s, IM3Module m) {
   if (s.perms & P_ADC) L("adc_read", "i(i)", h_adc_read);
   if (s.perms & P_PWM) L("pwm_write", "v(ii)", h_pwm_write);
   if (s.perms & P_MILLIS) L("millis", "i()", h_millis);
+#ifdef FLP_SENSORS
   if (s.perms & P_SENSOR) L("sensor_read", "f(iii)", h_sensor_read);
+#endif
+#ifdef FLP_PCF
   if (s.perms & P_PCF_READ) L("pcf_read", "i(iii)", h_pcf_read);
   if (s.perms & P_PCF_WRITE) L("pcf_write", "i(ii)", h_pcf_write);
+#endif
 }
 
 // ---- module lifecycle (call with g_mgmt held) ----
@@ -824,8 +857,10 @@ void setup() {
   Serial.begin(115200);
   Serial.setTimeout(200);
   g_mgmt = xSemaphoreCreateMutex();
+#ifdef FLP_HWTASK
   g_sensorLock = xSemaphoreCreateMutex();
-  xTaskCreate(sensorTask, "sensors", 4096, nullptr, 1, nullptr);
+  xTaskCreate(hwTask, "hardware", 4096, nullptr, 1, nullptr);
+#endif
   if (!LittleFS.begin(true)) Serial.println("LittleFS failed");
   LittleFS.mkdir("/modules");
   File dir = LittleFS.open("/modules");

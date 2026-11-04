@@ -345,6 +345,11 @@ fn run(
     }
 }
 
+/// The master drivers the project's blocks need.
+pub fn master_features(project: &Project) -> flp_build::MasterFeatures {
+    flp_build::MasterFeatures::of_blocks(project.logic.blocks.iter().map(|b| b.kind.as_str()))
+}
+
 /// Background build of the master firmware. If the user presses upload meanwhile, the
 /// finished build is flashed to the chosen port, like a normal master upload.
 fn precompile_master(
@@ -364,7 +369,13 @@ fn precompile_master(
         _ => {}
     };
     let build = cli
-        .compile_master(&project.work_dir(), board, true, &mut log)
+        .compile_master(
+            &project.work_dir(),
+            board,
+            &master_features(project),
+            true,
+            &mut log,
+        )
         .map_err(|e| e.to_string());
     let port = {
         let mut state = promotion.lock().unwrap();
@@ -433,8 +444,12 @@ fn upload_master(
         &crate::i18n::fmt("Сборка и заливка мастер-прошивки на {0}...", &[&port]),
     );
     let mut explained = None;
-    let result = cli.upload_master(&project.work_dir(), board, &port, &mut |l| {
-        match flp_build::explain_upload(l, &board.fqbn) {
+    let result = cli.upload_master(
+        &project.work_dir(),
+        board,
+        &master_features(project),
+        &port,
+        &mut |l| match flp_build::explain_upload(l, &board.fqbn) {
             Some(text) => {
                 out(LogLevel::Info, l);
                 out(LogLevel::Error, &text);
@@ -446,8 +461,8 @@ fn upload_master(
                 OutputLine::Error(s) => out(LogLevel::Error, &s),
                 _ => {}
             },
-        }
-    });
+        },
+    );
     result.map_err(|e| explained.unwrap_or_else(|| e.to_string()))?;
     Ok(Done {
         message: crate::i18n::fmt("Мастер-прошивка залита на {0}", &[&port]),

@@ -1619,7 +1619,7 @@ impl EditorApp {
         Some((
             doc.project.path.clone(),
             board_hash(&doc.project.config.board),
-            flp_build::master_sketch_id(),
+            flp_build::master_sketch_id(&crate::job::master_features(&doc.project)),
         ))
     }
 
