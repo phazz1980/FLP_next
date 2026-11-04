@@ -51,6 +51,7 @@ const HARDWARE: &[&str] = &[
     "pcf_read",
     "pcf_write",
     "modbus",
+    "uart",
 ];
 
 const FUEL_PER_CALL: u64 = 5_000_000;
@@ -143,6 +144,14 @@ pub struct StubIo {
     pub modbus_out: HashMap<(i32, i32, i32), i32>,
     /// Status of a master's slave by address (-1: error of our slave).
     pub modbus_status: HashMap<i32, i32>,
+    /// UART settings the module handed over, as `(port, code, value)` in order (code 63 opens).
+    pub uart_cfg: Vec<(i32, i32, i32)>,
+    /// Bytes waiting in a port's receive buffer, by port.
+    pub uart_rx: HashMap<i32, std::collections::VecDeque<u8>>,
+    /// What the module sent, by port, as `(value, size code)`.
+    pub uart_tx: HashMap<i32, Vec<(i32, i32)>>,
+    /// Speed changes the module asked for, by port.
+    pub uart_speed: HashMap<i32, i32>,
     /// Milliseconds since the module started; advances with every step.
     pub now_ms: u32,
 }
@@ -516,6 +525,35 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
                         0
                     }
                     _ => io.modbus_status.get(&a).copied().unwrap_or(0),
+                }
+            },
+        )
+        .map_err(bad)?
+        .func_wrap(
+            "flp",
+            "uart",
+            |mut c: Caller<'_, Host>, op: i32, port: i32, a: i32, b: i32| -> i32 {
+                let io = &mut c.data_mut().io;
+                match op {
+                    0 => {
+                        io.uart_cfg.push((port, a, b));
+                        0
+                    }
+                    1 => io
+                        .uart_rx
+                        .get_mut(&port)
+                        .and_then(|q| q.pop_front())
+                        .map_or(-1, i32::from),
+                    2 => io.uart_rx.get(&port).map_or(0, |q| q.len() as i32),
+                    3 => {
+                        io.uart_tx.entry(port).or_default().push((a, b));
+                        1
+                    }
+                    4 => io.uart_speed.get(&port).copied().unwrap_or(0),
+                    _ => {
+                        io.uart_speed.insert(port, a);
+                        0
+                    }
                 }
             },
         )

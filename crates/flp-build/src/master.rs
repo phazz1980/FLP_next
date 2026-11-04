@@ -19,6 +19,8 @@ pub struct MasterFeatures {
     pub pcf: bool,
     /// Modbus RTU master and slave (`modbus`); the libraries come from `libs/`.
     pub modbus: bool,
+    /// UART bytes (`uart`): `uart_read`, `uart_send`, `uart_config`.
+    pub uart: bool,
 }
 
 impl MasterFeatures {
@@ -30,6 +32,7 @@ impl MasterFeatures {
                 "ds18b20" | "dht22" => f.sensors = true,
                 "pcf8574_in" | "pcf8574_out" => f.pcf = true,
                 "modbus_rtu_master" | "modbus_rtu_slave" => f.modbus = true,
+                "uart_read" | "uart_send" | "uart_config" => f.uart = true,
                 _ => {}
             }
         }
@@ -42,6 +45,7 @@ impl MasterFeatures {
             (self.sensors, "FLP_SENSORS"),
             (self.pcf, "FLP_PCF"),
             (self.modbus, "FLP_MODBUS"),
+            (self.uart, "FLP_UART"),
         ] {
             if on {
                 text.push_str(&format!(
@@ -193,6 +197,9 @@ mod tests {
 "
         );
         assert_ne!(master_sketch_id(&none), master_sketch_id(&modbus));
+        let uart = MasterFeatures::of_blocks(["uart_send"]);
+        assert_eq!(uart.defines(), "#define FLP_UART 1\n");
+        assert_ne!(master_sketch_id(&none), master_sketch_id(&uart));
         assert!(sketch_text(&both).ends_with(SKETCH));
     }
 }

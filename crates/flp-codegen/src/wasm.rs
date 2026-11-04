@@ -39,7 +39,8 @@ const HW_SENSOR_READ: u32 = HW_BASE + 4;
 const HW_PCF_READ: u32 = HW_BASE + 5;
 const HW_PCF_WRITE: u32 = HW_BASE + 6;
 const HW_MODBUS: u32 = HW_BASE + 7;
-const HW_NAMES: [&str; 8] = [
+const HW_UART: u32 = HW_BASE + 8;
+const HW_NAMES: [&str; 9] = [
     "gpio_read",
     "gpio_write",
     "adc_read",
@@ -48,6 +49,7 @@ const HW_NAMES: [&str; 8] = [
     "pcf_read",
     "pcf_write",
     "modbus",
+    "uart",
 ];
 /// Bit of the pin number passed to `gpio_read` that asks for the pull-up.
 const PIN_PULLUP: i32 = 0x100;
@@ -809,6 +811,18 @@ impl<'a, 'p> Emitter<'a, 'p> {
         Ok(self.const_param(inst, i)? as i32)
     }
 
+    /// Number of a parameter by name as it is (a variable feeding it counts as 0).
+    fn named_param_f(&self, inst: &Instance, name: &str) -> f64 {
+        let i = inst
+            .lib
+            .def
+            .params
+            .iter()
+            .position(|p| p.name == name)
+            .unwrap_or(0);
+        self.const_param(inst, i).unwrap_or(0.0)
+    }
+
     /// `modbus(op, a, b, c, d)` with the first four as constants and `d` pushed by `d`.
     fn modbus_call(&mut self, op: i32, a: i32, b: i32, c: i32, d: impl FnOnce(&mut Self)) {
         self.c_i(op);
@@ -959,9 +973,271 @@ impl<'a, 'p> Emitter<'a, 'p> {
         Ok(true)
     }
 
+    /// `uart(op, port, a, b)` with `a` pushed by `a`.
+    fn uart_call(&mut self, op: i32, port: i32, a: impl FnOnce(&mut Self), b: i32) {
+        self.c_i(op);
+        self.c_i(port);
+        a(self);
+        self.c_i(b);
+        self.hw_call(HW_UART);
+    }
+
+    /// The port start-up, once per block: the master opens it with the block's settings.
+    fn uart_setup(&mut self, port: i32, u: &flp_core::uart::UartConfig) {
+        let (data, _, stop) = u.frame().unwrap_or((8, 'N', 1));
+        let settings = [
+            (0, 0),
+            (1, u.speed as i32),
+            (2, i32::from(data)),
+            (3, i32::from(u.parity_code())),
+            (4, i32::from(stop)),
+            (5, u.rx as i32),
+            (6, u.tx as i32),
+            (7, u.de as i32),
+            (8, u.rx_buffer as i32),
+            (63, 0),
+        ];
+        let done = self.state_i();
+        self.op(I::GlobalGet(done));
+        self.op(I::I32Eqz);
+        self.op(I::If(BlockType::Empty));
+        for (code, value) in settings {
+            self.uart_call(0, port, |e| e.c_i(code), value);
+            self.op(I::Drop);
+        }
+        self.c_i(1);
+        self.op(I::GlobalSet(done));
+        self.op(I::End);
+    }
+
+    /// UART bytes: the master owns the port; a module takes one byte per step or hands bytes
+    /// over (see `uart` in `master.ino`).
+    fn uart_block(&mut self, inst: &Instance) -> Result<bool, WasmError> {
+        let kind = inst.block.kind.as_str();
+        if !matches!(kind, "uart_read" | "uart_send" | "uart_config") {
+            return Ok(false);
+        }
+        let Some((u, _)) = crate::arduino::uart_of(self.program, inst) else {
+            return Err(self.unsupported(inst, "не найден UART блока"));
+        };
+        if !(1..=2).contains(&u.number) {
+            return Err(self.unsupported(
+                inst,
+                "USB и UART0 заняты протоколом мастера: в модуле доступны UART1 и UART2",
+            ));
+        }
+        let port = i32::from(u.number);
+        let out_index = |name: &str| {
+            inst.lib
+                .def
+                .outputs
+                .iter()
+                .position(|p| p.name == name)
+                .unwrap_or(0)
+        };
+        match kind {
+            "uart_read" => {
+                if self.named_param(inst, "mode")? == 0 {
+                    return Err(self.unsupported(inst, "чтение строк пока не поддержано в модулях"));
+                }
+                self.uart_setup(port, &u);
+                let r = self.tmp_i();
+                self.uart_call(1, port, |e| e.c_i(0), 0);
+                self.op(I::LocalSet(r));
+                if inst.outputs.contains_key("new") {
+                    self.op(I::LocalGet(r));
+                    self.c_i(0);
+                    self.op(I::I32GeS);
+                    self.set_out(inst, out_index("new"), Ty::I);
+                }
+                if inst.outputs.contains_key("byte") {
+                    // The last byte stays while nothing new comes.
+                    self.op(I::LocalGet(r));
+                    self.c_i(0);
+                    self.op(I::I32GeS);
+                    self.op(I::If(BlockType::Empty));
+                    self.op(I::LocalGet(r));
+                    self.set_out(inst, out_index("byte"), Ty::I);
+                    self.op(I::End);
+                }
+                if inst.outputs.contains_key("available") {
+                    self.uart_call(2, port, |e| e.c_i(0), 0);
+                    self.set_out(inst, out_index("available"), Ty::I);
+                }
+            }
+            "uart_config" => {
+                let format_used = inst.inputs.get("new_format").is_some_and(
+                    |i| !matches!(&i.source, Source::Default(ParamValue::Text(t)) if t.is_empty()),
+                );
+                if format_used {
+                    return Err(
+                        self.unsupported(inst, "смена формата UART пока не поддержана в модулях")
+                    );
+                }
+                self.uart_setup(port, &u);
+                if inst.inputs.contains_key("apply") {
+                    // On the rising edge of `apply` the speed changes.
+                    let prev = self.state_i();
+                    let apply = self.tmp_i();
+                    let speed = inst
+                        .lib
+                        .def
+                        .inputs
+                        .iter()
+                        .position(|p| p.name == "new_speed")
+                        .unwrap_or(0);
+                    let apply_in = inst
+                        .lib
+                        .def
+                        .inputs
+                        .iter()
+                        .position(|p| p.name == "apply")
+                        .unwrap_or(0);
+                    self.flag(inst, apply_in);
+                    self.op(I::LocalSet(apply));
+                    self.op(I::LocalGet(apply));
+                    self.op(I::GlobalGet(prev));
+                    self.op(I::I32Eqz);
+                    self.op(I::I32And);
+                    self.op(I::If(BlockType::Empty));
+                    self.uart_call(5, port, |e| e.input_as(inst, speed, Ty::I), 0);
+                    self.op(I::Drop);
+                    self.op(I::End);
+                    self.op(I::LocalGet(apply));
+                    self.op(I::GlobalSet(prev));
+                    if inst.outputs.contains_key("ok") {
+                        self.c_i(1);
+                        self.set_out(inst, out_index("ok"), Ty::I);
+                    }
+                }
+                self.uart_call(4, port, |e| e.c_i(0), 0);
+                self.set_out(inst, out_index("baud"), Ty::I);
+            }
+            _ => {
+                self.uart_setup(port, &u);
+                self.uart_send(inst, port)?;
+            }
+        }
+        Ok(true)
+    }
+
+    /// `uart_send` in binary mode: the value goes out as 1, 2 or 4 bytes when the trigger fires.
+    fn uart_send(&mut self, inst: &Instance, port: i32) -> Result<(), WasmError> {
+        let value_ty = inst.inputs.get("value").map(|i| i.ty);
+        if self.named_param(inst, "send_as")? == 0 || value_ty == Some(SignalType::String) {
+            return Err(self.unsupported(inst, "отправка текстом пока не поддержана в модулях"));
+        }
+        let trigger = self.named_param(inst, "trigger")?;
+        let ty = self.input_ty(inst, 1);
+        let is_bool = value_ty == Some(SignalType::Bool);
+        let int_size = self.named_param(inst, "int_size")?;
+        let size = if is_bool {
+            0
+        } else if ty == Ty::F {
+            2
+        } else {
+            int_size.clamp(0, 2)
+        };
+        let fire = self.tmp_i();
+        let en = self.tmp_i();
+        self.flag(inst, 0);
+        self.op(I::LocalSet(en));
+        let (started, last) = (self.state_i(), self.global(ty, &ParamValue::Int(0)));
+        match trigger {
+            0 => {
+                let prev = self.state_i();
+                self.op(I::LocalGet(en));
+                self.op(I::GlobalGet(prev));
+                self.op(I::I32Eqz);
+                self.op(I::I32And);
+                self.op(I::LocalSet(fire));
+                self.op(I::LocalGet(en));
+                self.op(I::GlobalSet(prev));
+            }
+            1 => {
+                self.op(I::LocalGet(en));
+                self.op(I::LocalSet(fire));
+            }
+            _ => {
+                let deadband = self.named_param_f(inst, "deadband");
+                self.op(I::GlobalGet(started));
+                self.op(I::I32Eqz);
+                self.input_as(inst, 1, ty);
+                self.op(I::GlobalGet(last));
+                if ty == Ty::F && deadband > 0.0 {
+                    self.op(I::F32Sub);
+                    self.op(I::F32Abs);
+                    self.c_f(deadband as f32);
+                    self.op(I::F32Ge);
+                } else if ty == Ty::F {
+                    self.op(I::F32Ne);
+                } else {
+                    self.op(I::I32Ne);
+                }
+                self.op(I::I32Or);
+                self.op(I::LocalGet(en));
+                self.op(I::I32And);
+                self.op(I::LocalSet(fire));
+            }
+        }
+        let sent = self.tmp_i();
+        self.c_i(0);
+        self.op(I::LocalSet(sent));
+        self.op(I::LocalGet(fire));
+        self.op(I::If(BlockType::Empty));
+        self.uart_call(
+            3,
+            port,
+            |e| {
+                if ty == Ty::F {
+                    e.input_as(inst, 1, Ty::F);
+                    e.op(I::I32ReinterpretF32);
+                } else {
+                    e.input_as(inst, 1, Ty::I);
+                    if is_bool {
+                        e.c_i(0);
+                        e.op(I::I32Ne);
+                    } else if size == 0 {
+                        e.clamp_int(0, 255);
+                    } else if size == 1 {
+                        e.clamp_int(-32768, 32767);
+                    }
+                }
+            },
+            size,
+        );
+        self.op(I::LocalSet(sent));
+        if trigger == 2 {
+            self.op(I::LocalGet(sent));
+            self.op(I::If(BlockType::Empty));
+            self.input_as(inst, 1, ty);
+            self.op(I::GlobalSet(last));
+            self.c_i(1);
+            self.op(I::GlobalSet(started));
+            self.op(I::End);
+        }
+        self.op(I::End);
+        if inst.outputs.contains_key("sent") {
+            self.op(I::LocalGet(sent));
+            let o = inst
+                .lib
+                .def
+                .outputs
+                .iter()
+                .position(|p| p.name == "sent")
+                .unwrap_or(0);
+            self.set_out(inst, o, Ty::I);
+        }
+        Ok(())
+    }
+
     /// Digital/analog/PWM pins of the board: calls into the master.
     fn hardware_block(&mut self, inst: &Instance) -> Result<bool, WasmError> {
-        if self.sensor_block(inst)? || self.pcf_block(inst)? || self.modbus_block(inst)? {
+        if self.sensor_block(inst)?
+            || self.pcf_block(inst)?
+            || self.modbus_block(inst)?
+            || self.uart_block(inst)?
+        {
             return Ok(true);
         }
         let kind = inst.block.kind.as_str();
@@ -1642,6 +1918,7 @@ impl<'a, 'p> Emitter<'a, 'p> {
             .ty()
             .function([ValType::I32, ValType::I32, ValType::I32], [ValType::I32]); // 10: pcf_read
         types.ty().function([ValType::I32; 5], [ValType::I32]); // 11: modbus
+        types.ty().function([ValType::I32; 4], [ValType::I32]); // 12: uart
 
         let mut imports = ImportSection::new();
         imports.import("flp", "tag_get_i", EntityType::Function(0));
@@ -1661,6 +1938,7 @@ impl<'a, 'p> Emitter<'a, 'p> {
                 HW_PCF_READ => 10,
                 HW_PCF_WRITE => 7,
                 HW_MODBUS => 11,
+                HW_UART => 12,
                 _ => 2,
             };
             imports.import("flp", name, EntityType::Function(ty));

@@ -1,0 +1,6 @@
+[project]
+name = "uart_bytes"
+description = "UART по байтам: принятый байт уходит обратно двоично, значение — float при изменении"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

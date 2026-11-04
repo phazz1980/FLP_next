@@ -42,7 +42,7 @@ static const uint32_t kStepLimitMs = 100;  // watchdog: a longer step means a ha
 static const int kJournal = 50;
 
 enum { P_GPIO_READ = 1, P_GPIO_WRITE = 2, P_ADC = 4, P_PWM = 8, P_MILLIS = 16, P_SENSOR = 32,
-       P_PCF_READ = 64, P_PCF_WRITE = 128, P_MODBUS = 256 };
+       P_PCF_READ = 64, P_PCF_WRITE = 128, P_MODBUS = 256, P_UART = 512 };
 
 #if defined(FLP_SENSORS) || defined(FLP_PCF) || defined(FLP_MODBUS)
 #define FLP_HWTASK 1
@@ -571,6 +571,67 @@ m3ApiRawFunction(h_modbus) {
 }
 #endif
 
+#ifdef FLP_UART
+// ---- UART bytes of ports 1 and 2 (port 0 is the console of the master's own protocol) ----
+// uart(op, port, a, b):
+//   op 0 setting: a = code, b = value; code 0 starts the list, 63 starts the port (once)
+//        codes: 1 speed, 2 data bits, 3 parity (0 N, 1 E, 2 O), 4 stop bits, 5 rx, 6 tx, 7 de, 8 receive buffer
+//   op 1 next byte or -1      op 2 bytes waiting      op 3 write: a = value bits, b = size code (0: 1 byte, 1: 2, 2: 4);
+//   returns 1 if it fitted into the transmit buffer      op 4 speed now      op 5 set speed a
+static int32_t g_ua[3][16];
+static bool g_uaOn[3];
+
+static HardwareSerial *uartOf(int port) {
+  if (port == 1) return &Serial1;
+#if SOC_UART_NUM > 2
+  if (port == 2) return &Serial2;
+#endif
+  return nullptr;
+}
+
+static uint32_t uartFrame(int data, int parity, int stop) {
+  static_assert(SERIAL_8E2 == SERIAL_8N1 + 0x22 && SERIAL_5N1 + 12 == SERIAL_8N1, "frame constants changed");
+  if (data < 5 || data > 8) data = 8;
+  return SERIAL_5N1 + (data - 5) * 4 + (parity == 1 ? 2 : parity == 2 ? 3 : 0) + (stop == 2 ? 0x20 : 0);
+}
+
+m3ApiRawFunction(h_uart) {
+  m3ApiReturnType(int32_t);
+  m3ApiGetArg(int32_t, op);
+  m3ApiGetArg(int32_t, port);
+  m3ApiGetArg(int32_t, a);
+  m3ApiGetArg(int32_t, b);
+  int32_t r = 0;
+  HardwareSerial *s = uartOf(port);
+  if (s) {
+    int32_t *c = g_ua[port];
+    if (op == 0) {
+      if (a == 0) memset(c, 0, sizeof g_ua[0]);
+      else if (a == 63) {
+        if (!g_uaOn[port]) {
+          s->setRxBufferSize(c[8] > 0 ? c[8] : 256);
+          s->begin(c[1], uartFrame(c[2], c[3], c[4]), c[5], c[6]);
+          if (c[7] >= 0) {
+            s->setPins(-1, -1, -1, c[7]);
+            s->setMode(UART_MODE_RS485_HALF_DUPLEX);
+          }
+          g_uaOn[port] = true;
+        }
+      } else if (a > 0 && a < 16) c[a] = b;
+    } else if (!g_uaOn[port]) {
+      r = op == 1 ? -1 : 0;
+    } else if (op == 1) r = s->read();
+    else if (op == 2) r = s->available();
+    else if (op == 3) {
+      size_t n = 1u << b;
+      if ((size_t)s->availableForWrite() >= n) { s->write((const uint8_t *)&a, n); r = 1; }
+    } else if (op == 4) r = s->baudRate();
+    else if (op == 5 && a > 0) s->updateBaudRate(a);
+  } else if (op == 1) r = -1;
+  m3ApiReturn(r);
+}
+#endif
+
 static void linkAll(Slot &s, IM3Module m) {
   auto L = [&](const char *n, const char *sig, M3RawCall f) { m3_LinkRawFunctionEx(m, "flp", n, sig, f, &s); };
   L("input_i", "i(i)", h_input_i);
@@ -601,6 +662,9 @@ static void linkAll(Slot &s, IM3Module m) {
 #ifdef FLP_MODBUS
   if (s.perms & P_MODBUS) L("modbus", "i(iiiii)", h_modbus);
 #endif
+#ifdef FLP_UART
+  if (s.perms & P_UART) L("uart", "i(iiii)", h_uart);
+#endif
 }
 
 // ---- module lifecycle (call with g_mgmt held) ----
@@ -615,6 +679,7 @@ static uint16_t parsePerms(const String &a) {
   if (a.indexOf("pcf_read") >= 0) p |= P_PCF_READ;
   if (a.indexOf("pcf_write") >= 0) p |= P_PCF_WRITE;
   if (a.indexOf("modbus") >= 0) p |= P_MODBUS;
+  if (a.indexOf("uart") >= 0) p |= P_UART;
   return p;
 }
 

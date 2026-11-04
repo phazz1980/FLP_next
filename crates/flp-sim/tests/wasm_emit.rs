@@ -274,3 +274,48 @@ fn sensors_example_switches_pins_from_sensor_values() {
     module.step(50).unwrap();
     assert_eq!(pin(&module, 2), Some(1), "air sensor lost: fault lamp");
 }
+
+#[test]
+fn uart_bytes_go_through_the_master() {
+    let lib = library();
+    let project = Project::load(repo_path("examples/uart_bytes")).unwrap();
+    let program = Program::build(&project, &lib).unwrap();
+    let built = program.wasm_module(1).unwrap();
+    let manifest = Manifest::parse(&built.manifest).unwrap();
+    assert_eq!(manifest.allow, ["uart"]);
+    let mut module = McuModule::load(&built.wasm, &manifest, 0).unwrap();
+    module
+        .io_mut()
+        .uart_rx
+        .entry(2)
+        .or_default()
+        .extend([65, 200]);
+    module.step(10).unwrap();
+    module.step(10).unwrap();
+    let io = module.io();
+    // The port is opened once by each of its four blocks, with the speed and frame of the board.
+    assert!(io.uart_cfg.contains(&(2, 1, 115200)));
+    assert!(io.uart_cfg.contains(&(2, 2, 8)) && io.uart_cfg.contains(&(2, 5, 16)));
+    assert_eq!(io.uart_cfg.iter().filter(|c| c.1 == 63).count(), 4);
+    assert_eq!(
+        io.uart_speed.get(&2),
+        Some(&57600),
+        "apply switches the speed"
+    );
+    // Echo: the bytes come back as one byte each; the scaled value goes out as a float.
+    let tx = &io.uart_tx[&2];
+    let bytes: Vec<_> = tx.iter().filter(|t| t.1 == 0).map(|t| t.0).collect();
+    assert_eq!(bytes, [65, 200]);
+    let floats: Vec<_> = tx
+        .iter()
+        .filter(|t| t.1 == 2)
+        .map(|t| f32::from_bits(t.0 as u32))
+        .collect();
+    assert!(
+        floats.len() >= 2 && (floats[0] - 25.49).abs() < 0.1,
+        "{floats:?}"
+    );
+    let n = module.io().uart_cfg.len();
+    module.step(10).unwrap();
+    assert_eq!(module.io().uart_cfg.len(), n, "settings are sent once");
+}

@@ -1,0 +1,59 @@
+# Эхо по байтам на UART2: каждый принятый байт отправляется обратно.
+# Второй передатчик шлёт значение float (4 байта), когда оно изменилось не меньше
+# чем на 0.5; блок настроек в начале переводит порт на 57600.
+
+[[block]]
+id = "rx"
+type = "uart_read"
+port = 2
+mode = 1
+
+[[block]]
+id = "echo"
+type = "uart_send"
+port = 2
+send_as = 1
+trigger = 1
+int_size = 0
+
+[[block]]
+id = "half"
+type = "scale"
+in_min = 0.0
+in_max = 255.0
+out_min = 0.0
+out_max = 100.0
+
+[[block]]
+id = "level"
+type = "uart_send"
+port = 2
+send_as = 1
+trigger = 2
+deadband = 0.5
+
+[[block]]
+id = "cfg"
+type = "uart_config"
+uart = 2
+runtime = true
+speed = 115200
+rx = 16
+tx = 17
+const = { new_speed = 57600, apply = true }
+
+[[link]]
+from = "rx.new"
+to   = "echo.en"
+
+[[link]]
+from = "rx.byte"
+to   = "echo.value"
+
+[[link]]
+from = "rx.byte"
+to   = "half.in"
+
+[[link]]
+from = "half.out"
+to   = "level.value"
