@@ -13,6 +13,9 @@ use crate::ParamValue;
 pub struct Logic {
     #[serde(rename = "var", default, skip_serializing_if = "Vec::is_empty")]
     pub vars: Vec<crate::vars::Var>,
+    /// Tags of other projects, see [`crate::modbus_tags`].
+    #[serde(rename = "extern", default, skip_serializing_if = "Vec::is_empty")]
+    pub externals: Vec<crate::modbus_tags::ExternalTag>,
     #[serde(rename = "expander", default, skip_serializing_if = "Vec::is_empty")]
     pub expanders: Vec<crate::expander::Expander>,
     #[serde(rename = "block", default, skip_serializing_if = "Vec::is_empty")]

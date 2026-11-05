@@ -74,6 +74,7 @@ pub fn preview_block(def: &BlockDef, template: &str) -> Result<String, GenError>
         },
         logic: Logic {
             vars: Vec::new(),
+            externals: Vec::new(),
             expanders: Vec::new(),
             blocks: vec![Block {
                 id: preview_id(&def),

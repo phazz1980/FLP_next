@@ -5,6 +5,8 @@
 //! directions, incompatible types). Semantic problems (unconnected inputs,
 //! loops) are left to [`crate::check`].
 
+use std::collections::BTreeMap;
+
 use crate::ident::is_valid_ident;
 use crate::vars::{Var, VAR_GET, VAR_PARAM, VAR_SET, WRITE_ENABLE};
 use crate::{
@@ -101,6 +103,91 @@ impl Project {
         });
         self.layout.blocks.insert(id.clone(), pos);
         Ok(id)
+    }
+
+    /// Adds a block for an MQTT topic taken from another project: a subscription
+    /// (`subscribe`, with the value type `kind`) or a publication. `None` when the project
+    /// already has such a block for the topic.
+    pub fn add_mqtt_topic(
+        &mut self,
+        lib: &Library,
+        topic: &str,
+        subscribe: bool,
+        kind: &str,
+        pos: BlockPos,
+    ) -> Result<Option<String>, EditError> {
+        let block_type = if subscribe {
+            "mqtt_subscribe"
+        } else {
+            "mqtt_publish"
+        };
+        let known = self.logic.blocks.iter().any(|b| {
+            b.kind == block_type
+                && b.params.get("topic") == Some(&ParamValue::Text(topic.to_owned()))
+        });
+        if known {
+            return Ok(None);
+        }
+        let id = self.add_block(lib, block_type, pos)?;
+        if let Some(b) = self.logic.blocks.iter_mut().find(|b| b.id == id) {
+            b.params
+                .insert("topic".into(), ParamValue::Text(topic.to_owned()));
+            if subscribe && kind != "string" {
+                b.params
+                    .insert("kind".into(), ParamValue::Text(kind.to_owned()));
+            }
+        }
+        Ok(Some(id))
+    }
+
+    /// Copies the MQTT client settings of another project into this one: the "MQTT client"
+    /// block is added when missing, and when the network is Wi-Fi the "Wi-Fi client" block is
+    /// switched on (added, or taken out of access-point-only mode). Returns what was done.
+    pub fn import_mqtt_settings(
+        &mut self,
+        lib: &Library,
+        settings: &BTreeMap<String, ParamValue>,
+        pos: BlockPos,
+    ) -> Result<Vec<String>, EditError> {
+        let mut done = Vec::new();
+        let id = match self.logic.blocks.iter().find(|b| b.kind == "mqtt") {
+            Some(b) => b.id.clone(),
+            None => {
+                done.push("добавлен блок «MQTT клиент»".to_owned());
+                self.add_block(lib, "mqtt", pos)?
+            }
+        };
+        if let Some(b) = self.logic.blocks.iter_mut().find(|b| b.id == id) {
+            for (k, v) in settings {
+                b.params.insert(k.clone(), v.clone());
+            }
+        }
+        done.push("настройки брокера перенесены".to_owned());
+        let wifi = !matches!(settings.get("net"), Some(ParamValue::Text(n)) if n != "wifi");
+        if wifi {
+            let existing = self
+                .logic
+                .blocks
+                .iter()
+                .find(|b| b.kind == "wifi")
+                .map(|b| (b.id.clone(), b.params.get("wifi_mode").cloned()));
+            match existing {
+                None => {
+                    let wpos = BlockPos {
+                        y: pos.y + 90.0,
+                        ..pos
+                    };
+                    self.add_block(lib, "wifi", wpos)?;
+                    done.push("включён Wi-Fi: добавлен блок «Wi-Fi клиент»".to_owned());
+                }
+                Some((wid, Some(ParamValue::Int(1)))) => {
+                    self.set_param(lib, &wid, "wifi_mode", Some(ParamValue::Int(0)))?;
+                    done.push("включён Wi-Fi: режим «Клиент» вместо точки доступа".to_owned());
+                }
+                Some(_) => {}
+            }
+        }
+        Ok(done)
     }
 
     /// Adds a block that reads (`write = false`) or writes a variable; the id is

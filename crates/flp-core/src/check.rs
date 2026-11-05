@@ -53,6 +53,7 @@ pub enum DiagKind {
     ExpanderPin,
     Tag,
     FloatCounter,
+    ExternalTag,
 }
 
 impl DiagKind {
@@ -87,6 +88,7 @@ impl DiagKind {
         DiagKind::ExpanderPin,
         DiagKind::Tag,
         DiagKind::FloatCounter,
+        DiagKind::ExternalTag,
     ];
 
     /// Stable machine-readable id, kebab-case.
@@ -122,6 +124,7 @@ impl DiagKind {
             DiagKind::ExpanderPin => "expander-pin",
             DiagKind::Tag => "tag",
             DiagKind::FloatCounter => "float-counter",
+            DiagKind::ExternalTag => "external-tag",
         }
     }
 }
@@ -496,6 +499,7 @@ pub fn check_project(project: &Project, lib: &Library) -> Report {
         d.link = d.link.and_then(|i| links.get(i).copied());
     }
     check_board_blocks(project, lib, &mut report);
+    crate::modbus_tags::check_externals(project, &mut report);
     let layout = BoardLayout::of_board(&project.config.board, lib.boards());
     let pins = pin_uses(&project.logic, lib);
     let uarts = crate::uart::check_project_part(

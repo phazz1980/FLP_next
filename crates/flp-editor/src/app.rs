@@ -157,6 +157,7 @@ pub struct EditorApp {
     pub board_editor: Option<crate::boardedit::BoardEditor>,
     /// Open "Project code" window.
     pub code_view: Option<crate::codeview::CodeView>,
+    pub tag_import: Option<crate::tagimport::TagImport>,
     pub help: Option<crate::help::HelpWindow>,
     /// User block waiting for the delete confirmation.
     pub block_delete: Option<String>,
@@ -282,6 +283,7 @@ impl EditorApp {
             block_editor: None,
             board_editor: None,
             code_view: None,
+            tag_import: None,
             help: None,
             block_delete: None,
             sheet_delete: None,
@@ -1828,7 +1830,7 @@ impl EditorApp {
                     let lib = self.lib.clone();
                     if let Some(doc) = &mut self.doc {
                         let _ = doc.edit(&lib, None, |p| {
-                            p.logic = logic;
+                            p.logic = *logic;
                             p.layout = layout;
                             Ok::<_, String>(())
                         });
@@ -2513,6 +2515,21 @@ impl EditorApp {
                 self.start_debug(ui.ctx());
             }
         });
+        ui.menu_button(crate::i18n::tr("Теги"), |ui| {
+            if ui
+                .add_enabled(
+                    self.doc.is_some(),
+                    egui::Button::new(crate::i18n::tr("Перенести из проекта...")),
+                )
+                .on_hover_text(crate::i18n::tr(
+                    "Взять регистры Modbus, описанные блоками другого проекта",
+                ))
+                .clicked()
+            {
+                self.tag_import = Some(Default::default());
+                ui.close();
+            }
+        });
         ui.menu_button(crate::i18n::tr("Библиотека"), |ui| {
             if ui.button(crate::i18n::tr("Новый блок...")).clicked() {
                 self.block_editor = Some(crate::blockedit::BlockEditor::new_block(self, ""));
@@ -3098,6 +3115,7 @@ impl eframe::App for EditorApp {
         crate::blockedit::show(self, &ctx);
         crate::boardedit::show(self, &ctx);
         crate::codeview::show(self, &ctx);
+        crate::tagimport::show(self, &ctx);
         crate::help::show(self, &ctx);
         crate::blockedit::delete_dialog(self, &ctx);
         crate::canvas::sheet_delete_dialog(self, &ctx);

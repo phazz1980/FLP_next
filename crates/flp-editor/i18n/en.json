@@ -1231,6 +1231,21 @@
  "Заливка мастер-прошивки на {0}...": "Uploading master firmware to {0}...",
  "Мастер-прошивка собрана": "Master firmware built",
  "Мастер-прошивка залита на {0}": "Master firmware uploaded to {0}",
- "На весь экран": "Full screen",
- "Свернуть окно": "Restore window"
+ "Свернуть окно": "Restore window",
+ "Перенести из проекта...": "Transfer from project...",
+ "Взять регистры Modbus, описанные блоками другого проекта": "Take Modbus registers described by blocks of another project",
+ "Перенести теги из проекта": "Transfer tags from project",
+ "Выбрать проект...": "Choose project...",
+ "Проект, откуда взять теги": "Project to take tags from",
+ "Папка проекта...": "Project folder...",
+ "В проекте нет блоков Modbus и MQTT": "The project has no Modbus or MQTT blocks",
+ "MQTT: что это здесь?": "MQTT: what is it here?",
+ "подписка": "subscription",
+ "публикация": "publication",
+ "Настройки MQTT-брокера (и включить Wi-Fi, если выключен)": "MQTT broker settings (and switch Wi-Fi on if it is off)",
+ "Перенести": "Transfer",
+ "Повторный перенос обновляет адреса уже взятых тегов": "Transferring again updates the addresses of tags already taken",
+ "Теги: добавлено {0}, обновлено {1}, не взято {2}": "Tags: added {0}, updated {1}, not taken {2}",
+ "MQTT: добавлено блоков {0}, уже были или не добавлены {1}": "MQTT: blocks added {0}, already there or not added {1}",
+ "Внешний тег": "External tag"
 }

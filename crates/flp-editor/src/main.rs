@@ -36,6 +36,7 @@ mod report;
 mod selfupdate;
 mod simview;
 mod splash;
+mod tagimport;
 mod textmenu;
 mod theme;
 mod themeedit;

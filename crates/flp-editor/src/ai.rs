@@ -46,7 +46,7 @@ enum Msg {
 
 /// Requests from the worker that the editor carries out.
 pub enum Request {
-    Apply(Logic, Layout),
+    Apply(Box<Logic>, Layout),
     StopDebug,
     ReloadLibrary,
 }
@@ -197,7 +197,7 @@ impl AiChat {
                     }
                 }
                 Msg::Session(id) => self.session = Some(id),
-                Msg::Edit(logic, layout) => requests.push(Request::Apply(logic, layout)),
+                Msg::Edit(logic, layout) => requests.push(Request::Apply(Box::new(logic), layout)),
                 Msg::StopDebug => requests.push(Request::StopDebug),
                 Msg::ReloadLibrary => requests.push(Request::ReloadLibrary),
                 Msg::Finished { history, error } => {

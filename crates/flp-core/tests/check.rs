@@ -730,3 +730,133 @@ to   = "lamp.in"
     );
     assert_single_error(&src, "нужен блок преобразования");
 }
+
+fn write_project(dir: &std::path::Path, logic: &str) {
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(
+        dir.join("project.toml"),
+        "[project]\nname = \"t\"\n\n[board]\nfqbn = \"esp32:esp32:esp32\"\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("logic.toml"), logic).unwrap();
+}
+
+#[test]
+fn external_tags_follow_the_source_project() {
+    use flp_core::modbus_tags::{check_externals, load_published, stored_path};
+
+    let root = std::env::temp_dir().join(format!("flp-exttags-{}", std::process::id()));
+    let (slave, master) = (root.join("slave"), root.join("master"));
+    let slave_logic = "[[block]]\nid = \"level\"\ntype = \"modbus_write\"\n\
+                       table = \"holding\"\nkind = \"float\"\nreg = 4\n";
+    write_project(&slave, slave_logic);
+    write_project(&master, "");
+
+    let mut project = Project::load(&master).unwrap();
+    let tags = load_published(&slave).unwrap();
+    assert_eq!(tags.len(), 1);
+    assert_eq!(stored_path(&root, &slave), "slave");
+    let report = project.logic.import_tags("../slave", &tags);
+    assert_eq!(report.added, ["level"]);
+
+    let mut r = Report::default();
+    check_externals(&project, &mut r);
+    assert!(r.errors().next().is_none(), "{:?}", r.diagnostics);
+
+    // The type changes in the source: the master reports an error.
+    write_project(&slave, &slave_logic.replace("float", "int"));
+    let mut r = Report::default();
+    check_externals(&project, &mut r);
+    assert!(r.errors().any(|d| d.kind == DiagKind::ExternalTag));
+
+    // The tag is gone: an error too.
+    write_project(&slave, "");
+    let mut r = Report::default();
+    check_externals(&project, &mut r);
+    assert!(r.errors().any(|d| d.kind == DiagKind::ExternalTag));
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn mqtt_topic_becomes_a_block_once() {
+    use flp_core::BlockPos;
+
+    let root = std::env::temp_dir().join(format!("flp-mqtttag-{}", std::process::id()));
+    write_project(&root, "");
+    let mut project = Project::load(&root).unwrap();
+    let lib = library();
+    let pos = BlockPos {
+        sheet: 1,
+        x: 0.0,
+        y: 0.0,
+    };
+    let id = project
+        .add_mqtt_topic(&lib, "home/set", true, "float", pos)
+        .unwrap()
+        .unwrap();
+    let block = project.logic.block(&id).unwrap();
+    assert_eq!(block.kind, "mqtt_subscribe");
+    assert_eq!(project.logic.mqtt_topics()[0].kind, "float");
+    // The same topic again is skipped; as a publication it is a different block.
+    assert!(project
+        .add_mqtt_topic(&lib, "home/set", true, "float", pos)
+        .unwrap()
+        .is_none());
+    assert!(project
+        .add_mqtt_topic(&lib, "home/set", false, "string", pos)
+        .unwrap()
+        .is_some());
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn mqtt_settings_switch_wifi_on() {
+    use flp_core::{BlockPos, ParamValue};
+
+    let root = std::env::temp_dir().join(format!("flp-mqttset-{}", std::process::id()));
+    write_project(&root, "");
+    let mut project = Project::load(&root).unwrap();
+    let lib = library();
+    let pos = BlockPos {
+        sheet: 1,
+        x: 0.0,
+        y: 0.0,
+    };
+    let mut settings = std::collections::BTreeMap::new();
+    settings.insert("broker".to_owned(), ParamValue::Text("mqtt.home".into()));
+    settings.insert("port".to_owned(), ParamValue::Int(1884));
+    project.import_mqtt_settings(&lib, &settings, pos).unwrap();
+    let got = project.logic.mqtt_settings().unwrap();
+    assert_eq!(
+        got.get("broker"),
+        Some(&ParamValue::Text("mqtt.home".into()))
+    );
+    assert!(project.logic.blocks.iter().any(|b| b.kind == "wifi"));
+    // Access-point-only Wi-Fi becomes a client; a second run adds nothing.
+    let wid = project
+        .logic
+        .blocks
+        .iter()
+        .find(|b| b.kind == "wifi")
+        .unwrap()
+        .id
+        .clone();
+    project
+        .set_param(&lib, &wid, "wifi_mode", Some(ParamValue::Int(1)))
+        .unwrap();
+    project.import_mqtt_settings(&lib, &settings, pos).unwrap();
+    assert_eq!(
+        project.logic.block(&wid).unwrap().params.get("wifi_mode"),
+        Some(&ParamValue::Int(0))
+    );
+    assert_eq!(
+        project
+            .logic
+            .blocks
+            .iter()
+            .filter(|b| b.kind == "mqtt")
+            .count(),
+        1
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
