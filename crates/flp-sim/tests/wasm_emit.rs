@@ -253,6 +253,38 @@ fn modbus_rtu_goes_through_the_master() {
 }
 
 #[test]
+fn modbus_tcp_master_goes_through_the_master() {
+    let lib = library();
+    let project = Project::load(repo_path("examples/modbus_tcp_master")).unwrap();
+    let program = Program::build(&project, &lib).unwrap();
+    let built = program.wasm_module(1).unwrap();
+    let manifest = Manifest::parse(&built.manifest).unwrap();
+    assert!(manifest.allow.contains(&"modbus".to_string()));
+    let mut module = McuModule::load(&built.wasm, &manifest, 0).unwrap();
+    // Unit 1, input table (1), float (1), master (1), TCP (bit 9).
+    let tcp = 1 << 8 | 1 << 9;
+    let temp = (1, 1 | 1 << 4 | tcp, 0);
+    module
+        .io_mut()
+        .modbus_in
+        .insert(temp, 21.5f32.to_bits() as i32);
+    module.io_mut().modbus_status.insert(1, 1);
+    module.step(50).unwrap();
+    let io = module.io();
+    assert!(io.modbus_cfg.contains(&(0, 3)), "TCP master role");
+    assert!(io.modbus_cfg.contains(&(1, 0)), "Wi-Fi interface");
+    assert!(io.modbus_cfg.contains(&(2, 502)), "port");
+    // 192.168.1.50 with the first octet in the lowest byte.
+    assert!(io
+        .modbus_cfg
+        .contains(&(3, i32::from_le_bytes([192, 168, 1, 50]))));
+    assert!(io.modbus_cfg.contains(&(16, 1)), "Unit ID");
+    assert_eq!(io.modbus_cfg.iter().filter(|(c, _)| *c == 63).count(), 1);
+    // The button is inverted with a pull-up: released reads as 1 on the coil.
+    assert_eq!(io.modbus_out[&(1, 2 | 2 << 4 | tcp, 0)], 1);
+}
+
+#[test]
 fn sensors_example_switches_pins_from_sensor_values() {
     let lib = library();
     let project = Project::load(repo_path("examples/sensors")).unwrap();

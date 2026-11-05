@@ -1,0 +1,58 @@
+# Modbus TCP Master через Wi-Fi.
+# Опрашивает устройство 192.168.1.50 (его можно собрать из примера modbus_wifi):
+# читает температуру float из input 0..1, а кнопка этой платы включает его coil 0.
+
+[[block]]
+id = "wifi"
+type = "wifi"
+ssid = "MyNetwork"
+
+[[block]]
+id = "master"
+type = "modbus_tcp_master"
+ip = "192.168.1.50"
+count = 1
+slave1 = 1
+period = "500ms"
+holding = 0
+input = 2
+coils = 1
+discrete = 0
+
+[[block]]
+id = "temp"
+type = "modbus_master_read"
+master = "tcp"
+slave = 1
+table = "input"
+kind = "float"
+reg = 0
+
+[[block]]
+id = "button"
+type = "digital_in"
+pin = 13
+pullup = true
+inverted = true
+
+[[block]]
+id = "led_reg"
+type = "modbus_master_write"
+master = "tcp"
+slave = 1
+table = "coil"
+kind = "bool"
+reg = 0
+
+[[block]]
+id = "online_led"
+type = "digital_out"
+pin = 2
+
+[[link]]
+from = "button.out"
+to   = "led_reg.in_b"
+
+[[link]]
+from = "temp.ok"
+to   = "online_led.in"

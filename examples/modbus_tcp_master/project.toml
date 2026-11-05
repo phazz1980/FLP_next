@@ -1,0 +1,6 @@
+[project]
+name = "modbus_tcp_master"
+description = "Опрос устройства по Modbus TCP через Wi-Fi: температура с него, светодиод на нём включает кнопка"
+
+[board]
+fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

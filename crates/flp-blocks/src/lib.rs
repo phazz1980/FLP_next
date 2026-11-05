@@ -399,6 +399,10 @@ static BLOCKS: &[Block] = &[
         emit: uart::modbus_rtu_slave,
     },
     Block {
+        kind: "modbus_tcp_master",
+        emit: uart::modbus_tcp_master,
+    },
+    Block {
         kind: "modbus_tcp_slave",
         emit: uart::modbus_tcp_slave,
     },

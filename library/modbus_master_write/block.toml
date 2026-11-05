@@ -4,7 +4,7 @@ name = "Запись Modbus Master"
 symbol = "MM →"
 group = "Сеть"
 shared = "network"
-description = "Записывает значение в ведомое устройство через блок «Modbus RTU Master»."
+description = "Записывает значение в ведомое устройство через блок «Modbus RTU Master» или «Modbus TCP Master»."
 
 [[input]]
 name = "in"
@@ -30,7 +30,7 @@ type = "int"
 default = 1
 min = 1
 max = 247
-description = "Адрес ведомого (один из адресов в «Modbus RTU Master»)"
+description = "Адрес ведомого (адрес в «Modbus RTU Master» или Unit ID в «Modbus TCP Master»)"
 
 [[param]]
 name = "table"
@@ -50,3 +50,9 @@ type = "int"
 default = 0
 min = 0
 description = "Адрес в таблице"
+
+[[param]]
+name = "master"
+type = "string"
+default = "rtu"
+description = "Чей опрос: rtu («Modbus RTU Master») или tcp («Modbus TCP Master»)"

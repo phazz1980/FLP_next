@@ -339,6 +339,58 @@ pub(crate) fn modbus_rtu_master(e: &CppCtx) -> CppParts {
     }
 }
 
+/// `IPAddress(a, b, c, d)` for a dotted address; a text that is not one gives 0.0.0.0.
+fn ip_literal(text: &str) -> String {
+    let parts: Vec<u8> = text
+        .split('.')
+        .filter_map(|p| p.trim().parse().ok())
+        .collect();
+    match parts[..] {
+        [a, b, c, d] => format!("IPAddress({a}, {b}, {c}, {d})"),
+        _ => "IPAddress(0, 0, 0, 0)".to_owned(),
+    }
+}
+
+pub(crate) fn modbus_tcp_master(e: &CppCtx) -> CppParts {
+    let obj = "flpMasterTcp";
+    let net = if e.text("net") == "ethernet" {
+        "flpEth"
+    } else {
+        "flpWifi"
+    };
+    let mut s = Lines::default();
+    s.line(format!(
+        "{obj}.setServerIpAdress(0, {});",
+        ip_literal(e.text("ip"))
+    ))
+    .line(format!("{obj}.setServerPort(0, {});", e.param("port")))
+    .line(format!(
+        "{obj}.setServerSlavesSize(0, {});",
+        e.param("count")
+    ));
+    for n in 1..=e.int("count", 1) {
+        let addr = e.int(&format!("slave{n}"), 0).to_string();
+        s.line(format!("{obj}.setSlaveAddress(0, {}, {addr});", n - 1))
+            .line(format!(
+                "{obj}.setPollingPeriod(0, {addr}, {}UL);",
+                e.param("period")
+            ))
+            .line(format!(
+                "{obj}.setTimeOutTime(0, {addr}, {}UL);",
+                e.param("timeout")
+            ));
+        tables(&mut s, e, obj, Some(&format!("0, {addr}")));
+    }
+    CppParts {
+        global: format!(
+            "// Shared master: modbus_master_read / modbus_master_write blocks (master = tcp) access its slaves.\nModbusMasterTCP {obj}(&{net}, 1);"
+        ),
+        setup: s.finish(),
+        looped: format!("{obj}.pool();"),
+        ..Default::default()
+    }
+}
+
 pub(crate) fn modbus_rtu_slave(e: &CppCtx) -> CppParts {
     let u = uart(e);
     let obj = "flpModbusRtu";
@@ -425,25 +477,35 @@ pub(crate) fn modbus_write(e: &CppCtx) -> CppParts {
     })
 }
 
+/// The master object and the leading call argument: the TCP master has a server index first.
+fn master_object(e: &CppCtx) -> (&'static str, &'static str) {
+    if e.text("master") == "tcp" {
+        ("flpMasterTcp", "0, ")
+    } else {
+        ("flpMaster", "")
+    }
+}
+
 pub(crate) fn modbus_master_read(e: &CppCtx) -> CppParts {
     let (slave, t, reg) = (e.param("slave"), table(e.text("table")), e.param("reg"));
+    let (obj, lead) = master_object(e);
     let mut l = Lines::default();
     l.line(match e.text("kind") {
         "float" => format!(
-            "{} = flpMaster.readFloat({slave}, {t}, {reg});",
+            "{} = {obj}.readFloat({lead}{slave}, {t}, {reg});",
             e.output("out_f")
         ),
         "bool" => format!(
-            "{} = flpMaster.readBool({slave}, {t}, {reg});",
+            "{} = {obj}.readBool({lead}{slave}, {t}, {reg});",
             e.output("out_b")
         ),
         _ => format!(
-            "{} = flpMaster.readInteger({slave}, {t}, {reg});",
+            "{} = {obj}.readInteger({lead}{slave}, {t}, {reg});",
             e.output("out")
         ),
     })
     .line(format!(
-        "{} = flpMaster.slaveStatus({slave}, false);",
+        "{} = {obj}.slaveStatus({lead}{slave}, false);",
         e.output("ok")
     ));
     looped(l.finish())
@@ -451,17 +513,18 @@ pub(crate) fn modbus_master_read(e: &CppCtx) -> CppParts {
 
 pub(crate) fn modbus_master_write(e: &CppCtx) -> CppParts {
     let (slave, t, reg) = (e.param("slave"), table(e.text("table")), e.param("reg"));
+    let (obj, lead) = master_object(e);
     looped(match e.text("kind") {
         "float" => format!(
-            "flpMaster.saveFloat({slave}, {}, {t}, {reg});",
+            "{obj}.saveFloat({lead}{slave}, {}, {t}, {reg});",
             e.input("in_f")
         ),
         "bool" => format!(
-            "flpMaster.saveBool({slave}, {}, {t}, {reg});",
+            "{obj}.saveBool({lead}{slave}, {}, {t}, {reg});",
             e.input("in_b")
         ),
         _ => format!(
-            "flpMaster.saveInteger({slave}, (int16_t)({}), {t}, {reg});",
+            "{obj}.saveInteger({lead}{slave}, (int16_t)({}), {t}, {reg});",
             e.input("in")
         ),
     })

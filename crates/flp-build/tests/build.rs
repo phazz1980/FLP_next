@@ -54,3 +54,30 @@ fn master_with_web_compiles() {
     let errors: Vec<&String> = log.iter().filter(|l| l.contains("error")).collect();
     assert!(result.is_ok(), "{:?}\n{errors:?}", result.as_ref().err());
 }
+
+#[test]
+#[ignore = "needs arduino-cli with esp32:esp32"]
+fn master_with_modbus_tcp_compiles() {
+    let cli = ArduinoCli::locate().unwrap();
+    let project = Project::load(repo_path("examples/modbus_tcp_master")).unwrap();
+    let features =
+        flp_build::MasterFeatures::of_blocks(project.logic.blocks.iter().map(|b| b.kind.as_str()));
+    let mut log = Vec::new();
+    let result = cli.compile_master(
+        &project.work_dir(),
+        &project.config.board,
+        &features,
+        true,
+        &mut |line| log.push(line.to_owned()),
+    );
+    let errors: Vec<&String> = log
+        .iter()
+        .filter(|l| l.contains("error") || l.contains("undefined") || l.contains("overflow"))
+        .collect();
+    assert!(
+        result.is_ok(),
+        "{:?}
+{errors:?}",
+        result.as_ref().err()
+    );
+}

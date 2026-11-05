@@ -1,0 +1,114 @@
+[block]
+type = "modbus_tcp_master"
+name = "Modbus TCP Master"
+symbol = "MB TCP M"
+group = "Сеть"
+shared = "network"
+description = "Ведущее устройство Modbus TCP через Wi-Fi или Ethernet: опрашивает до четырёх ведомых (Unit ID) на одном сервере."
+single = true
+includes = ["flprogModbusTCP.h"]
+
+[[param]]
+name = "net"
+type = "string"
+default = "wifi"
+description = "Сеть: wifi (блок «Wi-Fi клиент») или ethernet (блок «Ethernet W5500»)"
+
+[[param]]
+name = "ip"
+type = "string"
+default = "192.168.1.10"
+description = "IP-адрес сервера Modbus TCP (устройства, которое опрашиваем)"
+
+[[param]]
+name = "port"
+type = "int"
+default = 502
+min = 1
+max = 65535
+description = "TCP-порт сервера"
+
+[[param]]
+name = "count"
+type = "int"
+default = 1
+min = 1
+max = 4
+description = "Число ведомых (Unit ID) на сервере"
+
+[[param]]
+name = "slave1"
+type = "int"
+default = 1
+min = 0
+max = 247
+description = "Unit ID ведомого 1"
+
+[[param]]
+name = "slave2"
+type = "int"
+default = 2
+min = 0
+max = 247
+when = "count >= 2"
+description = "Unit ID ведомого 2"
+
+[[param]]
+name = "slave3"
+type = "int"
+default = 3
+min = 0
+max = 247
+when = "count >= 3"
+description = "Unit ID ведомого 3"
+
+[[param]]
+name = "slave4"
+type = "int"
+default = 4
+min = 0
+max = 247
+when = "count >= 4"
+description = "Unit ID ведомого 4"
+
+[[param]]
+name = "period"
+type = "duration"
+default = "1s"
+min = 10
+description = "Период опроса каждого ведомого"
+
+[[param]]
+name = "timeout"
+type = "duration"
+default = "1s"
+min = 10
+description = "Время ожидания ответа"
+
+[[param]]
+name = "holding"
+type = "int"
+default = 10
+min = 0
+description = "Сколько регистров хранения (4x) опрашивать у каждого ведомого, с адреса 0"
+
+[[param]]
+name = "input"
+type = "int"
+default = 10
+min = 0
+description = "Сколько входных регистров (3x) опрашивать, с адреса 0"
+
+[[param]]
+name = "coils"
+type = "int"
+default = 10
+min = 0
+description = "Сколько катушек (0x) опрашивать, с адреса 0"
+
+[[param]]
+name = "discrete"
+type = "int"
+default = 10
+min = 0
+description = "Сколько дискретных входов (1x) опрашивать, с адреса 0"

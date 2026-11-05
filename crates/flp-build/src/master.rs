@@ -44,6 +44,11 @@ impl MasterFeatures {
                 "ds18b20" | "dht22" => f.sensors = true,
                 "pcf8574_in" | "pcf8574_out" => f.pcf = true,
                 "modbus_rtu_master" | "modbus_rtu_slave" => f.modbus = true,
+                // The TCP roles ride on the network interface the `wifi`/`ethernet` block brings.
+                "modbus_tcp_master" | "modbus_tcp_slave" => {
+                    f.modbus = true;
+                    f.net = true;
+                }
                 "uart_read" | "uart_send" | "uart_config" => f.uart = true,
                 // The address and the time are texts: they come through `text` too.
                 "wifi" => {
@@ -122,15 +127,11 @@ impl MasterFeatures {
 
 /// The board as the master is built for. The master is flashed over USB and never updates itself
 /// over the air, so it takes the "No OTA" partitions (2 MB app, 2 MB for modules) instead of the
-/// default 1.2 MB app, in which the network stack alone does not fit. A scheme or flash size set
-/// in the project wins.
+/// default 1.2 MB app, in which the network stack alone does not fit. Always so by default,
+/// whatever the flash size; only a scheme set in the project wins.
 fn master_board(board: &BoardConfig) -> BoardConfig {
     let mut board = board.clone();
-    let small_flash = board
-        .options
-        .get("FlashSize")
-        .is_some_and(|v| matches!(v.as_str(), "1M" | "2M"));
-    if board.fqbn.starts_with("esp32:esp32:") && !small_flash {
+    if board.fqbn.starts_with("esp32:esp32:") {
         board
             .options
             .entry("PartitionScheme".into())
@@ -292,6 +293,8 @@ mod tests {
 "
         );
         assert_ne!(master_sketch_id(&none), master_sketch_id(&modbus));
+        let tcp = MasterFeatures::of_blocks(["modbus_tcp_master", "wifi"]);
+        assert!(tcp.modbus && tcp.net && tcp.wifi && !tcp.eth);
         let uart = MasterFeatures::of_blocks(["uart_send"]);
         assert_eq!(uart.defines(), "#define FLP_UART 1\n");
         assert_ne!(master_sketch_id(&none), master_sketch_id(&uart));
@@ -347,6 +350,6 @@ mod tests {
         assert_eq!(master_board(&board).options["PartitionScheme"], "huge_app");
         board.options.clear();
         board.options.insert("FlashSize".into(), "2M".into());
-        assert!(!master_board(&board).options.contains_key("PartitionScheme"));
+        assert_eq!(master_board(&board).options["PartitionScheme"], "no_ota");
     }
 }

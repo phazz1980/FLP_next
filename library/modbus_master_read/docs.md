@@ -1,7 +1,7 @@
 # Чтение Modbus Master
 
-Читает значение ведомого, которое опросил блок «Modbus RTU Master».
-`slave` — адрес ведомого; `table` — holding, input, coil или discrete;
+Читает значение ведомого, которое опросил блок «Modbus RTU Master» или «Modbus TCP Master».
+`master` — rtu (по умолчанию) или tcp; `slave` — адрес ведомого (для TCP — Unit ID); `table` — holding, input, coil или discrete;
 `kind` — int, float или bool, от него зависит выход (`out`, `out_f`, `out_b`).
 Выход `ok` показывает, отвечает ли ведомый.
 

@@ -31,6 +31,9 @@
 #endif
 #ifdef FLP_NET
 #include "flprogNetwork.h"
+#ifdef FLP_MODBUS
+#include "flprogModbusTCP.h"
+#endif
 #ifdef FLP_WEB
 #include "flprogWebServer.h"
 #include <esp_mac.h>
@@ -500,6 +503,10 @@ m3ApiRawFunction(h_pcf_write) {
 //   op 1 read:   a = slave address (master), b = table | kind << 4 | master << 8, c = register
 //   op 2 write:  as read, d = value
 //   op 3 status: a >= 0 slave of the master answers (1/0), a < 0 last error of our slave
+// Roles 3 (TCP master) and 4 (TCP slave) ride on a network interface and need FLP_NET; bit 9 of b in
+// read/write/status marks a call to the TCP master (its server is always index 0, a = Unit ID).
+// TCP settings: 1 interface (0 Wi-Fi, 1 Ethernet), 2 port, 3 server IP (IPAddress bits, master only),
+// the rest as for RTU. The objects are created by modbusTcpPoll() once the interface is ready.
 // Setting codes: 0 role (1 master, 2 slave), 1 uart, 2 speed, 3 parity, 4 rx, 5 tx, 6 de, 7 count / address,
 // 8..11 slave tables (holding, input, coils, discrete), 16 + 8 n + k master slave n: 0 address, 1 period,
 // 2 timeout, 3..6 table sizes.
@@ -507,12 +514,20 @@ static FlprogUartExecutor g_mbUart;
 static ModbusMasterRTU *g_mbMaster = nullptr;
 static ModbusSlaveRTU *g_mbSlave = nullptr;
 static int32_t g_mb[64];
+#ifdef FLP_NET
+static ModbusMasterTCP *g_mbTcpMaster = nullptr;
+static ModbusSlaveTCP *g_mbTcpSlave = nullptr;
+static bool g_mbTcpWanted = false;  // settings of a TCP role are in g_mb, waiting for the network
+#endif
 static const uint8_t kMbTables[4] = {FLPROG_HOLDING_REGISTR, FLPROG_INPUT_REGISTR, FLPROG_COIL, FLPROG_DISCRETE_INPUT};
 
 // A macro, not a template: the Arduino prototype generator cannot handle templates.
 #define MB_SETUP(o)   do {     (o)->setSpeedUart(g_mb[2]);     (o)->setParityUart(g_mb[3]);     if (g_mb[4] >= 0) (o)->setPinRxUart(g_mb[4]);     if (g_mb[5] >= 0) (o)->setPinTxUart(g_mb[5]);     if (g_mb[6] >= 0) (o)->setPinPeDe(g_mb[6]);   } while (0)
 
 static void modbusCommit() {
+#ifdef FLP_NET
+  if ((g_mb[0] == 3 && !g_mbTcpMaster) || (g_mb[0] == 4 && !g_mbTcpSlave)) g_mbTcpWanted = true;
+#endif
   if (g_mb[0] == 1 && !g_mbMaster) {
     int n = g_mb[7] < 1 ? 1 : g_mb[7] > 4 ? 4 : g_mb[7];
     auto *m = new ModbusMasterRTU(g_mb[1], n, &g_mbUart);
@@ -541,10 +556,19 @@ static void modbusCommit() {
   }
 }
 
+#ifdef FLP_NET
+static void modbusTcpPoll();
+#endif
+
 static void modbusPoll() {
   xSemaphoreTake(g_sensorLock, portMAX_DELAY);
   if (g_mbMaster) g_mbMaster->pool();
   if (g_mbSlave) g_mbSlave->pool();
+#ifdef FLP_NET
+  modbusTcpPoll();
+  if (g_mbTcpMaster) g_mbTcpMaster->pool();
+  if (g_mbTcpSlave) g_mbTcpSlave->pool();
+#endif
   xSemaphoreGive(g_sensorLock);
 }
 
@@ -560,16 +584,32 @@ m3ApiRawFunction(h_modbus) {
   uint8_t table = kMbTables[b & 3];
   int kind = b >> 4 & 15;
   bool master = b >> 8 & 1;
+#ifdef FLP_NET
+  bool tcp = b >> 9 & 1;
+#else
+  bool tcp = false;
+#endif
   if (op == 0) {
     if (a == 0) memset(g_mb, 0, sizeof g_mb);
     if (a == 63) modbusCommit();
     else if (a >= 0 && a < 63) g_mb[a] = b;
   } else if (op == 1) {
-    if (master && g_mbMaster) {
+#ifdef FLP_NET
+    if (tcp && g_mbTcpMaster) {
+      if (kind == 1) { float f = g_mbTcpMaster->readFloat(0, a, table, c); memcpy(&r, &f, 4); }
+      else if (kind == 2) r = g_mbTcpMaster->readBool(0, a, table, c);
+      else r = (int16_t)g_mbTcpMaster->readInteger(0, a, table, c);
+    } else if (tcp && !master && g_mbTcpSlave) {
+      if (kind == 1) { float f = g_mbTcpSlave->readFloat(table, c); memcpy(&r, &f, 4); }
+      else if (kind == 2) r = g_mbTcpSlave->readBool(table, c);
+      else r = (int16_t)g_mbTcpSlave->readInteger(table, c);
+    } else
+#endif
+    if (!tcp && master && g_mbMaster) {
       if (kind == 1) { float f = g_mbMaster->readFloat(a, table, c); memcpy(&r, &f, 4); }
       else if (kind == 2) r = g_mbMaster->readBool(a, table, c);
       else r = (int16_t)g_mbMaster->readInteger(a, table, c);
-    } else if (!master && g_mbSlave) {
+    } else if (!tcp && !master && g_mbSlave) {
       if (kind == 1) { float f = g_mbSlave->readFloat(table, c); memcpy(&r, &f, 4); }
       else if (kind == 2) r = g_mbSlave->readBool(table, c);
       else r = (int16_t)g_mbSlave->readInteger(table, c);
@@ -577,16 +617,32 @@ m3ApiRawFunction(h_modbus) {
   } else if (op == 2) {
     float f;
     memcpy(&f, &d, 4);
-    if (master && g_mbMaster) {
+#ifdef FLP_NET
+    if (tcp && g_mbTcpMaster) {
+      if (kind == 1) g_mbTcpMaster->saveFloat(0, a, f, table, c);
+      else if (kind == 2) g_mbTcpMaster->saveBool(0, a, d != 0, table, c);
+      else g_mbTcpMaster->saveInteger(0, a, (int16_t)d, table, c);
+    } else if (tcp && !master && g_mbTcpSlave) {
+      if (kind == 1) g_mbTcpSlave->saveFloat(f, table, c);
+      else if (kind == 2) g_mbTcpSlave->saveBool(d != 0, table, c);
+      else g_mbTcpSlave->saveInteger((int16_t)d, table, c);
+    } else
+#endif
+    if (!tcp && master && g_mbMaster) {
       if (kind == 1) g_mbMaster->saveFloat(a, f, table, c);
       else if (kind == 2) g_mbMaster->saveBool(a, d != 0, table, c);
       else g_mbMaster->saveInteger(a, (int16_t)d, table, c);
-    } else if (!master && g_mbSlave) {
+    } else if (!tcp && !master && g_mbSlave) {
       if (kind == 1) g_mbSlave->saveFloat(f, table, c);
       else if (kind == 2) g_mbSlave->saveBool(d != 0, table, c);
       else g_mbSlave->saveInteger((int16_t)d, table, c);
     }
   } else if (op == 3) {
+#ifdef FLP_NET
+    if (tcp && a >= 0) r = g_mbTcpMaster && g_mbTcpMaster->slaveStatus(0, a, false) ? 1 : 0;
+    else if (tcp) r = g_mbTcpSlave ? g_mbTcpSlave->getLastError() : 0;
+    else
+#endif
     if (a >= 0) r = g_mbMaster && g_mbMaster->slaveStatus(a, false) ? 1 : 0;
     else r = g_mbSlave ? g_mbSlave->getLastError() : 0;
   }
@@ -987,6 +1043,48 @@ static void ethPoll() {
   g_eth->pool();
   n.ethReady = g_eth->ethernetIsReady();
   n.ethIp = n.ethReady ? (uint32_t)g_eth->localIP() : 0;
+}
+#endif
+
+#if defined(FLP_MODBUS) && defined(FLP_NET)
+// Creates the Modbus TCP master or slave once the chosen interface is up (called under g_sensorLock).
+static void modbusTcpPoll() {
+  if (!g_mbTcpWanted) return;
+  FLProgAbstractTcpInterface *iface = nullptr;
+#ifdef FLP_WIFI
+  if (g_mb[1] == 0 && g_net.complete) iface = &g_wifi;
+#endif
+#ifdef FLP_ETH
+  if (g_mb[1] == 1 && g_eth) iface = g_eth;
+#endif
+  if (!iface) return;
+  if (g_mb[0] == 3) {
+    int n = g_mb[7] < 1 ? 1 : g_mb[7] > 4 ? 4 : g_mb[7];
+    auto *m = new ModbusMasterTCP(iface, 1);
+    m->setServerIpAdress(0, IPAddress((uint32_t)g_mb[3]));
+    m->setServerPort(0, (uint16_t)g_mb[2]);
+    m->setServerSlavesSize(0, n);
+    for (int i = 0; i < n; i++) {
+      int b = 16 + 8 * i;
+      uint8_t addr = g_mb[b];
+      m->setSlaveAddress(0, i, addr);
+      m->setPollingPeriod(0, addr, (uint32_t)g_mb[b + 1]);
+      m->setTimeOutTime(0, addr, (uint32_t)g_mb[b + 2]);
+      for (int t = 0; t < 4; t++) {
+        if (g_mb[b + 3 + t] > 0) m->configDataTable(0, addr, kMbTables[t], g_mb[b + 3 + t]);
+      }
+    }
+    g_mbTcpMaster = m;
+  } else if (g_mb[0] == 4) {
+    auto *m = new ModbusSlaveTCP(iface);
+    m->setSlaveAddress(g_mb[7]);
+    m->setTcpPort((int16_t)g_mb[2]);
+    for (int t = 0; t < 4; t++) {
+      if (g_mb[8 + t] > 0) m->configDataTable(kMbTables[t], g_mb[8 + t]);
+    }
+    g_mbTcpSlave = m;
+  }
+  g_mbTcpWanted = false;
 }
 #endif
 
