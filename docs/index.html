@@ -50,10 +50,13 @@ a{color:var(--acc)}
 <h2>Быстрый старт</h2>
 <ol>
 <li>Скачайте <code>FLP_next.zip</code> со страницы релиза и распакуйте.</li>
-<li>Запустите <code>crablogic-editor.exe</code>. Если нужно, программа предложит скачать arduino-cli и ядро ESP32.</li>
+<li>Запустите <code>crablogic-editor.exe</code>. Если нужно, программа предложит скачать arduino-cli и ядро ESP32 сама.</li>
 <li>Откройте пример «Примеры → pump», нажмите F7 (проверить) и F5 (собрать).</li>
 <li>Подключите ESP32 по USB и выберите «Проект → Отладка: залить и подключиться».</li>
 </ol>
+
+<h2>Ядро ESP32</h2>
+<p>Для сборки прошивок нужно ядро ESP32 для Arduino (версия 3.3.12, около 49 МБ). Программа скачивает его сама, но можно взять вручную: <a href="https://github.com/espressif/arduino-esp32/releases/download/3.3.12/esp32-core-3.3.12.zip">esp32-core-3.3.12.zip</a>. Для установки по списку плат Espressif используйте адрес индекса: <code>https://espressif.github.io/arduino-esp32/package_esp32_index.json</code>.</p>
 
 <h2>Статус</h2>
 <p>Версия 1.3 — бета. Основная плата: ESP32 DevKit; работа с ESP32‑C3 проверена на железе. Программа развивается одним автором, сообщения об ошибках приветствуются в <a href="https://github.com/phazz1980/FLP_next/issues">Issues</a>.</p>
