@@ -40,15 +40,11 @@ pub trait Backend {
     fn generate(&self, program: &Program) -> Result<String, GenError>;
 }
 
-/// Checks the project schema and generates source code with `backend`.
-pub fn generate(
-    project: &Project,
-    lib: &Library,
-    backend: &dyn Backend,
-) -> Result<String, GenError> {
+/// The project as the generators take it: disabled links dropped, and an unused output
+/// (it waits in the project tree with nothing to write) left out. An unused input is
+/// harmless and stays.
+pub fn prepare(project: &Project, lib: &Library) -> Project {
     let mut project = project.without_disabled();
-    // An unused output waits in the project tree with nothing to write: it is left
-    // out of the sketch. An unused input is harmless and stays.
     for id in project.unused_tags(lib) {
         let output = project
             .logic
@@ -59,6 +55,16 @@ pub fn generate(
             project.remove_block(&id).expect("listed by unused_tags");
         }
     }
+    project
+}
+
+/// Checks the project schema and generates source code with `backend`.
+pub fn generate(
+    project: &Project,
+    lib: &Library,
+    backend: &dyn Backend,
+) -> Result<String, GenError> {
+    let project = prepare(project, lib);
     let program = Program::build(&project, lib)?;
     backend.generate(&program)
 }

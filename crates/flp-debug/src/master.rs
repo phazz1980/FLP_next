@@ -267,6 +267,13 @@ fn handle_line(
         l.frames += 1;
         return true;
     }
+    // `list` answer: the address of the board, absent while it has none.
+    if let Some(ip) = text.strip_prefix("ip=") {
+        let ip = ip.trim().to_owned();
+        let changed = l.address.as_deref() != Some(ip.as_str());
+        l.address = Some(ip);
+        return changed;
+    }
     if text == "ok" || text.is_empty() {
         return false;
     }

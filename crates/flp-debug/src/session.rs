@@ -40,6 +40,8 @@ pub struct Live {
     /// `Project::content_hash` of the project the firmware was built from; `None`
     /// until the board has told it (and for a firmware that cannot).
     pub project_hash: Option<[u8; 8]>,
+    /// Address of the board in the network, as the master firmware reports it.
+    pub address: Option<String>,
 }
 
 impl Live {

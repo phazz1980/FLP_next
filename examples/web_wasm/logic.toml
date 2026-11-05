@@ -6,7 +6,6 @@ id = "wifi"
 type = "wifi"
 ssid = "MyNetwork"
 password = "secret123"
-web_update = false
 
 [[block]]
 id = "page"
@@ -90,6 +89,122 @@ id = "led"
 type = "digital_out"
 pin = 2
 
+[[block]]
+id = "head"
+type = "web_label"
+caption = "Управление"
+col = 1
+row = 1
+w = 24
+h = 2
+
+[[block]]
+id = "btn"
+type = "web_button"
+caption = "Нажать"
+col = 9
+row = 3
+w = 8
+h = 2
+
+[[block]]
+id = "inp"
+type = "web_input"
+caption = "Уставка"
+min = -50.0
+max = 150.0
+step = 0.5
+initial = 21.5
+unit = "°C"
+col = 17
+row = 5
+w = 8
+h = 2
+
+[[block]]
+id = "bar"
+type = "web_gauge"
+caption = "Шкала"
+min = 0.0
+max = 100.0
+unit = "%"
+col = 9
+row = 7
+w = 16
+h = 4
+
+[[block]]
+id = "line"
+type = "web_shape"
+shape = 0
+thickness = 2
+color = "#4a90d9"
+col = 1
+row = 13
+w = 24
+h = 2
+
+[[block]]
+id = "tank"
+type = "web_tank"
+caption = "Ёмкость"
+unit = "%"
+min = 0.0
+max = 100.0
+col = 1
+row = 33
+w = 4
+h = 8
+color = "#4a90d9"
+
+[[link]]
+from = "level.out"
+to   = "tank.in"
+
+# A second image of the tank widget: it works with the same widget on the page.
+[[block]]
+id = "tank_2"
+type = "web_tank"
+tag = "tank"
+
+[[link]]
+from = "level.out"
+to   = "tank_2.in"
+
+[[block]]
+id = "clock"
+type = "web_clock"
+caption = "Время"
+col = 5
+row = 33
+w = 8
+h = 4
+
+[[block]]
+id = "pic"
+type = "web_image"
+caption = "Схема"
+url = "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b0/ESP32_Espressif_ESP-WROOM-32_Wi-Fi_Bluetooth_Module.jpg/320px-ESP32_Espressif_ESP-WROOM-32_Wi-Fi_Bluetooth_Module.jpg"
+col = 13
+row = 33
+w = 8
+h = 8
+
+[[block]]
+id = "fan"
+type = "web_icon"
+caption = "Вентилятор"
+icon = 1
+color = "#2da44e"
+col = 21
+row = 33
+w = 4
+h = 6
+
+[[link]]
+from = "sw.out"
+to   = "fan.in"
+
 [[link]]
 from = "sw.out"
 to = "led.in"
@@ -97,6 +212,10 @@ to = "led.in"
 [[link]]
 from = "sw.out"
 to = "lamp.in"
+
+[[link]]
+from = "level.out"
+to = "bar.in"
 
 [[link]]
 from = "level.out"

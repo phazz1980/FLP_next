@@ -1,7 +1,7 @@
 //! Project file `<name>.crab`: a ZIP archive (opens in any archiver) with
 //! `project.toml` (board, settings), `logic.toml` (blocks and links),
-//! `layout.toml` (coordinates, editor only) and `boards.pdf` (picture of all
-//! sheets). Old projects were folders of the three TOML files; they are still
+//! `web.toml` (the web page: its settings and widgets), `layout.toml`
+//! (coordinates, editor only) and `boards.pdf` (picture of all sheets). Old projects were folders of the three TOML files; they are still
 //! read and converted on save.
 
 use std::collections::BTreeMap;
@@ -30,8 +30,16 @@ pub const WORK_DIR: &str = ".flp";
 pub const PROJECT_FILE: &str = "project.toml";
 pub const LOGIC_FILE: &str = "logic.toml";
 pub const LAYOUT_FILE: &str = "layout.toml";
+/// The web page: the `web_ui` block and the widgets, in the format of `logic.toml`.
+/// In memory they are blocks of [`Logic`]; on disk they live apart from the logic.
+pub const WEB_FILE: &str = "web.toml";
 /// Picture of all sheets, for viewing the schema without the editor.
 pub const BOARDS_PDF: &str = "boards.pdf";
+
+/// Blocks of the web page (the `web_ui` host and the widgets) are stored in `web.toml`.
+pub fn is_web_kind(kind: &str) -> bool {
+    kind.starts_with("web_")
+}
 
 /// Project settings: `[project]`, `[board]`, `[[uart]]`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -121,11 +129,28 @@ impl Project {
     /// what is checked and built.
     pub fn without_disabled(&self) -> Project {
         let mut out = self.clone();
-        let off: Vec<String> = self
+        let mut off: Vec<String> = self
             .disabled_blocks()
             .into_iter()
             .map(String::from)
             .collect();
+        // A switched-off web page builds nothing: its widgets stay only in the project.
+        let web_off = self.logic.blocks.iter().any(|b| {
+            b.kind == "web_ui"
+                && matches!(
+                    b.params.get("enabled"),
+                    Some(crate::ParamValue::Bool(false))
+                )
+        });
+        if web_off {
+            off.extend(
+                self.logic
+                    .blocks
+                    .iter()
+                    .filter(|b| is_web_kind(&b.kind))
+                    .map(|b| b.id.clone()),
+            );
+        }
         if off.is_empty() {
             return out;
         }
@@ -133,6 +158,7 @@ impl Project {
             .enabled_links()
             .into_iter()
             .map(|i| self.logic.links[i].clone())
+            .filter(|l| !off.contains(&l.from.block) && !off.contains(&l.to.block))
             .collect();
         out.logic.blocks.retain(|b| !off.contains(&b.id));
         out.layout.blocks.retain(|id, _| !off.contains(id));
@@ -194,7 +220,7 @@ impl Project {
             entry: PROJECT_FILE,
         })?;
         let config = parse_toml(&config, &inner(PROJECT_FILE))?;
-        let logic = match entry(LOGIC_FILE)? {
+        let mut logic: Logic = match entry(LOGIC_FILE)? {
             Some(text) => parse_toml(&text, &inner(LOGIC_FILE))?,
             None => Logic::default(),
         };
@@ -202,6 +228,10 @@ impl Project {
             Some(text) => parse_toml(&text, &inner(LAYOUT_FILE))?,
             None => Layout::default(),
         };
+        if let Some(text) = entry(WEB_FILE)? {
+            let web: Logic = parse_toml(&text, &inner(WEB_FILE))?;
+            logic.blocks.extend(web.blocks);
+        }
         Ok(Self {
             path: path.to_owned(),
             config,
@@ -213,7 +243,12 @@ impl Project {
 
     fn load_legacy(dir: &Path) -> Result<Self> {
         let config = read_toml(&dir.join(PROJECT_FILE))?;
-        let logic = read_toml(&dir.join(LOGIC_FILE))?;
+        let mut logic: Logic = read_toml(&dir.join(LOGIC_FILE))?;
+        let web_path = dir.join(WEB_FILE);
+        if web_path.exists() {
+            let web: Logic = read_toml(&web_path)?;
+            logic.blocks.extend(web.blocks);
+        }
         let layout_path = dir.join(LAYOUT_FILE);
         let layout = if layout_path.exists() {
             read_toml(&layout_path)?
@@ -254,12 +289,7 @@ impl Project {
     /// failed save never leaves a broken project. Comments in the TOML files
     /// are not preserved.
     pub fn save_with(&self, extra: &[(&str, &[u8])]) -> Result<()> {
-        let inner = |name: &str| self.path.join(name);
-        let texts = [
-            (PROJECT_FILE, to_toml(&self.config, &inner(PROJECT_FILE))?),
-            (LOGIC_FILE, to_toml(&self.logic, &inner(LOGIC_FILE))?),
-            (LAYOUT_FILE, to_toml(&self.layout, &inner(LAYOUT_FILE))?),
-        ];
+        let texts = self.files(true)?;
         let tmp = self.path.with_extension(format!("{PROJECT_EXT}.tmp"));
         let write_err = |source| Error::Write {
             path: self.path.clone(),
@@ -288,12 +318,7 @@ impl Project {
     /// firmware. Equal projects give equal bytes (no timestamps), so an unchanged
     /// project does not change the sketch.
     pub fn archive_bytes(&self) -> Result<Vec<u8>> {
-        let inner = |name: &str| self.path.join(name);
-        let texts = [
-            (PROJECT_FILE, to_toml(&self.config, &inner(PROJECT_FILE))?),
-            (LOGIC_FILE, to_toml(&self.logic, &inner(LOGIC_FILE))?),
-            (LAYOUT_FILE, to_toml(&self.layout, &inner(LAYOUT_FILE))?),
-        ];
+        let texts = self.files(true)?;
         let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         for (name, text) in &texts {
@@ -311,17 +336,45 @@ impl Project {
             .into_inner())
     }
 
+    /// The text of the schema files as they are stored: the web page blocks go to
+    /// `web.toml` (written only when there are any), the rest of the logic stays in
+    /// `logic.toml`. `with_layout` adds `layout.toml` at the end.
+    fn files(&self, with_layout: bool) -> Result<Vec<(&'static str, String)>> {
+        let inner = |name: &str| self.path.join(name);
+        let (web, rest): (Vec<_>, Vec<_>) = self
+            .logic
+            .blocks
+            .iter()
+            .cloned()
+            .partition(|b| is_web_kind(&b.kind));
+        let logic = Logic {
+            blocks: rest,
+            ..self.logic.clone()
+        };
+        let mut files = vec![
+            (PROJECT_FILE, to_toml(&self.config, &inner(PROJECT_FILE))?),
+            (LOGIC_FILE, to_toml(&logic, &inner(LOGIC_FILE))?),
+        ];
+        if !web.is_empty() {
+            let page = Logic {
+                blocks: web,
+                ..Logic::default()
+            };
+            files.push((WEB_FILE, to_toml(&page, &inner(WEB_FILE))?));
+        }
+        if with_layout {
+            files.push((LAYOUT_FILE, to_toml(&self.layout, &inner(LAYOUT_FILE))?));
+        }
+        Ok(files)
+    }
+
     /// Short identity of the project's logic and settings (`project.toml` and
     /// `logic.toml`; coordinates in `layout.toml` do not count). The firmware carries
     /// the same value, so the editor can tell whether the board runs this project.
     pub fn content_hash(&self) -> Result<[u8; 8]> {
         use sha2::{Digest, Sha256};
-        let inner = |name: &str| self.path.join(name);
         let mut hasher = Sha256::new();
-        for (name, text) in [
-            (PROJECT_FILE, to_toml(&self.config, &inner(PROJECT_FILE))?),
-            (LOGIC_FILE, to_toml(&self.logic, &inner(LOGIC_FILE))?),
-        ] {
+        for (name, text) in self.files(false)? {
             hasher.update((text.len() as u64).to_le_bytes());
             hasher.update(name.as_bytes());
             hasher.update(text.as_bytes());

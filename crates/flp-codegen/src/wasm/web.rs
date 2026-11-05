@@ -52,13 +52,22 @@ impl Emitter<'_, '_> {
     }
 
     /// The widgets of the sheet in execution order.
+    /// The page host block is switched on (the `enabled` parameter).
+    pub(super) fn web_enabled(&self, ui: &Instance) -> bool {
+        self.web_num(ui, "enabled") != 0.0
+    }
+
     fn web_widgets(&self) -> Vec<&Instance<'_>> {
         let program = self.program;
         self.module
             .blocks
             .iter()
             .map(|&bi| &program.blocks[bi])
-            .filter(|i| i.block.kind.starts_with("web_") && i.block.kind != "web_ui")
+            .filter(|i| {
+                i.block.kind.starts_with("web_")
+                    && i.block.kind != "web_ui"
+                    && i.block.tag.is_none()
+            })
             .collect()
     }
 
@@ -179,8 +188,8 @@ impl Emitter<'_, '_> {
         Ok(w)
     }
 
-    /// Network interfaces the page is served on: the blocks of the project that have the web
-    /// page switched on (1 Wi-Fi, 2 Ethernet).
+    /// Network interfaces the page is served on: the network blocks of the project
+    /// (1 Wi-Fi, 2 Ethernet).
     fn web_mask(&self) -> i32 {
         let mut mask = 0;
         for inst in &self.program.blocks {
@@ -189,13 +198,7 @@ impl Emitter<'_, '_> {
                 "ethernet" => 2,
                 _ => continue,
             };
-            let on = match inst.params.get("web") {
-                Some(ParamValue::Bool(b)) => *b,
-                _ => true,
-            };
-            if on {
-                mask |= bit;
-            }
+            mask |= bit;
         }
         mask
     }
@@ -361,21 +364,44 @@ impl Emitter<'_, '_> {
             return Ok(true);
         }
         let program = self.program;
-        let has_ui = self
+        let ui = self
             .module
             .blocks
             .iter()
-            .any(|&bi| program.blocks[bi].block.kind == "web_ui");
-        if !has_ui {
+            .map(|&bi| &program.blocks[bi])
+            .find(|i| i.block.kind == "web_ui");
+        // A switched-off page keeps its widgets in the project but builds nothing.
+        if ui.is_some_and(|ui| !self.web_enabled(ui)) {
+            return Ok(true);
+        }
+        if ui.is_none() {
             return Err(self.unsupported(inst, "нужен блок «Веб-интерфейс» на этом же листе"));
         }
+        // An image of a widget on the sheet works with the widget itself.
+        let widget = inst.block.tag.as_deref().unwrap_or(&inst.block.id);
         let idx = self
             .web_widgets()
             .iter()
-            .position(|i| i.block.id == inst.block.id)
+            .position(|i| i.block.id == widget)
             .unwrap_or(0) as i32;
         // Fails for a widget the master cannot show yet.
         self.web_widget(inst)?;
+        // A widget with nothing linked (its images on the sheets carry the links) shows
+        // nothing of its own: it must not overwrite what an image wrote.
+        if inst.inputs.is_empty()
+            && matches!(
+                kind,
+                "web_led"
+                    | "web_icon"
+                    | "web_gauge"
+                    | "web_tank"
+                    | "web_value"
+                    | "web_chart"
+                    | "web_text"
+            )
+        {
+            return Ok(true);
+        }
         match kind {
             "web_led" | "web_icon" | "web_gauge" | "web_tank" | "web_value" | "web_chart" => {
                 let x = self.tmp_f();
@@ -434,6 +460,14 @@ impl Emitter<'_, '_> {
                 }
             }
             "web_text_input" => {
+                // The page may write while `write` is on; without a link it always may.
+                if inst.inputs.contains_key("write") {
+                    let on = self.tmp_i();
+                    self.flag(inst, 0);
+                    self.op(I::LocalSet(on));
+                    self.net_call4(24, [A::C(idx), A::L(on), A::C(0), A::C(0)]);
+                    self.op(I::Drop);
+                }
                 if let Some(buf) = self.out_buf(inst, "out") {
                     self.net_call4(22, [A::C(idx), buf.ptr(), buf.cap(), A::C(0)]);
                     self.op(I::GlobalSet(buf.len));

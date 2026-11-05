@@ -34,11 +34,6 @@ pub enum NetAction {
     AddTopic(&'static str),
     Remove(String),
     Designer,
-    /// Opens the new-widget window with this page (0-based) preselected.
-    NewWidget(usize),
-    AddPage,
-    /// Removes the page (0-based); its widgets move to the previous page.
-    DeletePage(usize),
     Focus(String),
     /// Virtual bench in simulation: the network link is lost or back.
     BenchOffline(bool),
@@ -116,7 +111,14 @@ fn service(
         .id_salt(("net", kind))
         .default_open(block.is_some())
         .show(ui, |ui| {
-            let mut on = block.is_some();
+            // The web page is switched by a parameter: its settings and widgets stay.
+            let web_switch = kind == WEB_UI && block.is_some();
+            let mut on = match block {
+                Some(b) if web_switch => {
+                    !matches!(b.params.get("enabled"), Some(ParamValue::Bool(false)))
+                }
+                _ => block.is_some(),
+            };
             let check = ui.add_enabled(
                 available || on,
                 egui::Checkbox::new(&mut on, crate::i18n::tr("Включить")),
@@ -124,7 +126,21 @@ fn service(
             if !available {
                 check.on_hover_text(crate::i18n::tr("Сначала включите Wi-Fi или Ethernet"));
             } else if check.changed() {
-                actions.push(NetAction::Toggle { kind, on });
+                match block {
+                    Some(b) if web_switch => actions.push(NetAction::SetParam {
+                        id: b.id.clone(),
+                        name: "enabled".into(),
+                        value: ParamValue::Bool(on),
+                    }),
+                    _ => actions.push(NetAction::Toggle { kind, on }),
+                }
+            }
+            if kind == WEB_UI
+                && ui
+                    .button(crate::i18n::tr("Конструктор страницы..."))
+                    .clicked()
+            {
+                actions.push(NetAction::Designer);
             }
             if let Some(b) = block {
                 // The whole block with its ports goes to the board, like a topic.
@@ -151,7 +167,7 @@ fn service(
                 }
                 settings(app, ui, b, kind, actions);
             }
-            if kind == MQTT {
+            if kind == MQTT && block.is_some() {
                 topics_section(app, ui, actions);
             }
         });
@@ -284,7 +300,7 @@ fn settings(
     let def = &lib.def;
     for p in def
         .active_params(&b.params)
-        .filter(|p| !(kind == WEB_UI && p.name == "pages"))
+        .filter(|p| !(kind == WEB_UI && (p.name == "pages" || p.name == "enabled")))
     {
         let label = crate::i18n::tr(p.label.as_deref().unwrap_or(&p.name));
         // Values kept by the program (Wi-Fi password) are not in the project file.
@@ -508,7 +524,7 @@ fn settings(
         actions.push(NetAction::Settings(b.id.clone()));
     }
     if kind == WEB_UI {
-        pages_section(app, ui, b, actions);
+        pages_section(app, ui, actions);
         if ui
             .button(crate::i18n::tr("Конструктор страницы..."))
             .clicked()
@@ -522,7 +538,7 @@ fn widget_blocks(logic: &flp_core::Logic) -> impl Iterator<Item = &flp_core::Blo
     logic
         .blocks
         .iter()
-        .filter(|w| w.kind.starts_with("web_") && w.kind != WEB_UI)
+        .filter(|w| w.kind.starts_with("web_") && w.kind != WEB_UI && w.tag.is_none())
 }
 
 /// Names of the web interface pages (at least one).
@@ -553,53 +569,15 @@ fn widget_page(w: &flp_core::Block, pages: usize) -> usize {
     }
 }
 
-/// Pages with their widgets: a name field, a delete button and the widgets of the page;
-/// a click on a widget finds it on the sheet, a double click opens its settings.
-fn pages_section(
-    app: &EditorApp,
-    ui: &mut Ui,
-    web: &flp_core::Block,
-    actions: &mut Vec<NetAction>,
-) {
+/// Pages with their widgets (they are made in the web designer): the name of the page and
+/// its widgets; a click on a widget finds it on the sheet, a double click opens its settings.
+fn pages_section(app: &EditorApp, ui: &mut Ui, actions: &mut Vec<NetAction>) {
     let Some(doc) = &app.doc else { return };
     let logic = &doc.project.logic;
     let names = page_names(logic);
     ui.separator();
     for (i, name) in names.iter().enumerate() {
-        ui.horizontal(|ui| {
-            ui.label(format!("{}.", i + 1));
-            let mut text = name.clone();
-            if ui
-                .add(egui::TextEdit::singleline(&mut text).desired_width(110.0))
-                .on_hover_text(crate::i18n::tr("Название страницы"))
-                .changed()
-            {
-                let mut all = names.clone();
-                all[i] = text.replace(';', "");
-                actions.push(NetAction::SetParam {
-                    id: web.id.clone(),
-                    name: "pages".to_owned(),
-                    value: ParamValue::Text(all.join(";")),
-                });
-            }
-            if ui
-                .small_button("+")
-                .on_hover_text(crate::i18n::tr("Добавить виджет на эту страницу"))
-                .clicked()
-            {
-                actions.push(NetAction::NewWidget(i));
-            }
-            if names.len() > 1
-                && ui
-                    .small_button("✕")
-                    .on_hover_text(crate::i18n::tr(
-                        "Удалить страницу: её виджеты перейдут на предыдущую",
-                    ))
-                    .clicked()
-            {
-                actions.push(NetAction::DeletePage(i));
-            }
-        });
+        ui.label(format!("{}. {name}", i + 1));
         ui.indent(("page", i), |ui| {
             for w in widget_blocks(logic).filter(|w| widget_page(w, names.len()) == i + 1) {
                 let caption = match w.params.get("caption") {
@@ -607,17 +585,26 @@ fn pages_section(
                     _ => crate::i18n::tr("без имени"),
                 };
                 let sel = app.selection.as_ref().is_some_and(|s| s.has_block(&w.id));
+                // Like a variable: a widget that is on no sheet yet is highlighted.
+                let placed = std::iter::once(w.id.as_str())
+                    .chain(logic.tag_copies(&w.id))
+                    .any(|id| doc.project.layout.blocks.contains_key(id));
                 let text = egui::RichText::new(format!("{caption} ({})", w.id));
+                let text = if placed {
+                    text
+                } else {
+                    text.color(ui.visuals().warn_fg_color)
+                };
                 let text = if sel { text.strong() } else { text };
                 let resp = crate::canvas::drag_source(
                     ui,
                     Id::unique(("widget", &w.id)),
-                    DragItem::Widget(w.id.clone()),
+                    DragItem::Topic(w.id.clone()),
                     |ui| ui.label(text),
                 )
-                .on_hover_text(
-                        crate::i18n::tr("Щелчок — найти на плате, двойной щелчок — параметры.                          Перетащите на плату — появится такой же виджет."),
-                    );
+                .on_hover_text(crate::i18n::tr(
+                    "Щелчок — найти на плате, двойной щелчок — параметры. Перетащите на плату: можно несколько раз, все изображения работают с одним виджетом. Не поставленный на плату виджет подсвечен.",
+                ));
                 if resp.double_clicked() {
                     actions.push(NetAction::Settings(w.id.clone()));
                 } else if resp.clicked() {
@@ -626,67 +613,6 @@ fn pages_section(
             }
         });
     }
-    ui.horizontal(|ui| {
-        if ui.small_button(crate::i18n::tr("+ страница")).clicked() {
-            actions.push(NetAction::AddPage);
-        }
-        if ui.small_button(crate::i18n::tr("+ виджет")).clicked() {
-            actions.push(NetAction::NewWidget(0));
-        }
-    });
-}
-
-/// Places a copy of the widget `id` (same type and parameters, new id) at `pos`; it goes
-/// to the free cell below the content of the same page.
-pub fn copy_widget(
-    p: &mut flp_core::Project,
-    lib: &flp_core::Library,
-    id: &str,
-    pos: flp_core::BlockPos,
-) -> Result<String, flp_core::EditError> {
-    let frag = p.copy_fragment(&[id.to_owned()]);
-    let mut ids = p.paste_fragment(lib, &frag, pos)?;
-    let new = ids
-        .pop()
-        .ok_or_else(|| flp_core::EditError::NoBlock(id.to_owned()))?;
-    let page = match frag.blocks.first().and_then(|b| b.params.get("page")) {
-        Some(ParamValue::Int(i)) => *i,
-        _ => 1,
-    };
-    let (col, row) = free_cell(lib, &p.logic, page.max(1) as usize);
-    p.set_param(lib, &new, "col", Some(ParamValue::Int(col)))?;
-    p.set_param(lib, &new, "row", Some(ParamValue::Int(row)))?;
-    Ok(new)
-}
-
-/// Kinds of the library blocks that are web page widgets.
-pub fn widget_kinds(lib: &flp_core::Library) -> Vec<String> {
-    lib.iter()
-        .map(|b| b.def.info.kind.clone())
-        .filter(|k| k.starts_with("web_") && k != WEB_UI)
-        .collect()
-}
-
-/// Top-left cell below everything already on the page (1-based page number).
-pub fn free_cell(lib: &flp_core::Library, logic: &flp_core::Logic, page: usize) -> (i64, i64) {
-    let pages = page_names(logic).len();
-    let int = |w: &flp_core::Block, name: &str| match w.params.get(name) {
-        Some(ParamValue::Int(i)) => *i,
-        _ => match lib
-            .get(&w.kind)
-            .and_then(|l| l.def.param(name))
-            .and_then(|p| p.default.as_ref())
-        {
-            Some(ParamValue::Int(i)) => *i,
-            _ => 1,
-        },
-    };
-    let bottom = widget_blocks(logic)
-        .filter(|w| widget_page(w, pages) == page)
-        .map(|w| int(w, "row") + int(w, "h") - 1)
-        .max()
-        .unwrap_or(0);
-    (1, bottom + 1)
 }
 
 /// Name of a setting or port: dragging it onto the sheet takes the value out to the
@@ -802,70 +728,15 @@ pub fn apply(app: &mut EditorApp, actions: Vec<NetAction>) {
                     s.set_broker_down(on);
                 }
             }
-            NetAction::NewWidget(page) => app.dialog = Dialog::for_widget(app, page),
-            NetAction::AddPage => {
-                let Some(doc) = &mut app.doc else { return };
-                let mut names = page_names(&doc.project.logic);
-                names.push(format!("Страница {}", names.len() + 1));
-                let Some(web) = doc.project.logic.blocks.iter().find(|b| b.kind == WEB_UI) else {
-                    return;
-                };
-                let id = web.id.clone();
-                let value = ParamValue::Text(names.join(";"));
-                if let Err(e) =
-                    doc.edit(&lib, None, |p| p.set_param(&lib, &id, "pages", Some(value)))
-                {
-                    app.info(LogLevel::Error, e.to_string());
-                }
-            }
-            NetAction::DeletePage(index) => {
-                let Some(doc) = &mut app.doc else { return };
-                let mut names = page_names(&doc.project.logic);
-                if names.len() < 2 || index >= names.len() {
-                    return;
-                }
-                let pages = names.len();
-                names.remove(index);
-                let Some(web) = doc.project.logic.blocks.iter().find(|b| b.kind == WEB_UI) else {
-                    return;
-                };
-                let web_id = web.id.clone();
-                let moved: Vec<(String, i64)> = widget_blocks(&doc.project.logic)
-                    .map(|w| (w.id.clone(), widget_page(w, pages) as i64))
-                    .filter(|(_, pg)| *pg > index as i64)
-                    .collect();
-                let result = doc.edit(&lib, None, |p| {
-                    for (id, pg) in &moved {
-                        let to = ParamValue::Int((pg - 1).max(1));
-                        p.set_param(&lib, id, "page", Some(to))?;
-                    }
-                    let value = ParamValue::Text(names.join(";"));
-                    p.set_param(&lib, &web_id, "pages", Some(value))
-                });
-                if let Err(e) = result {
-                    app.info(LogLevel::Error, e.to_string());
-                }
-            }
             NetAction::Designer => app.open_web_designer(),
             NetAction::Settings(id) => app.dialog = Dialog::for_block(app, &id),
             NetAction::Toggle { kind, on } => {
                 let Some(doc) = &mut app.doc else { return };
                 let result = doc.edit(&lib, None, |p| {
                     if on {
-                        p.add_block(&lib, kind, pos)?;
-                        if kind == WEB_UI {
-                            // The page is served by the network service.
-                            let nets: Vec<String> = p
-                                .logic
-                                .blocks
-                                .iter()
-                                .filter(|b| NETWORKS.iter().any(|(k, _)| *k == b.kind))
-                                .map(|b| b.id.clone())
-                                .collect();
-                            for id in nets {
-                                p.set_param(&lib, &id, "web", Some(ParamValue::Bool(true)))?;
-                            }
-                        }
+                        let id = p.add_block(&lib, kind, pos)?;
+                        // The block waits in the panel until it is dragged onto a sheet.
+                        p.layout.blocks.remove(&id);
                         Ok(())
                     } else {
                         let ids: Vec<String> = p
@@ -1024,44 +895,5 @@ mod tests {
             mode(&before).unwrap_or(ParamValue::Int(0))
         );
         assert!(p.logic.vars.iter().all(|v| !v.service));
-    }
-
-    #[test]
-    fn new_widget_goes_below_the_page_content() {
-        let (lib, _) =
-            Library::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library")).unwrap();
-        let p = Project::load(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../examples/web_ui"
-        ))
-        .unwrap();
-        assert_eq!(page_names(&p.logic), ["Главная"]);
-        let (col, row) = free_cell(&lib, &p.logic, 1);
-        assert_eq!(col, 1);
-        assert!(row > 1);
-        // An empty second page starts at the top.
-        assert_eq!(free_cell(&lib, &p.logic, 2), (1, 1));
-        assert!(widget_kinds(&lib).contains(&"web_button".to_owned()));
-    }
-
-    #[test]
-    fn dropped_widget_is_a_copy_with_its_own_id_and_cell() {
-        let (lib, _) =
-            Library::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library")).unwrap();
-        let mut p = Project::load(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../examples/web_ui"
-        ))
-        .unwrap();
-        let src = p.logic.block("sld").unwrap().clone();
-        let new = copy_widget(&mut p, &lib, "sld", POS).unwrap();
-        assert_ne!(new, "sld");
-        let copy = p.logic.block(&new).unwrap();
-        assert_eq!(copy.kind, src.kind);
-        assert_eq!(copy.params.get("caption"), src.params.get("caption"));
-        assert_ne!(copy.params.get("row"), src.params.get("row"));
-        // A second drop gives yet another id.
-        let again = copy_widget(&mut p, &lib, "sld", POS).unwrap();
-        assert_ne!(again, new);
     }
 }

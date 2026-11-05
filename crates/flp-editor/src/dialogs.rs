@@ -21,7 +21,6 @@ pub enum Dialog {
     Var(VarDialog),
     Sheet(SheetDialog),
     Board(crate::boardcfg::BoardDialog),
-    Widget(WidgetDialog),
     Expander(ExpanderDialog),
 }
 
@@ -29,15 +28,6 @@ pub enum Dialog {
 pub struct ExpanderDialog {
     original: Option<String>,
     form: Expander,
-}
-
-/// A new web page widget: its type and page are chosen before the block is created.
-pub struct WidgetDialog {
-    kind: String,
-    /// 0-based index into the page names.
-    page: usize,
-    /// Parameters of the chosen type (caption, unit, range, ...), edited like a block's.
-    form: BlockDialog,
 }
 
 pub struct BlockDialog {
@@ -97,38 +87,6 @@ enum Outcome {
     Apply,
     Cancel,
     Delete,
-}
-
-impl BlockDialog {
-    /// Parameter buffer of a block that does not exist yet.
-    fn for_kind(app: &EditorApp, kind: &str) -> Option<Self> {
-        let def = &app.lib.get(kind)?.def;
-        let values = def.params.iter().map(|p| (p.name.clone(), None)).collect();
-        let texts = def
-            .params
-            .iter()
-            .filter(|p| matches!(p.kind, ParamKind::Text | ParamKind::Duration))
-            .map(|p| {
-                let text = match &p.default {
-                    Some(ParamValue::Text(s)) => s.clone(),
-                    _ => String::new(),
-                };
-                (p.name.clone(), text)
-            })
-            .collect();
-        Some(Self {
-            id: String::new(),
-            new_id: String::new(),
-            kind: kind.to_owned(),
-            values,
-            param_in: BTreeSet::new(),
-            texts,
-            revealed: BTreeSet::new(),
-            pages: Vec::new(),
-            source: PinSource::Gpio,
-            pending: new_expander(app.doc.as_ref().map(|d| &d.project.logic)),
-        })
-    }
 }
 
 /// Declaration offered in the "new expander" form: the first free id, the first chip.
@@ -202,18 +160,6 @@ impl Dialog {
     }
 
     /// Window for a new web widget on the given page (0-based).
-    pub fn for_widget(app: &EditorApp, page: usize) -> Option<Self> {
-        let doc = app.doc.as_ref()?;
-        let kinds = crate::netpanel::widget_kinds(&app.lib);
-        let pages = crate::netpanel::page_names(&doc.project.logic).len();
-        let kind = kinds.first()?.clone();
-        Some(Self::Widget(WidgetDialog {
-            form: BlockDialog::for_kind(app, &kind)?,
-            kind,
-            page: page.min(pages - 1),
-        }))
-    }
-
     pub fn for_var(app: &EditorApp, name: Option<&str>) -> Option<Self> {
         let var = match name {
             Some(n) => app.doc.as_ref()?.project.logic.var(n)?.clone(),
@@ -285,7 +231,6 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
         },
         Dialog::Sheet(d) => crate::i18n::fmt("Плата {0}", &[&d.number]),
         Dialog::Board(_) => crate::i18n::tr("Настройки МК").to_owned(),
-        Dialog::Widget(_) => crate::i18n::tr("Новый виджет").to_owned(),
         Dialog::Expander(d) => match &d.original {
             Some(id) => crate::i18n::fmt("Расширитель «{0}»", &[&id]),
             None => crate::i18n::tr("Новый расширитель").to_owned(),
@@ -325,7 +270,6 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
                         };
                     }
                 }
-                Dialog::Widget(d) => widget_body(app, ui, d),
                 Dialog::Expander(d) => expander_body(app, ui, d),
             }
         });
@@ -411,89 +355,6 @@ fn is_widget_kind(kind: &str) -> bool {
     kind.starts_with("web_") && kind != "web_ui"
 }
 
-fn widget_body(app: &EditorApp, ui: &mut Ui, d: &mut WidgetDialog) {
-    let Some(doc) = &app.doc else { return };
-    let pages = crate::netpanel::page_names(&doc.project.logic);
-    let kinds = crate::netpanel::widget_kinds(&app.lib);
-    let name_of = |kind: &str| {
-        app.lib.get(kind).map_or_else(
-            || kind.to_owned(),
-            |b| crate::i18n::tr(&b.def.info.name).to_owned(),
-        )
-    };
-    egui::Grid::new("widget_props")
-        .num_columns(2)
-        .spacing([10.0, 6.0])
-        .show(ui, |ui| {
-            ui.label(crate::i18n::tr("Тип виджета"));
-            egui::ComboBox::from_id_salt("widget_kind")
-                .selected_text(name_of(&d.kind))
-                .show_ui(ui, |ui| {
-                    for kind in &kinds {
-                        let hint = app
-                            .lib
-                            .get(kind)
-                            .map(|b| b.def.info.description.clone())
-                            .unwrap_or_default();
-                        if ui
-                            .selectable_label(*kind == d.kind, name_of(kind))
-                            .on_hover_text(hint)
-                            .clicked()
-                        {
-                            if let Some(form) = BlockDialog::for_kind(app, kind) {
-                                d.kind = kind.clone();
-                                d.form = form;
-                            }
-                        }
-                    }
-                });
-            ui.end_row();
-            ui.label(crate::i18n::tr("Страница"));
-            let page = d.page.min(pages.len() - 1);
-            egui::ComboBox::from_id_salt("widget_page")
-                .selected_text(&pages[page])
-                .show_ui(ui, |ui| {
-                    for (i, name) in pages.iter().enumerate() {
-                        if ui.selectable_label(i == page, name).clicked() {
-                            d.page = i;
-                        }
-                    }
-                });
-            ui.end_row();
-        });
-    let Some(def) = app.lib.get(&d.kind).map(|b| &b.def) else {
-        return;
-    };
-    ui.add_space(6.0);
-    ui.add(egui::Label::new(RichText::new(crate::i18n::tr(&def.info.description)).weak()).wrap());
-    ui.add_space(6.0);
-    let current: BTreeMap<String, ParamValue> = d
-        .form
-        .values
-        .iter()
-        .filter_map(|(k, v)| Some((k.clone(), v.clone()?)))
-        .collect();
-    let params: Vec<&ParamDef> = def
-        .active_params(&current)
-        .filter(|p| !matches!(p.name.as_str(), "col" | "row" | "w" | "h" | "page"))
-        .collect();
-    let pins = Pins::none();
-    egui::Grid::new("widget_params")
-        .num_columns(2)
-        .spacing([10.0, 6.0])
-        .show(ui, |ui| {
-            for &p in &params {
-                ui.label(crate::i18n::tr(p.title()))
-                    .on_hover_text(crate::i18n::tr(p.description.trim()));
-                ui.horizontal(|ui| param_editor(ui, p, &mut d.form, def, &app.local, &pins));
-                ui.end_row();
-            }
-        });
-    ui.weak(crate::i18n::tr(
-        "Расположение и размер виджета — в конструкторе страницы.",
-    ));
-}
-
 fn block_body(app: &EditorApp, ui: &mut Ui, d: &mut BlockDialog) {
     let Some(doc) = &app.doc else { return };
     let Some(block) = doc.project.logic.block(&d.id) else {
@@ -562,10 +423,12 @@ fn block_settings(
         .filter(|p| {
             !p.fixed
                 && !(is_widget_kind(&d.kind)
-                    && matches!(p.name.as_str(), "col" | "row" | "w" | "h"))
-                && !(d.kind == "web_ui" && p.name == "pages")
-                // The web server follows the web page block; the network panel switches it.
-                && !(matches!(d.kind.as_str(), "wifi" | "ethernet") && p.name == "web")
+                    && (matches!(
+                        p.name.as_str(),
+                        "col" | "row" | "w" | "h" | "page" | "color" | "back"
+                    ) || (d.kind == "web_text_input"
+                        && matches!(p.name.as_str(), "initial" | "secret"))))
+                && !(d.kind == "web_ui" && matches!(p.name.as_str(), "pages" | "enabled"))
         })
         .collect();
     let inputs: Vec<&PortDef> = def.active_inputs(&current).collect();
@@ -736,19 +599,6 @@ struct ExpanderPins {
     expander: Expander,
     /// Pin of the chip and the block that holds it.
     taken: Vec<(i64, String)>,
-}
-
-impl Pins {
-    /// Pins of widgets and other blocks without board pins.
-    fn none() -> Self {
-        Self {
-            layout: None,
-            others: Vec::new(),
-            expanders: Vec::new(),
-            can_expander: false,
-            free_id: String::new(),
-        }
-    }
 }
 
 /// Edits one buffered parameter of the block dialog.
@@ -1638,48 +1488,13 @@ fn sheet_body(ui: &mut Ui, d: &mut SheetDialog) {
         });
 }
 
-fn apply_widget(app: &mut EditorApp, d: &WidgetDialog) -> Result<(), String> {
-    let lib = app.lib.clone();
-    let pos = crate::panels::free_spot(app);
-    let doc = app
-        .doc
-        .as_mut()
-        .ok_or(crate::i18n::tr("проект не открыт"))?;
-    let page = d.page + 1;
-    let (col, row) = crate::netpanel::free_cell(&lib, &doc.project.logic, page);
-    let id = doc
-        .edit(&lib, None, |p| {
-            let id = p.add_block(&lib, &d.kind, pos)?;
-            let ints = [("page", page as i64), ("col", col), ("row", row)];
-            for (name, v) in ints {
-                p.set_param(&lib, &id, name, Some(ParamValue::Int(v)))?;
-            }
-            for (name, value) in &d.form.values {
-                if let Some(v) = value
-                    .clone()
-                    .filter(|_| !ints.iter().any(|(n, _)| n == name))
-                {
-                    p.set_param(&lib, &id, name, Some(v))?;
-                }
-            }
-            Ok::<_, flp_core::EditError>(id)
-        })
-        .map_err(|e| e.to_string())?;
-    app.focus_block(&id);
-    Ok(())
-}
-
 fn apply(app: &mut EditorApp, dialog: &Dialog) -> Result<(), String> {
-    if let Dialog::Widget(d) = dialog {
-        return apply_widget(app, d);
-    }
     let lib = app.lib.clone();
     let doc = app
         .doc
         .as_mut()
         .ok_or(crate::i18n::tr("проект не открыт"))?;
     match dialog {
-        Dialog::Widget(_) => {}
         Dialog::Board(d) => {
             let board = d.config()?;
             let uarts = d.uarts();

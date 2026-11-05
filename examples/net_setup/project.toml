@@ -1,6 +1,0 @@
-[project]
-name = "net_setup"
-description = "Веб-страница ввода сетевых параметров: SSID, пароль, брокер MQTT, логин, Client ID, пароль OTA, и проверка их применения"
-
-[board]
-fqbn = "esp32:esp32:esp32"   # ESP32 DevKit

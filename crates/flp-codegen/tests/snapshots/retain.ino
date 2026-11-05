@@ -54,30 +54,13 @@ bool press_prev = false;
 // wifi_1: wifi
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgOnBoardWifiInterface flpWifi;
-// Network services (MQTT, web, OTA) are polled at most once per period.
+// Network services (MQTT, web) are polled at most once per period.
 uint32_t wifi_1_net_t = 0;
 bool wifi_1_net_due = true;
 // Applied radio state: 0 off, 1 client, 2 access point, 3 both; 255 not yet.
 uint8_t wifi_1_state = 255;
 // Address shown on the address output; the text is rebuilt only when it changes.
 uint32_t wifi_1_ip_raw = 0;
-// Web server (port 80): the web_ui block adds its pages to it.
-FLProgWebServer wifi_1_web(&flpWifi, 80);
-// Shared web server: the web_ui block adds its pages to it.
-FLProgWebServer &flpWebSrv = wifi_1_web;
-// Update over the network (ArduinoOTA through the shared interface).
-FLProgNetworkOta wifi_1_ota;
-bool wifi_1_ota_on = false;
-#define FLP_WEB_UPD 1
-// Firmware upload from the web page: raw HTTP POST streamed into Update (port 8080).
-FLProgNetworkTcpServer wifi_1_up;
-FLProgNetworkTcpServerClient *wifi_1_up_c = nullptr;
-bool wifi_1_up_on = false;
-uint8_t wifi_1_up_st = 0;  // 0 idle, 1 headers, 2 body, 3 done (restart pending)
-char wifi_1_up_line[160];
-uint8_t wifi_1_up_ll = 0;
-uint32_t wifi_1_up_len = 0, wifi_1_up_got = 0, wifi_1_up_t = 0, wifi_1_up_try = 0;
-bool wifi_1_up_auth = false;
 
 // mqtt_1: mqtt
 // Shared MQTT client: mqtt_publish / mqtt_subscribe blocks use it.
@@ -125,127 +108,6 @@ bool flp_mqtt_match(const char *f, const char *t) {
   }
 }
 
-// wifi_1: wifi
-void wifi_1_up_reply(const char *status, const char *text) {
-  String r = String("HTTP/1.1 ") + status + "\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\nContent-Length: " + String(strlen(text)) + "\r\n\r\n" + text;
-  wifi_1_up_c->write((const uint8_t *)r.c_str(), r.length());
-}
-
-void wifi_1_up_fail(const char *status, const char *text) {
-  if (wifi_1_up_st == 2) {
-    Update.abort();
-  }
-  wifi_1_up_reply(status, text);
-  wifi_1_up_c->stop();
-  wifi_1_up_c = nullptr;
-  wifi_1_up_st = 0;
-}
-
-// Header line: the request line is checked for path and password, Content-Length is remembered.
-void wifi_1_up_header_line() {
-  char *l = wifi_1_up_line;
-  if (strncmp(l, "POST /update", 12) == 0) {
-    String expect = String("?p=") + "" + " ";
-    wifi_1_up_auth = strlen("") == 0 || strstr(l, expect.c_str()) != nullptr;
-  } else if (strncasecmp(l, "Content-Length:", 15) == 0) {
-    wifi_1_up_len = (uint32_t)strtoul(l + 15, nullptr, 10);
-  }
-}
-
-void wifi_1_up_poll() {
-  if (!wifi_1_up_on) {
-    if (millis() - wifi_1_up_try > 2000) {
-      wifi_1_up_try = millis();
-      wifi_1_up_on = wifi_1_up.begin(flpWifi, 8080);
-    }
-    return;
-  }
-  wifi_1_up.pool();
-  if (wifi_1_up_c == nullptr) {
-    wifi_1_up_c = wifi_1_up.takeNewClient();
-    if (wifi_1_up_c == nullptr) {
-      return;
-    }
-    wifi_1_up_st = 1;
-    wifi_1_up_ll = 0;
-    wifi_1_up_len = 0;
-    wifi_1_up_got = 0;
-    wifi_1_up_auth = false;
-    wifi_1_up_t = millis();
-  }
-  if (wifi_1_up_st == 3) {
-    if (millis() - wifi_1_up_t > 800) {
-      ESP.restart();
-    }
-    return;
-  }
-  if (!wifi_1_up_c->active() || millis() - wifi_1_up_t > 10000) {
-    if (wifi_1_up_st == 2) {
-      Update.abort();
-    }
-    wifi_1_up_c->stop();
-    wifi_1_up_c = nullptr;
-    wifi_1_up_st = 0;
-    return;
-  }
-  if (wifi_1_up_st == 1) {
-    for (uint16_t n = 0; n < 512 && wifi_1_up_st == 1; n++) {
-      int b = wifi_1_up_c->read();
-      if (b < 0) {
-        break;
-      }
-      wifi_1_up_t = millis();
-      if (b == '\n') {
-        wifi_1_up_line[wifi_1_up_ll] = 0;
-        if (wifi_1_up_ll > 0 && wifi_1_up_line[wifi_1_up_ll - 1] == '\r') {
-          wifi_1_up_line[wifi_1_up_ll - 1] = 0;
-        }
-        bool empty = wifi_1_up_line[0] == 0;
-        if (!empty) {
-          wifi_1_up_header_line();
-        }
-        wifi_1_up_ll = 0;
-        if (empty) {
-          if (!wifi_1_up_auth) {
-            wifi_1_up_fail("403 Forbidden", "Неверный пароль");
-          } else if (wifi_1_up_len == 0 || !Update.begin(wifi_1_up_len)) {
-            wifi_1_up_fail("500 Internal Server Error", "Нет места под прошивку");
-          } else {
-            wifi_1_up_st = 2;
-          }
-        }
-      } else if (wifi_1_up_ll < sizeof(wifi_1_up_line) - 1) {
-        wifi_1_up_line[wifi_1_up_ll++] = (char)b;
-      }
-    }
-  }
-  if (wifi_1_up_st == 2) {
-    for (uint8_t n = 0; n < 4 && wifi_1_up_got < wifi_1_up_len; n++) {
-      uint8_t buf[512];
-      uint32_t want = wifi_1_up_len - wifi_1_up_got;
-      int got = wifi_1_up_c->read(buf, want < sizeof(buf) ? want : sizeof(buf));
-      if (got <= 0) {
-        break;
-      }
-      wifi_1_up_t = millis();
-      if (Update.write(buf, (size_t)got) != (size_t)got) {
-        wifi_1_up_fail("500 Internal Server Error", "Ошибка записи прошивки");
-        return;
-      }
-      wifi_1_up_got += (uint32_t)got;
-    }
-    if (wifi_1_up_got >= wifi_1_up_len) {
-      if (Update.end(true)) {
-        wifi_1_up_reply("200 OK", "Прошивка загружена, устройство перезагружается");
-        wifi_1_up_st = 3;
-        wifi_1_up_t = millis();
-      } else {
-        wifi_1_up_fail("500 Internal Server Error", "Прошивка не принята");
-      }
-    }
-  }
-}
-
 // Фоновая задача: ядро 0, блоки плат с признаком «фоновая задача»
 void flp_bg_task(void *) {
   for (;;) {
@@ -290,22 +152,6 @@ void flp_bg_task(void *) {
         wifi_1_ip_raw = ip;
         wifi_1_address = ip ? IPAddress(ip).toString() : String();
       }
-    }
-    if (wifi_1_net_due && true) {
-      wifi_1_web.pool();
-    }
-    if (wifi_1_net_due && true && true) {
-      wifi_1_up_poll();
-    }
-    if (wifi_1_net_due && true) {
-      if (!wifi_1_ota_on) {
-        wifi_1_ota_on = true;
-        if (""[0] != 0) {
-          wifi_1_ota.setPasswordValue("");
-        }
-        wifi_1_ota.begin(flpWifi);
-      }
-      wifi_1_ota.pool();
     }
 
     // mqtt_1: mqtt
@@ -397,7 +243,6 @@ void setup() {
     flpWifi.subnet(addr);
     flpWifi.resetDhcp();
   }
-  wifi_1_ota.setHostname("wifi_1");
 
   // Фоновая задача стартует после настройки всех блоков
   xTaskCreatePinnedToCore(flp_bg_task, "flp_bg", 10240, nullptr, 1, nullptr, 0);

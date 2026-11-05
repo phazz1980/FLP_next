@@ -9,8 +9,6 @@ sck = 14
 miso = 12
 mosi = 13
 mac = 41
-web = false
-web_update = false
 out_address = true
 
 [[block]]
@@ -18,8 +16,6 @@ id = "wifi"
 type = "wifi"
 ssid = "MyNetwork"
 password = "secret123"
-web = false
-web_update = false
 out_address = true
 
 [[block]]

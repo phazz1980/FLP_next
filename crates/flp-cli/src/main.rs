@@ -570,6 +570,7 @@ fn run_gen_wasm(
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
+    let project = flp_codegen::prepare(&project, &lib);
     let program = match Program::build(&project, &lib) {
         Ok(program) => program,
         Err(GenError::Schema(diagnostics)) => {

@@ -48,9 +48,10 @@ static const int kCore = portNUM_PROCESSORS > 1 ? 1 : 0;
 static const int kStackWords = 2048;
 // The wasm3 compiler recurses deeply on a big module (300 blocks overflowed 6 KB), so the task needs room.
 static const int kTaskStackBytes = 16384;
+static const int kTaskStackMin = 8192;
 static const uint32_t kStepPeriodMs = 10;
 static const uint32_t kStepLimitMs = 100;  // watchdog: a longer step means a hang
-static const int kJournal = 50;
+static const int kJournal = 24;
 
 enum { P_GPIO_READ = 1, P_GPIO_WRITE = 2, P_ADC = 4, P_PWM = 8, P_MILLIS = 16, P_SENSOR = 32,
        P_PCF_READ = 64, P_PCF_WRITE = 128, P_MODBUS = 256, P_UART = 512, P_TEXT = 1024, P_NET = 2048 };
@@ -127,6 +128,12 @@ struct Slot {
 };
 
 static Slot g_slots[kMaxSlots];
+// A small module compiles with a shallow recursion, so its task gets a smaller stack: the free
+// heap is fragmented, and a 16 KB block is often not there when a module is swapped at run time.
+static inline int taskStackFor(size_t wasmLen) {
+  size_t n = 6144 + wasmLen;
+  return n < (size_t)kTaskStackMin ? kTaskStackMin : n > (size_t)kTaskStackBytes ? kTaskStackBytes : (int)n;
+}
 static SemaphoreHandle_t g_mgmt;
 static uint32_t g_tags[64];  // bits of i32 / f32
 
@@ -1127,6 +1134,7 @@ static int32_t mqttSubscribe(const char *filter) {
 struct WebItem {
   uint8_t kind;  // 0 number, 1 text shown, 2 text input, 3 secret text input, 4 chart
   bool rw;       // the page may change the value
+  volatile bool locked;  // the module forbids the page to write now
   uint8_t dec;   // digits after the point
   float lo, hi;
   volatile float value;
@@ -1161,7 +1169,58 @@ static bool webAllowed(FLProgNetworkHttpServer *server) {
   server->send(403, "text/plain", "auth");
   return false;
 }
+// The page layout is kept in flash (Preferences, 3900-byte pieces) and written only when its hash changes.
+static Preferences g_webPrefs;
+static uint32_t webHash(const char *s) {
+  uint32_t h = 2166136261u;
+  for (; *s; s++) h = (h ^ (uint8_t)*s) * 16777619u;
+  return h;
+}
+static void webPageSave() {
+  if (!g_webLayout) return;
+  uint32_t h = webHash(g_webLayout);
+  g_webPrefs.begin("flpweb", false);
+  if (g_webPrefs.getUInt("hash", 0) != h || !g_webPrefs.isKey("n")) {
+    size_t len = strlen(g_webLayout);
+    int parts = (int)((len + 3899) / 3900);
+    for (int i = 0; i < parts; i++) {
+      char key[4] = {'p', (char)('0' + i), 0, 0};
+      size_t k = len - i * 3900 < 3900 ? len - i * 3900 : 3900;
+      g_webPrefs.putBytes(key, g_webLayout + i * 3900, k);
+    }
+    g_webPrefs.putUInt("n", (uint32_t)len);
+    g_webPrefs.putUInt("hash", h);
+  }
+  g_webPrefs.end();
+}
+static void webPageLoad() {
+  if (g_webLayout) return;
+  g_webPrefs.begin("flpweb", true);
+  size_t len = g_webPrefs.getUInt("n", 0);
+  if (len > 0 && len < 8192) {
+    char *b = (char *)malloc(len + 1);
+    if (b) {
+      size_t got = 0;
+      for (int i = 0; got < len && i < 3; i++) {
+        char key[4] = {'p', (char)('0' + i), 0, 0};
+        got += g_webPrefs.getBytes(key, b + got, len - got);
+      }
+      b[got] = 0;
+      if (got == len && webHash(b) == g_webPrefs.getUInt("hash", 0)) {
+        g_webLayout = b;
+        g_webLayoutCap = len + 1;
+      } else {
+        free(b);
+      }
+    }
+  }
+  g_webPrefs.end();
+}
 static void webPage(FLProgNetworkHttpServer *server) {
+  if (!g_webLayout || strlen(g_webLayout) < 12) {
+    server->send(200, "text/html; charset=utf-8", "<!DOCTYPE html><meta charset=\"utf-8\"><title>FLP</title><p>Страница не загружена");
+    return;
+  }
   if (!server->sendStreamProgmem(200, "text/html; charset=utf-8", flp_html, strlen(flp_html))) {
     server->write((const uint8_t *)flp_html, strlen(flp_html));
   }
@@ -1199,7 +1258,7 @@ static void webSet(FLProgNetworkHttpServer *server) {
   if (!webAllowed(server)) return;
   if (server->hasArgumentKey("i") && server->hasArgumentKey("v")) {
     int i = server->argumentValueAtKey("i").toInt();
-    if (i >= 0 && i < g_webCount && g_webItems[i].rw) {
+    if (i >= 0 && i < g_webCount && g_webItems[i].rw && !g_webItems[i].locked) {
       WebItem &it = g_webItems[i];
       String v = server->argumentValueAtKey("v");
       if (it.kind >= 2 && it.text) {
@@ -1363,7 +1422,7 @@ static void webInfo(FLProgNetworkHttpServer *server) {
   o += ",\"sketch\":"; o += String(ESP.getSketchSize());
   o += ",\"free\":"; o += String(ESP.getFreeSketchSpace());
   o += ",\"build\":\"" __DATE__ " " __TIME__ "\"";
-  o += ",\"u\":false}";
+  o += '}';
   server->send(200, "application/json", o);
 }
 // Charts store a point of the shown value once per period.
@@ -1384,6 +1443,7 @@ static void webSample() {
 static void webPoll() {
   webSample();
   if (!g_webComplete || g_webBegun) return;
+  webPageLoad();
   FLProgNetworkInterface *iface = nullptr;
 #ifdef FLP_WIFI
   if ((g_webMask & 1) && g_net.complete) iface = &g_wifi;
@@ -1584,6 +1644,7 @@ m3ApiRawFunction(h_net) {
         WebItem &it = g_webItems[i];
         it.kind = t[0];
         it.rw = t[1] != 0;
+        it.locked = false;
         it.dec = t[2];
         memcpy(&it.lo, t + 4, 4);
         memcpy(&it.hi, t + 8, 4);
@@ -1620,6 +1681,7 @@ m3ApiRawFunction(h_net) {
       for (int32_t i = 0; i < c; i++) t += (char)((const uint8_t *)_mem)[b + i];
       wnLoad(t, d);
     } else if (a == 63) {
+      webPageSave();
       g_webComplete = true;
     }
   } else if (op == 19) {
@@ -1655,6 +1717,9 @@ m3ApiRawFunction(h_net) {
       portEXIT_CRITICAL(&g_webMux);
       r = k;
     }
+  } else if (op == 24) {
+    // Write permission of a widget: a = widget, b = 1 the page may write, 0 it may not.
+    if (a >= 0 && a < g_webCount) g_webItems[a].locked = (b == 0);
   } else if (op == 23) {
     // Network form: a = 0..9 reads a field as text (b pointer, c capacity; returns the length), 10 the "saved" flag (cleared by the read), 11 DHCP, 12 mode.
     if (a == 10) {
@@ -1806,7 +1871,12 @@ static bool startSlot(Slot &s, bool paused = false) {
   memset((void *)s.params, 0, sizeof s.params);
   memset((void *)s.outputs, 0, sizeof s.outputs);
   memset((void *)s.forced, 0, sizeof s.forced);
-  xTaskCreatePinnedToCore(slotTask, s.name, kTaskStackBytes, &s, 1, &s.task, kCore);
+  if (xTaskCreatePinnedToCore(slotTask, s.name, taskStackFor(s.wasmLen), &s, 1, &s.task, kCore) != pdPASS) {
+    s.task = nullptr;
+    jlog(s.name, "нет памяти под задачу (свободно %u, крупнейший блок %u)", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+    stopSlot(s);
+    return false;
+  }
   return true;
 }
 
@@ -2047,6 +2117,15 @@ static void cmdLine(String line) {
     for (auto &s : g_slots)
       if (s.used)
         Serial.printf("%s %s steps=%u restarts=%u out0=%08x crc=%08x\n", s.name, s.task ? "run" : "stop", (unsigned)s.steps, (unsigned)s.restarts, (unsigned)s.outputs[0], (unsigned)(s.wasm ? esp_crc32_le(0, s.wasm, s.wasmLen) : 0));
+    uint32_t ip = 0;
+#ifdef FLP_WIFI
+    if (g_net.complete) ip = g_net.ip;
+#endif
+#ifdef FLP_ETH
+    if (!ip && g_eth) ip = (uint32_t)g_eth->localIP();
+#endif
+    // The editor shows the address of the board in its status bar.
+    if (ip) Serial.printf("ip=%s\n", IPAddress(ip).toString().c_str());
     Serial.printf("free=%u largest=%u\n", (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     Serial.println("end");
   } else if (line.startsWith("swap ") || line.startsWith("del ")) {

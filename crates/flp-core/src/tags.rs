@@ -57,6 +57,14 @@ impl Project {
         })
     }
 
+    /// Whether `id` is a widget of the web page (or a copy of one). Widgets live in the
+    /// project tree; the sheets only show images of them, like tags.
+    pub fn is_widget(&self, id: &str) -> bool {
+        self.logic
+            .block(id)
+            .is_some_and(|b| crate::project::is_web_kind(&b.kind) && b.kind != "web_ui")
+    }
+
     /// Tags that are not used: neither they nor their copies stand on a sheet or
     /// have links, constants or bindings. They are kept in the tree, skipped by the
     /// empty-input check and left out of the generated code.
@@ -100,6 +108,19 @@ impl Project {
         block.inverted.clear();
         block.inverted_inputs.clear();
         block.bound.clear();
+        self.logic
+            .links
+            .retain(|l| l.from.block != id && l.to.block != id);
+        self.layout.blocks.remove(id);
+        let prefix = format!("{id}.");
+        self.layout.wires.retain(|k, _| !k.starts_with(&prefix));
+        Ok(())
+    }
+
+    /// Takes a network service block (Wi-Fi, MQTT, ...) off the sheets: it keeps its
+    /// settings and waits in the left panel, only its links and position go away.
+    pub fn take_service_off_board(&mut self, id: &str) -> Result<(), EditError> {
+        self.block_index(id)?;
         self.logic
             .links
             .retain(|l| l.from.block != id && l.to.block != id);

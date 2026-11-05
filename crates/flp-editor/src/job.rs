@@ -66,8 +66,7 @@ pub struct Job {
 impl Job {
     /// Starts generation + build (+ upload) on a worker thread. `wake` is called after
     /// every event so the UI can repaint.
-    /// `debug`: firmware with the online debugging module; after an upload the editor
-    /// connects to it.
+    /// `debug`: the modules report every block output; after the upload the editor connects.
     pub fn start(
         kind: JobKind,
         debug: bool,
@@ -80,7 +79,6 @@ impl Job {
             JobKind::Build => crate::i18n::tr("Сборка"),
             JobKind::Rebuild => crate::i18n::tr("Пересборка"),
             JobKind::Precompile => crate::i18n::tr("Фоновая сборка"),
-            JobKind::Upload { .. } if debug => crate::i18n::tr("Заливка отладочной прошивки"),
             JobKind::Upload { .. } => crate::i18n::tr("Заливка"),
             JobKind::UploadModules { .. } => crate::i18n::tr("Заливка модулей"),
         };
@@ -187,9 +185,9 @@ fn run(
     if let JobKind::UploadModules { port } = &kind {
         return upload_modules(port.as_deref(), project, lib, debug, out);
     }
-    // The plain upload puts the master on the board; the schema follows as modules.
-    // Debugging still needs the schema firmware with the debugging module.
-    if let (JobKind::Upload { port }, false) = (&kind, debug) {
+    // The upload puts the master on the board, with debugging on or off; the schema follows
+    // as modules (debugging is a flag of the module build).
+    if let JobKind::Upload { port } = &kind {
         return upload_master(port.as_deref(), project, control, out);
     }
     if let Some(w2c2) = crate::theme::w2c2() {
@@ -198,7 +196,7 @@ fn run(
         }
     }
     let program = Program::build(project, lib).map_err(|e| e.to_string())?;
-    let code = ArduinoCpp { debug }
+    let code = ArduinoCpp { debug: false }
         .generate(&program)
         .map_err(|e| e.to_string())?;
     // The project goes into the firmware as saved, not as prepared for generation.
@@ -215,11 +213,7 @@ fn run(
         .with_control(control);
     let board = &project.config.board;
     let opts = CompileOptions {
-        mode: if debug {
-            BuildMode::Debug
-        } else {
-            BuildMode::Release
-        },
+        mode: BuildMode::Release,
         verbose: !background,
         low_priority: background,
         force: matches!(kind, JobKind::Rebuild),
@@ -312,7 +306,7 @@ fn run(
         JobKind::Build | JobKind::Rebuild | JobKind::Precompile => Ok(Done {
             message: crate::i18n::tr("Сборка готова").into(),
             port: None,
-            debug,
+            debug: false,
         }),
         JobKind::UploadModules { .. } => unreachable!("handled before the sketch is built"),
         JobKind::Upload { port } => {
@@ -339,7 +333,7 @@ fn run(
             Ok(Done {
                 message: crate::i18n::fmt("Прошивка залита на {0}", &[&port]),
                 port: Some(port),
-                debug,
+                debug: false,
             })
         }
     }
@@ -347,8 +341,22 @@ fn run(
 
 /// The master drivers the project's blocks need.
 pub fn master_features(project: &Project) -> flp_build::MasterFeatures {
-    let mut features =
-        flp_build::MasterFeatures::of_blocks(project.logic.blocks.iter().map(|b| b.kind.as_str()));
+    // A switched-off web page builds nothing, so it must not pull the web part into the master.
+    let web_off = project.logic.blocks.iter().any(|b| {
+        b.kind == "web_ui"
+            && matches!(
+                b.params.get("enabled"),
+                Some(flp_core::ParamValue::Bool(false))
+            )
+    });
+    let mut features = flp_build::MasterFeatures::of_blocks(
+        project
+            .logic
+            .blocks
+            .iter()
+            .map(|b| b.kind.as_str())
+            .filter(|k| !(web_off && k.starts_with("web_"))),
+    );
     // UART lines and text sending are the default modes of these two blocks.
     features.text |= project.logic.blocks.iter().any(|b| {
         let mode = match b.kind.as_str() {
@@ -494,6 +502,7 @@ fn upload_modules(
     watch: bool,
     out: &mut dyn FnMut(LogLevel, &str),
 ) -> Result<Done, String> {
+    let project = &flp_codegen::prepare(project, lib);
     let program = Program::build(project, lib).map_err(|e| e.to_string())?;
     let mut modules = Vec::new();
     for sheet in program.sheets() {

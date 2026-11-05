@@ -353,6 +353,10 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
                     p.rename_block(&id, w).map_err(|e| e.to_string())?;
                     id = w.clone();
                 }
+                // A widget of the web page lives in the left panel until it is dragged out.
+                if p.is_widget(&id) {
+                    p.layout.blocks.remove(&id);
+                }
                 for (name, value) in &params {
                     p.set_param(&lib, &id, name, value.clone())
                         .map_err(|e| e.to_string())?;

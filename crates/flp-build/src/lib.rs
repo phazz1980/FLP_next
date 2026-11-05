@@ -644,6 +644,22 @@ impl ArduinoCli {
         check_status("заливка", status)
     }
 
+    /// Whether the core of board `fqbn` is installed (the bundled folder first, then the
+    /// system one); nothing is installed.
+    pub fn has_core(&self, fqbn: &str) -> Result<bool, BuildError> {
+        let Some(id) = core_id(fqbn) else {
+            return Ok(true);
+        };
+        if self.core_installed(&id)? {
+            return Ok(true);
+        }
+        if self.core_dir.lock().unwrap().is_some() {
+            self.set_core_dir(None);
+            return self.core_installed(&id);
+        }
+        Ok(false)
+    }
+
     /// Installs the board core (`esp32:esp32` for an `esp32:esp32:...` board) when it is
     /// missing. Returns the core id if it was installed.
     pub fn ensure_core(
@@ -1001,6 +1017,9 @@ fn compile_args(work_dir: &Path, board: &BoardConfig, opts: &CompileOptions) -> 
         args.push(dir.into());
     }
     let mut extra_flags = String::from(FP_CONTRACT_FLAG);
+    // Over-the-air update is not offered: keep ArduinoOTA and Update out of the network
+    // library (the define is ignored when the library is not used).
+    extra_flags.push_str(" -DFLPROG_NETWORK_COMPILE_OTA=0");
     // The web interface page does not fit into the library's default response buffer
     // (2 KiB, answer 500), so a sketch with the `web_ui` block raises the limit.
     if uses_web_ui(work_dir) {
@@ -1337,7 +1356,7 @@ mod tests {
                 "--build-path",
                 &build,
                 "--build-property",
-                "compiler.cpp.extra_flags=-ffp-contract=off -fwrapv",
+                "compiler.cpp.extra_flags=-ffp-contract=off -fwrapv -DFLPROG_NETWORK_COMPILE_OTA=0",
                 "-v",
                 &sketch,
             ]

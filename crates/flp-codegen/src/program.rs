@@ -112,7 +112,13 @@ impl<'a> Program<'a> {
     /// Checks the schema and resolves it. Fails with [`GenError::Schema`] on check errors.
     pub fn build(project: &'a Project, lib: &'a Library) -> Result<Self, GenError> {
         let logic = &project.logic;
-        let report = check(logic, lib, None);
+        let mut report = check(logic, lib, None);
+        // As in the editor check, a widget of the web page is not fed on the sheets: its
+        // empty inputs are no error and read zero.
+        report.diagnostics.retain(|d| {
+            d.kind != flp_core::DiagKind::InputEmpty
+                || d.block.as_ref().is_none_or(|b| !project.is_widget(b))
+        });
         let uarts = flp_core::uart::check_project_uarts(project, lib);
         if report.has_errors() || uarts.has_errors() {
             let mut diagnostics = report.diagnostics;
@@ -183,6 +189,9 @@ impl<'a> Program<'a> {
                         Source::Default(zero_value(same))
                     }
                     (None, None, Some(value)) => Source::Default(value.clone()),
+                    (None, None, None) if project.is_widget(&block.id) => {
+                        Source::Default(zero_value(port.ty))
+                    }
                     (None, None, None) => unreachable!("unconnected inputs checked"),
                 };
                 let ty = match (&source, port.ty) {

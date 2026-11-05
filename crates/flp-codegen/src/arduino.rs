@@ -37,6 +37,15 @@ impl Backend for ArduinoCpp {
     }
 
     fn generate(&self, program: &Program) -> Result<String, GenError> {
+        if program
+            .project
+            .logic
+            .blocks
+            .iter()
+            .any(|b| flp_core::project::is_web_kind(&b.kind))
+        {
+            return Err(GenError::WebNeedsWasm);
+        }
         let env = environment();
         let tasks = Tasks::new(program)?;
         let mut rendered = Vec::with_capacity(program.blocks.len());

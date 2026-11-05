@@ -67,9 +67,25 @@ fn examples_match_snapshots() {
     for dir in examples() {
         let lib = library_for(&dir);
         let project = Project::load(&dir).unwrap();
+        let name = dir.file_name().unwrap().to_str().unwrap();
+        // The web page lives only in WASM modules: the plain sketch refuses it.
+        if project
+            .logic
+            .blocks
+            .iter()
+            .any(|b| flp_core::project::is_web_kind(&b.kind))
+        {
+            assert!(
+                matches!(
+                    generate(&project, &lib, &ArduinoCpp::RELEASE),
+                    Err(flp_codegen::GenError::WebNeedsWasm)
+                ),
+                "{name}"
+            );
+            continue;
+        }
         let code = generate(&project, &lib, &ArduinoCpp::RELEASE)
             .unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
-        let name = dir.file_name().unwrap().to_str().unwrap();
         let snapshot = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/snapshots")
             .join(format!("{name}.ino"));

@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use flp_core::project::is_web_kind;
 use flp_core::{check_project, BlockPos, Layout, Library, Logic, ParamKind, Project, Report};
 
 /// State that undo/redo restores.
@@ -81,6 +82,23 @@ impl Doc {
         }
     }
 
+    /// Takes the web page (the `web_*` blocks) from `other`, the project as another program
+    /// (the web constructor) saved it, and keeps everything else as it is in the editor.
+    pub fn adopt_web(&mut self, other: &Project, lib: &Library) {
+        let _ = self.edit::<(), ()>(lib, None, |p| {
+            p.logic.blocks.retain(|b| !is_web_kind(&b.kind));
+            p.logic.blocks.extend(
+                other
+                    .logic
+                    .blocks
+                    .iter()
+                    .filter(|b| is_web_kind(&b.kind))
+                    .cloned(),
+            );
+            Ok(())
+        });
+    }
+
     /// Ends merging of consecutive edits (e.g. when a drag is released).
     pub fn end_edit(&mut self) {
         self.last_key = None;
@@ -154,6 +172,8 @@ fn place_unplaced(project: &mut Project, lib: &Library) {
         .blocks
         .iter()
         .filter(|b| !layout.blocks.contains_key(&b.id))
+        // A web widget waits in the project tree; the page designer made it, not the sheet.
+        .filter(|b| !(is_web_kind(&b.kind) && b.kind != "web_ui"))
         .filter(|b| {
             let tag = lib
                 .resolve(&project.logic, b)

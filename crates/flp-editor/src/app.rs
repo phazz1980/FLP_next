@@ -245,6 +245,8 @@ enum SelfUpdate {
 enum CliPrompt {
     Hidden,
     Ask,
+    /// arduino-cli is there, the ESP32 core is not.
+    AskCore,
     /// The download runs on a worker thread and sends its lines and the final result.
     Installing(Receiver<Result<String, String>>),
 }
@@ -322,10 +324,10 @@ impl EditorApp {
             board_import: Default::default(),
             block_diffs: Vec::new(),
             self_update: SelfUpdate::Idle(None),
-            cli_prompt: if ArduinoCli::locate().is_ok() {
-                CliPrompt::Hidden
-            } else {
-                CliPrompt::Ask
+            cli_prompt: match ArduinoCli::locate() {
+                Err(_) => CliPrompt::Ask,
+                Ok(cli) if cli.has_core("esp32:esp32:esp32").unwrap_or(true) => CliPrompt::Hidden,
+                Ok(_) => CliPrompt::AskCore,
             },
         };
         match LocalValues::open_default() {
@@ -453,15 +455,26 @@ impl EditorApp {
     fn cli_window(&mut self, ctx: &egui::Context) {
         match &self.cli_prompt {
             CliPrompt::Hidden => {}
-            CliPrompt::Ask => {
+            CliPrompt::Ask | CliPrompt::AskCore => {
+                let core_only = matches!(self.cli_prompt, CliPrompt::AskCore);
                 let mut install = false;
                 let mut later = false;
-                egui::Window::new(crate::i18n::tr("arduino-cli не найден"))
+                let title = if core_only {
+                    crate::i18n::tr("Ядро ESP32 не найдено")
+                } else {
+                    crate::i18n::tr("arduino-cli не найден")
+                };
+                egui::Window::new(title)
                     .collapsible(false)
                     .resizable(false)
                     .show(ctx, |ui| {
-                        ui.label(crate::i18n::tr("Для сборки и заливки прошивки нужна программа arduino-cli."));
-                        ui.label(crate::i18n::tr("Скачать сейчас? Будут загружены arduino-cli и ядро ESP32 (несколько сотен МБ) в папку программы."));
+                        if core_only {
+                            ui.label(crate::i18n::tr("Для сборки и заливки прошивки нужно ядро ESP32 для arduino-cli."));
+                            ui.label(crate::i18n::tr("Скачать сейчас? Ядро ESP32 (несколько сотен МБ) будет загружено в папку программы."));
+                        } else {
+                            ui.label(crate::i18n::tr("Для сборки и заливки прошивки нужна программа arduino-cli."));
+                            ui.label(crate::i18n::tr("Скачать сейчас? Будут загружены arduino-cli и ядро ESP32 (несколько сотен МБ) в папку программы."));
+                        }
                         ui.horizontal(|ui| {
                             install = ui.button(crate::i18n::tr("Установить")).clicked();
                             later = ui.button(crate::i18n::tr("Позже")).clicked();
@@ -756,6 +769,15 @@ impl EditorApp {
             return;
         }
         if doc.dirty {
+            // The web constructor writes the widgets into the file: take them over, or the
+            // next save would wipe them. The rest of the unsaved work stays.
+            let path = doc.project.path.clone();
+            self.disk_stamp = stamp;
+            if let Ok(other) = Doc::open(&path, &self.lib) {
+                if let Some(doc) = &mut self.doc {
+                    doc.adopt_web(&other.project, &self.lib);
+                }
+            }
             if !self.disk_warned {
                 self.disk_warned = true;
                 self.info(
@@ -1436,7 +1458,20 @@ impl EditorApp {
                     ids.sort_by_key(|id| p.logic.block(id).is_none_or(|b| b.tag.is_none()));
                     // An input or output leaves the sheet but stays in the project tree.
                     ids.iter().try_for_each(|id| {
-                        if p.is_tag(&self.lib, p.logic.tag_of(id)) {
+                        let kind = p.logic.block(id).map(|b| b.kind.as_str());
+                        if matches!(
+                            kind,
+                            Some(
+                                "wifi"
+                                    | "ethernet"
+                                    | "mqtt"
+                                    | "mqtt_publish"
+                                    | "mqtt_subscribe"
+                                    | "web_ui"
+                            )
+                        ) {
+                            p.take_service_off_board(id)
+                        } else if p.is_tag(&self.lib, p.logic.tag_of(id)) || p.is_widget(id) {
                             p.take_off_board(id)
                         } else {
                             p.remove_block(id)
@@ -1548,7 +1583,7 @@ impl EditorApp {
         if let Some(job) = &mut self.job {
             // Upload joins the background master build: it stops being background and goes
             // on as a normal master upload.
-            if let (JobKind::Upload { port }, false) = (&kind, self.debug_firmware) {
+            if let JobKind::Upload { port } = &kind {
                 if job.promote(port.clone()) {
                     let title = job.title;
                     self.stop_debug();
@@ -1627,7 +1662,7 @@ impl EditorApp {
     /// settings) or the embedded master sketch changed. Schema edits do not start it:
     /// the schema goes to the board as modules.
     fn precompile(&mut self, ctx: &egui::Context) {
-        const PAUSE: Duration = Duration::from_secs(3);
+        const PAUSE: Duration = Duration::from_secs(15);
         let Some(key) = self.master_key() else { return };
         let now = Instant::now();
         match &self.seen_rev {

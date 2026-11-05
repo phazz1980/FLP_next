@@ -672,6 +672,8 @@ pub struct BlockEditor {
     generated: Option<Generated>,
     /// Closing with unsaved changes: asking what to do.
     confirm_close: bool,
+    /// The window fills the whole application window.
+    maximized: bool,
     /// A built-in block: shown, but cannot be changed.
     read_only: bool,
     /// Sections, packs and folders a new block may be put into.
@@ -732,6 +734,7 @@ impl BlockEditor {
             sim_build: SimBuild::default(),
             generated: None,
             confirm_close: false,
+            maximized: false,
             read_only: false,
             folders: Vec::new(),
             names: Vec::new(),
@@ -808,14 +811,30 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
     };
     let mut open = true;
     let mut close = false;
-    egui::Window::new(title)
+    let mut window = egui::Window::new(title)
         .id(Id::unique("block_editor"))
         .open(&mut open)
         .collapsible(false)
         .resizable(true)
         .default_width(900.0)
-        .default_height(640.0)
-        .show(ctx, |ui| close = body(app, ui, &mut ed));
+        .default_height(640.0);
+    if ed.maximized {
+        let area = ctx.content_rect().shrink(4.0);
+        window = window
+            .fixed_pos(area.min)
+            .fixed_size(area.size() - egui::vec2(16.0, 36.0));
+    }
+    window.show(ctx, |ui| {
+        let label = if ed.maximized {
+            crate::i18n::tr("🗗 Обычный размер")
+        } else {
+            crate::i18n::tr("🗖 На всё окно")
+        };
+        if ui.small_button(label).clicked() {
+            ed.maximized = !ed.maximized;
+        }
+        close = body(app, ui, &mut ed);
+    });
     if !open && ed.dirty() {
         ed.confirm_close = true;
     } else if !open {

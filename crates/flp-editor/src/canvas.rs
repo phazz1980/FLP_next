@@ -39,8 +39,6 @@ pub enum DragItem {
     Block(String),
     /// Variable: the side the first link comes to decides read or write.
     Var(String),
-    /// Web widget (block id) from the page list: a copy of it is placed on the sheet.
-    Widget(String),
     /// Setting or port of a service block (Wi-Fi...) taken out to the board.
     Setting {
         id: String,
@@ -1715,9 +1713,6 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             let result = match item {
                 DragItem::Block(kind) => doc.edit(&lib, None, |p| p.add_block(&lib, &kind, pos)),
                 DragItem::Var(name) => doc.edit(&lib, None, |p| p.add_var_block(&name, false, pos)),
-                DragItem::Widget(id) => doc.edit(&lib, None, |p| {
-                    crate::netpanel::copy_widget(p, &lib, &id, pos)
-                }),
                 DragItem::Setting { id, name, ty, feed } => doc.edit(&lib, None, |p| {
                     crate::netpanel::pull_out(p, &lib, &id, &name, ty, feed, pos)
                 }),
@@ -1725,18 +1720,20 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 // block itself is placed (or moved).
                 DragItem::Topic(id) => doc.edit(&lib, None, |p| {
                     let tag = p.logic.tag_of(&id).to_owned();
-                    let is_tag = p.logic.block(&tag).is_some_and(|b| {
-                        lib.resolve(&p.logic, b).is_some_and(|l| {
-                            l.def
-                                .params
-                                .iter()
-                                .any(|d| d.kind == flp_core::ParamKind::Pin)
-                        })
-                    });
+                    let is_tag = p.is_widget(&tag)
+                        || p.logic.block(&tag).is_some_and(|b| {
+                            lib.resolve(&p.logic, b).is_some_and(|l| {
+                                l.def
+                                    .params
+                                    .iter()
+                                    .any(|d| d.kind == flp_core::ParamKind::Pin)
+                            })
+                        });
                     let placed = std::iter::once(tag.as_str())
                         .chain(p.logic.tag_copies(&tag))
                         .any(|b| p.layout.blocks.contains_key(b));
-                    if is_tag && placed {
+                    // A widget never stands on a sheet itself, only its images do.
+                    if is_tag && (placed || p.is_widget(&tag)) {
                         p.add_tag_copy(&tag, pos)
                     } else {
                         p.layout.blocks.insert(id.clone(), pos);

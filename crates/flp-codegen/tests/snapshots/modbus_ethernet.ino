@@ -29,148 +29,13 @@ bool relay_reg_out_b_pend = false;
 // eth: ethernet
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgWiznetInterface flpEth(5);
-// Network services (MQTT, web, OTA) are polled at most once per period.
+// Network services (MQTT, web) are polled at most once per period.
 uint32_t eth_net_t = 0;
 bool eth_net_due = true;
-// Web server (port 80): the web_ui block adds its pages to it.
-FLProgWebServer eth_web(&flpEth, 80);
-// Update over the network (ArduinoOTA through the shared interface).
-FLProgNetworkOta eth_ota;
-bool eth_ota_on = false;
-// Firmware upload from the web page: raw HTTP POST streamed into Update (port 8080).
-FLProgNetworkTcpServer eth_up;
-FLProgNetworkTcpServerClient *eth_up_c = nullptr;
-bool eth_up_on = false;
-uint8_t eth_up_st = 0;  // 0 idle, 1 headers, 2 body, 3 done (restart pending)
-char eth_up_line[160];
-uint8_t eth_up_ll = 0;
-uint32_t eth_up_len = 0, eth_up_got = 0, eth_up_t = 0, eth_up_try = 0;
-bool eth_up_auth = false;
 
 // slave: modbus_tcp_slave
 // Shared slave: modbus_read / modbus_write blocks access its tables.
 ModbusSlaveTCP flpModbus(&flpEth);
-
-// eth: ethernet
-void eth_up_reply(const char *status, const char *text) {
-  String r = String("HTTP/1.1 ") + status + "\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\nContent-Length: " + String(strlen(text)) + "\r\n\r\n" + text;
-  eth_up_c->write((const uint8_t *)r.c_str(), r.length());
-}
-
-void eth_up_fail(const char *status, const char *text) {
-  if (eth_up_st == 2) {
-    Update.abort();
-  }
-  eth_up_reply(status, text);
-  eth_up_c->stop();
-  eth_up_c = nullptr;
-  eth_up_st = 0;
-}
-
-// Header line: the request line is checked for path and password, Content-Length is remembered.
-void eth_up_header_line() {
-  char *l = eth_up_line;
-  if (strncmp(l, "POST /update", 12) == 0) {
-    String expect = String("?p=") + "" + " ";
-    eth_up_auth = strlen("") == 0 || strstr(l, expect.c_str()) != nullptr;
-  } else if (strncasecmp(l, "Content-Length:", 15) == 0) {
-    eth_up_len = (uint32_t)strtoul(l + 15, nullptr, 10);
-  }
-}
-
-void eth_up_poll() {
-  if (!eth_up_on) {
-    if (millis() - eth_up_try > 2000) {
-      eth_up_try = millis();
-      eth_up_on = eth_up.begin(flpEth, 8080);
-    }
-    return;
-  }
-  eth_up.pool();
-  if (eth_up_c == nullptr) {
-    eth_up_c = eth_up.takeNewClient();
-    if (eth_up_c == nullptr) {
-      return;
-    }
-    eth_up_st = 1;
-    eth_up_ll = 0;
-    eth_up_len = 0;
-    eth_up_got = 0;
-    eth_up_auth = false;
-    eth_up_t = millis();
-  }
-  if (eth_up_st == 3) {
-    if (millis() - eth_up_t > 800) {
-      ESP.restart();
-    }
-    return;
-  }
-  if (!eth_up_c->active() || millis() - eth_up_t > 10000) {
-    if (eth_up_st == 2) {
-      Update.abort();
-    }
-    eth_up_c->stop();
-    eth_up_c = nullptr;
-    eth_up_st = 0;
-    return;
-  }
-  if (eth_up_st == 1) {
-    for (uint16_t n = 0; n < 512 && eth_up_st == 1; n++) {
-      int b = eth_up_c->read();
-      if (b < 0) {
-        break;
-      }
-      eth_up_t = millis();
-      if (b == '\n') {
-        eth_up_line[eth_up_ll] = 0;
-        if (eth_up_ll > 0 && eth_up_line[eth_up_ll - 1] == '\r') {
-          eth_up_line[eth_up_ll - 1] = 0;
-        }
-        bool empty = eth_up_line[0] == 0;
-        if (!empty) {
-          eth_up_header_line();
-        }
-        eth_up_ll = 0;
-        if (empty) {
-          if (!eth_up_auth) {
-            eth_up_fail("403 Forbidden", "Неверный пароль");
-          } else if (eth_up_len == 0 || !Update.begin(eth_up_len)) {
-            eth_up_fail("500 Internal Server Error", "Нет места под прошивку");
-          } else {
-            eth_up_st = 2;
-          }
-        }
-      } else if (eth_up_ll < sizeof(eth_up_line) - 1) {
-        eth_up_line[eth_up_ll++] = (char)b;
-      }
-    }
-  }
-  if (eth_up_st == 2) {
-    for (uint8_t n = 0; n < 4 && eth_up_got < eth_up_len; n++) {
-      uint8_t buf[512];
-      uint32_t want = eth_up_len - eth_up_got;
-      int got = eth_up_c->read(buf, want < sizeof(buf) ? want : sizeof(buf));
-      if (got <= 0) {
-        break;
-      }
-      eth_up_t = millis();
-      if (Update.write(buf, (size_t)got) != (size_t)got) {
-        eth_up_fail("500 Internal Server Error", "Ошибка записи прошивки");
-        return;
-      }
-      eth_up_got += (uint32_t)got;
-    }
-    if (eth_up_got >= eth_up_len) {
-      if (Update.end(true)) {
-        eth_up_reply("200 OK", "Прошивка загружена, устройство перезагружается");
-        eth_up_st = 3;
-        eth_up_t = millis();
-      } else {
-        eth_up_fail("500 Internal Server Error", "Прошивка не принята");
-      }
-    }
-  }
-}
 
 // Фоновая задача: ядро 0, блоки плат с признаком «фоновая задача»
 void flp_bg_task(void *) {
@@ -192,22 +57,6 @@ void flp_bg_task(void *) {
       flpEth.pool();
     }
     eth_ready = flpEth.ethernetIsReady();
-    if (eth_net_due && true) {
-      eth_web.pool();
-    }
-    if (eth_net_due && true && true) {
-      eth_up_poll();
-    }
-    if (eth_net_due && true) {
-      if (!eth_ota_on) {
-        eth_ota_on = true;
-        if (""[0] != 0) {
-          eth_ota.setPasswordValue("");
-        }
-        eth_ota.begin(flpEth);
-      }
-      eth_ota.pool();
-    }
 
     // slave: modbus_tcp_slave
     flpModbus.pool();
@@ -252,7 +101,6 @@ void setup() {
     flpEth.subnet(addr);
     flpEth.resetDhcp();
   }
-  eth_ota.setHostname("eth");
 
   // slave: modbus_tcp_slave
   flpModbus.setSlaveAddress(1);

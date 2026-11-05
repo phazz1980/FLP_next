@@ -10,7 +10,7 @@ pub struct CodeView {
     /// Generated sketch, or the reason it could not be generated.
     code: Result<String, String>,
     /// Revision and debugging option the code was generated for.
-    key: Option<(u64, bool)>,
+    key: Option<u64>,
 }
 
 impl CodeView {
@@ -27,7 +27,7 @@ impl CodeView {
             self.key = None;
             return;
         };
-        let key = (doc.revision, app.debug_firmware);
+        let key = doc.revision;
         if self.key == Some(key) {
             return;
         }
@@ -36,11 +36,9 @@ impl CodeView {
         self.code = Program::build(&project, &app.lib)
             .map_err(|e| e.to_string())
             .and_then(|p| {
-                ArduinoCpp {
-                    debug: app.debug_firmware,
-                }
-                .generate(&p)
-                .map_err(|e| e.to_string())
+                ArduinoCpp { debug: false }
+                    .generate(&p)
+                    .map_err(|e| e.to_string())
             });
     }
 }
@@ -64,11 +62,7 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
                         ui.ctx().copy_text(code.clone());
                         app.info(LogLevel::Info, crate::i18n::tr("Код проекта скопирован"));
                     }
-                    let mode = if app.debug_firmware {
-                        crate::i18n::tr("с модулем отладки")
-                    } else {
-                        crate::i18n::tr("без отладки")
-                    };
+                    let mode = crate::i18n::tr("без отладки");
                     ui.weak(crate::i18n::fmt(
                         "Строк: {0}, {1}",
                         &[&code.lines().count(), &mode],

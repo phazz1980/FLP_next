@@ -686,6 +686,7 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
                                         .map(|r| WebStubItem {
                                             kind: r[0],
                                             rw: r[1] != 0,
+                                            locked: false,
                                             dec: r[2],
                                             points: r[3],
                                             lo: f(&r[4..8]),
@@ -766,6 +767,12 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
                         data[p..p + n].copy_from_slice(&text.as_bytes()[..n]);
                         data[p + n] = 0;
                         return n as i32;
+                    }
+                    24 => {
+                        if let Some(it) = c.data_mut().io.web_items.get_mut(a as usize) {
+                            it.locked = b == 0;
+                        }
+                        return 0;
                     }
                     23 => {
                         let io = &mut c.data_mut().io;
@@ -934,6 +941,8 @@ pub struct WebStubItem {
     /// 0 number, 1 text shown, 2 text input, 3 secret text input, 4 chart.
     pub kind: u8,
     pub rw: bool,
+    /// The module forbids the page to write (`write` input of the text input).
+    pub locked: bool,
     pub dec: u8,
     /// Chart: points the master keeps.
     pub points: u8,

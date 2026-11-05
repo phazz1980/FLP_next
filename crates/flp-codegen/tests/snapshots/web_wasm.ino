@@ -92,7 +92,7 @@ FlpNet flpNet;
 // wifi: wifi
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgOnBoardWifiInterface flpWifi;
-// Network services (MQTT, web, OTA) are polled at most once per period.
+// Network services (MQTT, web) are polled at most once per period.
 uint32_t wifi_net_t = 0;
 bool wifi_net_due = true;
 // Applied radio state: 0 off, 1 client, 2 access point, 3 both; 255 not yet.
@@ -111,9 +111,6 @@ uint32_t wifi_ip_raw = 0;
 FLProgWebServer wifi_web(&flpWifi, 80);
 // Shared web server: the web_ui block adds its pages to it.
 FLProgWebServer &flpWebSrv = wifi_web;
-// Update over the network (ArduinoOTA through the shared interface).
-FLProgNetworkOta wifi_ota;
-bool wifi_ota_on = false;
 
 // page: web_ui
 const char page_html[] PROGMEM = R"FLPUI(<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FLP_next</title>
@@ -300,17 +297,13 @@ function mk(d,i){
 function sy(){
  var g=h('div','sy'),t=h('table'),R={},rows=[['ip','IP-адрес'],['mac','MAC'],['rssi','Сигнал Wi-Fi'],['up','Аптайм'],['chip','Чип'],['heap','Память (свободно)'],['flash','Флеш'],['app','Прошивка'],['build','Сборка']];
  rows.forEach(function(r){var tr=h('tr'),v=h('td','','');tr.appendChild(h('td','',r[1]));tr.appendChild(v);t.appendChild(tr);R[r[0]]=v});
- g.appendChild(t);var up=h('div');up.hidden=true;g.appendChild(up);
- var f=h('input'),bt=h('button','bt','Загрузить прошивку'),st=h('div');f.type='file';f.accept='.bin';
- up.appendChild(h('h2','','Обновление прошивки'));up.appendChild(f);up.appendChild(h('br'));up.appendChild(bt);up.appendChild(st);
- bt.onclick=function(){var b=f.files[0];if(!b)return;var p=prompt('Пароль обновления','');st.textContent='...';
-  fetch('http://'+location.hostname+':8080/update?p='+encodeURIComponent(p||''),{method:'POST',headers:{'Content-Type':'text/plain'},body:b}).then(function(r){return r.text()}).then(function(x){st.textContent=x}).catch(function(){st.textContent='ошибка'})};
+ g.appendChild(t);
  function ld(){if(g.hidden)return;F('/ui/info').then(function(r){return r.json()}).then(function(d){
   var s=d.up;R.ip.textContent=d.ip;R.mac.textContent=d.mac;R.rssi.textContent=d.rssi+' дБм';
   R.up.textContent=Math.floor(s/86400)+' д '+Math.floor(s/3600)%24+' ч '+Math.floor(s/60)%60+' мин';
   R.chip.textContent=d.chip+', '+d.cpu+' МГц';R.heap.textContent=Math.round(d.heap/1024)+' из '+Math.round(d.heapAll/1024)+' КБ';
   R.flash.textContent=Math.round(d.flash/1048576)+' МБ';R.app.textContent=Math.round(d.sketch/1024)+' КБ, свободно '+Math.round(d.free/1024)+' КБ';
-  R.build.textContent=d.build;up.hidden=!d.u}).catch(function(){})}
+  R.build.textContent=d.build}).catch(function(){})}
  setInterval(ld,2000);g.onshow=ld;return g}
 function poll(){F('/ui/state').then(function(r){return r.json()}).then(function(a){a.forEach(function(v,i){if(E[i])E[i](v)})}).catch(function(){}).then(function(){setTimeout(poll,500)})}
 function go(n){P.forEach(function(g,j){g.hidden=j!=n});A.forEach(function(a,j){a.classList.toggle('on',j==n)});history.replaceState(null,'','#'+(n+1));if(P[n].onshow)P[n].onshow()}
@@ -542,11 +535,6 @@ void page_info(FLProgNetworkHttpServer *server) {
   o += ",\"sketch\":"; o += String(ESP.getSketchSize());
   o += ",\"free\":"; o += String(ESP.getFreeSketchSpace());
   o += ",\"build\":\"" __DATE__ " " __TIME__ "\"";
-#ifdef FLP_WEB_UPD
-  o += ",\"u\":true";
-#else
-  o += ",\"u\":false";
-#endif
   o += '}';
   server->send(200, "application/json", o);
 }
@@ -674,18 +662,8 @@ void flp_bg_task(void *) {
         wifi_address = ip ? IPAddress(ip).toString() : String();
       }
     }
-    if (wifi_net_due && true) {
+    if (wifi_net_due) {
       wifi_web.pool();
-    }
-    if (wifi_net_due && true) {
-      if (!wifi_ota_on) {
-        wifi_ota_on = true;
-        if (""[0] != 0) {
-          wifi_ota.setPasswordValue("");
-        }
-        wifi_ota.begin(flpWifi);
-      }
-      wifi_ota.pool();
     }
 
     // sw: web_switch
@@ -786,9 +764,6 @@ void setup() {
   netform_ip.reserve(32);
   netform_gateway.reserve(32);
   netform_subnet.reserve(32);
-
-  // wifi: wifi
-  wifi_ota.setHostname("wifi");
 
   // page: web_ui
   flpWebSrv.addHandler("/", page_page);

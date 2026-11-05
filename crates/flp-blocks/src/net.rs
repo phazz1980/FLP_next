@@ -1,136 +1,11 @@
 //! Firmware code of the network interfaces: Wi-Fi and Ethernet W5500, with the services
-//! they host (web server, firmware upload page, update over the network).
+//! they host (web server).
 
 use crate::cpp::{CppCtx, CppParts, Lines};
 
-/// Firmware upload from the web page (raw HTTP POST streamed into `Update`, port 8080).
-/// `@ID@` is the block id, `@NET@` the interface object, `@PASS@` the update password.
-const UPLOAD_FUNCTIONS: &str = r##"void @ID@_up_reply(const char *status, const char *text) {
-  String r = String("HTTP/1.1 ") + status + "\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\nContent-Length: " + String(strlen(text)) + "\r\n\r\n" + text;
-  @ID@_up_c->write((const uint8_t *)r.c_str(), r.length());
-}
-
-void @ID@_up_fail(const char *status, const char *text) {
-  if (@ID@_up_st == 2) {
-    Update.abort();
-  }
-  @ID@_up_reply(status, text);
-  @ID@_up_c->stop();
-  @ID@_up_c = nullptr;
-  @ID@_up_st = 0;
-}
-
-// Header line: the request line is checked for path and password, Content-Length is remembered.
-void @ID@_up_header_line() {
-  char *l = @ID@_up_line;
-  if (strncmp(l, "POST /update", 12) == 0) {
-    String expect = String("?p=") + @PASS@ + " ";
-    @ID@_up_auth = strlen(@PASS@) == 0 || strstr(l, expect.c_str()) != nullptr;
-  } else if (strncasecmp(l, "Content-Length:", 15) == 0) {
-    @ID@_up_len = (uint32_t)strtoul(l + 15, nullptr, 10);
-  }
-}
-
-void @ID@_up_poll() {
-  if (!@ID@_up_on) {
-    if (millis() - @ID@_up_try > 2000) {
-      @ID@_up_try = millis();
-      @ID@_up_on = @ID@_up.begin(@NET@, 8080);
-    }
-    return;
-  }
-  @ID@_up.pool();
-  if (@ID@_up_c == nullptr) {
-    @ID@_up_c = @ID@_up.takeNewClient();
-    if (@ID@_up_c == nullptr) {
-      return;
-    }
-    @ID@_up_st = 1;
-    @ID@_up_ll = 0;
-    @ID@_up_len = 0;
-    @ID@_up_got = 0;
-    @ID@_up_auth = false;
-    @ID@_up_t = millis();
-  }
-  if (@ID@_up_st == 3) {
-    if (millis() - @ID@_up_t > 800) {
-      ESP.restart();
-    }
-    return;
-  }
-  if (!@ID@_up_c->active() || millis() - @ID@_up_t > 10000) {
-    if (@ID@_up_st == 2) {
-      Update.abort();
-    }
-    @ID@_up_c->stop();
-    @ID@_up_c = nullptr;
-    @ID@_up_st = 0;
-    return;
-  }
-  if (@ID@_up_st == 1) {
-    for (uint16_t n = 0; n < 512 && @ID@_up_st == 1; n++) {
-      int b = @ID@_up_c->read();
-      if (b < 0) {
-        break;
-      }
-      @ID@_up_t = millis();
-      if (b == '\n') {
-        @ID@_up_line[@ID@_up_ll] = 0;
-        if (@ID@_up_ll > 0 && @ID@_up_line[@ID@_up_ll - 1] == '\r') {
-          @ID@_up_line[@ID@_up_ll - 1] = 0;
-        }
-        bool empty = @ID@_up_line[0] == 0;
-        if (!empty) {
-          @ID@_up_header_line();
-        }
-        @ID@_up_ll = 0;
-        if (empty) {
-          if (!@ID@_up_auth) {
-            @ID@_up_fail("403 Forbidden", "Неверный пароль");
-          } else if (@ID@_up_len == 0 || !Update.begin(@ID@_up_len)) {
-            @ID@_up_fail("500 Internal Server Error", "Нет места под прошивку");
-          } else {
-            @ID@_up_st = 2;
-          }
-        }
-      } else if (@ID@_up_ll < sizeof(@ID@_up_line) - 1) {
-        @ID@_up_line[@ID@_up_ll++] = (char)b;
-      }
-    }
-  }
-  if (@ID@_up_st == 2) {
-    for (uint8_t n = 0; n < 4 && @ID@_up_got < @ID@_up_len; n++) {
-      uint8_t buf[512];
-      uint32_t want = @ID@_up_len - @ID@_up_got;
-      int got = @ID@_up_c->read(buf, want < sizeof(buf) ? want : sizeof(buf));
-      if (got <= 0) {
-        break;
-      }
-      @ID@_up_t = millis();
-      if (Update.write(buf, (size_t)got) != (size_t)got) {
-        @ID@_up_fail("500 Internal Server Error", "Ошибка записи прошивки");
-        return;
-      }
-      @ID@_up_got += (uint32_t)got;
-    }
-    if (@ID@_up_got >= @ID@_up_len) {
-      if (Update.end(true)) {
-        @ID@_up_reply("200 OK", "Прошивка загружена, устройство перезагружается");
-        @ID@_up_st = 3;
-        @ID@_up_t = millis();
-      } else {
-        @ID@_up_fail("500 Internal Server Error", "Прошивка не принята");
-      }
-    }
-  }
-}"##;
-
 /// Which services the block hosts. A setting taken from a variable is switched while
-/// running, so its code is always built in.
+/// running, so its code is always built in. The web server is always hosted.
 struct Services {
-    web: bool,
-    update: bool,
-    ota: bool,
     /// Address settings come from variables: re-applied when they change.
     dynamic: bool,
     /// Services are polled at most once per period.
@@ -139,12 +14,7 @@ struct Services {
 
 impl Services {
     fn of(e: &CppCtx, settings: &[&str]) -> Self {
-        let on = |n: &str| e.flag(n) || e.is_bound(n);
-        let web = on("web");
         Self {
-            web,
-            update: web && on("web_update"),
-            ota: on("ota"),
             dynamic: settings.iter().any(|n| e.is_bound(n)),
             period: e.int("net_period", 0) > 0,
         }
@@ -161,67 +31,8 @@ static void @ID@_mix(uint32_t &h, const char *s) {
 }
 static void @ID@_mix(uint32_t &h, const String &s) { @ID@_mix(h, s.c_str()); }";
 
-/// The update password as a C string expression; from an input it is a `String`.
-fn ota_pass(e: &CppCtx) -> String {
-    if e.is_bound("ota_password") {
-        format!("String({}).c_str()", e.param("ota_password"))
-    } else {
-        e.param("ota_password").to_owned()
-    }
-}
-
-fn upload_functions(e: &CppCtx, net: &str) -> String {
-    UPLOAD_FUNCTIONS
-        .replace("@ID@", &e.id)
-        .replace("@PASS@", &ota_pass(e))
-        .replace("@NET@", net)
-}
-
-/// Globals of the services: web server, update over the network, upload page.
-fn service_globals(l: &mut Lines, e: &CppCtx, s: &Services, net: &str, with_define: bool) {
-    let id = &e.id;
-    if s.web {
-        l.line("// Web server (port 80): the web_ui block adds its pages to it.")
-            .line(format!("FLProgWebServer {id}_web(&{net}, 80);"));
-        if with_define {
-            l.line("// Shared web server: the web_ui block adds its pages to it.")
-                .line(format!("FLProgWebServer &flpWebSrv = {id}_web;"));
-        }
-    }
-    if s.ota {
-        l.line("// Update over the network (ArduinoOTA through the shared interface).")
-            .line(format!("FLProgNetworkOta {id}_ota;"))
-            .line(format!("bool {id}_ota_on = false;"));
-        if e.is_bound("ota_password") {
-            l.line(format!("String {id}_ota_pass;"));
-        }
-    }
-    if s.update {
-        if with_define {
-            l.line("#define FLP_WEB_UPD 1");
-        }
-        l.line(
-            "// Firmware upload from the web page: raw HTTP POST streamed into Update (port 8080).",
-        )
-        .line(format!("FLProgNetworkTcpServer {id}_up;"))
-        .line(format!(
-            "FLProgNetworkTcpServerClient *{id}_up_c = nullptr;"
-        ))
-        .line(format!("bool {id}_up_on = false;"))
-        .line(format!(
-            "uint8_t {id}_up_st = 0;  // 0 idle, 1 headers, 2 body, 3 done (restart pending)"
-        ))
-        .line(format!("char {id}_up_line[160];"))
-        .line(format!("uint8_t {id}_up_ll = 0;"))
-        .line(format!(
-            "uint32_t {id}_up_len = 0, {id}_up_got = 0, {id}_up_t = 0, {id}_up_try = 0;"
-        ))
-        .line(format!("bool {id}_up_auth = false;"));
-    }
-}
-
 fn period_globals(l: &mut Lines, id: &str) {
-    l.line("// Network services (MQTT, web, OTA) are polled at most once per period.")
+    l.line("// Network services (MQTT, web) are polled at most once per period.")
         .line(format!("uint32_t {id}_net_t = 0;"))
         .line(format!("bool {id}_net_due = true;"));
 }
@@ -245,64 +56,6 @@ fn pool(l: &mut Lines, e: &CppCtx, net: &str) {
             .line("}");
     } else {
         l.line(format!("{net}.pool();"));
-    }
-}
-
-fn service_loop(l: &mut Lines, e: &CppCtx, s: &Services, net: &str) {
-    let id = &e.id;
-    let due = if s.period {
-        format!("{id}_net_due && ")
-    } else {
-        String::new()
-    };
-    if s.web {
-        l.line(format!("if ({due}{}) {{", e.flag_code("web")))
-            .line(format!("  {id}_web.pool();"))
-            .line("}");
-    }
-    if s.update {
-        l.line(format!(
-            "if ({due}{} && {}) {{",
-            e.flag_code("web"),
-            e.flag_code("web_update")
-        ))
-        .line(format!("  {id}_up_poll();"))
-        .line("}");
-    }
-    if s.ota {
-        let pass = ota_pass(e);
-        // From an input the password lives in a String, so the library never keeps a
-        // pointer to a temporary.
-        let bound = e.is_bound("ota_password");
-        let held = if bound {
-            format!("{id}_ota_pass.c_str()")
-        } else {
-            pass.clone()
-        };
-        l.line(format!("if ({due}{}) {{", e.flag_code("ota")))
-            .line(format!("  if (!{id}_ota_on) {{"))
-            .line(format!("    {id}_ota_on = true;"));
-        if bound {
-            l.line(format!("    {id}_ota_pass = {pass};"));
-        }
-        l.line(format!("    if ({held}[0] != 0) {{"))
-            .line(format!("      {id}_ota.setPasswordValue({held});"))
-            .line("    }")
-            .line(format!("    {id}_ota.begin({net});"));
-        if bound {
-            l.line(format!(
-                "  }} else if (strcmp({id}_ota_pass.c_str(), {pass}) != 0) {{"
-            ))
-            .line("    // Password written while running: the next upload asks for the new one.")
-            .line(format!("    {id}_ota_pass = {pass};"))
-            .line(format!(
-                "    if ({held}[0] != 0) {id}_ota.setPasswordValue({held});"
-            ))
-            .line("  }");
-        } else {
-            l.line("  }");
-        }
-        l.line(format!("  {id}_ota.pool();")).line("}");
     }
 }
 
@@ -351,14 +104,6 @@ fn wifi_apply(e: &CppCtx, client: bool, ap: bool) -> String {
     l.finish()
 }
 
-fn functions(e: &CppCtx, s: &Services, net: &str) -> String {
-    if s.update {
-        upload_functions(e, net)
-    } else {
-        String::new()
-    }
-}
-
 pub(crate) fn wifi(e: &CppCtx) -> CppParts {
     let id = &e.id;
     let s = Services::of(
@@ -392,14 +137,10 @@ pub(crate) fn wifi(e: &CppCtx) -> CppParts {
         g.line("// Address shown on the address output; the text is rebuilt only when it changes.")
             .line(format!("uint32_t {id}_ip_raw = 0;"));
     }
-    service_globals(&mut g, e, &s, "flpWifi", true);
 
     let mut su = Lines::default();
     if !s.dynamic {
         su.line(wifi_apply(e, client, ap));
-    }
-    if s.ota {
-        su.line(format!("{id}_ota.setHostname(\"{id}\");"));
     }
 
     let mut l = Lines::default();
@@ -499,13 +240,11 @@ pub(crate) fn wifi(e: &CppCtx) -> CppParts {
             .line("  }")
             .line("}");
     }
-    service_loop(&mut l, e, &s, "flpWifi");
 
     CppParts {
         global: g.finish(),
         setup: su.finish(),
         looped: l.finish(),
-        functions: functions(e, &s, "flpWifi"),
         ..Default::default()
     }
 }
@@ -522,7 +261,6 @@ pub(crate) fn ethernet(e: &CppCtx) -> CppParts {
     if s.period {
         period_globals(&mut g, id);
     }
-    service_globals(&mut g, e, &s, "flpEth", false);
     if e.flag("out_address") {
         g.line("// Address shown on the address output; the text is rebuilt only when it changes.")
             .line(format!("uint32_t {id}_ip_raw = 0;"));
@@ -550,9 +288,6 @@ pub(crate) fn ethernet(e: &CppCtx) -> CppParts {
     let apply = apply.finish();
     if !s.dynamic {
         su.line(&apply);
-    }
-    if s.ota {
-        su.line(format!("{id}_ota.setHostname(\"{id}\");"));
     }
 
     let mut l = Lines::default();
@@ -588,13 +323,11 @@ pub(crate) fn ethernet(e: &CppCtx) -> CppParts {
             .line("  }")
             .line("}");
     }
-    service_loop(&mut l, e, &s, "flpEth");
 
     CppParts {
         global: g.finish(),
         setup: su.finish(),
         looped: l.finish(),
-        functions: functions(e, &s, "flpEth"),
         ..Default::default()
     }
 }

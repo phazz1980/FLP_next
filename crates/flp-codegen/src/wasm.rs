@@ -113,6 +113,9 @@ impl Program<'_> {
     }
 }
 
+/// Watched signals per module the master firmware keeps (`kMaxOutputs`).
+const MAX_WATCHED: usize = 128;
+
 /// The two machine types of the model: `i32` carries `bool` and `int`, `f32` carries `float`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Ty {
@@ -612,15 +615,14 @@ impl<'a, 'p> Emitter<'a, 'p> {
         self.coerce(from, ty);
         self.op(I::GlobalSet(g));
         let label = signal_label(self.program, signal);
-        if self.watch {
-            let k = self
-                .watched
-                .iter()
-                .position(|l| *l == label)
-                .unwrap_or_else(|| {
-                    self.watched.push(label.clone());
-                    self.watched.len() - 1
-                });
+        // The master keeps `MAX_WATCHED` signals per module; reporting more only grows the code.
+        let slot = self.watched.iter().position(|l| *l == label).or_else(|| {
+            (self.watch && self.watched.len() < MAX_WATCHED).then(|| {
+                self.watched.push(label.clone());
+                self.watched.len() - 1
+            })
+        });
+        if let (true, Some(k)) = (self.watch, slot) {
             self.c_i(k as i32);
             self.op(I::GlobalGet(g));
             // The host answers with the value to use (a forced one while forcing).
@@ -690,6 +692,7 @@ impl<'a, 'p> Emitter<'a, 'p> {
             .iter()
             .map(|&bi| &program.blocks[bi])
             .find(|i| i.block.kind == "web_ui")
+            .filter(|ui| self.web_enabled(ui))
         {
             // The page is set up before any widget reads or writes a value.
             self.scratch_i = 0;

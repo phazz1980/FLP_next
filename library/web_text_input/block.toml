@@ -7,6 +7,12 @@ shared = "network"
 description = "Поле ввода текста на веб-странице (имя сети, пароль, адрес брокера): выход — введённая строка. Значение хранится до перезагрузки платы."
 memory = true
 
+[[input]]
+name = "write"
+type = "bool"
+default = true
+description = "Пока на входе ноль, страница не может менять текст. Без связи запись разрешена"
+
 [[output]]
 name = "out"
 type = "string"

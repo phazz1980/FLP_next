@@ -9,6 +9,9 @@ pub enum GenError {
     #[error("в схеме есть ошибки, генерация невозможна")]
     Schema(Vec<Diagnostic>),
 
+    #[error("веб-страница работает только в модулях WASM: соберите проект как WASM (flp gen-wasm), в обычном скетче веба нет")]
+    WebNeedsWasm,
+
     #[error("у блока «{kind}» нет шаблона {file} для выбранной платы")]
     MissingTemplate { kind: String, file: &'static str },
 

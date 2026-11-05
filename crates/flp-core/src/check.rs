@@ -484,8 +484,12 @@ pub fn check_project(project: &Project, lib: &Library) -> Report {
     let mut report = check(&project.logic, lib, Some(&project.layout));
     // An unused tag waits in the project tree: its inputs are not fed yet.
     let unused = project.unused_tags(lib);
+    // The same for a widget of the web page: its images on the sheets are fed, not it.
     report.diagnostics.retain(|d| {
-        d.kind != DiagKind::InputEmpty || d.block.as_ref().is_none_or(|b| !unused.contains(b))
+        d.kind != DiagKind::InputEmpty
+            || d.block
+                .as_ref()
+                .is_none_or(|b| !unused.contains(b) && !project.is_widget(b))
     });
     // Link indices refer to the project's own list, not to the trimmed one.
     for d in &mut report.diagnostics {
@@ -1061,7 +1065,10 @@ impl<'a> Resolver<'a, '_> {
                 report.link_error(
                     DiagKind::LinkEnds,
                     link,
-                    format!("{what}: нет блока «{}»", r.block),
+                    format!(
+                        "{what}: нет блока «{}» (веб-виджет мог быть удалён в конструкторе)",
+                        r.block
+                    ),
                 );
             }
             return None;
@@ -1399,7 +1406,10 @@ fn check_tags(logic: &Logic, defs: &[Option<&BlockDef>], report: &mut Report) ->
                 "копия «{id}»: тип «{}» не совпадает с типом тега «{tag}» («{}»)",
                 block.kind, t.kind
             )),
-            Some((t, _)) if !defs[t].is_some_and(|d| d.params.iter().any(|p| p.kind == ParamKind::Pin)) => {
+            Some((t, tb))
+                if !crate::project::is_web_kind(&tb.kind)
+                    && !defs[t].is_some_and(|d| d.params.iter().any(|p| p.kind == ParamKind::Pin)) =>
+            {
                 Some(format!("копия «{id}»: у «{tag}» нет вывода платы, копировать можно только входы и выходы"))
             }
             Some((t, _)) => {

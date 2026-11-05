@@ -513,8 +513,12 @@ fn web_page_goes_through_the_master() {
     assert!(io.web_layout.contains("\"k\":\"textin\""));
     assert!(io.web_layout.contains("\"y\":1"));
     assert!(io.web_layout.contains("\"k\":\"chart\""));
+    // An image of a widget (`tank_2`) is not a widget of its own.
     let kinds: Vec<u8> = io.web_items.iter().map(|i| i.kind).collect();
-    assert_eq!(kinds, [0, 0, 2, 0, 0, 4, 1, 1, 1]);
+    assert_eq!(
+        kinds,
+        [0, 0, 2, 0, 0, 4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1]
+    );
     // The network form: defaults from the block, one widget of the table; the saved ssid is shown.
     assert_eq!(io.web_net.len(), 10);
     assert_eq!(io.web_net[0], "home");
@@ -529,7 +533,7 @@ fn web_page_goes_through_the_master() {
     let io = module.io();
     assert_eq!(io.web_items[3].value, 25.0, "value shown from the slider");
     assert_eq!(io.web_items[6].text, "Привет, FLP");
-    assert_eq!(io.web_items[8].text, "home", "ssid from the form");
+    assert_eq!(io.web_items[17].text, "home", "ssid from the form");
     // The page changes the switch, the slider and the name.
     let io = module.io_mut();
     io.web_items[0].value = 1.0;

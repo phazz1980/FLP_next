@@ -383,6 +383,11 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
     }
     let mut open = true;
     let mut go = None;
+    let scale_id = egui::Id::unique("help_font_scale");
+    let mut scale = ctx
+        .data_mut(|d| d.get_persisted::<f32>(scale_id))
+        .unwrap_or(1.0)
+        .clamp(0.7, 2.5);
     egui::Window::new(crate::i18n::tr("Справка"))
         .open(&mut open)
         .collapsible(false)
@@ -412,6 +417,17 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
                 if !help.query.is_empty() && ui.button("✕").clicked() {
                     help.query.clear();
                 }
+                ui.separator();
+                ui.label(crate::i18n::tr("Шрифт:"));
+                if ui.small_button("A−").clicked() {
+                    scale = (scale - 0.1).max(0.7);
+                }
+                if ui.small_button("A+").clicked() {
+                    scale = (scale + 0.1).min(2.5);
+                }
+                if (scale - 1.0).abs() > 0.01 && ui.small_button("100%").clicked() {
+                    scale = 1.0;
+                }
             });
             ui.separator();
             let height = ui.available_height();
@@ -430,10 +446,16 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
                         .id_salt("help_text")
                         .max_height(height)
                         .auto_shrink([false, false])
-                        .show(ui, |ui| go = help.content(ui).or(go.take()));
+                        .show(ui, |ui| {
+                            for font in ui.style_mut().text_styles.values_mut() {
+                                font.size *= scale;
+                            }
+                            go = help.content(ui).or(go.take());
+                        });
                 });
             });
         });
+    ctx.data_mut(|d| d.insert_persisted(scale_id, scale));
     if let Some(target) = go {
         help.goto(&target);
     }

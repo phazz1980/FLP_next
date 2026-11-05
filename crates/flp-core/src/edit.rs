@@ -416,10 +416,17 @@ impl Project {
         if self.hand_tag_to_copy(id) {
             return Ok(());
         }
+        // A deleted web widget leaves its links: the check reports them instead of the
+        // sheet being edited behind the author's back.
+        let widget = crate::project::is_web_kind(&self.logic.blocks[index].kind)
+            && self.logic.blocks[index].kind != "web_ui"
+            && self.logic.blocks[index].tag.is_none();
         self.logic.blocks.remove(index);
-        self.logic
-            .links
-            .retain(|l| l.from.block != id && l.to.block != id);
+        if !widget {
+            self.logic
+                .links
+                .retain(|l| l.from.block != id && l.to.block != id);
+        }
         self.layout.blocks.remove(id);
         let prefix = format!("{id}.");
         self.layout.wires.retain(|k, _| !k.starts_with(&prefix));

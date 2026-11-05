@@ -179,6 +179,10 @@ impl DebugState {
 
     /// IP address the board reports on the `address` output of a Wi-Fi block, if any.
     pub fn device_address(&self, blocks: &[flp_core::Block]) -> Option<String> {
+        // The master firmware reports its address itself.
+        if let Some(ip) = self.live.address.as_deref().filter(|a| !a.is_empty()) {
+            return self.online().then(|| ip.to_owned());
+        }
         self.table.texts.iter().enumerate().find_map(|(i, t)| {
             let Source::Output(p) = &t.source else {
                 return None;

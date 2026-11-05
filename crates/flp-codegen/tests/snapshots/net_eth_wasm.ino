@@ -41,28 +41,22 @@ bool clock_valid_pend = false;
 // eth: ethernet
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgWiznetInterface flpEth(15);
-// Network services (MQTT, web, OTA) are polled at most once per period.
+// Network services (MQTT, web) are polled at most once per period.
 uint32_t eth_net_t = 0;
 bool eth_net_due = true;
-// Update over the network (ArduinoOTA through the shared interface).
-FLProgNetworkOta eth_ota;
-bool eth_ota_on = false;
 // Address shown on the address output; the text is rebuilt only when it changes.
 uint32_t eth_ip_raw = 0;
 
 // wifi: wifi
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgOnBoardWifiInterface flpWifi;
-// Network services (MQTT, web, OTA) are polled at most once per period.
+// Network services (MQTT, web) are polled at most once per period.
 uint32_t wifi_net_t = 0;
 bool wifi_net_due = true;
 // Applied radio state: 0 off, 1 client, 2 access point, 3 both; 255 not yet.
 uint8_t wifi_state = 255;
 // Address shown on the address output; the text is rebuilt only when it changes.
 uint32_t wifi_ip_raw = 0;
-// Update over the network (ArduinoOTA through the shared interface).
-FLProgNetworkOta wifi_ota;
-bool wifi_ota_on = false;
 
 // clock: ntp
 // The FLProg_Network SNTP service is the same on every board and network: it keeps
@@ -93,16 +87,6 @@ void flp_bg_task(void *) {
         eth_ip_raw = ip;
         eth_address = ip ? IPAddress(ip).toString() : String();
       }
-    }
-    if (eth_net_due && true) {
-      if (!eth_ota_on) {
-        eth_ota_on = true;
-        if (""[0] != 0) {
-          eth_ota.setPasswordValue("");
-        }
-        eth_ota.begin(flpEth);
-      }
-      eth_ota.pool();
     }
 
     // wifi: wifi
@@ -146,16 +130,6 @@ void flp_bg_task(void *) {
         wifi_ip_raw = ip;
         wifi_address = ip ? IPAddress(ip).toString() : String();
       }
-    }
-    if (wifi_net_due && true) {
-      if (!wifi_ota_on) {
-        wifi_ota_on = true;
-        if (""[0] != 0) {
-          wifi_ota.setPasswordValue("");
-        }
-        wifi_ota.begin(flpWifi);
-      }
-      wifi_ota.pool();
     }
 
     // clock: ntp
@@ -226,7 +200,6 @@ void setup() {
     flpEth.subnet(addr);
     flpEth.resetDhcp();
   }
-  eth_ota.setHostname("eth");
 
   // wifi: wifi
   flpWifi.setClientSsid("MyNetwork");
@@ -244,7 +217,6 @@ void setup() {
     flpWifi.subnet(addr);
     flpWifi.resetDhcp();
   }
-  wifi_ota.setHostname("wifi");
 
   // led: digital_out
   pinMode(2, OUTPUT);

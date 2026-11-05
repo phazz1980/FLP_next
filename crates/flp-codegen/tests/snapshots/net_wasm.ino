@@ -39,16 +39,13 @@ String clock_text_in = String();
 // wifi: wifi
 // Shared network interface: Modbus TCP and other network blocks use it.
 FLProgOnBoardWifiInterface flpWifi;
-// Network services (MQTT, web, OTA) are polled at most once per period.
+// Network services (MQTT, web) are polled at most once per period.
 uint32_t wifi_net_t = 0;
 bool wifi_net_due = true;
 // Applied radio state: 0 off, 1 client, 2 access point, 3 both; 255 not yet.
 uint8_t wifi_state = 255;
 // Address shown on the address output; the text is rebuilt only when it changes.
 uint32_t wifi_ip_raw = 0;
-// Update over the network (ArduinoOTA through the shared interface).
-FLProgNetworkOta wifi_ota;
-bool wifi_ota_on = false;
 
 // clock: ntp
 // The FLProg_Network SNTP service is the same on every board and network: it keeps
@@ -102,16 +99,6 @@ void flp_bg_task(void *) {
         wifi_ip_raw = ip;
         wifi_address = ip ? IPAddress(ip).toString() : String();
       }
-    }
-    if (wifi_net_due && true) {
-      if (!wifi_ota_on) {
-        wifi_ota_on = true;
-        if (""[0] != 0) {
-          wifi_ota.setPasswordValue("");
-        }
-        wifi_ota.begin(flpWifi);
-      }
-      wifi_ota.pool();
     }
 
     // clock: ntp
@@ -183,7 +170,6 @@ void setup() {
     flpWifi.subnet(addr);
     flpWifi.resetDhcp();
   }
-  wifi_ota.setHostname("wifi");
 
   // led: digital_out
   pinMode(2, OUTPUT);

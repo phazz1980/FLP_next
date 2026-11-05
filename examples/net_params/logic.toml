@@ -10,7 +10,7 @@ type = "string"
 id = "wifi"
 type = "wifi"
 ssid = "MyNetwork"
-param_in = ["ssid", "password", "ota_password"]
+param_in = ["ssid", "password"]
 
 [[block]]
 id = "net_r"
@@ -69,10 +69,6 @@ to = "broker.password"
 [[link]]
 from = "login_r.out"
 to = "broker.client_id"
-
-[[link]]
-from = "pass_r.out"
-to = "wifi.ota_password"
 
 [[block]]
 id = "sub"

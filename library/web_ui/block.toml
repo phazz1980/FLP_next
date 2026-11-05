@@ -9,6 +9,13 @@ single = true
 hidden = true
 
 [[param]]
+name = "enabled"
+type = "bool"
+label = "Включить веб"
+default = true
+description = "Выключено — страница не собирается в прошивку, а настройки страницы и виджеты сохраняются"
+
+[[param]]
 name = "title"
 type = "string"
 label = "Заголовок"

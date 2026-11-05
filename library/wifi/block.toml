@@ -202,45 +202,10 @@ show = "hidden"
 description = "Показать выход кода ошибки"
 
 [[param]]
-name = "web"
-type = "bool"
-runtime = true
-label = "Веб-страница"
-default = true
-description = "Веб-сервер на порту 80 (на нём работает веб-интерфейс)"
-
-[[param]]
-name = "web_update"
-type = "bool"
-runtime = true
-label = "Загрузка прошивки"
-default = true
-when = "web"
-description = "Форма на странице «Система» для загрузки прошивки (.bin): файл принимает отдельный приёмник на порту 8080 и пишет в память, затем устройство перезагружается"
-
-[[param]]
 name = "net_period"
 type = "int"
 label = "Период опроса сети, мс"
 default = 5
 min = 0
 max = 1000
-description = "Как часто обслуживать сеть (MQTT, веб-страницу, OTA). По умолчанию 5 мс; 0 — в каждом цикле. Чем больше период, тем быстрее цикл схемы, но тем позже отвечают MQTT и веб-страница (не дольше чем на период)"
-
-[[param]]
-name = "ota"
-type = "bool"
-runtime = true
-label = "Обновление по сети"
-default = true
-description = "Прошивку можно обновить по сети (OTA) — менеджером OTA FLProg или Arduino IDE. Имя устройства — id блока"
-
-[[param]]
-name = "ota_password"
-type = "string"
-label = "Пароль OTA"
-runtime = true
-default = ""
-when = "ota or web_update"
-show = "secret"
-description = "Пароль обновления (по сети и через страницу); пусто — без пароля (любой в сети может залить прошивку)"
+description = "Как часто обслуживать сеть (MQTT, веб-страницу). По умолчанию 5 мс; 0 — в каждом цикле. Чем больше период, тем быстрее цикл схемы, но тем позже отвечают MQTT и веб-страница (не дольше чем на период)"

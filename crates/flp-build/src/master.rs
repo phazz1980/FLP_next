@@ -219,6 +219,12 @@ impl ArduinoCli {
         args.extend(board_args(board));
         args.push("--build-path".into());
         args.push(out.clone().into());
+        if features.net {
+            // The master never updates over the air: leave ArduinoOTA and Update out of
+            // the network library (they also pull in AES/bignum from mbedcrypto).
+            args.push("--build-property".into());
+            args.push("compiler.cpp.extra_flags=-DFLPROG_NETWORK_COMPILE_OTA=0".into());
+        }
         if features.modbus || features.net {
             for dir in crate::bundled_libraries(work_dir) {
                 args.push("--libraries".into());

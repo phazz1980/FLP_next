@@ -68,3 +68,37 @@ fn pump_uses_only_known_blocks_and_ports() {
         assert!(def(&l.to).input(&l.to.port).is_some(), "{}", l.to);
     }
 }
+
+#[test]
+fn web_page_blocks_are_stored_in_web_toml() {
+    let mut p = Project::load(repo_path("examples/pump")).unwrap();
+    let dir = std::env::temp_dir().join(format!("flp-webtoml-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    p.path = dir.join("page.crab");
+    p.logic.blocks.push(flp_core::Block {
+        id: "ui".into(),
+        kind: "web_ui".into(),
+        ..Default::default()
+    });
+    p.logic.blocks.push(flp_core::Block {
+        id: "lamp".into(),
+        kind: "web_led".into(),
+        ..Default::default()
+    });
+    p.save().unwrap();
+
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(&p.path).unwrap()).unwrap();
+    let mut read = |name: &str| {
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name(name).unwrap(), &mut text).unwrap();
+        text
+    };
+    let web = read("web.toml");
+    assert!(web.contains("web_ui") && web.contains("web_led"));
+    assert!(!read("logic.toml").contains("web_"));
+
+    let back = Project::load(&p.path).unwrap();
+    assert!(back.logic.block("ui").is_some() && back.logic.block("lamp").is_some());
+    assert_eq!(back.logic.blocks.len(), p.logic.blocks.len());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
