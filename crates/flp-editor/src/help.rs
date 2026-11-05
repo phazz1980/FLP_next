@@ -388,79 +388,101 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
         .data_mut(|d| d.get_persisted::<f32>(scale_id))
         .unwrap_or(1.0)
         .clamp(0.7, 2.5);
-    egui::Window::new(crate::i18n::tr("Справка"))
+    // The maximized window has its own id, so the normal one keeps its size for the restore.
+    let full_id = egui::Id::unique("help_full");
+    let mut full: bool = ctx.data(|d| d.get_temp(full_id)).unwrap_or(false);
+    let mut window = egui::Window::new(crate::i18n::tr("Справка"))
         .open(&mut open)
         .collapsible(false)
         .resizable(true)
         .default_width(860.0)
-        .default_height(580.0)
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(
-                        !help.history.is_empty(),
-                        egui::Button::new(crate::i18n::tr("← Назад")),
-                    )
-                    .clicked()
-                {
-                    if let Some(prev) = help.history.pop() {
-                        help.current = prev;
-                        help.anchor = None;
-                        help.query.clear();
-                    }
-                }
-                ui.add(
-                    TextEdit::singleline(&mut help.query)
-                        .hint_text(crate::i18n::tr("Поиск по справке"))
-                        .desired_width(240.0),
-                );
-                if !help.query.is_empty() && ui.button("✕").clicked() {
+        .default_height(580.0);
+    if full {
+        let screen = ctx.content_rect();
+        window = window
+            .id(egui::Id::unique("help_maximized"))
+            .fixed_pos(screen.min + egui::vec2(4.0, 4.0))
+            .fixed_size(screen.size() - egui::vec2(24.0, 56.0));
+    }
+    window.show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    !help.history.is_empty(),
+                    egui::Button::new(crate::i18n::tr("← Назад")),
+                )
+                .clicked()
+            {
+                if let Some(prev) = help.history.pop() {
+                    help.current = prev;
+                    help.anchor = None;
                     help.query.clear();
                 }
-                ui.separator();
-                ui.label(crate::i18n::tr("Шрифт:"));
-                if ui.small_button("A−").clicked() {
-                    scale = (scale - 0.1).max(0.7);
-                }
-                if ui.small_button("A+").clicked() {
-                    scale = (scale + 0.1).min(2.5);
-                }
-                if (scale - 1.0).abs() > 0.01 && ui.small_button("100%").clicked() {
-                    scale = 1.0;
-                }
+            }
+            ui.add(
+                TextEdit::singleline(&mut help.query)
+                    .hint_text(crate::i18n::tr("Поиск по справке"))
+                    .desired_width(240.0),
+            );
+            if !help.query.is_empty() && ui.button("✕").clicked() {
+                help.query.clear();
+            }
+            ui.separator();
+            ui.label(crate::i18n::tr("Шрифт:"));
+            if ui.small_button("A−").clicked() {
+                scale = (scale - 0.1).max(0.7);
+            }
+            if ui.small_button("A+").clicked() {
+                scale = (scale + 0.1).min(2.5);
+            }
+            if (scale - 1.0).abs() > 0.01 && ui.small_button("100%").clicked() {
+                scale = 1.0;
+            }
+            ui.separator();
+            let label = if full {
+                "Свернуть окно"
+            } else {
+                "На весь экран"
+            };
+            if ui.button(crate::i18n::tr(label)).clicked() {
+                full = !full;
+                ui.ctx().data_mut(|d| d.insert_temp(full_id, full));
+            }
+        });
+        ui.separator();
+        let height = ui.available_height();
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(210.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("help_tree")
+                    .max_height(height)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| go = help.tree(ui));
             });
             ui.separator();
-            let height = ui.available_height();
-            ui.horizontal_top(|ui| {
-                ui.vertical(|ui| {
-                    ui.set_width(210.0);
-                    egui::ScrollArea::vertical()
-                        .id_salt("help_tree")
-                        .max_height(height)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| go = help.tree(ui));
-                });
-                ui.separator();
-                ui.vertical(|ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("help_text")
-                        .max_height(height)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            for font in ui.style_mut().text_styles.values_mut() {
-                                font.size *= scale;
-                            }
-                            go = help.content(ui).or(go.take());
-                        });
-                });
+            ui.vertical(|ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("help_text")
+                    .max_height(height)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for font in ui.style_mut().text_styles.values_mut() {
+                            font.size *= scale;
+                        }
+                        go = help.content(ui).or(go.take());
+                    });
             });
         });
+    });
     ctx.data_mut(|d| d.insert_persisted(scale_id, scale));
     if let Some(target) = go {
         help.goto(&target);
     }
     if open && !ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         app.help = Some(help);
+    } else {
+        ctx.data_mut(|d| d.insert_temp(full_id, false));
     }
 }
 

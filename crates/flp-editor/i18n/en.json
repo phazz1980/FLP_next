@@ -1230,5 +1230,7 @@
  "Заливка мастер-прошивки": "Uploading master firmware",
  "Заливка мастер-прошивки на {0}...": "Uploading master firmware to {0}...",
  "Мастер-прошивка собрана": "Master firmware built",
- "Мастер-прошивка залита на {0}": "Master firmware uploaded to {0}"
+ "Мастер-прошивка залита на {0}": "Master firmware uploaded to {0}",
+ "На весь экран": "Full screen",
+ "Свернуть окно": "Restore window"
 }

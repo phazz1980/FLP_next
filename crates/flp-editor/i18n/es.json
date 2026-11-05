@@ -1226,5 +1226,7 @@
  "Путь к w2c2:": "Ruta de w2c2:",
  "Нужен блокам на Rust/WASM без шаблона C++: переводит block.wasm в C для прошивки": "Lo necesitan los bloques Rust/WASM sin plantilla C++: traduce block.wasm a C para el firmware",
  "Проверить w2c2": "Comprobar w2c2",
- "w2c2 найден": "w2c2 encontrado"
+ "w2c2 найден": "w2c2 encontrado",
+ "На весь экран": "Pantalla completa",
+ "Свернуть окно": "Restaurar ventana"
 }

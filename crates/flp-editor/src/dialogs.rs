@@ -238,43 +238,69 @@ pub fn show(app: &mut EditorApp, ctx: &egui::Context) {
     };
     let mut open = true;
     let mut outcome = Outcome::Open;
-    egui::Window::new(title)
+    // Block properties can fill the whole window. The maximized window has its own id,
+    // so the normal one keeps its size and position for the restore.
+    let full_id = egui::Id::unique("block_dialog_full");
+    let mut full: bool = ctx.data(|d| d.get_temp(full_id)).unwrap_or(false);
+    let is_block = matches!(dialog, Dialog::Block(_));
+    let mut window = egui::Window::new(title)
         .open(&mut open)
         .collapsible(false)
         .resizable(true)
-        .default_width(380.0)
-        .show(ctx, |ui| {
-            outcome = buttons(
-                ui,
-                match &dialog {
-                    Dialog::Var(d) => d.original.is_some(),
-                    Dialog::Expander(d) => d.original.is_some(),
-                    _ => false,
-                },
-            );
-            ui.separator();
-            match &mut dialog {
-                Dialog::Block(d) => block_body(app, ui, d),
-                Dialog::Var(d) => var_body(ui, d),
-                Dialog::Sheet(d) => sheet_body(ui, d),
-                Dialog::Board(d) => {
-                    d.body(ui, &app.ports);
-                    if let Some(request) = d.take_editor_request() {
-                        app.board_editor = match request {
-                            None => Some(crate::boardedit::BoardEditor::new_board(app)),
-                            Some(id) => app
-                                .lib
-                                .boards()
-                                .get(&id)
-                                .map(crate::boardedit::BoardEditor::edit),
-                        };
-                    }
-                }
-                Dialog::Expander(d) => expander_body(app, ui, d),
+        .default_width(380.0);
+    if is_block && full {
+        let screen = ctx.content_rect();
+        window = window
+            .id(egui::Id::unique("block_dialog_maximized"))
+            .fixed_pos(screen.min + egui::vec2(4.0, 4.0))
+            .fixed_size(screen.size() - egui::vec2(24.0, 56.0));
+    }
+    window.show(ctx, |ui| {
+        if is_block {
+            let label = if full {
+                "Свернуть окно"
+            } else {
+                "На весь экран"
+            };
+            if ui.button(crate::i18n::tr(label)).clicked() {
+                full = !full;
+                ui.ctx().data_mut(|d| d.insert_temp(full_id, full));
             }
-        });
+        }
+        outcome = buttons(
+            ui,
+            match &dialog {
+                Dialog::Var(d) => d.original.is_some(),
+                Dialog::Expander(d) => d.original.is_some(),
+                _ => false,
+            },
+        );
+        ui.separator();
+        match &mut dialog {
+            Dialog::Block(d) => block_body(app, ui, d),
+            Dialog::Var(d) => var_body(ui, d),
+            Dialog::Sheet(d) => sheet_body(ui, d),
+            Dialog::Board(d) => {
+                d.body(ui, &app.ports);
+                if let Some(request) = d.take_editor_request() {
+                    app.board_editor = match request {
+                        None => Some(crate::boardedit::BoardEditor::new_board(app)),
+                        Some(id) => app
+                            .lib
+                            .boards()
+                            .get(&id)
+                            .map(crate::boardedit::BoardEditor::edit),
+                    };
+                }
+            }
+            Dialog::Expander(d) => expander_body(app, ui, d),
+        }
+    });
     if !open || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         outcome = Outcome::Cancel;
+    }
+    if !matches!(outcome, Outcome::Open) {
+        ctx.data_mut(|d| d.insert_temp(full_id, false));
     }
     let keep = match outcome {
         Outcome::Open => true,
