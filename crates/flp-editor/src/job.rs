@@ -461,36 +461,102 @@ fn upload_master(
     let board = &project.config.board;
     let port = cli.choose_port(port, board).map_err(|e| e.to_string())?;
     warn_if_other_board(&cli, &port, &board.fqbn, out);
+    let features = master_features(project);
+    let defines = features.defines();
+    let parts: Vec<&str> = defines
+        .lines()
+        .filter_map(|l| l.strip_prefix("#define FLP_"))
+        .filter_map(|l| l.split_whitespace().next())
+        .collect();
     out(
         LogLevel::Info,
-        &crate::i18n::fmt("Сборка и заливка мастер-прошивки на {0}...", &[&port]),
+        &crate::i18n::fmt(
+            "Мастер-прошивка для {0}: {1}",
+            &[
+                &board.fqbn,
+                &if parts.is_empty() {
+                    crate::i18n::tr("базовый состав").to_owned()
+                } else {
+                    parts.join(", ").to_lowercase()
+                },
+            ],
+        ),
+    );
+    out(
+        LogLevel::Info,
+        crate::i18n::tr("Шаг 1 из 2: сборка мастер-прошивки..."),
+    );
+    let started = std::time::Instant::now();
+    let mut errors = 0;
+    let build = cli
+        .compile_master(&project.work_dir(), board, &features, false, &mut |l| {
+            match flp_build::classify(l) {
+                OutputLine::Stage(s) | OutputLine::Size(s) | OutputLine::Context(s) => {
+                    out(LogLevel::Info, &s)
+                }
+                OutputLine::Warning(s) => out(LogLevel::Warning, &s),
+                OutputLine::Error(s) => {
+                    errors += 1;
+                    out(LogLevel::Error, &s)
+                }
+                OutputLine::Detail => {}
+            }
+        })
+        .map_err(|e| match (&e, errors) {
+            (flp_build::BuildError::Failed { .. }, 1..) => crate::i18n::fmt(
+                "Ошибка сборки мастера ({0}): подробности в журнале",
+                &[&errors],
+            ),
+            _ => e.to_string(),
+        })?;
+    out(
+        LogLevel::Ok,
+        &crate::i18n::fmt("Мастер собран за {0} с", &[&started.elapsed().as_secs()]),
+    );
+    out(
+        LogLevel::Info,
+        &crate::i18n::fmt("Шаг 2 из 2: заливка на {0}...", &[&port]),
     );
     let mut explained = None;
-    let result = cli.upload_master(
-        &project.work_dir(),
-        board,
-        &master_features(project),
-        &port,
-        &mut |l| match flp_build::explain_upload(l, &board.fqbn) {
+    let mut shown = 0;
+    let result = cli.flash_master(&build, board, &port, &mut |l| {
+        match flp_build::explain_upload(l, &board.fqbn) {
             Some(text) => {
                 out(LogLevel::Info, l);
                 out(LogLevel::Error, &text);
                 explained.get_or_insert(text);
             }
-            None => match flp_build::classify(l) {
-                OutputLine::Stage(s) | OutputLine::Size(s) => out(LogLevel::Info, &s),
-                OutputLine::Warning(s) => out(LogLevel::Warning, &s),
-                OutputLine::Error(s) => out(LogLevel::Error, &s),
-                _ => {}
+            None => match upload_progress(l) {
+                // Flash progress every 20%, not on every block.
+                Some(percent) => {
+                    if percent >= shown + 20 || (percent == 100 && shown < 100) {
+                        shown = percent;
+                        out(LogLevel::Info, l.trim());
+                    }
+                }
+                None if !l.trim().is_empty() => out(LogLevel::Info, l.trim()),
+                None => {}
             },
-        },
-    );
+        }
+    });
     result.map_err(|e| explained.unwrap_or_else(|| e.to_string()))?;
     Ok(Done {
         message: crate::i18n::fmt("Мастер-прошивка залита на {0}", &[&port]),
         port: Some(port),
         debug: false,
     })
+}
+
+/// Percent of an esptool progress line (`Writing at 0x00010000... (12 %)`).
+fn upload_progress(line: &str) -> Option<u32> {
+    let rest = line.trim().strip_prefix("Writing at ")?;
+    let (_, tail) = rest.rsplit_once('(')?;
+    tail.trim_end_matches(')')
+        .trim()
+        .trim_end_matches('%')
+        .trim()
+        .parse()
+        .ok()
 }
 
 /// Builds every sheet as a WASM module and sends it to the master firmware on the board.
@@ -606,5 +672,16 @@ fn warn_if_other_board(
                 ],
             ),
         );
+    }
+}
+
+#[cfg(test)]
+mod upload_progress_tests {
+    use super::upload_progress;
+
+    #[test]
+    fn esptool_progress_percent() {
+        assert_eq!(upload_progress("Writing at 0x00010000... (12 %)"), Some(12));
+        assert_eq!(upload_progress("Connecting...."), None);
     }
 }

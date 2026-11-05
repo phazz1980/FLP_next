@@ -87,7 +87,7 @@ impl MasterFeatures {
         f
     }
 
-    fn defines(&self) -> String {
+    pub fn defines(&self) -> String {
         let mut text = String::new();
         for (on, name) in [
             (self.sensors, "FLP_SENSORS"),
@@ -216,7 +216,7 @@ impl ArduinoCli {
         }
         let out = build_dir(&root);
 
-        let mut args: Vec<OsString> = vec!["compile".into()];
+        let mut args: Vec<OsString> = vec!["compile".into(), "-v".into()];
         args.extend(board_args(board));
         args.push("--build-path".into());
         args.push(out.clone().into());

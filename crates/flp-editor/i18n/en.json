@@ -1247,5 +1247,11 @@
  "Повторный перенос обновляет адреса уже взятых тегов": "Transferring again updates the addresses of tags already taken",
  "Теги: добавлено {0}, обновлено {1}, не взято {2}": "Tags: added {0}, updated {1}, not taken {2}",
  "MQTT: добавлено блоков {0}, уже были или не добавлены {1}": "MQTT: blocks added {0}, already there or not added {1}",
- "Внешний тег": "External tag"
+ "Внешний тег": "External tag",
+ "Мастер-прошивка для {0}: {1}": "Master firmware for {0}: {1}",
+ "базовый состав": "basic set",
+ "Шаг 1 из 2: сборка мастер-прошивки...": "Step 1 of 2: building the master firmware...",
+ "Ошибка сборки мастера ({0}): подробности в журнале": "Master build failed ({0}): see the log",
+ "Мастер собран за {0} с": "Master built in {0} s",
+ "Шаг 2 из 2: заливка на {0}...": "Step 2 of 2: uploading to {0}..."
 }
