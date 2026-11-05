@@ -89,7 +89,15 @@ fn port_pos(rect: Rect, kind: Kind, index: usize, output: bool) -> Pos2 {
     }
 }
 
-pub fn show(ui: &mut egui::Ui, project: &Project, lib: &Library, sim: Option<&Simulation>) {
+/// Draws the sheets; returns the block clicked this frame (`Some(None)` for a click on
+/// empty space).
+pub fn show(
+    ui: &mut egui::Ui,
+    project: &Project,
+    lib: &Library,
+    sim: Option<&Simulation>,
+    selected: Option<&str>,
+) -> Option<Option<String>> {
     let logic = &project.logic;
     let layout = &project.layout;
     let dark = ui.visuals().dark_mode;
@@ -230,8 +238,9 @@ pub fn show(ui: &mut egui::Ui, project: &Project, lib: &Library, sim: Option<&Si
         );
     }
 
+    let mut clicked = None;
     egui::ScrollArea::both().show(ui, |ui| {
-        let (resp, painter) = ui.allocate_painter(Vec2::new(width, top), Sense::hover());
+        let (resp, painter) = ui.allocate_painter(Vec2::new(width, top), Sense::click());
         let origin = resp.rect.min.to_vec2();
         for sheet in &sheets {
             let (band_top, height) = bands[sheet];
@@ -320,11 +329,16 @@ pub fn show(ui: &mut egui::Ui, project: &Project, lib: &Library, sim: Option<&Si
                 continue;
             };
             let rect = p.rect.translate(origin);
+            let chosen = selected == Some(block.id.as_str());
             painter.rect(
                 rect,
                 4.0,
                 box_bg,
-                Stroke::new(1.2, fg),
+                if chosen {
+                    Stroke::new(2.5, Color32::from_rgb(70, 130, 220))
+                } else {
+                    Stroke::new(1.2, fg)
+                },
                 egui::StrokeKind::Inside,
             );
             if matches!(p.kind, Kind::Tag { .. }) {
@@ -394,5 +408,20 @@ pub fn show(ui: &mut egui::Ui, project: &Project, lib: &Library, sim: Option<&Si
                 );
             }
         }
+        if resp.clicked() {
+            clicked = Some(resp.interact_pointer_pos().and_then(|at| {
+                logic
+                    .blocks
+                    .iter()
+                    .rev()
+                    .find(|b| {
+                        placed
+                            .get(b.id.as_str())
+                            .is_some_and(|p| p.rect.translate(origin).contains(at))
+                    })
+                    .map(|b| b.id.clone())
+            }));
+        }
     });
+    clicked
 }

@@ -927,7 +927,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_17405(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_17533(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1316,28 +1316,28 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 4522, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_17403);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 4556, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_17531);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Array<any>")], shim_idx: 4169, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_12356);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Array<any>")], shim_idx: 4215, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_12432);
             return ret;
         },
         __wbindgen_generic_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 4169, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_12356_4);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 4215, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_12432_4);
             return ret;
         },
         __wbindgen_generic_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 4168, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_12355);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 129, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_529);
             return ret;
         },
         __wbindgen_generic_0000000000000005: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 50, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_401);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 4214, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_12431);
             return ret;
         },
         __wbindgen_generic_0000000000000006: function(arg0, arg1) {
@@ -1395,26 +1395,26 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_401(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_401(arg0, arg1);
+function __wasm_bindgen_func_elem_529(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_529(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_12356(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_12356(arg0, arg1, arg2);
+function __wasm_bindgen_func_elem_12432(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_12432(arg0, arg1, arg2);
 }
 
-function __wasm_bindgen_func_elem_12356_4(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_12356_4(arg0, arg1, arg2);
+function __wasm_bindgen_func_elem_12432_4(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_12432_4(arg0, arg1, arg2);
 }
 
-function __wasm_bindgen_func_elem_17405(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_17405(arg0, arg1, arg2, arg3);
+function __wasm_bindgen_func_elem_17533(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_17533(arg0, arg1, arg2, arg3);
 }
 
-function __wasm_bindgen_func_elem_12355(arg0, arg1) {
+function __wasm_bindgen_func_elem_12431(arg0, arg1) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16) >>> 0;
-        wasm.__wasm_bindgen_func_elem_12355(retptr, arg0, arg1);
+        wasm.__wasm_bindgen_func_elem_12431(retptr, arg0, arg1);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -1425,10 +1425,10 @@ function __wasm_bindgen_func_elem_12355(arg0, arg1) {
     }
 }
 
-function __wasm_bindgen_func_elem_17403(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_17531(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16) >>> 0;
-        wasm.__wasm_bindgen_func_elem_17403(retptr, arg0, arg1, arg2);
+        wasm.__wasm_bindgen_func_elem_17531(retptr, arg0, arg1, arg2);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
