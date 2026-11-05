@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CrabLogic — визуальное программирование ESP32</title>
+<meta name="description" content="CrabLogic — программа визуального программирования микроконтроллеров ESP32 (FBD) на Rust: схема из блоков, сборка и заливка по USB, онлайн-отладка, веб-конструктор, ИИ-помощник.">
+<style>
+:root{--bg:#fafaf7;--fg:#1d2024;--mut:#5d636b;--card:#fff;--line:#e3e1da;--acc:#c8501e;--accfg:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#16181b;--fg:#e8e9ea;--mut:#9aa0a6;--card:#1e2125;--line:#2d3136;--acc:#ec7a45;--accfg:#16181b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
+.w{max-width:960px;margin:0 auto;padding:0 16px}
+header{padding:56px 0 32px}
+h1{font-size:clamp(2rem,6vw,3rem);margin:0 0 8px;letter-spacing:-.02em}
+.lead{font-size:1.2rem;color:var(--mut);max-width:40em;margin:0 0 24px}
+.btn{display:inline-block;padding:10px 20px;border-radius:8px;background:var(--acc);color:var(--accfg);text-decoration:none;font-weight:600;margin:0 8px 8px 0}
+.btn.alt{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.tag{display:inline-block;font-size:.8rem;border:1px solid var(--acc);color:var(--acc);border-radius:99px;padding:1px 10px;margin-left:8px;vertical-align:middle}
+h2{margin:48px 0 16px;font-size:1.5rem}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.c{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+.c h3{margin:0 0 6px;font-size:1.05rem}
+.c p{margin:0;color:var(--mut);font-size:.95rem}
+ol{padding-left:1.2em}
+code{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:.9em}
+footer{margin:56px 0 32px;color:var(--mut);font-size:.9rem;border-top:1px solid var(--line);padding-top:16px}
+a{color:var(--acc)}
+</style>
+</head>
+<body>
+<div class="w">
+<header>
+<h1>CrabLogic <span class="tag">бета 1.3</span></h1>
+<p class="lead">Визуальное программирование микроконтроллеров ESP32: рисуете схему из блоков (FBD), программа собирает прошивку, заливает её по USB и показывает живые значения на схеме. Ядро написано на Rust.</p>
+<a class="btn" href="https://github.com/phazz1980/FLP_next/releases/tag/v1.3.0">Скачать для Windows</a>
+<a class="btn alt" href="https://github.com/phazz1980/FLP_next">Исходный код</a>
+</header>
+
+<h2>Что умеет</h2>
+<div class="g">
+<div class="c"><h3>Схема из блоков</h3><p>Привычная для FBD раскладка: платы-листы, библиотека блоков справа, проверка схемы (типы, порты, входы без источника, циклы без памяти).</p></div>
+<div class="c"><h3>Сборка и заливка</h3><p>Прошивка собирается через arduino-cli и заливается по USB. Фоновая прекомпиляция ускоряет повторные сборки.</p></div>
+<div class="c"><h3>Онлайн-отладка</h3><p>Живые значения на схеме, уставки на лету, форсировка сигналов. Проект можно хранить в памяти платы.</p></div>
+<div class="c"><h3>Веб-конструктор</h3><p>Веб-страница платы с виджетами, графиками и сетевой формой собирается в отдельном конструкторе и хранится в проекте.</p></div>
+<div class="c"><h3>Сеть и протоколы</h3><p>Wi-Fi, Ethernet, MQTT, NTP, Modbus RTU и TCP.</p></div>
+<div class="c"><h3>Свои блоки</h3><p>Блоки — это файлы: библиотека расширяется без перекомпиляции, блоки можно писать на любом языке через WASM. Есть ИИ-помощник и MCP-сервер.</p></div>
+</div>
+
+<h2>Быстрый старт</h2>
+<ol>
+<li>Скачайте <code>FLP_next.zip</code> со страницы релиза и распакуйте.</li>
+<li>Запустите <code>crablogic-editor.exe</code>. Если нужно, программа предложит скачать arduino-cli и ядро ESP32.</li>
+<li>Откройте пример «Примеры → pump», нажмите F7 (проверить) и F5 (собрать).</li>
+<li>Подключите ESP32 по USB и выберите «Проект → Отладка: залить и подключиться».</li>
+</ol>
+
+<h2>Статус</h2>
+<p>Версия 1.3 — бета. Основная плата: ESP32 DevKit; работа с ESP32‑C3 проверена на железе. Программа развивается одним автором, сообщения об ошибках приветствуются в <a href="https://github.com/phazz1980/FLP_next/issues">Issues</a>.</p>
+
+<footer>CrabLogic · Windows 10/11 x64 · <a href="https://github.com/phazz1980/FLP_next/releases">все релизы</a></footer>
+</div>
+</body>
+</html>
