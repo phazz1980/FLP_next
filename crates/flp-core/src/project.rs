@@ -241,6 +241,19 @@ impl Project {
         .migrated())
     }
 
+    /// Builds a project from the texts of its three files kept in memory (the browser
+    /// demo has no folders); `name` stands in for the project path.
+    pub fn from_sources(name: &str, project: &str, logic: &str, layout: &str) -> Result<Self> {
+        let at = |file: &str| Path::new(name).join(file);
+        Ok(Self {
+            path: at(&format!("{name}.{PROJECT_EXT}")),
+            config: parse_toml(project, &at(PROJECT_FILE))?,
+            logic: parse_toml(logic, &at(LOGIC_FILE))?,
+            layout: parse_toml(layout, &at(LAYOUT_FILE))?,
+        }
+        .migrated())
+    }
+
     fn load_legacy(dir: &Path) -> Result<Self> {
         let config = read_toml(&dir.join(PROJECT_FILE))?;
         let mut logic: Logic = read_toml(&dir.join(LOGIC_FILE))?;

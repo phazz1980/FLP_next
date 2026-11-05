@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CrabLogic — демо в браузере</title>
+<style>
+html,body{margin:0;height:100%;background:#1b1d20;color:#ddd;font:15px system-ui,sans-serif}
+canvas{display:block;width:100%;height:100%}
+#msg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;pointer-events:none}
+a{color:#ec7a45}
+</style>
+</head>
+<body>
+<canvas id="crab"></canvas>
+<div id="msg">Загрузка демо…<small>Только просмотр, сборка и симуляция. <a href="../">О программе</a></small></div>
+<script type="module">
+import init, { start } from './flp_demo.js';
+try {
+  await init();
+  await start('crab');
+  document.getElementById('msg').remove();
+} catch (e) {
+  document.getElementById('msg').textContent = 'Не удалось запустить демо: ' + e;
+}
+</script>
+</body>
+</html>

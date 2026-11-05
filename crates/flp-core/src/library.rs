@@ -969,6 +969,37 @@ impl Library {
         Ok((lib, errors))
     }
 
+    /// Builds the library from `block.toml` sources kept in memory, `(folder, source)`:
+    /// for targets without a file system (the browser demo). Broken blocks are skipped
+    /// and returned as errors, as in [`Library::load`].
+    pub fn from_sources<'a>(
+        sources: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> (Self, Vec<Error>) {
+        let mut lib = Self::default();
+        let mut errors = Vec::new();
+        for (folder, text) in sources {
+            let dir = PathBuf::from(folder);
+            let path = dir.join(BLOCK_FILE);
+            let def = toml::from_str::<BlockDef>(text)
+                .map_err(|e| e.to_string())
+                .and_then(|def| def.validate(folder).map(|()| def));
+            match def {
+                Ok(def) => {
+                    lib.blocks.insert(
+                        def.info.kind.clone(),
+                        LibraryBlock {
+                            def,
+                            dir,
+                            inline_templates: BTreeMap::new(),
+                        },
+                    );
+                }
+                Err(message) => errors.push(Error::InvalidBlockDef { path, message }),
+            }
+        }
+        (lib, errors)
+    }
+
     /// User boards: pin tables and descriptions from `user_library/boards/`.
     pub fn boards(&self) -> &Boards {
         &self.boards
