@@ -54,6 +54,7 @@ const HARDWARE: &[&str] = &[
     "uart",
     "text",
     "net",
+    "native",
 ];
 
 const FUEL_PER_CALL: u64 = 5_000_000;
@@ -156,6 +157,14 @@ pub struct StubIo {
     pub uart_speed: HashMap<i32, i32>,
     /// Text the module sent (op 6), by port.
     pub uart_text: HashMap<i32, Vec<u8>>,
+    /// Words of the inputs and parameters the module handed to a native part, by `(kind, inst)`
+    /// (the last call); `native_words` says how many to read for a kind.
+    pub native_in: HashMap<(i32, i32), Vec<i32>>,
+    /// Number of input words (inputs and parameters) a native part of `kind` takes.
+    pub native_words: HashMap<i32, usize>,
+    /// What a native part answers, by `(kind, inst)`: the words of its outputs. Without an
+    /// entry the call answers 0 (the master cannot run the part) and writes nothing.
+    pub native_out: HashMap<(i32, i32), Vec<i32>>,
     /// Network numbers the module set (`net` op 0), by code.
     pub net_num: HashMap<i32, i32>,
     /// Network text settings (`net` op 1), by code.
@@ -641,6 +650,33 @@ fn link_host(linker: &mut Linker<Host>) -> Result<(), String> {
                     return 0;
                 };
                 text_op(memory.data_mut(&mut c), [op, out, cap, a, alen, b, blen])
+            },
+        )
+        .map_err(bad)?
+        .func_wrap(
+            "crab",
+            "native",
+            |mut c: Caller<'_, Host>, kind: i32, inst: i32, input: i32, output: i32| -> i32 {
+                let words = c.data().io.native_words.get(&kind).copied().unwrap_or(0);
+                let bytes = read_bytes(&mut c, input, (words * 4) as i32, 4096);
+                let Some(bytes) = bytes else {
+                    return 0;
+                };
+                let given: Vec<i32> = bytes
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|w| i32::from_le_bytes(*w))
+                    .collect();
+                c.data_mut().io.native_in.insert((kind, inst), given);
+                let Some(answer) = c.data().io.native_out.get(&(kind, inst)).cloned() else {
+                    return 0;
+                };
+                let Some(memory) = c.get_export("memory").and_then(|e| e.into_memory()) else {
+                    return 0;
+                };
+                let raw: Vec<u8> = answer.iter().flat_map(|w| w.to_le_bytes()).collect();
+                i32::from(memory.write(&mut c, output as usize, &raw).is_ok())
             },
         )
         .map_err(bad)?

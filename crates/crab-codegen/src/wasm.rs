@@ -48,7 +48,8 @@ const HW_MODBUS: u32 = HW_BASE + 7;
 const HW_UART: u32 = HW_BASE + 8;
 const HW_TEXT: u32 = HW_BASE + 9;
 const HW_NET: u32 = HW_BASE + 10;
-const HW_NAMES: [&str; 11] = [
+const HW_NATIVE: u32 = HW_BASE + 11;
+const HW_NAMES: [&str; 12] = [
     "gpio_read",
     "gpio_write",
     "adc_read",
@@ -60,6 +61,7 @@ const HW_NAMES: [&str; 11] = [
     "uart",
     "text",
     "net",
+    "native",
 ];
 /// Bit of the pin number passed to `gpio_read` that asks for the pull-up.
 const PIN_PULLUP: i32 = 0x100;
@@ -772,6 +774,90 @@ impl<'a, 'p> Emitter<'a, 'p> {
         Ok(true)
     }
 
+    /// A block with a native part (`native.cpp`, `specs/drivers`): the master runs its `CRAB_STEP`.
+    /// The module writes the inputs, then the parameters, as 4-byte words into its memory and calls
+    /// `native(kind, inst, in_ptr, out_ptr)`; the outputs come back as words. `kind` is the index of
+    /// the block type among the native types of the project (sorted by name), `inst` the number of
+    /// this block among those of its type.
+    fn native_block(&mut self, inst: &Instance) -> Result<bool, WasmError> {
+        if inst.lib.native_path().is_none() {
+            return Ok(false);
+        }
+        let def = &inst.lib.def;
+        let mut kinds: std::collections::BTreeMap<&str, Vec<&str>> = Default::default();
+        for other in &self.program.blocks {
+            if other.lib.native_path().is_some() {
+                kinds
+                    .entry(other.block.kind.as_str())
+                    .or_default()
+                    .push(other.block.id.as_str());
+            }
+        }
+        let kind = kinds
+            .keys()
+            .position(|k| *k == inst.block.kind.as_str())
+            .expect("this block is among the native ones");
+        let number = kinds[inst.block.kind.as_str()]
+            .iter()
+            .position(|id| *id == inst.block.id.as_str())
+            .expect("this block is among its type");
+        let in_words = def.inputs.len() + def.params.len();
+        let in_ptr = self.alloc(4 * in_words.max(1) as u32);
+        let out_ptr = self.alloc(4 * def.outputs.len().max(1) as u32);
+        let ty_of = |t: SignalType| if t == SignalType::Float { Ty::F } else { Ty::I };
+        let store = |ty: Ty| {
+            let arg = Self::mem_arg(0, 2);
+            if ty == Ty::F {
+                I::F32Store(arg)
+            } else {
+                I::I32Store(arg)
+            }
+        };
+        let mut at = in_ptr;
+        for (i, port) in def.inputs.iter().enumerate() {
+            let ty = ty_of(port.ty);
+            self.c_i(at as i32);
+            self.input_as(inst, i, ty);
+            self.op(store(ty));
+            at += 4;
+        }
+        for (i, p) in def.params.iter().enumerate() {
+            let ty = if p.kind == ParamKind::Float {
+                Ty::F
+            } else {
+                Ty::I
+            };
+            self.c_i(at as i32);
+            let got = self.param(inst, i);
+            self.coerce(got, ty);
+            self.op(store(ty));
+            at += 4;
+        }
+        self.c_i(kind as i32);
+        self.c_i(number as i32);
+        self.c_i(in_ptr as i32);
+        self.c_i(out_ptr as i32);
+        self.hw_call(HW_NATIVE);
+        // The master answers 0 when it cannot run the part: the outputs stay as they were.
+        self.op(I::If(BlockType::Empty));
+        for (k, port) in def.outputs.iter().enumerate() {
+            if !inst.outputs.contains_key(port.name.as_str()) {
+                continue;
+            }
+            let ty = ty_of(port.ty);
+            self.c_i((out_ptr + 4 * k as u32) as i32);
+            let arg = Self::mem_arg(0, 2);
+            self.op(if ty == Ty::F {
+                I::F32Load(arg)
+            } else {
+                I::I32Load(arg)
+            });
+            self.set_out(inst, k, ty);
+        }
+        self.op(I::End);
+        Ok(true)
+    }
+
     /// PCF8574 on I²C: the master talks to the chip, the module takes the last byte
     /// (`pcf_read(key, period_ms, field)`: 0 byte, 1 answered) or hands over the byte to write
     /// (`pcf_write(key, byte)` returns whether the chip answered the last write).
@@ -1345,6 +1431,7 @@ impl<'a, 'p> Emitter<'a, 'p> {
             || self.uart_block(inst)?
             || self.text_block(inst)?
             || self.net_block(inst)?
+            || self.native_block(inst)?
             || self.mqtt_block(inst)?
             || self.web_block(inst)?
         {
@@ -2057,7 +2144,7 @@ impl<'a, 'p> Emitter<'a, 'p> {
                 HW_PCF_READ => 10,
                 HW_PCF_WRITE => 7,
                 HW_MODBUS | HW_NET => 11,
-                HW_UART => 12,
+                HW_UART | HW_NATIVE => 12,
                 HW_TEXT => 13,
                 _ => 2,
             };
