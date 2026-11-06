@@ -224,6 +224,8 @@ struct Form {
     outputs: Vec<PortRow>,
     params: Vec<ParamRow>,
     template: String,
+    /// `native.cpp`: C++ built into the master firmware; empty when the block has none.
+    native: String,
     docs: String,
     /// Arduino libraries and the example attached to the block.
     attach: Attach,
@@ -363,6 +365,7 @@ impl Form {
             outputs: vec![PortRow::new("out")],
             params: Vec::new(),
             template: NEW_TEMPLATE.into(),
+            native: String::new(),
             docs: String::new(),
             attach: Attach::default(),
         }
@@ -376,6 +379,10 @@ impl Form {
             .and_then(Result::ok)
             // Blocks written in Rust show their generated C++ as a starting point.
             .or_else(|| crab_codegen::builtin_cpp_preview(def))
+            .unwrap_or_default();
+        let native = block
+            .native_path()
+            .and_then(|p| fs::read_to_string(p).ok())
             .unwrap_or_default();
         let docs = block
             .docs_path()
@@ -397,6 +404,7 @@ impl Form {
             outputs: def.outputs.iter().map(PortRow::from_def).collect(),
             params: def.params.iter().map(ParamRow::from_def).collect(),
             template,
+            native,
             docs,
             attach: Attach::from_dir(&block.dir),
         }
@@ -590,6 +598,7 @@ enum Tab {
     Ports,
     Params,
     Code,
+    Native,
     Docs,
     Files,
     Sketch,
@@ -669,6 +678,8 @@ pub struct BlockEditor {
     tab: Tab,
     trial: crate::trialrun::TrialRun,
     sim_build: SimBuild,
+    /// Test build of the master with the native part, on the "Код C++ для платы" tab.
+    native_build: NativeBuild,
     generated: Option<Generated>,
     /// Closing with unsaved changes: asking what to do.
     confirm_close: bool,
@@ -732,6 +743,7 @@ impl BlockEditor {
             tab: Tab::Ports,
             trial: Default::default(),
             sim_build: SimBuild::default(),
+            native_build: NativeBuild::default(),
             generated: None,
             confirm_close: false,
             maximized: false,
@@ -942,6 +954,7 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
                 (Tab::Ports, crate::i18n::tr("Входы и выходы")),
                 (Tab::Params, crate::i18n::tr("Параметры")),
                 (Tab::Code, crate::i18n::tr("Код ESP32")),
+                (Tab::Native, crate::i18n::tr("Код C++ для платы")),
                 (Tab::Docs, crate::i18n::tr("Описание")),
                 (Tab::Files, crate::i18n::tr("Библиотека и пример")),
                 (Tab::Sketch, crate::i18n::tr("Пробная генерация")),
@@ -962,6 +975,7 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
                         Tab::Ports => crate::i18n::tr("входы-и-выходы"),
                         Tab::Params => crate::i18n::tr("параметры"),
                         Tab::Code => crate::i18n::tr("код-esp32"),
+                        Tab::Native => crate::i18n::tr("код-c-для-платы"),
                         Tab::Docs => crate::i18n::tr("описание"),
                         Tab::Files => crate::i18n::tr("библиотека-и-пример"),
                         Tab::Sketch => crate::i18n::tr("пробная-генерация"),
@@ -973,6 +987,16 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
         });
     });
     let editable = !ed.read_only;
+    // The board of the open project (ESP32 DevKit without one) for the test build of the native part.
+    let board = app.doc.as_ref().map_or_else(
+        || crab_core::BoardConfig {
+            fqbn: "esp32:esp32:esp32".into(),
+            model: None,
+            port: None,
+            options: Default::default(),
+        },
+        |d| d.project.config.board.clone(),
+    );
     let trial_dir = ed
         .original
         .as_deref()
@@ -990,6 +1014,7 @@ fn body(app: &mut EditorApp, ui: &mut Ui, ed: &mut BlockEditor) -> bool {
                     ui.add_enabled_ui(editable, |ui| params_tab(ui, &mut ed.form));
                 }
                 Tab::Code => code_tab(ui, &mut ed.form, editable),
+                Tab::Native => native_tab(ui, ed, &def, &board, &pal),
                 Tab::Docs => docs_tab(ui, &mut ed.form, editable),
                 Tab::Files => {
                     ui.add_enabled_ui(editable, |ui| files_tab(ui, &mut ed.form));
@@ -2035,6 +2060,284 @@ fn code_tab(ui: &mut Ui, f: &mut Form, editable: bool) {
     }
 }
 
+/// A starting point for `native.cpp` made from the ports and parameters of the form.
+fn native_skeleton(f: &Form) -> String {
+    let names = |rows: &[PortRow]| {
+        rows.iter()
+            .map(|r| r.name.trim().to_owned())
+            .collect::<Vec<_>>()
+    };
+    let mut text = String::from(
+        "// crab:native\n// Библиотеки Arduino: libs=\"Имя библиотеки, Другая\"; ресурсы (пин, шина, адрес): i2c=0x76\n// Значения для симуляции на компьютере: // crab:sim <выход>=<значение>\n",
+    );
+    for name in names(&f.inputs) {
+        text.push_str(&format!("// вход:    in.{name}\n"));
+    }
+    for name in names(&f.outputs) {
+        text.push_str(&format!("// выход:   out.{name}\n"));
+    }
+    for p in &f.params {
+        text.push_str(&format!(
+            "// параметр: p.{}  (только в CRAB_INIT)\n",
+            p.name.trim()
+        ));
+    }
+    text.push_str("\nstruct State {\n  int32_t counter;\n};\n\n");
+    if !f.params.is_empty() {
+        text.push_str("CRAB_INIT(State& s, Params p) {\n  // Один раз и при смене параметров: настройка датчика.\n}\n\n");
+    }
+    text.push_str("CRAB_STEP(State& s, In in, Out& out) {\n  // Каждый цикл: прочитать датчик и записать выходы.\n");
+    for name in names(&f.outputs) {
+        text.push_str(&format!("  // out.{name} = ...;\n"));
+    }
+    text.push_str("}\n");
+    text
+}
+
+/// Background build of the master with the native part of the block being edited.
+#[derive(Default)]
+struct NativeBuild {
+    rx: Option<std::sync::mpsc::Receiver<Result<(), Vec<String>>>>,
+    /// What to tell under the button; empty before the first build.
+    status: String,
+    /// Errors of the last failed build.
+    errors: Vec<String>,
+    failed: bool,
+}
+
+impl NativeBuild {
+    fn running(&self) -> bool {
+        self.rx.is_some()
+    }
+
+    fn start(&mut self, block: crab_build::native::NativeBlock, board: crab_core::BoardConfig) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.rx = Some(rx);
+        self.status = crate::i18n::tr("Мастер собирается, это займёт пару минут...").to_owned();
+        self.errors.clear();
+        self.failed = false;
+        std::thread::spawn(move || {
+            let result = (|| {
+                let cli = crab_build::ArduinoCli::locate().map_err(|e| vec![e.to_string()])?;
+                let work = std::env::temp_dir().join("crablogic_native_check");
+                let features = crab_build::MasterFeatures {
+                    natives: vec![block],
+                    ..Default::default()
+                };
+                let mut errors = Vec::new();
+                let result = cli.compile_master(&work, &board, &features, true, &mut |line| {
+                    if let crab_build::OutputLine::Error(e) = crab_build::classify(line) {
+                        errors.push(e);
+                    }
+                });
+                result.map(|_| ()).map_err(|e| {
+                    if errors.is_empty() {
+                        errors.push(e.to_string());
+                    }
+                    errors
+                })
+            })();
+            let _ = tx.send(result);
+        });
+    }
+
+    fn poll(&mut self) {
+        let Some(rx) = &self.rx else { return };
+        match rx.try_recv() {
+            Ok(Ok(())) => {
+                self.rx = None;
+                self.status = crate::i18n::tr("Мастер с этим блоком собран без ошибок").to_owned();
+            }
+            Ok(Err(errors)) => {
+                self.rx = None;
+                self.failed = true;
+                self.status = crate::i18n::tr("Мастер не собрался:").to_owned();
+                self.errors = errors;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.rx = None;
+                self.failed = true;
+                self.status = crate::i18n::tr("Сборка прервалась").to_owned();
+            }
+        }
+    }
+}
+
+/// Tab "Код C++ для платы": the native part of the block (`native.cpp`, `specs/drivers`).
+fn native_tab(
+    ui: &mut Ui,
+    ed: &mut BlockEditor,
+    def: &Result<BlockDef, String>,
+    board: &crab_core::BoardConfig,
+    pal: &Palette,
+) {
+    let editable = !ed.read_only;
+    ui.weak(crate::i18n::tr(
+        "Код на C++ для датчика, шины или библиотеки Arduino. Он входит в мастер-прошивку платы и \
+         выдаёт данные в схему; логику строят блоки схемы. Менять этот код = заново прошить мастер.",
+    ));
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .add_enabled(
+                editable && ed.form.native.trim().is_empty(),
+                egui::Button::new(crate::i18n::tr("Создать заготовку")),
+            )
+            .on_hover_text(crate::i18n::tr(
+                "Заготовка с входами, выходами и параметрами блока",
+            ))
+            .clicked()
+        {
+            ed.form.native = native_skeleton(&ed.form);
+        }
+        if editable {
+            ui.label(crate::i18n::tr("Вставить:"));
+        }
+    });
+    let id = Id::unique("block_native");
+    let mut insert = None;
+    if editable {
+        ui.horizontal_wrapped(|ui| {
+            let names = ed
+                .form
+                .inputs
+                .iter()
+                .map(|r| ("in", r.name.trim().to_owned()))
+                .chain(
+                    ed.form
+                        .outputs
+                        .iter()
+                        .map(|r| ("out", r.name.trim().to_owned())),
+                )
+                .chain(
+                    ed.form
+                        .params
+                        .iter()
+                        .map(|p| ("p", p.name.trim().to_owned())),
+                );
+            for (group, name) in names {
+                if name.is_empty() {
+                    continue;
+                }
+                let text = format!("{group}.{name}");
+                if ui.small_button(RichText::new(&text).monospace()).clicked() {
+                    insert = Some(text);
+                }
+            }
+        });
+    }
+    let mut layouter = crate::cpphl::layouter(true);
+    let mut read_only_text = ed.form.native.as_str();
+    if editable {
+        TextEdit::multiline(&mut ed.form.native)
+            .id(id)
+            .code_editor()
+            .layouter(&mut layouter)
+            .desired_width(f32::INFINITY)
+            .desired_rows(22)
+            .show(ui);
+    } else {
+        ui.add(
+            TextEdit::multiline(&mut read_only_text)
+                .code_editor()
+                .layouter(&mut layouter)
+                .desired_width(f32::INFINITY)
+                .desired_rows(22),
+        );
+    }
+    if let Some(text) = insert {
+        insert_at_cursor(ui.ctx(), id, &mut ed.form.native, &text);
+    }
+    ed.native_build.poll();
+    if ed.native_build.running() {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(300));
+    }
+    if ed.form.native.trim().is_empty() {
+        ui.weak(crate::i18n::tr(
+            "Нет нативной части: блок работает только через шаблон «Код ESP32»",
+        ));
+        return;
+    }
+    let Ok(def) = def else {
+        ui.weak(crate::i18n::tr(
+            "(исправьте ошибки описания, тогда файл проверится)",
+        ));
+        return;
+    };
+    match crab_core::native::parse_native(&ed.form.native, def) {
+        Err(errors) => {
+            for e in errors {
+                ui.colored_label(pal.error, e.to_string());
+            }
+        }
+        Ok(part) => {
+            let mut parts = Vec::new();
+            if !part.libs.is_empty() {
+                parts.push(crate::i18n::fmt(
+                    "библиотеки: {0}",
+                    &[&part.libs.join(", ")],
+                ));
+            }
+            for (k, v) in &part.resources {
+                parts.push(format!("{k} = {v}"));
+            }
+            let tail = if parts.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", parts.join("; "))
+            };
+            ui.colored_label(
+                pal.ok,
+                format!("{}{tail}", crate::i18n::tr("Файл разобран, ошибок нет")),
+            );
+            ui.horizontal(|ui| {
+                let core_ok = crab_build::cores::fqbn_available(&board.fqbn);
+                let can = editable_build(ed) && core_ok;
+                if ui
+                    .add_enabled(
+                        can,
+                        egui::Button::new(crate::i18n::tr("Собрать мастер для проверки")),
+                    )
+                    .on_hover_text(crate::i18n::fmt(
+                        "Собирает мастер-прошивку с этим блоком (один экземпляр) для платы {0}, без заливки",
+                        &[&board.fqbn],
+                    ))
+                    .clicked()
+                {
+                    match crab_build::native::NativeBlock::from_parts(def, &ed.form.native, 1) {
+                        Ok(block) => ed.native_build.start(block, board.clone()),
+                        Err(e) => {
+                            ed.native_build.status = e;
+                            ed.native_build.failed = true;
+                        }
+                    }
+                }
+                if !core_ok {
+                    ui.weak(crate::i18n::tr("Нет ядра ESP32 для этой платы: «Файл → Ядра ESP32»"));
+                }
+            });
+            if !ed.native_build.status.is_empty() {
+                let color = if ed.native_build.failed {
+                    pal.error
+                } else {
+                    pal.weak
+                };
+                ui.colored_label(color, &ed.native_build.status);
+                for line in ed.native_build.errors.iter().take(12) {
+                    ui.label(RichText::new(line).monospace().color(pal.error));
+                }
+            }
+        }
+    }
+}
+
+/// A build can start unless one is running already.
+fn editable_build(ed: &BlockEditor) -> bool {
+    !ed.native_build.running()
+}
+
 fn files_tab(ui: &mut Ui, f: &mut Form) {
     let attach = &mut f.attach;
     ui.weak(crate::i18n::tr(
@@ -2351,8 +2654,27 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
             }
         }
     }
+    // A native part that does not parse never lands in the library.
+    if !ed.form.native.trim().is_empty() {
+        if let Err(errors) = crab_core::native::parse_native(&ed.form.native, def) {
+            app.info(
+                LogLevel::Error,
+                crate::i18n::msg(
+                    "Блок не сохранён: в коде C++ для платы {0}",
+                    &[&crab_core::native::join_errors(&errors)],
+                ),
+            );
+            return false;
+        }
+    }
     match crab_core::save_block(&lib_dir, def, &ed.form.template, &ed.form.docs) {
         Ok(dir) => {
+            if let Err(e) = crab_core::save_native(&lib_dir, &def.info.kind, &ed.form.native) {
+                app.info(
+                    LogLevel::Error,
+                    crate::i18n::msg("Код C++ для платы не сохранён: {0}", &[&e]),
+                );
+            }
             app.info(
                 LogLevel::Ok,
                 crate::i18n::msg(

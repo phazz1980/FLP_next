@@ -86,35 +86,47 @@ fn param(kind: ParamKind) -> Option<NativeType> {
 impl NativeBlock {
     /// The native part of a library block, or `None` for a block without one.
     pub fn from_library(block: &LibraryBlock, instances: u32) -> crab_core::Result<Option<Self>> {
-        let Some(part) = block.native_part()? else {
+        let Some(path) = block.native_path() else {
             return Ok(None);
         };
-        let path = block.native_path().expect("native_part found the file");
         let source = std::fs::read_to_string(&path).map_err(|source| crab_core::Error::Read {
             path: path.clone(),
             source,
         })?;
+        Self::from_parts(&block.def, &source, instances)
+            .map(Some)
+            .map_err(|message| crab_core::Error::InvalidNative { path, message })
+    }
+
+    /// The native part from a definition and the text of `native.cpp` (a block being edited);
+    /// the error is the Russian text of the problems found.
+    pub fn from_parts(
+        def: &crab_core::BlockDef,
+        source: &str,
+        instances: u32,
+    ) -> Result<Self, String> {
+        let part = crab_core::native::parse_native(source, def)
+            .map_err(|errors| crab_core::native::join_errors(&errors))?;
         let ports = |list: &[crab_core::PortDef]| -> Vec<(String, NativeType)> {
             list.iter()
                 .filter_map(|p| signal(p.ty).map(|t| (p.name.clone(), t)))
                 .collect()
         };
-        Ok(Some(Self {
-            kind: block.def.info.kind.clone(),
-            source,
+        Ok(Self {
+            kind: def.info.kind.clone(),
+            source: source.to_owned(),
             libs: part.libs,
             has_init: part.has_init,
             has_state: part.has_state,
-            inputs: ports(&block.def.inputs),
-            outputs: ports(&block.def.outputs),
-            params: block
-                .def
+            inputs: ports(&def.inputs),
+            outputs: ports(&def.outputs),
+            params: def
                 .params
                 .iter()
                 .filter_map(|p| param(p.kind).map(|t| (p.name.clone(), t)))
                 .collect(),
             instances: instances.max(1),
-        }))
+        })
     }
 
     /// Words a module hands over: the inputs, then the parameters.

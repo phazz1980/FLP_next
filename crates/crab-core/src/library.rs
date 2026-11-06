@@ -920,6 +920,36 @@ pub fn save_block(lib_dir: &Path, def: &BlockDef, template: &str, docs: &str) ->
     Ok(dir)
 }
 
+/// Writes the native part `native.cpp` of the block folder `<lib_dir>/<kind>/`, or removes the
+/// file when `source` is empty. The folder must exist (save the block first); only a file whose
+/// contents changed is rewritten. Returns whether anything changed.
+pub fn save_native(lib_dir: &Path, kind: &str, source: &str) -> Result<bool> {
+    let path = lib_dir.join(kind).join(crate::native::NATIVE_FILE);
+    let old = fs::read_to_string(&path).ok();
+    let changed = if source.trim().is_empty() {
+        if old.is_none() {
+            return Ok(false);
+        }
+        fs::remove_file(&path).map_err(|source| Error::Write {
+            path: path.clone(),
+            source,
+        })?;
+        true
+    } else if old.as_deref() == Some(source) {
+        false
+    } else {
+        fs::write(&path, source).map_err(|source| Error::Write {
+            path: path.clone(),
+            source,
+        })?;
+        true
+    };
+    if changed {
+        crate::pack::bump(lib_dir);
+    }
+    Ok(changed)
+}
+
 /// All known block types: built-in ones from `library/` and user ones from
 /// `user_library/`. Built-in blocks cannot be changed: a user block may not take
 /// the type of a built-in one.
@@ -1625,6 +1655,52 @@ type = \"float\"
             text.contains("нативная часть") && text.contains("CRAB_STEP"),
             "{text}"
         );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn save_native_writes_changes_and_removes_an_empty_part() {
+        let root = std::env::temp_dir().join(format!("crab_save_native_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let d = def("[block]
+type = \"n\"
+name = \"N\"
+group = \"G\"
+");
+        save_block(&root, &d, "", "").unwrap();
+        let file = root.join("n").join(crate::native::NATIVE_FILE);
+        assert!(
+            !save_native(
+                &root, "n", "  
+"
+            )
+            .unwrap(),
+            "nothing to remove"
+        );
+        assert!(save_native(
+            &root,
+            "n",
+            "CRAB_STEP(a) {}
+"
+        )
+        .unwrap());
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "CRAB_STEP(a) {}
+"
+        );
+        assert!(
+            !save_native(
+                &root,
+                "n",
+                "CRAB_STEP(a) {}
+"
+            )
+            .unwrap(),
+            "unchanged"
+        );
+        assert!(save_native(&root, "n", "").unwrap());
+        assert!(!file.exists());
         fs::remove_dir_all(&root).unwrap();
     }
 

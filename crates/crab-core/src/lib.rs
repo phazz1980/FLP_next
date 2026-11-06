@@ -38,8 +38,8 @@ pub use error::{Error, Result};
 pub use expander::{Expander, ExpanderChip};
 pub use layout::{BlockPos, Layout, SheetInfo, WireRoute};
 pub use library::{
-    param_input_type, save_block, user_library_dir, BlockDef, Choice, Library, LibraryBlock,
-    ParamDef, ParamKind, ParamShow, PinMode, PortDef, SignalType,
+    param_input_type, save_block, save_native, user_library_dir, BlockDef, Choice, Library,
+    LibraryBlock, ParamDef, ParamKind, ParamShow, PinMode, PortDef, SignalType,
 };
 pub use local::LocalValues;
 pub use logic::{Block, Link, Logic, PortRef, PortRefError};
