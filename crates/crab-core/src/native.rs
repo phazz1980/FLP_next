@@ -277,7 +277,7 @@ fn defines_state(code: &str) -> bool {
 }
 
 /// A name that is a C++ identifier: ports and parameters become struct fields.
-fn is_cpp_ident(name: &str) -> bool {
+pub(crate) fn is_cpp_ident(name: &str) -> bool {
     let mut chars = name.chars();
     chars
         .next()
