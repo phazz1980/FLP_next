@@ -18,6 +18,7 @@ use flp_codegen::sketch_dir;
 use flp_core::BoardConfig;
 use serde::Deserialize;
 
+pub mod cores;
 mod direct;
 mod master;
 pub use master::{master_sketch_id, MasterBuild, MasterFeatures};
@@ -670,6 +671,12 @@ impl ArduinoCli {
         let Some(id) = core_id(fqbn) else {
             return Ok(None);
         };
+        // A chip other than the classic ESP32 is downloaded in the settings, not here.
+        if let Some(pack) = cores::pack_for_fqbn(fqbn) {
+            if pack.chip != "esp32" && !cores::is_installed(pack) {
+                return Err(BuildError::BadOutput(cores::missing_message(pack)));
+            }
+        }
         if self.core_installed(&id)? {
             return Ok(None);
         }

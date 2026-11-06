@@ -218,6 +218,7 @@ pub struct EditorApp {
     changes_window: bool,
     pub mcp: crate::mcp_host::McpHost,
     pub ai_conf: crate::aiconf::AiConf,
+    cores_conf: crate::coresconf::CoresConf,
     report: crate::report::Form,
     pub import: crate::blockio::Import,
     pub board_import: crate::boardio::Import,
@@ -321,6 +322,7 @@ impl EditorApp {
             changes_window: false,
             mcp: Default::default(),
             ai_conf: Default::default(),
+            cores_conf: Default::default(),
             report: Default::default(),
             import: Default::default(),
             board_import: Default::default(),
@@ -2303,6 +2305,10 @@ impl EditorApp {
                 }
             });
             ui.menu_button(crate::i18n::tr("Симуляция блоков"), |ui| self.sim_settings_menu(ui));
+            if ui.button(crate::i18n::tr("Ядра ESP32...")).clicked() {
+                self.cores_conf.show();
+                ui.close();
+            }
             ui.separator();
             if ui.button(crate::i18n::tr("Выход")).clicked() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -3006,6 +3012,7 @@ impl eframe::App for EditorApp {
             .set_project(self.doc.as_ref().map(|d| d.project.path.as_path()));
         self.mcp.window(&ctx);
         self.ai_conf.window(&ctx);
+        self.cores_conf.window(&ctx);
         self.poll_self_update(&ctx);
         update::changes_window(&ctx, &mut self.changes_window);
         crate::blockio::handle_drops(self, &ctx);

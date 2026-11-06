@@ -287,14 +287,16 @@ impl BoardDialog {
                     let mut picked: Option<(String, Option<String>, Option<BTreeMap<_, _>>)> = None;
                     ui.menu_button("▾", |ui| {
                         for (fqbn, name) in BOARDS {
-                            if ui.button(*name).on_hover_text(*fqbn).clicked() {
+                            let ready = flp_build::cores::fqbn_available(fqbn);
+                            if board_button(ui, name, fqbn, ready).clicked() {
                                 picked = Some(((*fqbn).to_owned(), None, None));
                                 ui.close();
                             }
                         }
                         ui.separator();
                         for m in BOARD_MODELS {
-                            if ui.button(m.name).on_hover_text(m.fqbn).clicked() {
+                            let ready = flp_build::cores::fqbn_available(m.fqbn);
+                            if board_button(ui, m.name, m.fqbn, ready).clicked() {
                                 picked = Some((m.fqbn.to_owned(), Some(m.id.to_owned()), None));
                                 ui.close();
                             }
@@ -303,7 +305,8 @@ impl BoardDialog {
                             ui.separator();
                             for b in self.boards.iter() {
                                 let info = &b.def.info;
-                                if ui.button(&info.name).on_hover_text(&info.fqbn).clicked() {
+                                let ready = flp_build::cores::fqbn_available(&info.fqbn);
+                                if board_button(ui, &info.name, &info.fqbn, ready).clicked() {
                                     picked = Some((
                                         info.fqbn.clone(),
                                         Some(info.id.clone()),
@@ -327,6 +330,14 @@ impl BoardDialog {
                     }
                     if let Some(name) = self.model_title() {
                         ui.label(RichText::new(name).weak());
+                    }
+                    if !flp_build::cores::fqbn_available(self.fqbn.trim()) {
+                        ui.label(
+                            RichText::new(crate::i18n::tr(
+                                "⚠ ядро этого чипа не скачано (Файл → Ядра ESP32...)",
+                            ))
+                            .color(ui.visuals().warn_fg_color),
+                        );
                     }
                     let user_board = self
                         .model
@@ -421,6 +432,18 @@ impl BoardDialog {
 }
 
 /// Label and drop-down for one board menu; non-default values are shown in bold.
+/// A board in the picker; greyed out while the core of its chip is not downloaded.
+fn board_button(ui: &mut Ui, name: &str, fqbn: &str, ready: bool) -> egui::Response {
+    let response = ui.add_enabled(ready, egui::Button::new(name));
+    if ready {
+        response.on_hover_text(fqbn)
+    } else {
+        response.on_disabled_hover_text(crate::i18n::tr(
+            "Ядро этого чипа не скачано: Файл → Ядра ESP32...",
+        ))
+    }
+}
+
 fn menu_row(ui: &mut Ui, menu: &BoardMenu, options: &mut BTreeMap<String, String>) {
     let default = menu.default_value().unwrap_or_default().to_owned();
     let current = options.get(&menu.key).cloned().unwrap_or(default.clone());
