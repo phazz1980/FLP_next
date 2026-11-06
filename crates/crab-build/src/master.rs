@@ -161,6 +161,59 @@ const MASTER_PARTITIONS: &str = "no_ota";
 /// prototypes the Arduino preprocessor makes already know the wasm3 types.
 const NATIVE_MARKER: &str = "// @crab-native-glue";
 
+/// Text form of [`master_sketch_id`] as the master reports it (`id=` in `stats`).
+pub fn master_id_text(features: &MasterFeatures) -> String {
+    format!("{:016x}", master_sketch_id(features))
+}
+
+/// `native=` of `stats`: `type:instances`, comma separated.
+fn native_kinds_text(features: &MasterFeatures) -> String {
+    features
+        .natives
+        .iter()
+        .map(|n| format!("{}:{}", n.kind, n.instances))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// How the master on a board relates to the one a project needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MasterState {
+    /// The same firmware.
+    Current,
+    /// An older master that does not tell what it is.
+    Unknown,
+    /// A different build that still has everything the project's native blocks need.
+    Differs,
+    /// Native parts the project needs are not in the master: (block type, instances needed).
+    MissingNative(Vec<(String, u32)>),
+}
+
+/// Compares what the master reported in `stats` with the master the project needs.
+pub fn master_state(info: &crate::mcu_module::MasterInfo, needed: &MasterFeatures) -> MasterState {
+    let Some(id) = &info.id else {
+        return MasterState::Unknown;
+    };
+    let missing: Vec<(String, u32)> = needed
+        .natives
+        .iter()
+        .filter(|n| {
+            info.natives
+                .iter()
+                .find(|(kind, _)| *kind == n.kind)
+                .is_none_or(|(_, have)| *have < n.instances)
+        })
+        .map(|n| (n.kind.clone(), n.instances))
+        .collect();
+    if !missing.is_empty() {
+        MasterState::MissingNative(missing)
+    } else if *id == master_id_text(needed) {
+        MasterState::Current
+    } else {
+        MasterState::Differs
+    }
+}
+
 /// The master sketch with the defines of its drivers in front.
 fn sketch_text(features: &MasterFeatures) -> String {
     let glue = crate::native::glue(&features.natives);
@@ -174,7 +227,18 @@ fn sketch_text(features: &MasterFeatures) -> String {
             .expect("master.ino has the native marker");
         SKETCH.replacen(marker_line, &glue, 1)
     };
-    format!("{}{}{body}", features.defines(), page_text(features))
+    let mut defines = features.defines();
+    defines.push_str(&format!(
+        "#define CRAB_MASTER_ID \"{}\"\n",
+        master_id_text(features)
+    ));
+    if !features.natives.is_empty() {
+        defines.push_str(&format!(
+            "#define CRAB_NATIVE_KINDS \"{}\"\n",
+            native_kinds_text(features)
+        ));
+    }
+    format!("{defines}{}{body}", page_text(features))
 }
 
 /// The web page as a flash constant: the same page a C++ sketch serves, so it is not copied into
@@ -423,6 +487,61 @@ CRAB_STEP(State& s, In in, Out& out) {}
         assert!(
             sketch_text(&plain).ends_with(SKETCH) && !sketch_text(&plain).contains("crab_nat_")
         );
+    }
+
+    #[test]
+    fn master_state_names_the_missing_native_parts() {
+        use crate::mcu_module::MasterInfo;
+        use crate::native::{NativeBlock, NativeType};
+        let native = |kind: &str, instances| NativeBlock {
+            kind: kind.into(),
+            source: "CRAB_STEP(State& s, In in, Out& out) {}
+"
+            .into(),
+            libs: vec![],
+            has_init: false,
+            has_state: false,
+            inputs: vec![],
+            outputs: vec![("t".into(), NativeType::Float)],
+            params: vec![],
+            instances,
+        };
+        let needed = MasterFeatures {
+            natives: vec![native("bmp", 2)],
+            ..Default::default()
+        };
+        let id = master_id_text(&needed);
+        let info = |id: Option<&str>, natives: &[(&str, u32)]| MasterInfo {
+            id: id.map(str::to_owned),
+            natives: natives.iter().map(|(k, n)| ((*k).to_owned(), *n)).collect(),
+        };
+        // The same firmware.
+        assert_eq!(
+            master_state(&info(Some(&id), &[("bmp", 2)]), &needed),
+            MasterState::Current
+        );
+        // An old master tells nothing.
+        assert_eq!(
+            master_state(&info(None, &[]), &needed),
+            MasterState::Unknown
+        );
+        // The block is not there, or there are fewer instances than the project has.
+        for have in [&[][..], &[("bmp", 1)][..], &[("other", 5)][..]] {
+            assert_eq!(
+                master_state(&info(Some("0"), have), &needed),
+                MasterState::MissingNative(vec![("bmp".into(), 2)])
+            );
+        }
+        // More than needed and another fingerprint: works, but it is another build.
+        assert_eq!(
+            master_state(&info(Some("0"), &[("bmp", 3)]), &needed),
+            MasterState::Differs
+        );
+        // The sketch carries what the master will report.
+        let text = sketch_text(&needed);
+        assert!(text.contains(&format!("#define CRAB_MASTER_ID \"{id}\"")));
+        assert!(text.contains("#define CRAB_NATIVE_KINDS \"bmp:2\""));
+        assert!(!sketch_text(&MasterFeatures::default()).contains("#define CRAB_NATIVE_KINDS"));
     }
 
     #[test]

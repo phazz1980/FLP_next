@@ -274,6 +274,24 @@ fn handle_line(
         l.address = Some(ip);
         return changed;
     }
+    // `list` answer: what this master is (`id=<hex>`) and which native parts of blocks it has
+    // (`native=<type>:<instances>,...`).
+    if let Some(id) = text.strip_prefix("id=") {
+        let id = id.trim().to_owned();
+        let changed = l.master_id.as_deref() != Some(id.as_str());
+        l.master_id = Some(id);
+        return changed;
+    }
+    if let Some(list) = text.strip_prefix("native=") {
+        l.master_natives = list
+            .split(',')
+            .filter_map(|item| {
+                let (kind, count) = item.trim().split_once(':')?;
+                Some((kind.to_owned(), count.parse().ok()?))
+            })
+            .collect();
+        return true;
+    }
     if text == "ok" || text.is_empty() {
         return false;
     }
@@ -424,6 +442,33 @@ mod tests {
         assert_eq!(l.values[1], Some(Value::Float(1.5)));
         assert_eq!(l.values[0], Some(Value::Int(7)));
         assert!(asked.is_empty());
+    }
+
+    #[test]
+    fn master_id_and_native_parts_are_kept_not_printed() {
+        let table = table();
+        let live = Arc::new(Mutex::new(Live::default()));
+        let line = |text: &str| {
+            handle_line(
+                text,
+                &table,
+                &[],
+                &mut Vec::new(),
+                &mut Vec::new(),
+                Instant::now(),
+                &live,
+            )
+        };
+        assert!(line("id=00ab12cd34ef5678"));
+        assert!(!line("id=00ab12cd34ef5678"), "the same id is not a change");
+        assert!(line("native=bmp:2,twice:1"));
+        let l = live.lock().unwrap();
+        assert_eq!(l.master_id.as_deref(), Some("00ab12cd34ef5678"));
+        assert_eq!(
+            l.master_natives,
+            [("bmp".to_owned(), 2), ("twice".to_owned(), 1)]
+        );
+        assert!(l.console.is_empty(), "{:?}", l.console);
     }
 
     #[test]

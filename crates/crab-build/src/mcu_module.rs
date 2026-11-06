@@ -110,6 +110,32 @@ pub fn upload_module<P: Read + Write>(
     }
 }
 
+/// What a master says about itself in the answer to `stats`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MasterInfo {
+    /// `id=`: the fingerprint of the firmware; `None` for a master that does not report one.
+    pub id: Option<String>,
+    /// `native=`: native parts of blocks built in, as (block type, instances).
+    pub natives: Vec<(String, u32)>,
+}
+
+impl MasterInfo {
+    /// Takes `id=...` and `native=type:n,...` lines; other lines are not about this.
+    fn take_line(&mut self, line: &str) {
+        if let Some(id) = line.strip_prefix("id=") {
+            self.id = Some(id.trim().to_owned());
+        } else if let Some(list) = line.strip_prefix("native=") {
+            self.natives = list
+                .split(',')
+                .filter_map(|item| {
+                    let (kind, count) = item.trim().split_once(':')?;
+                    Some((kind.to_owned(), count.parse().ok()?))
+                })
+                .collect();
+        }
+    }
+}
+
 /// Waits until the master answers: opening the port can reset a board with native USB
 /// (ESP32-C3), and a command sent while it boots is lost. Pings with `stats` until the
 /// answer ends with `end`.
@@ -117,16 +143,26 @@ pub fn wait_for_master<P: Read + Write>(
     port: &mut P,
     within: Duration,
 ) -> Result<(), ModuleUploadError> {
+    wait_for_master_info(port, within).map(|_| ())
+}
+
+/// Like [`wait_for_master`], and returns what the master reported about itself.
+pub fn wait_for_master_info<P: Read + Write>(
+    port: &mut P,
+    within: Duration,
+) -> Result<MasterInfo, ModuleUploadError> {
     const PING_ANSWER: Duration = Duration::from_millis(700);
     let started = Instant::now();
     while started.elapsed() < within {
         port.write_all(b"stats\n")?;
         port.flush()?;
         let ping = Instant::now();
+        let mut info = MasterInfo::default();
         while ping.elapsed() < PING_ANSWER {
             match read_line_within(port, PING_ANSWER) {
-                Ok(line) if line == "end" => return Ok(()),
-                Ok(_) | Err(ModuleUploadError::Timeout) => {}
+                Ok(line) if line == "end" => return Ok(info),
+                Ok(line) => info.take_line(&line),
+                Err(ModuleUploadError::Timeout) => {}
                 Err(e) => return Err(e),
             }
         }
@@ -238,6 +274,71 @@ mod tests {
     }
 
     const WASM: &[u8] = b"\0asm\x01\0\0\0";
+
+    /// A master that answers `stats` with the given text.
+    struct StatsMaster {
+        answer: Vec<u8>,
+        out: std::collections::VecDeque<u8>,
+    }
+
+    impl Read for StatsMaster {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            match self.out.pop_front() {
+                Some(b) => {
+                    buf[0] = b;
+                    Ok(1)
+                }
+                None => Err(io::ErrorKind::TimedOut.into()),
+            }
+        }
+    }
+
+    impl Write for StatsMaster {
+        fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+            if data
+                == b"stats
+"
+            {
+                self.out.extend(self.answer.clone());
+            }
+            Ok(data.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn master_info_comes_from_the_stats_answer() {
+        let mut port = StatsMaster {
+            answer: b"blink run steps=5 restarts=0 out0=00000000 crc=00000000
+id=00ab12cd34ef5678
+native=bmp:2,twice:1
+free=1 largest=1
+end
+"
+            .to_vec(),
+            out: Default::default(),
+        };
+        let info = wait_for_master_info(&mut port, Duration::from_secs(2)).unwrap();
+        assert_eq!(info.id.as_deref(), Some("00ab12cd34ef5678"));
+        assert_eq!(
+            info.natives,
+            [("bmp".to_owned(), 2), ("twice".to_owned(), 1)]
+        );
+        // An older master says nothing about itself.
+        let mut old = StatsMaster {
+            answer: b"free=1 largest=1
+end
+"
+            .to_vec(),
+            out: Default::default(),
+        };
+        assert_eq!(
+            wait_for_master_info(&mut old, Duration::from_secs(2)).unwrap(),
+            MasterInfo::default()
+        );
+    }
 
     #[test]
     fn crc32_check_value() {

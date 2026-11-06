@@ -180,7 +180,7 @@ fn run(
     } = report;
     let background = matches!(kind, JobKind::Precompile);
     if background {
-        return precompile_master(project, control, promotion, out);
+        return precompile_master(project, lib, control, promotion, out);
     }
     if let JobKind::UploadModules { port } = &kind {
         return upload_modules(port.as_deref(), project, lib, debug, out);
@@ -188,7 +188,7 @@ fn run(
     // The upload puts the master on the board, with debugging on or off; the schema follows
     // as modules (debugging is a flag of the module build).
     if let JobKind::Upload { port } = &kind {
-        return upload_master(port.as_deref(), project, control, out);
+        return upload_master(port.as_deref(), project, lib, control, out);
     }
     if let Some(w2c2) = crate::theme::w2c2() {
         for problem in crab_build::wasm_c::translate_library(&w2c2, lib) {
@@ -340,7 +340,7 @@ fn run(
 }
 
 /// The master drivers the project's blocks need.
-pub fn master_features(project: &Project) -> crab_build::MasterFeatures {
+pub fn master_features(project: &Project, lib: &Library) -> crab_build::MasterFeatures {
     // A switched-off web page builds nothing, so it must not pull the web part into the master.
     let web_off = project.logic.blocks.iter().any(|b| {
         b.kind == "web_ui"
@@ -357,6 +357,14 @@ pub fn master_features(project: &Project) -> crab_build::MasterFeatures {
             .map(|b| b.kind.as_str())
             .filter(|k| !(web_off && k.starts_with("web_"))),
     );
+    // Blocks with a native part (`native.cpp`) are built into the master. A broken one is not in
+    // the library, so it is not here either.
+    if let Ok(natives) = crab_build::native::collect_natives(
+        lib,
+        project.logic.blocks.iter().map(|b| b.kind.as_str()),
+    ) {
+        features.natives = natives;
+    }
     // UART lines and text sending are the default modes of these two blocks.
     features.text |= project.logic.blocks.iter().any(|b| {
         let mode = match b.kind.as_str() {
@@ -376,6 +384,7 @@ pub fn master_features(project: &Project) -> crab_build::MasterFeatures {
 /// finished build is flashed to the chosen port, like a normal master upload.
 fn precompile_master(
     project: &Project,
+    lib: &Library,
     control: Arc<BuildControl>,
     promotion: &Mutex<Promotion>,
     out: &mut dyn FnMut(LogLevel, &str),
@@ -394,7 +403,7 @@ fn precompile_master(
         .compile_master(
             &project.work_dir(),
             board,
-            &master_features(project),
+            &master_features(project, lib),
             true,
             &mut log,
         )
@@ -452,6 +461,7 @@ fn precompile_master(
 fn upload_master(
     port: Option<&str>,
     project: &Project,
+    lib: &Library,
     control: Arc<BuildControl>,
     out: &mut dyn FnMut(LogLevel, &str),
 ) -> Result<Done, String> {
@@ -461,7 +471,7 @@ fn upload_master(
     let board = &project.config.board;
     let port = cli.choose_port(port, board).map_err(|e| e.to_string())?;
     warn_if_other_board(&cli, &port, &board.fqbn, out);
-    let features = master_features(project);
+    let features = master_features(project, lib);
     let defines = features.defines();
     let parts: Vec<&str> = defines
         .lines()
@@ -588,8 +598,22 @@ fn upload_modules(
     // Release DTR/RTS so opening the port does not reset the board.
     let _ = serial.write_data_terminal_ready(false);
     let _ = serial.write_request_to_send(false);
-    crab_build::mcu_module::wait_for_master(&mut serial, std::time::Duration::from_secs(8))
-        .map_err(|e| e.to_string())?;
+    let info = crab_build::mcu_module::wait_for_master_info(
+        &mut serial,
+        std::time::Duration::from_secs(8),
+    )
+    .map_err(|e| e.to_string())?;
+    // A module that calls a native part the master does not have would only fail on the board.
+    match crab_build::master_state(&info, &master_features(project, lib)) {
+        crab_build::MasterState::MissingNative(missing) => {
+            return Err(missing_native_message(&missing));
+        }
+        crab_build::MasterState::Differs => out(
+            LogLevel::Info,
+            crate::i18n::tr("Мастер на плате собран иначе, чем нужно проекту, но нужные нативные части в нём есть"),
+        ),
+        crab_build::MasterState::Current | crab_build::MasterState::Unknown => {}
+    }
     for module in &modules {
         let allow = crab_sim::mcu::Manifest::parse(&module.manifest)
             .map(|m| m.allow)
@@ -609,6 +633,19 @@ fn upload_modules(
         port: Some(port),
         debug: watch,
     })
+}
+
+/// Why modules cannot go to the board: its master lacks native parts of blocks.
+pub fn missing_native_message(missing: &[(String, u32)]) -> String {
+    let list = missing
+        .iter()
+        .map(|(kind, n)| crate::i18n::fmt("«{0}» (экземпляров: {1})", &[kind, n]))
+        .collect::<Vec<_>>()
+        .join(", ");
+    crate::i18n::fmt(
+        "В мастере на плате нет нативной части блоков: {0}. Нажмите «Залить мастер-прошивку»: мастер соберётся заново вместе с этими блоками.",
+        &[&list],
+    )
 }
 
 fn reason_text(reason: CliReason) -> &'static str {

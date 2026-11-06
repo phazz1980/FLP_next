@@ -1805,7 +1805,7 @@ impl EditorApp {
         Some((
             doc.project.path.clone(),
             board_hash(&doc.project.config.board),
-            crab_build::master_sketch_id(&crate::job::master_features(&doc.project)),
+            crab_build::master_sketch_id(&crate::job::master_features(&doc.project, &self.lib)),
         ))
     }
 
@@ -2995,6 +2995,30 @@ impl EditorApp {
                             );
                         }
                         None => {}
+                    }
+                    // The master on the board against the one the project needs: native parts of blocks
+                    // (and the build itself) are not changed by loading modules.
+                    if let Some(id) = &d.live.master_id {
+                        let info = crab_build::mcu_module::MasterInfo {
+                            id: Some(id.clone()),
+                            natives: d.live.master_natives.clone(),
+                        };
+                        let features = crate::job::master_features(p, &self.lib);
+                        match crab_build::master_state(&info, &features) {
+                            crab_build::MasterState::Current => {
+                                ui.label(crate::i18n::tr("Мастер на плате актуален"));
+                            }
+                            crab_build::MasterState::MissingNative(missing) => {
+                                ui.label(
+                                    RichText::new(crate::job::missing_native_message(&missing))
+                                        .color(self.theme.palette.warning),
+                                );
+                            }
+                            crab_build::MasterState::Differs => {
+                                ui.label(crate::i18n::tr("Мастер на плате собран иначе"));
+                            }
+                            crab_build::MasterState::Unknown => {}
+                        }
                     }
                     if d.live.needs_password {
                         let id = egui::Id::unique("debug_password_input");

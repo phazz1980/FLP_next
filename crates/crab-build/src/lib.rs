@@ -22,7 +22,9 @@ pub mod cores;
 mod direct;
 mod master;
 pub mod native;
-pub use master::{master_sketch_id, MasterBuild, MasterFeatures};
+pub use master::{
+    master_id_text, master_sketch_id, master_state, MasterBuild, MasterFeatures, MasterState,
+};
 pub mod mcu_module;
 mod output;
 pub mod wasm;

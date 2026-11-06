@@ -2247,6 +2247,13 @@ static void cmdLine(String line) {
 #endif
     // The editor shows the address of the board in its status bar.
     if (ip) Serial.printf("ip=%s\n", IPAddress(ip).toString().c_str());
+#ifdef CRAB_MASTER_ID
+    // Which master this is: the editor compares it with the one the project needs.
+    Serial.printf("id=%s\n", CRAB_MASTER_ID);
+#endif
+#ifdef CRAB_NATIVE_KINDS
+    Serial.printf("native=%s\n", CRAB_NATIVE_KINDS);  // block type:instances, comma separated
+#endif
     Serial.printf("free=%u largest=%u\n", (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     Serial.println("end");
   } else if (line.startsWith("swap ") || line.startsWith("del ")) {

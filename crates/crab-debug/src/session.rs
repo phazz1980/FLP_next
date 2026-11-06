@@ -42,6 +42,10 @@ pub struct Live {
     pub project_hash: Option<[u8; 8]>,
     /// Address of the board in the network, as the master firmware reports it.
     pub address: Option<String>,
+    /// `id=` of the master firmware: its fingerprint; `None` for a master that does not tell.
+    pub master_id: Option<String>,
+    /// `native=` of the master firmware: native parts of blocks built in, (type, instances).
+    pub master_natives: Vec<(String, u32)>,
 }
 
 impl Live {
