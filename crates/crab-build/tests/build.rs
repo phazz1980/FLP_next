@@ -193,3 +193,101 @@ type = \"{ty}\"",
         result.as_ref().err()
     );
 }
+
+#[test]
+#[ignore = "needs arduino-cli with esp32:esp32 and the GyverHX711 library"]
+fn master_with_a_wizard_block_compiles() {
+    use crab_build::native::NativeBlock;
+    use crab_core::native_wizard::{
+        LibraryWizard, WizAction, WizArg, WizOutput, WizParam, WizType,
+    };
+    let wizard = LibraryWizard {
+        lib: "GyverHX711".into(),
+        header: "GyverHX711.h".into(),
+        class: "GyverHX711".into(),
+        params: vec![
+            WizParam {
+                name: "data".into(),
+                ty: WizType::Pin,
+            },
+            WizParam {
+                name: "clock".into(),
+                ty: WizType::Pin,
+            },
+        ],
+        args: vec![
+            WizArg::Param("data".into()),
+            WizArg::Param("clock".into()),
+            WizArg::Const("HX_GAIN128_A".into()),
+        ],
+        init: vec![],
+        outputs: vec![
+            WizOutput {
+                name: "ready".into(),
+                ty: WizType::Bool,
+                expr: "available()".into(),
+                when: String::new(),
+            },
+            WizOutput {
+                name: "value".into(),
+                ty: WizType::Int,
+                expr: "read()".into(),
+                when: "ready".into(),
+            },
+        ],
+        actions: vec![WizAction {
+            input: "tare".into(),
+            call: "tare()".into(),
+        }],
+    };
+    assert!(wizard.validate().is_empty());
+    let def: crab_core::BlockDef = toml::from_str(
+        "[block]
+type = \"hx711\"
+name = \"HX711\"
+group = \"Тест\"
+
+[[input]]
+name = \"tare\"
+type = \"bool\"
+default = false
+
+[[output]]
+name = \"ready\"
+type = \"bool\"
+
+[[output]]
+name = \"value\"
+type = \"int\"
+
+[[param]]
+name = \"data\"
+type = \"pin\"
+
+[[param]]
+name = \"clock\"
+type = \"pin\"
+",
+    )
+    .unwrap();
+    let native = NativeBlock::from_parts(&def, &wizard.generate(), 1).unwrap();
+    let root = std::env::temp_dir().join("crab_native_wizard_test");
+    let _ = std::fs::remove_dir_all(&root);
+    let cli = ArduinoCli::locate().unwrap();
+    let project = Project::load(repo_path("examples/pump")).unwrap();
+    let features = crab_build::MasterFeatures {
+        natives: vec![native],
+        ..Default::default()
+    };
+    let mut log = Vec::new();
+    let result = cli.compile_master(&root, &project.config.board, &features, true, &mut |line| {
+        log.push(line.to_owned())
+    });
+    let errors: Vec<&String> = log.iter().filter(|l| l.contains("error")).collect();
+    assert!(
+        result.is_ok(),
+        "{:?}
+{errors:?}",
+        result.as_ref().err()
+    );
+}
