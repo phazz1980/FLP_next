@@ -354,6 +354,48 @@ group = \"Логика\"
 }
 
 #[test]
+fn creates_a_block_with_a_native_part() {
+    let mut c = ctx("native");
+    let toml = "[block]
+type = \"bmp\"
+name = \"Датчик\"
+group = \"Датчики\"
+                [[output]]
+name = \"temperature\"
+type = \"float\"
+";
+    let bad = run(
+        &mut c,
+        "create_block_type",
+        json!({"type": "bmp", "block_toml": toml, "native": "// crab:native
+int x;
+"}),
+    );
+    assert!(bad.unwrap_err().contains("native.cpp"));
+    assert!(!c.lib_dir.join("bmp").exists());
+    let none = run(
+        &mut c,
+        "create_block_type",
+        json!({"type": "bmp", "block_toml": toml}),
+    );
+    assert!(none.unwrap_err().contains("native"));
+
+    let code = "// crab:native libs=\"Wire\" i2c=0x76
+// crab:sim temperature=21
+                CRAB_STEP(State& s, In in, Out& out) { out.temperature = 21.0f; }
+";
+    run(
+        &mut c,
+        "create_block_type",
+        json!({"type": "bmp", "block_toml": toml, "native": code}),
+    )
+    .unwrap();
+    assert!(c.lib.get("bmp").is_some());
+    let t = run(&mut c, "get_block_type", json!({"type": "bmp"})).unwrap();
+    assert_eq!(t["native"], code);
+}
+
+#[test]
 fn live_values_and_unknown_tool() {
     let mut c = ctx("live");
     let v = run(&mut c, "read_live_values", json!({})).unwrap();

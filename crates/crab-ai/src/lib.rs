@@ -242,13 +242,14 @@ pub fn tools() -> Vec<Tool> {
         },
         Tool {
             name: "create_block_type",
-            description: "Создать новый пользовательский тип блока (папка user_library/): block.toml, шаблон esp32.cpp.tmpl и docs.md. Встроенные блоки менять нельзя. Поле group задаёт раздел и папки библиотеки через «/», например «Насосы/Управление». Формат — как у существующих блоков (см. get_block_type).",
+            description: "Создать новый пользовательский тип блока (папка user_library/): block.toml, шаблон esp32.cpp.tmpl и docs.md. Встроенные блоки менять нельзя. Поле group задаёт раздел и папки библиотеки через «/», например «Насосы/Управление». Формат — как у существующих блоков (см. get_block_type). Блок с датчиком, шиной или библиотекой Arduino описывается нативной частью `native` (файл native.cpp, C++ внутри мастер-прошивки): первая строка `// crab:native libs=\"Библиотека Arduino, Другая\" i2c=0x76`, затем `// crab:sim выход=значение` для симуляции на компьютере, необязательный `struct State {...};`, необязательная `CRAB_INIT(State& s, Params p) {...}` (один раз и при смене параметров) и обязательная `CRAB_STEP(State& s, In in, Out& out) {...}` (каждый цикл: прочитать датчик, записать `out.<выход>`; входы — `in.<вход>`, параметры — `p.<параметр>`). Порты и параметры только bool/int/float (время и пин — int), имена — латиница. Нативная часть только отдаёт данные, логику строят блоки схемы. Нужен template или native (можно оба).",
             input_schema: json!({"type": "object", "properties": {
                 "type": {"type": "string"},
                 "block_toml": {"type": "string"},
-                "template": {"type": "string"},
+                "template": {"type": "string", "description": "esp32.cpp.tmpl; можно опустить, если задан native"},
+                "native": {"type": "string", "description": "native.cpp: C++ нативной части блока (датчики, шины, библиотеки Arduino)"},
                 "docs": {"type": "string"}
-            }, "required": ["type", "block_toml", "template"]}),
+            }, "required": ["type", "block_toml"]}),
         },
     ]
 }
@@ -325,8 +326,10 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
                 .and_then(Result::ok)
                 // Built-in blocks without a template are written in Rust.
                 .or_else(|| crab_codegen::builtin_cpp_preview(&b.def));
+            let native = b.native_path().and_then(|p| fs::read_to_string(p).ok());
             v["docs"] = json!(docs);
             v["template"] = json!(template);
+            v["native"] = json!(native);
             Ok(v)
         }
         "add_block" => {
@@ -670,7 +673,8 @@ pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, St
                 ctx,
                 &kind,
                 &s("block_toml")?,
-                &s("template")?,
+                args.get("template").and_then(Value::as_str).unwrap_or(""),
+                args.get("native").and_then(Value::as_str).unwrap_or(""),
                 args.get("docs").and_then(Value::as_str),
             )?;
             Ok(json!({"created": kind}))
@@ -825,6 +829,7 @@ fn create_block_type(
     kind: &str,
     block_toml: &str,
     template: &str,
+    native: &str,
     docs: Option<&str>,
 ) -> Result<(), String> {
     let lib_dir = ctx.library_dir();
@@ -839,10 +844,17 @@ fn create_block_type(
     if ctx.library().is_user(kind) {
         return Err(format!("тип «{kind}» уже есть; выберите другое имя"));
     }
+    if template.trim().is_empty() && native.trim().is_empty() {
+        return Err("нужен шаблон кода (template) или нативная часть (native)".to_owned());
+    }
     // Validate in memory first, so a broken block never lands in the library.
     let def: crab_core::BlockDef =
         toml::from_str(block_toml).map_err(|e| format!("block.toml: {e}"))?;
     def.validate(kind).map_err(|e| format!("block.toml: {e}"))?;
+    if !native.trim().is_empty() {
+        crab_core::native::parse_native(native, &def)
+            .map_err(|e| format!("native.cpp: {}", crab_core::native::join_errors(&e)))?;
+    }
     // The group becomes the section and folders of the user library
     // (`Насосы/Управление`); an unusable group puts the block in the root.
     let parts: Vec<&str> = def.info.group.split('/').map(str::trim).collect();
@@ -861,7 +873,12 @@ fn create_block_type(
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let write = |file: &str, text: &str| fs::write(dir.join(file), text).map_err(|e| e.to_string());
     write(BLOCK_FILE, block_toml)?;
-    write(ESP32_CPP_TEMPLATE, template)?;
+    if !template.trim().is_empty() {
+        write(ESP32_CPP_TEMPLATE, template)?;
+    }
+    if !native.trim().is_empty() {
+        write(crab_core::native::NATIVE_FILE, native)?;
+    }
     if let Some(docs) = docs {
         write(DOCS_FILE, docs)?;
     }
