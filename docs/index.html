@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CrabLogic — визуальное программирование ESP32</title>
 <meta name="description" content="CrabLogic — программа визуального программирования микроконтроллеров ESP32 (FBD) на Rust: схема из блоков, сборка и заливка по USB, онлайн-отладка, веб-конструктор, ИИ-помощник.">
+<link rel="icon" type="image/svg+xml" href="img/logo.svg">
 <style>
 :root{--bg:#fafaf7;--fg:#1d2024;--mut:#5d636b;--card:#fff;--line:#e3e1da;--acc:#c8501e;--accfg:#fff}
 @media (prefers-color-scheme:dark){:root{--bg:#16181b;--fg:#e8e9ea;--mut:#9aa0a6;--card:#1e2125;--line:#2d3136;--acc:#ec7a45;--accfg:#16181b}}
@@ -28,6 +29,7 @@ figure{margin:0 0 24px}
 figure img{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:10px}
 figcaption{color:var(--mut);font-size:.9rem;margin-top:6px}
 ol,ul{padding-left:1.2em}
+.logo{height:1.5em;width:1.5em;vertical-align:-.3em;margin-right:12px}
 .tw{overflow-x:auto;margin:12px 0}table{border-collapse:collapse;width:auto;font-size:.95rem}th,td{text-align:left;padding:8px 12px;border:1px solid var(--line);vertical-align:top}th{background:var(--card)}td:last-child{white-space:nowrap}
 code{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:.9em;overflow-wrap:anywhere}
 footer{margin:56px 0 32px;color:var(--mut);font-size:.9rem;border-top:1px solid var(--line);padding-top:16px}
@@ -38,7 +40,7 @@ a{color:var(--acc)}
 <div class="w">
 <div class="top"><select id="lang" aria-label="Language"><option value="ru">Русский</option><option value="en">English</option><option value="es">Español</option><option value="zh">中文</option><option value="hi">हिन्दी</option><option value="bn">বাংলা</option></select></div>
 <header>
-<h1>CrabLogic <span class="tag" data-i="beta">бета 1.3</span></h1>
+<h1><img class="logo" src="img/logo.svg" alt="" width="56" height="56">CrabLogic <span class="tag" data-i="beta">бета 1.3</span></h1>
 <p class="lead" data-i="lead">Визуальное программирование микроконтроллеров ESP32: рисуете схему из блоков (FBD), программа собирает прошивку, заливает её по USB и показывает живые значения на схеме. Ядро написано на Rust.</p>
 <a class="btn" href="https://github.com/phazz1980/CrabLogic/releases/tag/v1.3.0" data-i="dl">Скачать для Windows</a>
 <a class="btn alt" href="demo/" data-i="demo">Демо в браузере</a>
