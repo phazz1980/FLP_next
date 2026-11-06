@@ -66,6 +66,9 @@ struct Node {
     texts_out: Vec<String>,
     /// Simulated time left until the `received` pulse of a hand-fed MQTT block ends.
     pulse_ms: u64,
+    /// Outputs of a block with a native part (`native.cpp`): the values of its
+    /// `// crab:sim` line stand in for the code that only runs on the board.
+    native_sim: Vec<Option<f64>>,
 }
 
 /// Blocks whose outputs follow what the bench shows on their pin.
@@ -129,6 +132,11 @@ impl Node {
     /// Web controls (switch, slider, number input) start at their `initial` parameter
     /// and are then changed by hand like any other input of the board.
     fn apply_initial(&mut self) {
+        for (out, sim) in self.outputs.iter_mut().zip(&self.native_sim) {
+            if let Some(v) = sim {
+                *out = *v;
+            }
+        }
         if !matches!(
             self.def.info.kind.as_str(),
             "web_switch" | "web_slider" | "web_input"
@@ -262,6 +270,18 @@ impl Simulation {
                     Err(e) => notes.push(format!("{}: {e}", block.id)),
                 }
             }
+            let native_sim = match lb.native_part() {
+                Ok(Some(part)) => def
+                    .outputs
+                    .iter()
+                    .map(|o| part.sim.get(&o.name).map(plain_number))
+                    .collect(),
+                Ok(None) => Vec::new(),
+                Err(e) => {
+                    notes.push(format!("{}: {e}", block.id));
+                    Vec::new()
+                }
+            };
             let types = Types {
                 ins: def
                     .inputs
@@ -293,10 +313,13 @@ impl Simulation {
                     .collect(),
                 sources: Vec::new(),
                 inputs: vec![0.0; def.inputs.len()],
-                outputs: vec![0.0; def.outputs.len()],
+                outputs: (0..def.outputs.len())
+                    .map(|i| native_sim.get(i).copied().flatten().unwrap_or(0.0))
+                    .collect(),
                 texts_in: vec![String::new(); def.inputs.len()],
                 texts_out: vec![String::new(); def.outputs.len()],
                 pulse_ms: 0,
+                native_sim,
                 active,
                 params,
                 param_texts,

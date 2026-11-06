@@ -1,26 +1,26 @@
-# Число нажатий кнопки переживает перезагрузку: переменная сохраняется во флеш.
-# Имена переменных — любой текст, имя в скетче получается автоматически.
-
 [[var]]
 name = "Нажатий всего"
 type = "float"
-retain = true
 description = "Сколько раз нажата кнопка за всё время"
+retain = true
 
-# Никто не записывает — уставка; её можно поменять на лету при отладке и она сохранится.
 [[var]]
 name = "Порог"
 type = "float"
 init = 10.0
-retain = true
 description = "После скольких нажатий зажечь светодиод"
+retain = true
+
+[[var]]
+name = "йц2"
+type = "String"
 
 [[block]]
 id = "button"
 type = "digital_in"
+inverted = true
 pin = 13
 pullup = true
-inverted = true
 
 [[block]]
 id = "press"
@@ -40,7 +40,6 @@ value = 1.0
 id = "next"
 type = "add"
 
-# Записывает «Нажатий всего + 1» только по нажатию (вход En).
 [[block]]
 id = "total_w"
 type = "var_set"
@@ -56,7 +55,6 @@ var = "Порог"
 id = "rest"
 type = "sub"
 
-# total − limit > −0.5, то есть нажатий не меньше порога.
 [[block]]
 id = "reached"
 type = "greater"
@@ -67,38 +65,65 @@ id = "led"
 type = "digital_out"
 pin = 2
 
+[[block]]
+id = "wifi_1"
+type = "wifi"
+ssid = "asdf"
+
+[[block]]
+id = "mqtt_1"
+type = "mqtt"
+
+[[block]]
+id = "mqtt_subscribe_1"
+type = "mqtt_subscribe"
+
+[[block]]
+id = "йц2_r1"
+type = "var_set"
+var = "йц2"
+write_enable = true
+
 [[link]]
 from = "button.out"
-to   = "press.in"
+to = "press.in"
 
 [[link]]
 from = "total_r.out"
-to   = "next.a"
+to = "next.a"
 
 [[link]]
 from = "one.out"
-to   = "next.b"
+to = "next.b"
 
 [[link]]
 from = "next.out"
-to   = "total_w.in"
+to = "total_w.in"
 
 [[link]]
 from = "press.out"
-to   = "total_w.en"
+to = "total_w.en"
 
 [[link]]
 from = "total_r.out"
-to   = "rest.a"
+to = "rest.a"
 
 [[link]]
 from = "limit_r.out"
-to   = "rest.b"
+to = "rest.b"
 
 [[link]]
 from = "rest.out"
-to   = "reached.a"
+to = "reached.a"
 
 [[link]]
 from = "reached.out"
-to   = "led.in"
+to = "led.in"
+
+[[link]]
+from = "mqtt_subscribe_1.out"
+to = "йц2_r1.in"
+
+[[link]]
+from = "mqtt_subscribe_1.received"
+to = "йц2_r1.en"

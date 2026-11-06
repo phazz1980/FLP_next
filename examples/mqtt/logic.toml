@@ -1,8 +1,3 @@
-# MQTT через Wi-Fi: crab/temp — температура (по изменению), crab/button — кнопка (по изменению),
-# crab/led (1/0, on/off) — включает светодиод.
-# Публикации и подписка заданы в панели слева (раздел MQTT); значения идут через переменные,
-# привязки лежат в [block.bind].
-
 [[var]]
 name = "Температура"
 type = "float"
@@ -18,7 +13,14 @@ type = "bool"
 [[block]]
 id = "wifi"
 type = "wifi"
+param_in = [
+    "net_period",
+]
+out_error = true
+out_ready = true
+out_status = true
 ssid = "MyNetwork"
+wifi_mode = 0
 
 [[block]]
 id = "broker"
@@ -34,10 +36,10 @@ pin = 4
 [[block]]
 id = "temp_pub"
 type = "mqtt_publish"
-topic = "crab/temp"
-trigger = 1
 deadband = 0.2
 decimals = 1
+topic = "crab/temp"
+trigger = 1
 
 [block.bind]
 value = "Температура"
@@ -45,15 +47,15 @@ value = "Температура"
 [[block]]
 id = "button"
 type = "digital_in"
+inverted = true
 pin = 13
 pullup = true
-inverted = true
 
 [[block]]
 id = "button_pub"
 type = "mqtt_publish"
-topic = "crab/button"
 retain = true
+topic = "crab/button"
 trigger = 1
 
 [block.bind]
@@ -62,8 +64,8 @@ value = "Кнопка"
 [[block]]
 id = "led_sub"
 type = "mqtt_subscribe"
-topic = "crab/led"
 kind = "bool"
+topic = "crab/led"
 
 [block.bind]
 out_b = "Светодиод"
@@ -90,12 +92,20 @@ var = "Светодиод"
 
 [[link]]
 from = "sensor.temp"
-to   = "temp_w.in"
+to = "temp_w.in"
 
 [[link]]
 from = "button.out"
-to   = "button_w.in"
+to = "button_w.in"
 
 [[link]]
 from = "led_r.out"
-to   = "led.in"
+to = "led.in"
+
+[[link]]
+from = "sensor.temp"
+to = "temp_pub.value"
+
+[[link]]
+from = "button.out"
+to = "button_pub.value"

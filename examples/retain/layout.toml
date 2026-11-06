@@ -1,41 +1,69 @@
-# Координаты блоков для редактора.
-
 [block.button]
+sheet = 1
 x = 40.0
 y = 40.0
 
-[block.press]
-x = 200.0
-y = 40.0
-
-[block.total_r]
-x = 40.0
-y = 160.0
-
-[block.one]
-x = 40.0
-y = 240.0
-
-[block.next]
-x = 200.0
-y = 180.0
-
-[block.total_w]
-x = 360.0
-y = 120.0
+[block.led]
+sheet = 1
+x = 520.0
+y = 320.0
 
 [block.limit_r]
+sheet = 1
 x = 40.0
 y = 340.0
 
-[block.rest]
+[block.mqtt_1]
+sheet = 1
+x = 40.0
+y = 540.0
+
+[block.mqtt_subscribe_1]
+sheet = 1
+x = 150.0
+y = 440.0
+
+[block.next]
+sheet = 1
 x = 200.0
-y = 320.0
+y = 180.0
+
+[block.one]
+sheet = 1
+x = 40.0
+y = 240.0
+
+[block.press]
+sheet = 1
+x = 200.0
+y = 40.0
 
 [block.reached]
+sheet = 1
 x = 360.0
 y = 320.0
 
-[block.led]
-x = 520.0
+[block.rest]
+sheet = 1
+x = 200.0
 y = 320.0
+
+[block.total_r]
+sheet = 1
+x = 40.0
+y = 160.0
+
+[block.total_w]
+sheet = 1
+x = 360.0
+y = 120.0
+
+[block.wifi_1]
+sheet = 1
+x = 40.0
+y = 440.0
+
+[block."йц2_r1"]
+sheet = 1
+x = 330.0
+y = 460.0

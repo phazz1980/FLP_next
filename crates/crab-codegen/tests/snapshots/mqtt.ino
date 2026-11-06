@@ -17,6 +17,8 @@
 // Выходы блоков
 bool wifi_ready = false;
 String wifi_address = String();
+int32_t wifi_status = 0;
+int32_t wifi_error = 0;
 bool broker_connected = false;
 int32_t broker_error = 0;
 float sensor_temp = 0.0f;
@@ -132,7 +134,7 @@ void crab_bg_task(void *) {
     }
     {
       uint32_t now = millis();
-      wifi_net_due = (uint32_t)(now - wifi_net_t) >= 5;
+      wifi_net_due = (uint32_t)(now - wifi_net_t) >= (5);
       if (wifi_net_due) {
         wifi_net_t = now;
       }
@@ -141,6 +143,8 @@ void crab_bg_task(void *) {
       crabWifi.pool();
     }
     wifi_ready = crabWifi.clientIsReady();
+    wifi_status = crabWifi.getStatus();
+    wifi_error = crabWifi.getError();
     {
       uint32_t ip = 0;
       if (crabWifi.clientIsReady()) {
