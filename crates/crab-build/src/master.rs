@@ -321,11 +321,10 @@ impl ArduinoCli {
             args.push("--build-property".into());
             args.push("compiler.cpp.extra_flags=-DFLPROG_NETWORK_COMPILE_OTA=0".into());
         }
-        if features.modbus || features.net {
-            for dir in crate::bundled_libraries(work_dir) {
-                args.push("--libraries".into());
-                args.push(dir.into());
-            }
+        // Always: Wasm3 and the sensor libraries are shipped there too.
+        for dir in crate::bundled_libraries(work_dir) {
+            args.push("--libraries".into());
+            args.push(dir.into());
         }
         args.push(sketch_dir.clone().into());
         let status = self.run(&args, low_priority, on_line)?;

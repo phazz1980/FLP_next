@@ -210,6 +210,20 @@ pub fn bundled_libraries(project_root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Library names (`name=` of `library.properties`) found in the bundled library folders.
+fn bundled_library_names(dirs: &[PathBuf]) -> Vec<String> {
+    dirs.iter()
+        .filter_map(|d| std::fs::read_dir(d).ok())
+        .flat_map(|entries| entries.flatten())
+        .filter_map(|e| std::fs::read_to_string(e.path().join("library.properties")).ok())
+        .filter_map(|text| {
+            text.lines()
+                .find_map(|l| l.trim().strip_prefix("name="))
+                .map(|n| n.trim().to_owned())
+        })
+        .collect()
+}
+
 /// Strips the Windows verbatim prefix (`\\?\`), which arduino-cli does not accept.
 fn plain_path(path: &Path) -> PathBuf {
     let s = path.as_os_str().to_string_lossy();
@@ -748,9 +762,15 @@ impl ArduinoCli {
             .map_err(|source| self.spawn_error(source))?;
         check_status("список библиотек", output.status)?;
         let installed = parse_lib_list(&String::from_utf8_lossy(&output.stdout))?;
+        // Libraries shipped in the `libs` folder are passed to arduino-cli by path and need
+        // no internet.
+        let bundled = bundled_library_names(&bundled_libraries(Path::new(".")));
         let missing: Vec<String> = required
             .iter()
-            .filter(|spec| !is_installed(spec, &installed))
+            .filter(|spec| {
+                let name = spec.split_once('@').map_or(**spec, |(n, _)| n);
+                !is_installed(spec, &installed) && !bundled.iter().any(|b| b == name)
+            })
             .map(|spec| spec.to_string())
             .collect();
         if missing.is_empty() {
@@ -1228,6 +1248,27 @@ fn parse_board_list(json: &str) -> Result<Vec<SerialPort>, BuildError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bundled_library_names_come_from_library_properties() {
+        let dir = std::env::temp_dir().join(format!("crab-bundled-libs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let lib = dir.join("DHT_sensor_library");
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::write(
+            lib.join("library.properties"),
+            "name=DHT sensor library
+version=1.4.7
+",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.join("not_a_lib")).unwrap();
+        assert_eq!(
+            bundled_library_names(std::slice::from_ref(&dir)),
+            vec!["DHT sensor library".to_owned()]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     fn board() -> BoardConfig {
