@@ -1,9 +1,9 @@
 # Runs scenario.txt on the board (module counter.wasm via the master's in/param/tick/out
-# commands) and compares every `out` line with golden.txt made by the flp-sim test.
-# Usage: compare.ps1 -Port COM10 -Wasm <counter.wasm> (flp upload-wasm is used for the upload)
-param([string]$Port = 'COM10', [string]$Wasm = ($env:TEMP + '\mods\counter.wasm'), [string]$Flp = 'cargo run -q -p flp-cli --')
+# commands) and compares every `out` line with golden.txt made by the crab-sim test.
+# Usage: compare.ps1 -Port COM10 -Wasm <counter.wasm> (crablogic upload-wasm is used for the upload)
+param([string]$Port = 'COM10', [string]$Wasm = ($env:TEMP + '\mods\counter.wasm'), [string]$Crab = 'cargo run -q -p crab-cli --')
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-Invoke-Expression "$Flp upload-wasm `"$Wasm`" --name counter --port $Port"
+Invoke-Expression "$Crab upload-wasm `"$Wasm`" --name counter --port $Port"
 if ($LASTEXITCODE -ne 0) { exit 1 }
 $golden = @(Get-Content "$here\golden.txt" | Where-Object { $_.Trim() })
 $p = New-Object System.IO.Ports.SerialPort $Port, 115200

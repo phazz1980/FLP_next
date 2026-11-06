@@ -13,7 +13,7 @@
 
 В модуле WASM датчик опрашивает мастер-прошивка (отдельная задача, период берётся из `period`), блок читает последнее значение; на каждую пару `pin`+`index` один опрос, всего до 8 датчиков на плате.
 
-Нужны библиотеки OneWire и DallasTemperature — `flp build` и мастер-прошивка ставят их сами. Пример: `examples/sensors`.
+Нужны библиотеки OneWire и DallasTemperature — `crablogic build` и мастер-прошивка ставят их сами. Пример: `examples/sensors`.
 
 ```toml
 [[block]]

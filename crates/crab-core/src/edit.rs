@@ -1,0 +1,1837 @@
+//! Schema editing operations shared by the editor and (later) the AI commands.
+//!
+//! Every operation keeps `logic` and `layout` consistent and rejects edits that
+//! would make the schema structurally invalid (unknown types, wrong port
+//! directions, incompatible types). Semantic problems (unconnected inputs,
+//! loops) are left to [`crate::check`].
+
+use std::collections::BTreeMap;
+
+use crate::ident::is_valid_ident;
+use crate::vars::{Var, VAR_GET, VAR_PARAM, VAR_SET, WRITE_ENABLE};
+use crate::{
+    Block, BlockPos, Expander, Layout, Library, Link, ParamValue, PortRef, Project, SignalType,
+    WireRoute,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum EditError {
+    #[error("нет блока «{0}»")]
+    NoBlock(String),
+    #[error("неизвестный тип блока «{0}»")]
+    UnknownType(String),
+    #[error("недопустимый id «{0}»: только буквы (можно русские), цифры, «_» и «-» (имя может состоять и из одних цифр), без пробелов и точек")]
+    InvalidId(String),
+    #[error("id «{0}» уже занят")]
+    DuplicateId(String),
+    #[error("у блока «{block}» нет выхода «{port}»")]
+    NoOutput { block: String, port: String },
+    #[error("у блока «{block}» нет входа «{port}»")]
+    NoInput { block: String, port: String },
+    #[error("выход {from} нельзя подать на вход {to}: не совпадают типы")]
+    TypeMismatch { from: PortRef, to: PortRef },
+    #[error("порт {0} не логический: инвертировать можно только bool")]
+    NotBool(PortRef),
+    #[error("у блока «{block}» нет параметра «{param}»")]
+    NoParam { block: String, param: String },
+    #[error("параметр «{param}» блока «{block}» нельзя сделать входом")]
+    NotInputParam { block: String, param: String },
+    #[error("значение не подходит к параметру «{0}»")]
+    BadValue(String),
+    #[error("блок «{0}» нельзя заменить: переменные и копии тегов меняются другим способом")]
+    ReplaceUnsupported(String),
+    #[error("нет переменной «{0}»")]
+    NoVar(String),
+    #[error("блок переменной «{0}» уже подключён с другой стороны: переменную в одном блоке можно либо читать, либо записывать")]
+    VarBothSides(String),
+    #[error(
+        "у блока переменной «{0}» включён вход разрешения записи: он только записывает, выхода нет"
+    )]
+    VarWriteOnly(String),
+    #[error("блок настройки сервиса «{0}» работает только в одну сторону: читает значение или записывает, но не оба")]
+    VarFixed(String),
+    #[error("недопустимое имя переменной «{0}»: пустое, с пробелами по краям или с управляющими символами")]
+    InvalidVarName(String),
+    #[error("переменная «{0}» уже есть")]
+    DuplicateVar(String),
+    #[error("начальное значение не подходит к типу переменной «{0}»")]
+    BadInit(String),
+    #[error("нет расширителя «{0}»")]
+    NoExpander(String),
+    #[error("расширитель «{0}» уже есть")]
+    DuplicateExpander(String),
+    #[error("{0}")]
+    BadExpander(String),
+    #[error("расширитель «{id}» нельзя удалить: на нём стоят блоки ({blocks})")]
+    ExpanderBusy { id: String, blocks: String },
+    #[error("блок типа «{0}» не может стоять на выводе расширителя")]
+    ExpanderUnsupported(String),
+    #[error("у {chip} расширителя «{expander}» нет вывода P{pin}, допустимы P0–P{last}")]
+    ExpanderPinRange {
+        expander: String,
+        chip: &'static str,
+        pin: i64,
+        last: u8,
+    },
+    #[error("вывод P{pin} расширителя «{expander}» уже занят блоком «{block}»")]
+    ExpanderPinBusy {
+        expander: String,
+        pin: i64,
+        block: String,
+    },
+}
+
+impl Project {
+    /// Adds a block of type `kind` with a generated id (`timer_on_1`, ...) and returns the id.
+    pub fn add_block(
+        &mut self,
+        lib: &Library,
+        kind: &str,
+        pos: BlockPos,
+    ) -> Result<String, EditError> {
+        if lib.get(kind).is_none() {
+            return Err(EditError::UnknownType(kind.to_owned()));
+        }
+        let id = (1..)
+            .map(|n| format!("{kind}_{n}"))
+            .find(|id| self.logic.block(id).is_none())
+            .expect("infinite range");
+        self.logic.blocks.push(Block {
+            id: id.clone(),
+            kind: kind.to_owned(),
+            ..Default::default()
+        });
+        self.layout.blocks.insert(id.clone(), pos);
+        Ok(id)
+    }
+
+    /// Adds a block for an MQTT topic taken from another project: a subscription
+    /// (`subscribe`, with the value type `kind`) or a publication. `None` when the project
+    /// already has such a block for the topic.
+    pub fn add_mqtt_topic(
+        &mut self,
+        lib: &Library,
+        topic: &str,
+        subscribe: bool,
+        kind: &str,
+        pos: BlockPos,
+    ) -> Result<Option<String>, EditError> {
+        let block_type = if subscribe {
+            "mqtt_subscribe"
+        } else {
+            "mqtt_publish"
+        };
+        let known = self.logic.blocks.iter().any(|b| {
+            b.kind == block_type
+                && b.params.get("topic") == Some(&ParamValue::Text(topic.to_owned()))
+        });
+        if known {
+            return Ok(None);
+        }
+        let id = self.add_block(lib, block_type, pos)?;
+        if let Some(b) = self.logic.blocks.iter_mut().find(|b| b.id == id) {
+            b.params
+                .insert("topic".into(), ParamValue::Text(topic.to_owned()));
+            if subscribe && kind != "string" {
+                b.params
+                    .insert("kind".into(), ParamValue::Text(kind.to_owned()));
+            }
+        }
+        Ok(Some(id))
+    }
+
+    /// Copies the MQTT client settings of another project into this one: the "MQTT client"
+    /// block is added when missing, and when the network is Wi-Fi the "Wi-Fi client" block is
+    /// switched on (added, or taken out of access-point-only mode). Returns what was done.
+    pub fn import_mqtt_settings(
+        &mut self,
+        lib: &Library,
+        settings: &BTreeMap<String, ParamValue>,
+        pos: BlockPos,
+    ) -> Result<Vec<String>, EditError> {
+        let mut done = Vec::new();
+        let id = match self.logic.blocks.iter().find(|b| b.kind == "mqtt") {
+            Some(b) => b.id.clone(),
+            None => {
+                done.push("добавлен блок «MQTT клиент»".to_owned());
+                self.add_block(lib, "mqtt", pos)?
+            }
+        };
+        if let Some(b) = self.logic.blocks.iter_mut().find(|b| b.id == id) {
+            for (k, v) in settings {
+                b.params.insert(k.clone(), v.clone());
+            }
+        }
+        done.push("настройки брокера перенесены".to_owned());
+        let wifi = !matches!(settings.get("net"), Some(ParamValue::Text(n)) if n != "wifi");
+        if wifi {
+            let existing = self
+                .logic
+                .blocks
+                .iter()
+                .find(|b| b.kind == "wifi")
+                .map(|b| (b.id.clone(), b.params.get("wifi_mode").cloned()));
+            match existing {
+                None => {
+                    let wpos = BlockPos {
+                        y: pos.y + 90.0,
+                        ..pos
+                    };
+                    self.add_block(lib, "wifi", wpos)?;
+                    done.push("включён Wi-Fi: добавлен блок «Wi-Fi клиент»".to_owned());
+                }
+                Some((wid, Some(ParamValue::Int(1)))) => {
+                    self.set_param(lib, &wid, "wifi_mode", Some(ParamValue::Int(0)))?;
+                    done.push("включён Wi-Fi: режим «Клиент» вместо точки доступа".to_owned());
+                }
+                Some(_) => {}
+            }
+        }
+        Ok(done)
+    }
+
+    /// Adds a block that reads (`write = false`) or writes a variable; the id is
+    /// derived from the variable name (`setpoint_r1`, `setpoint_w1`).
+    pub fn add_var_block(
+        &mut self,
+        var: &str,
+        write: bool,
+        pos: BlockPos,
+    ) -> Result<String, EditError> {
+        if self.logic.var(var).is_none() {
+            return Err(EditError::NoVar(var.to_owned()));
+        }
+        let (kind, suffix) = if write {
+            (VAR_SET, "w")
+        } else {
+            (VAR_GET, "r")
+        };
+        let id = (1..)
+            .map(|n| format!("{var}_{suffix}{n}"))
+            .find(|id| self.logic.block(id).is_none())
+            .expect("infinite range");
+        self.logic.blocks.push(Block {
+            id: id.clone(),
+            kind: kind.to_owned(),
+            params: [(VAR_PARAM.to_owned(), ParamValue::Text(var.to_owned()))].into(),
+            ..Default::default()
+        });
+        self.layout.blocks.insert(id.clone(), pos);
+        Ok(id)
+    }
+
+    /// Declares a new variable.
+    pub fn add_var(&mut self, var: Var) -> Result<(), EditError> {
+        self.validate_var(&var, None)?;
+        self.logic.vars.push(var);
+        Ok(())
+    }
+
+    /// Replaces a variable declaration (name, type, initial value, description).
+    /// Blocks using it follow a rename; links that no longer fit the new type stay
+    /// and are reported by the check.
+    pub fn update_var(&mut self, name: &str, mut var: Var) -> Result<(), EditError> {
+        let index = self.var_index(name)?;
+        // The dialog does not know about service variables: keep the flag.
+        var.service = self.logic.vars[index].service;
+        self.validate_var(&var, Some(name))?;
+        if var.name != name {
+            for block in &mut self.logic.blocks {
+                if block.var_name() == Some(name) {
+                    block
+                        .params
+                        .insert(VAR_PARAM.to_owned(), ParamValue::Text(var.name.clone()));
+                }
+            }
+        }
+        self.logic.vars[index] = var;
+        Ok(())
+    }
+
+    /// Removes a variable together with the blocks that read or write it.
+    pub fn remove_var(&mut self, name: &str) -> Result<(), EditError> {
+        let index = self.var_index(name)?;
+        self.logic.vars.remove(index);
+        let users: Vec<String> = self
+            .logic
+            .blocks
+            .iter()
+            .filter(|b| b.var_name() == Some(name))
+            .map(|b| b.id.clone())
+            .collect();
+        for id in users {
+            self.remove_block(&id)?;
+        }
+        Ok(())
+    }
+
+    /// Declares a new expander.
+    pub fn add_expander(&mut self, e: Expander) -> Result<(), EditError> {
+        self.validate_expander(&e, None)?;
+        self.logic.expanders.push(e);
+        Ok(())
+    }
+
+    /// Replaces an expander declaration. Blocks standing on it follow a rename; pins
+    /// that no longer fit the new chip stay and are reported by the check.
+    pub fn update_expander(&mut self, id: &str, e: Expander) -> Result<(), EditError> {
+        let index = self.expander_index(id)?;
+        self.validate_expander(&e, Some(id))?;
+        if e.id != id {
+            for block in &mut self.logic.blocks {
+                if block.expander.as_deref() == Some(id) {
+                    block.expander = Some(e.id.clone());
+                }
+            }
+        }
+        self.logic.expanders[index] = e;
+        Ok(())
+    }
+
+    /// Removes an expander that no block stands on.
+    pub fn remove_expander(&mut self, id: &str) -> Result<(), EditError> {
+        let index = self.expander_index(id)?;
+        let blocks: Vec<&str> = self
+            .logic
+            .blocks
+            .iter()
+            .filter(|b| b.expander.as_deref() == Some(id))
+            .map(|b| b.id.as_str())
+            .collect();
+        if !blocks.is_empty() {
+            return Err(EditError::ExpanderBusy {
+                id: id.to_owned(),
+                blocks: blocks.join(", "),
+            });
+        }
+        self.logic.expanders.remove(index);
+        Ok(())
+    }
+
+    /// Puts a block on pin `pin` of an expander, or (`None`) takes it off: the pin
+    /// parameter is then cleared, since the number meant a pin of the chip, not a GPIO.
+    pub fn set_block_expander(
+        &mut self,
+        lib: &Library,
+        id: &str,
+        target: Option<(&str, i64)>,
+    ) -> Result<(), EditError> {
+        // A copy of a tag stands where its tag stands.
+        let id = self.logic.tag_of(id).to_owned();
+        self.set_tag_expander(lib, &id, target)?;
+        self.logic.sync_tags();
+        Ok(())
+    }
+
+    fn set_tag_expander(
+        &mut self,
+        lib: &Library,
+        id: &str,
+        target: Option<(&str, i64)>,
+    ) -> Result<(), EditError> {
+        let def = self.block_def(lib, id)?;
+        let pin_param = crate::expander::pin_param(def)
+            .ok_or_else(|| EditError::ExpanderUnsupported(def.info.kind.clone()))?
+            .name
+            .clone();
+        let index = self.block_index(id)?;
+        let Some((name, pin)) = target else {
+            let block = &mut self.logic.blocks[index];
+            if block.expander.take().is_some() {
+                block.params.remove(&pin_param);
+            }
+            return Ok(());
+        };
+        if !def.info.expander {
+            return Err(EditError::ExpanderUnsupported(def.info.kind.clone()));
+        }
+        let e = self
+            .logic
+            .expander(name)
+            .ok_or_else(|| EditError::NoExpander(name.to_owned()))?;
+        if pin < 0 || pin >= i64::from(e.chip.pins()) {
+            return Err(EditError::ExpanderPinRange {
+                expander: name.to_owned(),
+                chip: e.chip.name(),
+                pin,
+                last: e.chip.pins() - 1,
+            });
+        }
+        if let Some((_, block)) = crate::expander::taken_pins(&self.logic, lib, name, Some(id))
+            .into_iter()
+            .find(|(p, _)| *p == pin)
+        {
+            return Err(EditError::ExpanderPinBusy {
+                expander: name.to_owned(),
+                pin,
+                block,
+            });
+        }
+        let block = &mut self.logic.blocks[index];
+        block.expander = Some(name.to_owned());
+        block.params.insert(pin_param, ParamValue::Int(pin));
+        Ok(())
+    }
+
+    fn expander_index(&self, id: &str) -> Result<usize, EditError> {
+        self.logic
+            .expanders
+            .iter()
+            .position(|e| e.id == id)
+            .ok_or_else(|| EditError::NoExpander(id.to_owned()))
+    }
+
+    fn validate_expander(&self, e: &Expander, old_id: Option<&str>) -> Result<(), EditError> {
+        if Some(e.id.as_str()) != old_id && self.logic.expander(&e.id).is_some() {
+            return Err(EditError::DuplicateExpander(e.id.clone()));
+        }
+        if let Some(problem) = e.problem() {
+            return Err(EditError::BadExpander(problem));
+        }
+        let clash = self.logic.expanders.iter().find(|o| {
+            Some(o.id.as_str()) != old_id
+                && o.address == e.address
+                && o.sda == e.sda
+                && o.scl == e.scl
+        });
+        if let Some(other) = clash {
+            return Err(EditError::BadExpander(format!(
+                "расширитель «{}»: адрес 0x{:02X} на этой шине уже занят расширителем «{}»",
+                e.id, e.address, other.id
+            )));
+        }
+        Ok(())
+    }
+
+    fn var_index(&self, name: &str) -> Result<usize, EditError> {
+        self.logic
+            .vars
+            .iter()
+            .position(|v| v.name == name)
+            .ok_or_else(|| EditError::NoVar(name.to_owned()))
+    }
+
+    fn validate_var(&self, var: &Var, old_name: Option<&str>) -> Result<(), EditError> {
+        if !crate::vars::is_valid_var_name(&var.name) {
+            return Err(EditError::InvalidVarName(var.name.clone()));
+        }
+        if Some(var.name.as_str()) != old_name && self.logic.var(&var.name).is_some() {
+            return Err(EditError::DuplicateVar(var.name.clone()));
+        }
+        if var.init.as_ref().is_some_and(|i| !var.ty.accepts(i)) {
+            return Err(EditError::BadInit(var.name.clone()));
+        }
+        Ok(())
+    }
+
+    /// A free spot on `sheet` for a block placed without coordinates (by AI or a
+    /// command): blocks go left to right in rows below the existing ones.
+    pub fn free_position(&self, sheet: u32) -> BlockPos {
+        let on_sheet: Vec<&BlockPos> = self
+            .layout
+            .blocks
+            .values()
+            .filter(|p| p.sheet == sheet)
+            .collect();
+        let bottom = on_sheet.iter().map(|p| p.y).fold(-120.0_f32, f32::max);
+        let row: Vec<&&BlockPos> = on_sheet.iter().filter(|p| p.y == bottom).collect();
+        let right = row.iter().map(|p| p.x).fold(-140.0_f32, f32::max);
+        if right + 140.0 < 1000.0 && !row.is_empty() {
+            BlockPos {
+                sheet,
+                x: right + 140.0,
+                y: bottom,
+            }
+        } else {
+            BlockPos {
+                sheet,
+                x: 40.0,
+                y: bottom + 120.0,
+            }
+        }
+    }
+
+    /// Sets the name, comment and task of a sheet; an entry with nothing set is removed.
+    pub fn set_sheet_info(&mut self, info: crate::SheetInfo) {
+        let sheets = &mut self.layout.sheets;
+        sheets.retain(|s| s.number != info.number);
+        if !info.name.is_empty() || !info.comment.is_empty() || info.background || info.disabled {
+            sheets.push(info);
+            sheets.sort_by_key(|s| s.number);
+        }
+    }
+
+    /// Swaps the places of two sheets: their blocks and their names/comments.
+    pub fn swap_sheets(&mut self, a: u32, b: u32) {
+        let swap = |n: &mut u32| {
+            if *n == a {
+                *n = b;
+            } else if *n == b {
+                *n = a;
+            }
+        };
+        self.layout
+            .blocks
+            .values_mut()
+            .for_each(|p| swap(&mut p.sheet));
+        self.layout
+            .sheets
+            .iter_mut()
+            .for_each(|s| swap(&mut s.number));
+        self.layout.sheets.sort_by_key(|s| s.number);
+    }
+
+    /// Deletes a sheet with all its blocks (and their links); other sheets keep their numbers.
+    pub fn delete_sheet(&mut self, sheet: u32) -> Result<(), EditError> {
+        let ids: Vec<String> = self
+            .layout
+            .blocks
+            .iter()
+            .filter(|(_, p)| p.sheet == sheet)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            self.remove_block(&id)?;
+        }
+        self.layout.sheets.retain(|s| s.number != sheet);
+        Ok(())
+    }
+
+    /// Removes a block with its links and position.
+    pub fn remove_block(&mut self, id: &str) -> Result<(), EditError> {
+        let index = self.block_index(id)?;
+        if self.hand_tag_to_copy(id) {
+            return Ok(());
+        }
+        // A deleted web widget leaves its links: the check reports them instead of the
+        // sheet being edited behind the author's back.
+        let widget = crate::project::is_web_kind(&self.logic.blocks[index].kind)
+            && self.logic.blocks[index].kind != "web_ui"
+            && self.logic.blocks[index].tag.is_none();
+        self.logic.blocks.remove(index);
+        if !widget {
+            self.logic
+                .links
+                .retain(|l| l.from.block != id && l.to.block != id);
+        }
+        self.layout.blocks.remove(id);
+        let prefix = format!("{id}.");
+        self.layout.wires.retain(|k, _| !k.starts_with(&prefix));
+        Ok(())
+    }
+
+    /// Renames a block, updating its links and position.
+    pub fn rename_block(&mut self, old: &str, new: &str) -> Result<(), EditError> {
+        let index = self.block_index(old)?;
+        if old == new {
+            return Ok(());
+        }
+        if !is_valid_ident(new) {
+            return Err(EditError::InvalidId(new.to_owned()));
+        }
+        if self.logic.block(new).is_some() {
+            return Err(EditError::DuplicateId(new.to_owned()));
+        }
+        self.logic.blocks[index].id = new.to_owned();
+        for block in &mut self.logic.blocks {
+            if block.tag.as_deref() == Some(old) {
+                block.tag = Some(new.to_owned());
+            }
+        }
+        for link in &mut self.logic.links {
+            for end in [&mut link.from, &mut link.to] {
+                if end.block == old {
+                    end.block = new.to_owned();
+                }
+            }
+        }
+        if let Some(pos) = self.layout.blocks.remove(old) {
+            self.layout.blocks.insert(new.to_owned(), pos);
+        }
+        let prefix = format!("{old}.");
+        let moved: Vec<String> = self
+            .layout
+            .wires
+            .keys()
+            .filter(|k| k.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for key in moved {
+            if let Some(route) = self.layout.wires.remove(&key) {
+                self.layout
+                    .wires
+                    .insert(format!("{new}.{}", &key[prefix.len()..]), route);
+            }
+        }
+        Ok(())
+    }
+
+    /// Changes the type of a block in place: id, position and links stay. Ports are
+    /// matched by name, then the remaining ones of the same direction in order when
+    /// their types fit; parameters keep their values when the new type has a
+    /// parameter of that name that accepts it. Returns the links that could not be
+    /// kept (`a.out -> b.in`), the parameters and the constants dropped.
+    pub fn replace_block(
+        &mut self,
+        lib: &Library,
+        id: &str,
+        kind: &str,
+    ) -> Result<Vec<String>, EditError> {
+        let index = self.block_index(id)?;
+        let old_block = self.logic.blocks[index].clone();
+        if old_block.var_name().is_some() || old_block.tag.is_some() {
+            return Err(EditError::ReplaceUnsupported(id.to_owned()));
+        }
+        let old_def = self.block_def(lib, id)?.clone();
+        let new_def = lib
+            .get(kind)
+            .ok_or_else(|| EditError::UnknownType(kind.to_owned()))?
+            .def
+            .clone();
+        if kind == VAR_GET || kind == VAR_SET {
+            return Err(EditError::ReplaceUnsupported(kind.to_owned()));
+        }
+
+        // Old port name -> new port name, per direction.
+        let map_ports = |old: &[crate::PortDef], new: &[crate::PortDef]| {
+            let mut map = std::collections::BTreeMap::new();
+            let mut used = std::collections::BTreeSet::new();
+            for p in old {
+                if new.iter().any(|q| q.name == p.name) {
+                    map.insert(p.name.clone(), p.name.clone());
+                    used.insert(p.name.clone());
+                }
+            }
+            for p in old {
+                if map.contains_key(&p.name) {
+                    continue;
+                }
+                if let Some(q) = new.iter().find(|q| !used.contains(&q.name) && p.ty == q.ty) {
+                    map.insert(p.name.clone(), q.name.clone());
+                    used.insert(q.name.clone());
+                }
+            }
+            map
+        };
+        let in_map = map_ports(&old_def.inputs, &new_def.inputs);
+        let out_map = map_ports(&old_def.outputs, &new_def.outputs);
+
+        let mut dropped = Vec::new();
+        let mut links = Vec::new();
+        for link in std::mem::take(&mut self.logic.links) {
+            let mut l = link.clone();
+            let mut keep = true;
+            if l.from.block == id {
+                match out_map.get(&l.from.port) {
+                    Some(p) => l.from.port = p.clone(),
+                    None => keep = false,
+                }
+            }
+            if l.to.block == id {
+                match in_map.get(&l.to.port) {
+                    Some(p) => l.to.port = p.clone(),
+                    None => keep = false,
+                }
+            }
+            if keep {
+                // Types of the new ends must still fit.
+                let out_ty = if l.from.block == id {
+                    new_def.output(&l.from.port).map(|p| p.ty)
+                } else {
+                    self.block_def(lib, &l.from.block)
+                        .ok()
+                        .and_then(|d| d.output(&l.from.port))
+                        .map(|p| p.ty)
+                };
+                let in_ty = if l.to.block == id {
+                    new_def.input(&l.to.port).map(|p| p.ty)
+                } else {
+                    self.block_def(lib, &l.to.block)
+                        .ok()
+                        .and_then(|d| d.input(&l.to.port))
+                        .map(|p| p.ty)
+                };
+                keep = matches!((out_ty, in_ty), (Some(a), Some(b)) if a.can_feed(b));
+            }
+            if keep {
+                links.push(l);
+            } else {
+                dropped.push(format!("{} -> {}", link.from, link.to));
+            }
+        }
+        self.logic.links = links;
+
+        // Routes of links into the block follow the renamed input ports.
+        let routes: Vec<(String, String)> = in_map
+            .iter()
+            .filter(|(a, b)| a != b)
+            .map(|(a, b)| (format!("{id}.{a}"), format!("{id}.{b}")))
+            .collect();
+        let moved: Vec<_> = routes
+            .iter()
+            .filter_map(|(a, b)| self.layout.wires.remove(a).map(|r| (b.clone(), r)))
+            .collect();
+        self.layout.wires.extend(moved);
+        let valid: std::collections::BTreeSet<String> = self
+            .logic
+            .links
+            .iter()
+            .map(|l| Layout::wire_key(&l.to))
+            .collect();
+        let prefix = format!("{id}.");
+        self.layout
+            .wires
+            .retain(|k, _| !k.starts_with(&prefix) || valid.contains(k));
+
+        let block = &mut self.logic.blocks[index];
+        block.kind = kind.to_owned();
+        let mut params = std::collections::BTreeMap::new();
+        for (name, value) in &old_block.params {
+            match new_def.param(name) {
+                Some(p) if p.kind.accepts(value) => {
+                    params.insert(name.clone(), value.clone());
+                }
+                _ => dropped.push(format!("{id}.{name}")),
+            }
+        }
+        block.params = params;
+        block.consts = old_block
+            .consts
+            .iter()
+            .filter_map(|(k, v)| in_map.get(k).map(|n| (n.clone(), v.clone())))
+            .collect();
+        block.inverted = old_block
+            .inverted
+            .iter()
+            .filter_map(|k| out_map.get(k).cloned())
+            .collect();
+        block.inverted_inputs = old_block
+            .inverted_inputs
+            .iter()
+            .filter_map(|k| in_map.get(k).cloned())
+            .collect();
+        block.bound = old_block
+            .bound
+            .iter()
+            .filter_map(|(k, v)| {
+                let n = in_map
+                    .get(k)
+                    .or_else(|| out_map.get(k))
+                    .or_else(|| new_def.param(k).map(|_| k))?;
+                Some((n.clone(), v.clone()))
+            })
+            .collect();
+        Ok(dropped)
+    }
+
+    /// Connects an output to an input. An existing link into the same input is replaced.
+    pub fn connect(&mut self, lib: &Library, from: PortRef, to: PortRef) -> Result<(), EditError> {
+        // A variable block reads or writes depending on the side the link comes to.
+        self.adapt_var_block(lib, &from.block, false)?;
+        self.adapt_var_block(lib, &to.block, true)?;
+        let out_ty = {
+            let def = self.block_def(lib, &from.block)?;
+            def.output(&from.port)
+                .ok_or_else(|| EditError::NoOutput {
+                    block: from.block.clone(),
+                    port: from.port.clone(),
+                })?
+                .ty
+        };
+        let in_ty = {
+            let def = self.block_def(lib, &to.block)?;
+            def.input(&to.port)
+                .ok_or_else(|| EditError::NoInput {
+                    block: to.block.clone(),
+                    port: to.port.clone(),
+                })?
+                .ty
+        };
+        if !out_ty.can_feed(in_ty) {
+            return Err(EditError::TypeMismatch { from, to });
+        }
+        self.logic.links.retain(|l| l.to != to);
+        self.layout.wires.remove(&Layout::wire_key(&to));
+        if let Some(b) = self.logic.blocks.iter_mut().find(|b| b.id == to.block) {
+            b.consts.remove(&to.port);
+        }
+        self.logic.links.push(Link { from, to });
+        Ok(())
+    }
+
+    /// Sets (or with `None` clears) the manual position of the middle segment of a link.
+    pub fn set_wire_bend(&mut self, to: &PortRef, bend: Option<f32>) {
+        self.change_wire(to, |w| w.bend = bend);
+    }
+
+    /// Breaks a link into two labelled stubs on the sheet, or joins it back.
+    pub fn set_wire_broken(&mut self, to: &PortRef, broken: bool) {
+        self.change_wire(to, |w| w.broken = broken);
+    }
+
+    fn change_wire(&mut self, to: &PortRef, f: impl FnOnce(&mut WireRoute)) {
+        let key = Layout::wire_key(to);
+        let mut route = self.layout.wires.get(&key).copied().unwrap_or_default();
+        f(&mut route);
+        if route == WireRoute::default() {
+            self.layout.wires.remove(&key);
+        } else {
+            self.layout.wires.insert(key, route);
+        }
+    }
+
+    /// Puts a constant on an input (dropping its link) or removes it (`None`).
+    pub fn set_input_const(
+        &mut self,
+        lib: &Library,
+        input: &PortRef,
+        value: Option<ParamValue>,
+    ) -> Result<(), EditError> {
+        let ty = self
+            .block_def(lib, &input.block)?
+            .input(&input.port)
+            .ok_or_else(|| EditError::NoInput {
+                block: input.block.clone(),
+                port: input.port.clone(),
+            })?
+            .ty;
+        let block = self.block_mut(&input.block)?;
+        match value {
+            Some(v) if !ty.accepts(&v) => return Err(EditError::BadValue(input.port.clone())),
+            Some(v) => {
+                block.consts.insert(input.port.clone(), v);
+                self.logic.links.retain(|l| &l.to != input);
+                self.layout.wires.remove(&Layout::wire_key(input));
+            }
+            None => {
+                block.consts.remove(&input.port);
+            }
+        }
+        Ok(())
+    }
+
+    /// Inverts a logical port (an output for all its links, or an input), or
+    /// stops inverting it.
+    pub fn set_port_inverted(
+        &mut self,
+        lib: &Library,
+        port: &PortRef,
+        output: bool,
+        on: bool,
+    ) -> Result<(), EditError> {
+        let def = self.block_def(lib, &port.block)?;
+        let ty = if output {
+            def.output(&port.port).ok_or_else(|| EditError::NoOutput {
+                block: port.block.clone(),
+                port: port.port.clone(),
+            })?
+        } else {
+            def.input(&port.port).ok_or_else(|| EditError::NoInput {
+                block: port.block.clone(),
+                port: port.port.clone(),
+            })?
+        }
+        .ty;
+        if ty != SignalType::Bool {
+            return Err(EditError::NotBool(port.clone()));
+        }
+        let block = self.block_mut(&port.block)?;
+        let set = if output {
+            &mut block.inverted
+        } else {
+            &mut block.inverted_inputs
+        };
+        if on {
+            set.insert(port.port.clone());
+        } else {
+            set.remove(&port.port);
+        }
+        Ok(())
+    }
+
+    fn block_mut(&mut self, id: &str) -> Result<&mut Block, EditError> {
+        self.logic
+            .blocks
+            .iter_mut()
+            .find(|b| b.id == id)
+            .ok_or_else(|| EditError::NoBlock(id.to_owned()))
+    }
+
+    /// Switches the write enable input `en` of one variable block. Turning it on
+    /// makes an unconnected read a write; a read with links cannot get it.
+    pub fn set_var_write_enable(
+        &mut self,
+        lib: &Library,
+        id: &str,
+        on: bool,
+    ) -> Result<(), EditError> {
+        let linked = self
+            .logic
+            .links
+            .iter()
+            .any(|l| l.from.block == id || l.to.block == id);
+        let service = self.is_var_fixed(lib, self.logic.block(id).and_then(|b| b.var_name()));
+        let block = self
+            .logic
+            .blocks
+            .iter_mut()
+            .find(|b| b.id == id)
+            .ok_or_else(|| EditError::NoBlock(id.to_owned()))?;
+        if block.var_name().is_none() {
+            return Err(EditError::NoBlock(id.to_owned()));
+        }
+        if on {
+            if block.kind == VAR_GET {
+                if service {
+                    return Err(EditError::VarFixed(id.to_owned()));
+                }
+                if linked {
+                    return Err(EditError::VarBothSides(id.to_owned()));
+                }
+                block.kind = VAR_SET.to_owned();
+            }
+            block
+                .params
+                .insert(WRITE_ENABLE.to_owned(), ParamValue::Bool(true));
+        } else {
+            block.params.remove(WRITE_ENABLE);
+            self.logic
+                .links
+                .retain(|l| !(l.to.block == id && l.to.port == "en"));
+        }
+        Ok(())
+    }
+
+    fn is_var_fixed(&self, lib: &Library, name: Option<&str>) -> bool {
+        name.is_some_and(|n| crate::vars::var_fixed(&self.logic, lib, n))
+    }
+
+    /// Turns a variable block into a reader or a writer before a link is attached;
+    /// allowed only while the block has no links.
+    fn adapt_var_block(&mut self, lib: &Library, id: &str, write: bool) -> Result<(), EditError> {
+        let want = if write { VAR_SET } else { VAR_GET };
+        let Some(block) = self.logic.block(id) else {
+            return Ok(());
+        };
+        if (block.kind != VAR_GET && block.kind != VAR_SET) || block.kind == want {
+            return Ok(());
+        }
+        if self.is_var_fixed(lib, block.var_name()) {
+            return Err(EditError::VarFixed(id.to_owned()));
+        }
+        // A write with the enable input stays a write.
+        if matches!(block.params.get(WRITE_ENABLE), Some(ParamValue::Bool(true))) {
+            return Err(EditError::VarWriteOnly(id.to_owned()));
+        }
+        if self
+            .logic
+            .links
+            .iter()
+            .any(|l| l.from.block == id || l.to.block == id)
+        {
+            return Err(EditError::VarBothSides(id.to_owned()));
+        }
+        if let Some(b) = self.logic.blocks.iter_mut().find(|b| b.id == id) {
+            b.kind = want.to_owned();
+            if !write {
+                b.params.remove(WRITE_ENABLE);
+            }
+        }
+        Ok(())
+    }
+
+    /// Removes the link into `to`. Returns whether there was one.
+    pub fn disconnect(&mut self, to: &PortRef) -> bool {
+        let before = self.logic.links.len();
+        self.logic.links.retain(|l| &l.to != to);
+        self.layout.wires.remove(&Layout::wire_key(to));
+        self.logic.links.len() != before
+    }
+
+    /// Sets a parameter; `None` removes it so the default applies.
+    pub fn set_param(
+        &mut self,
+        lib: &Library,
+        id: &str,
+        name: &str,
+        value: Option<ParamValue>,
+    ) -> Result<(), EditError> {
+        let def = self.block_def(lib, id)?;
+        let param = def.param(name).ok_or_else(|| EditError::NoParam {
+            block: id.to_owned(),
+            param: name.to_owned(),
+        })?;
+        if value
+            .as_ref()
+            .is_some_and(|v| !param.kind.accepts(v) || !param.allows(v))
+        {
+            return Err(EditError::BadValue(name.to_owned()));
+        }
+        // Parameters of a copy are its tag's.
+        let index = self.block_index(self.logic.tag_of(id))?;
+        let params = &mut self.logic.blocks[index].params;
+        match value {
+            Some(v) => params.insert(name.to_owned(), v),
+            None => params.remove(name),
+        };
+        self.logic.sync_tags();
+        Ok(())
+    }
+
+    /// Turns a parameter into an input of the block (the value is then read on every
+    /// scan) or back. Going back drops the links and the constant of that input.
+    pub fn set_param_input(
+        &mut self,
+        lib: &Library,
+        id: &str,
+        name: &str,
+        on: bool,
+    ) -> Result<(), EditError> {
+        let index = self.block_index(id)?;
+        let block = &self.logic.blocks[index];
+        let base = lib
+            .get(&block.kind)
+            .ok_or_else(|| EditError::UnknownType(block.kind.clone()))?;
+        let param = base.def.param(name).ok_or_else(|| EditError::NoParam {
+            block: id.to_owned(),
+            param: name.to_owned(),
+        })?;
+        let clash = base.def.input(name).is_some() || base.def.output(name).is_some();
+        if on && (crate::library::param_input_type(param).is_none() || clash) {
+            return Err(EditError::NotInputParam {
+                block: id.to_owned(),
+                param: name.to_owned(),
+            });
+        }
+        if on {
+            let block = &mut self.logic.blocks[index];
+            block.param_in.insert(name.to_owned());
+            block.bound.remove(name);
+        } else {
+            let port = PortRef::new(id, name);
+            let block = &mut self.logic.blocks[index];
+            block.param_in.remove(name);
+            block.consts.remove(name);
+            block.inverted_inputs.remove(name);
+            self.logic.links.retain(|l| l.to != port);
+            self.layout.wires.remove(&Layout::wire_key(&port));
+        }
+        Ok(())
+    }
+
+    /// Takes a port or a parameter of the block from a variable; `None` releases it.
+    pub fn bind(&mut self, id: &str, name: &str, var: Option<&str>) -> Result<(), EditError> {
+        let index = self.block_index(id)?;
+        match var {
+            Some(v) => {
+                if self.logic.var(v).is_none() {
+                    return Err(EditError::NoVar(v.to_owned()));
+                }
+                self.logic.blocks[index]
+                    .bound
+                    .insert(name.to_owned(), v.to_owned());
+            }
+            None => {
+                self.logic.blocks[index].bound.remove(name);
+            }
+        }
+        Ok(())
+    }
+
+    /// Name of the `use_<port>` / `out_<port>` switch of a port, when the block has one.
+    pub fn port_switch(&self, lib: &Library, id: &str, port: &str) -> Option<String> {
+        let block = self.logic.block(id)?;
+        let def = &lib.resolve(&self.logic, block)?.def;
+        ["use_", "out_"]
+            .iter()
+            .map(|prefix| format!("{prefix}{port}"))
+            .find(|n| def.param(n).is_some())
+    }
+
+    /// Turns the switch of a port on or off, when the block has one.
+    pub fn switch_port(
+        &mut self,
+        lib: &Library,
+        id: &str,
+        port: &str,
+        on: bool,
+    ) -> Result<(), EditError> {
+        match self.port_switch(lib, id, port) {
+            Some(name) => self.set_param(lib, id, &name, Some(ParamValue::Bool(on))),
+            None => Ok(()),
+        }
+    }
+
+    /// Releases service variables (taken out of Wi-Fi and the like) that no variable
+    /// block uses any more: the binding is dropped, the variable is deleted and the
+    /// port or parameter returns to the setting it had before.
+    pub fn release_unused_services(&mut self, lib: &Library) -> Result<(), EditError> {
+        let unused: Vec<String> = self
+            .logic
+            .vars
+            .iter()
+            .filter(|v| v.service)
+            .filter(|v| {
+                !self
+                    .logic
+                    .blocks
+                    .iter()
+                    .any(|b| b.var_name() == Some(&v.name))
+            })
+            .map(|v| v.name.clone())
+            .collect();
+        for name in unused {
+            let binders: Vec<(String, String)> = self
+                .logic
+                .blocks
+                .iter()
+                .flat_map(|b| {
+                    b.bound
+                        .iter()
+                        .filter(|(_, v)| **v == name)
+                        .map(|(port, _)| (b.id.clone(), port.clone()))
+                })
+                .collect();
+            let init = self.logic.var(&name).and_then(|v| v.init.clone());
+            for (id, port) in binders {
+                self.bind(&id, &port, None)?;
+                self.switch_port(lib, &id, &port, false)?;
+                // The `mode` input replaced the chosen mode: bring it back.
+                if port == "mode" && self.logic.block(&id).is_some_and(|b| b.kind == "wifi") {
+                    let mode = init.clone().filter(|v| matches!(v, ParamValue::Int(0..=2)));
+                    self.set_param(lib, &id, "wifi_mode", mode)?;
+                }
+            }
+            let index = self.var_index(&name)?;
+            self.logic.vars.remove(index);
+        }
+        Ok(())
+    }
+
+    /// Moves a block; blocks without a position get one.
+    pub fn move_block(&mut self, id: &str, pos: BlockPos) -> Result<(), EditError> {
+        self.block_index(id)?;
+        self.layout.blocks.insert(id.to_owned(), pos);
+        Ok(())
+    }
+
+    pub(crate) fn block_index(&self, id: &str) -> Result<usize, EditError> {
+        self.logic
+            .blocks
+            .iter()
+            .position(|b| b.id == id)
+            .ok_or_else(|| EditError::NoBlock(id.to_owned()))
+    }
+
+    fn block_def<'l>(&self, lib: &'l Library, id: &str) -> Result<&'l crate::BlockDef, EditError> {
+        let block = &self.logic.blocks[self.block_index(id)?];
+        lib.resolve(&self.logic, block)
+            .map(|b| &b.def)
+            .ok_or_else(|| EditError::UnknownType(block.kind.clone()))
+    }
+}
+
+/// Blocks copied to the clipboard: the blocks, links between them, the variables
+/// they use and positions relative to the top-left block. Serialized as JSON, so
+/// it can be pasted into another editor window or project.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Fragment {
+    #[serde(default)]
+    pub vars: Vec<Var>,
+    pub blocks: Vec<Block>,
+    #[serde(default)]
+    pub links: Vec<Link>,
+    /// Offsets from the top-left corner of the copied group, by block id.
+    #[serde(default)]
+    pub offsets: std::collections::BTreeMap<String, (f32, f32)>,
+}
+
+impl Fragment {
+    /// Marker so arbitrary clipboard text is not taken for blocks.
+    const TAG: &'static str = "crab-fragment";
+
+    pub fn to_clipboard(&self) -> String {
+        let mut v = serde_json::to_value(self).expect("fragment serializes");
+        v["format"] = Self::TAG.into();
+        serde_json::to_string_pretty(&v).expect("json")
+    }
+
+    /// Parses clipboard text; `None` when it is not a copied fragment.
+    pub fn from_clipboard(text: &str) -> Option<Self> {
+        let v: serde_json::Value = serde_json::from_str(text.trim()).ok()?;
+        if v.get("format")?.as_str()? != Self::TAG {
+            return None;
+        }
+        serde_json::from_value(v).ok()
+    }
+}
+
+impl Project {
+    /// Copies the given blocks with the links among them; unknown ids are skipped.
+    pub fn copy_fragment(&self, ids: &[String]) -> Fragment {
+        let blocks: Vec<Block> = self
+            .logic
+            .blocks
+            .iter()
+            .filter(|b| ids.contains(&b.id))
+            .cloned()
+            .collect();
+        let has = |id: &str| blocks.iter().any(|b| b.id == id);
+        let links = self
+            .logic
+            .links
+            .iter()
+            .filter(|l| has(&l.from.block) && has(&l.to.block))
+            .cloned()
+            .collect();
+        let mut vars: Vec<Var> = Vec::new();
+        for name in blocks.iter().filter_map(|b| b.var_name()) {
+            if let Some(v) = self.logic.var(name) {
+                if !vars.iter().any(|x| x.name == v.name) {
+                    vars.push(v.clone());
+                }
+            }
+        }
+        let pos: Vec<(&str, BlockPos)> = blocks
+            .iter()
+            .filter_map(|b| Some((b.id.as_str(), *self.layout.blocks.get(&b.id)?)))
+            .collect();
+        let min_x = pos.iter().map(|p| p.1.x).fold(f32::INFINITY, f32::min);
+        let min_y = pos.iter().map(|p| p.1.y).fold(f32::INFINITY, f32::min);
+        let offsets = pos
+            .iter()
+            .map(|(id, p)| ((*id).to_owned(), (p.x - min_x, p.y - min_y)))
+            .collect();
+        Fragment {
+            vars,
+            blocks,
+            links,
+            offsets,
+        }
+    }
+
+    /// Inserts a fragment with its top-left corner at `at` and returns the new ids.
+    /// Taken ids get a numeric suffix; missing variables are declared, existing
+    /// ones with the same name are reused.
+    pub fn paste_fragment(
+        &mut self,
+        lib: &Library,
+        frag: &Fragment,
+        at: BlockPos,
+    ) -> Result<Vec<String>, EditError> {
+        for b in &frag.blocks {
+            if b.var_name().is_none() && lib.get(&b.kind).is_none() {
+                return Err(EditError::UnknownType(b.kind.clone()));
+            }
+            if !is_valid_ident(&b.id) {
+                return Err(EditError::InvalidId(b.id.clone()));
+            }
+        }
+        for v in &frag.vars {
+            if self.logic.var(&v.name).is_none() {
+                self.add_var(v.clone())?;
+            }
+        }
+        let mut renamed = std::collections::BTreeMap::new();
+        let mut ids = Vec::new();
+        for b in &frag.blocks {
+            if let Some(name) = b.var_name() {
+                if self.logic.var(name).is_none() {
+                    return Err(EditError::NoVar(name.to_owned()));
+                }
+            }
+            let id = if self.logic.block(&b.id).is_none() {
+                b.id.clone()
+            } else {
+                let base = b.id.trim_end_matches(|c: char| c.is_ascii_digit());
+                let base = base.trim_end_matches('_');
+                (2..)
+                    .map(|n| format!("{base}_{n}"))
+                    .find(|id| self.logic.block(id).is_none())
+                    .expect("infinite range")
+            };
+            let (dx, dy) = frag.offsets.get(&b.id).copied().unwrap_or_default();
+            self.logic.blocks.push(Block {
+                id: id.clone(),
+                ..b.clone()
+            });
+            self.layout.blocks.insert(
+                id.clone(),
+                BlockPos {
+                    sheet: at.sheet,
+                    x: at.x + dx,
+                    y: at.y + dy,
+                },
+            );
+            renamed.insert(b.id.clone(), id.clone());
+            ids.push(id);
+        }
+        for l in &frag.links {
+            let (Some(from), Some(to)) = (renamed.get(&l.from.block), renamed.get(&l.to.block))
+            else {
+                continue;
+            };
+            self.connect(
+                lib,
+                PortRef::new(from, &l.from.port),
+                PortRef::new(to, &l.to.port),
+            )?;
+        }
+        Ok(ids)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{BlockDef, LibraryBlock, Logic, ProjectConfig};
+
+    fn library() -> Library {
+        let mut lib = Library::default();
+        for (kind, extra) in [
+            ("src", "[[output]]\nname = \"out\"\ntype = \"bool\"\n"),
+            ("num", "[[output]]\nname = \"out\"\ntype = \"float\"\n"),
+            (
+                "sink",
+                "[[input]]\nname = \"in\"\ntype = \"bool\"\n\
+                 [[param]]\nname = \"pin\"\ntype = \"pin\"\n",
+            ),
+        ] {
+            let def: BlockDef = toml::from_str(&format!(
+                "[block]\ntype = \"{kind}\"\nname = \"{kind}\"\ngroup = \"Тест\"\n{extra}"
+            ))
+            .unwrap();
+            lib.insert(LibraryBlock {
+                def,
+                dir: Default::default(),
+                inline_templates: Default::default(),
+            });
+        }
+        lib
+    }
+
+    fn expander_library() -> Library {
+        let mut lib = library();
+        let def: BlockDef = toml::from_str(
+            "[block]\ntype = \"dout\"\nname = \"dout\"\ngroup = \"Тест\"\nexpander = true\n\
+             [[param]]\nname = \"pin\"\ntype = \"pin\"\nmode = \"out\"\n",
+        )
+        .unwrap();
+        lib.insert(LibraryBlock {
+            def,
+            dir: Default::default(),
+            inline_templates: Default::default(),
+        });
+        lib
+    }
+
+    fn project() -> Project {
+        let config: ProjectConfig =
+            toml::from_str("[project]\nname = \"t\"\n[board]\nfqbn = \"x:y:z\"\n").unwrap();
+        Project {
+            path: Default::default(),
+            config,
+            logic: Logic::default(),
+            layout: Default::default(),
+        }
+    }
+
+    const POS: BlockPos = BlockPos {
+        sheet: 1,
+        x: 0.0,
+        y: 0.0,
+    };
+
+    #[test]
+    fn parameter_becomes_input_and_back() {
+        let mut lib = library();
+        let def: BlockDef = toml::from_str(
+            "[block]
+type = \"tmr\"
+name = \"tmr\"
+group = \"Тест\"
+[[input]]
+name = \"in\"
+type = \"bool\"
+[[output]]
+name = \"q\"
+type = \"bool\"
+[[param]]
+name = \"delay\"
+type = \"duration\"
+default = \"2s\"
+[[param]]
+name = \"size\"
+type = \"int\"
+default = 4
+static = true
+[[param]]
+name = \"pin\"
+type = \"pin\"
+",
+        )
+        .unwrap();
+        lib.insert(LibraryBlock {
+            def,
+            dir: Default::default(),
+            inline_templates: Default::default(),
+        });
+        let mut p = project();
+        let src = p.add_block(&lib, "src", POS).unwrap();
+        let tmr = p.add_block(&lib, "tmr", POS).unwrap();
+
+        assert!(p.set_param_input(&lib, &tmr, "size", true).is_err());
+        assert!(p.set_param_input(&lib, &tmr, "pin", true).is_err());
+        assert!(p.set_param_input(&lib, &tmr, "nope", true).is_err());
+
+        p.set_param_input(&lib, &tmr, "delay", true).unwrap();
+        let def = &lib
+            .resolve(&p.logic, p.logic.block(&tmr).unwrap())
+            .unwrap()
+            .def;
+        let input = def.input("delay").expect("input appeared");
+        assert_eq!(input.ty, SignalType::Int);
+        // The parameter value became the default, in milliseconds.
+        assert_eq!(input.default, Some(ParamValue::Int(2000)));
+        // Other blocks of the type are untouched.
+        assert!(lib.get("tmr").unwrap().def.input("delay").is_none());
+
+        p.connect(&lib, PortRef::new(&src, "out"), PortRef::new(&tmr, "delay"))
+            .ok();
+        p.set_param_input(&lib, &tmr, "delay", false).unwrap();
+        let def = &lib
+            .resolve(&p.logic, p.logic.block(&tmr).unwrap())
+            .unwrap()
+            .def;
+        assert!(def.input("delay").is_none());
+        assert!(p.logic.links.iter().all(|l| l.to.port != "delay"));
+        assert!(p.logic.block(&tmr).unwrap().param_in.is_empty());
+    }
+
+    #[test]
+    fn replace_keeps_links_and_matches_ports_by_order() {
+        let mut lib = library();
+        for (kind, body) in [
+            (
+                "sink2",
+                "[[input]]
+name = \"x\"
+type = \"bool\"
+[[param]]
+name = \"pin\"
+type = \"pin\"
+",
+            ),
+            (
+                "flt",
+                "[[input]]
+name = \"in\"
+type = \"float\"
+",
+            ),
+        ] {
+            let def: BlockDef = toml::from_str(&format!(
+                "[block]
+type = \"{kind}\"
+name = \"{kind}\"
+group = \"Тест\"
+{body}"
+            ))
+            .unwrap();
+            lib.insert(LibraryBlock {
+                def,
+                dir: Default::default(),
+                inline_templates: Default::default(),
+            });
+        }
+        let mut p = project();
+        let src = p.add_block(&lib, "src", POS).unwrap();
+        let sink = p.add_block(&lib, "sink", POS).unwrap();
+        p.connect(&lib, PortRef::new(&src, "out"), PortRef::new(&sink, "in"))
+            .unwrap();
+        p.logic.blocks[1]
+            .params
+            .insert("pin".into(), ParamValue::Int(5));
+        p.logic.blocks[1].inverted_inputs.insert("in".into());
+
+        // Different input name: the lone bool input takes the link over.
+        let dropped = p.replace_block(&lib, &sink, "sink2").unwrap();
+        assert!(dropped.is_empty());
+        let b = p.logic.block(&sink).unwrap();
+        assert_eq!(b.kind, "sink2");
+        assert_eq!(b.params.get("pin"), Some(&ParamValue::Int(5)));
+        assert!(b.inverted_inputs.contains("x"));
+        assert_eq!(p.logic.links[0].to, PortRef::new(&sink, "x"));
+        assert!(p.layout.blocks.contains_key(&sink));
+
+        // A float input does not take a bool: the link is reported and dropped.
+        let dropped = p.replace_block(&lib, &sink, "flt").unwrap();
+        assert_eq!(dropped.len(), 2, "{dropped:?}");
+        assert!(p.logic.links.is_empty());
+        assert!(p.replace_block(&lib, &sink, "nope").is_err());
+    }
+
+    #[test]
+    fn add_generates_ids() {
+        let lib = library();
+        let mut p = project();
+        assert_eq!(p.add_block(&lib, "src", POS).unwrap(), "src_1");
+        assert_eq!(p.add_block(&lib, "src", POS).unwrap(), "src_2");
+        p.remove_block("src_1").unwrap();
+        assert_eq!(p.add_block(&lib, "src", POS).unwrap(), "src_1");
+        assert!(p.add_block(&lib, "nope", POS).is_err());
+        assert_eq!(p.layout.blocks.len(), 2);
+    }
+
+    #[test]
+    fn connect_replaces_and_validates() {
+        let lib = library();
+        let mut p = project();
+        let a = p.add_block(&lib, "src", POS).unwrap();
+        let b = p.add_block(&lib, "src", POS).unwrap();
+        let n = p.add_block(&lib, "num", POS).unwrap();
+        let s = p.add_block(&lib, "sink", POS).unwrap();
+        let input = PortRef::new(&s, "in");
+        p.connect(&lib, PortRef::new(&a, "out"), input.clone())
+            .unwrap();
+        p.connect(&lib, PortRef::new(&b, "out"), input.clone())
+            .unwrap();
+        assert_eq!(p.logic.links.len(), 1);
+        assert_eq!(p.logic.links[0].from.block, b);
+        assert!(matches!(
+            p.connect(&lib, PortRef::new(&n, "out"), input.clone()),
+            Err(EditError::TypeMismatch { .. })
+        ));
+        assert!(p
+            .connect(&lib, PortRef::new(&s, "in"), PortRef::new(&a, "out"))
+            .is_err());
+        assert!(p.disconnect(&input));
+        assert!(!p.disconnect(&input));
+    }
+
+    #[test]
+    fn constant_and_link_replace_each_other() {
+        let lib = library();
+        let mut p = project();
+        let a = p.add_block(&lib, "src", POS).unwrap();
+        let s = p.add_block(&lib, "sink", POS).unwrap();
+        let input = PortRef::new(&s, "in");
+        p.connect(&lib, PortRef::new(&a, "out"), input.clone())
+            .unwrap();
+        p.set_input_const(&lib, &input, Some(ParamValue::Bool(true)))
+            .unwrap();
+        assert!(p.logic.links.is_empty());
+        assert!(matches!(
+            p.set_input_const(&lib, &input, Some(ParamValue::Float(1.0))),
+            Err(EditError::BadValue(_))
+        ));
+        p.connect(&lib, PortRef::new(&a, "out"), input.clone())
+            .unwrap();
+        assert!(p.logic.block(&s).unwrap().consts.is_empty());
+    }
+
+    #[test]
+    fn only_logical_ports_invert() {
+        let lib = library();
+        let mut p = project();
+        let a = p.add_block(&lib, "src", POS).unwrap();
+        let n = p.add_block(&lib, "num", POS).unwrap();
+        let s = p.add_block(&lib, "sink", POS).unwrap();
+        p.set_port_inverted(&lib, &PortRef::new(&a, "out"), true, true)
+            .unwrap();
+        p.set_port_inverted(&lib, &PortRef::new(&s, "in"), false, true)
+            .unwrap();
+        assert!(p.logic.block(&a).unwrap().inverted.contains("out"));
+        assert!(p.logic.block(&s).unwrap().inverted_inputs.contains("in"));
+        assert!(matches!(
+            p.set_port_inverted(&lib, &PortRef::new(&n, "out"), true, true),
+            Err(EditError::NotBool(_))
+        ));
+        // Saved and loaded back unchanged.
+        let text = toml::to_string(&p.logic).unwrap();
+        assert_eq!(toml::from_str::<Logic>(&text).unwrap(), p.logic);
+    }
+
+    #[test]
+    fn rename_and_remove_keep_links_consistent() {
+        let lib = library();
+        let mut p = project();
+        let a = p.add_block(&lib, "src", POS).unwrap();
+        let s = p.add_block(&lib, "sink", POS).unwrap();
+        p.connect(&lib, PortRef::new(&a, "out"), PortRef::new(&s, "in"))
+            .unwrap();
+        p.rename_block(&a, "button").unwrap();
+        assert_eq!(p.logic.links[0].from, PortRef::new("button", "out"));
+        assert!(p.layout.blocks.contains_key("button"));
+        assert_eq!(
+            p.rename_block("button", &s),
+            Err(EditError::DuplicateId(s.clone()))
+        );
+        assert!(p.rename_block("button", "a b").is_err());
+        p.remove_block("button").unwrap();
+        assert!(p.logic.links.is_empty());
+    }
+
+    #[test]
+    fn manual_route_follows_its_link() {
+        let lib = library();
+        let mut p = project();
+        let a = p.add_block(&lib, "src", POS).unwrap();
+        let s = p.add_block(&lib, "sink", POS).unwrap();
+        let to = PortRef::new(&s, "in");
+        p.connect(&lib, PortRef::new(&a, "out"), to.clone())
+            .unwrap();
+        p.set_wire_bend(&to, Some(120.0));
+        assert_eq!(p.layout.wires[&format!("{s}.in")].bend, Some(120.0));
+        // Renaming the target carries the route along.
+        p.rename_block(&s, "target").unwrap();
+        assert!(p.layout.wires.contains_key("target.in"));
+        // A new link into the input starts with the automatic route.
+        let to = PortRef::new("target", "in");
+        p.connect(&lib, PortRef::new(&a, "out"), to.clone())
+            .unwrap();
+        assert!(p.layout.wires.is_empty());
+        p.set_wire_bend(&to, Some(60.0));
+        assert!(p.disconnect(&to));
+        assert!(p.layout.wires.is_empty());
+        p.set_wire_bend(&to, Some(60.0));
+        p.remove_block("target").unwrap();
+        assert!(p.layout.wires.is_empty());
+        // Breaking a link keeps only the flag; joining it again leaves nothing behind.
+        p.set_wire_broken(&to, true);
+        assert!(p.layout.wires["target.in"].broken);
+        p.set_wire_broken(&to, false);
+        assert!(p.layout.wires.is_empty());
+    }
+
+    #[test]
+    fn variables() {
+        let mut p = project();
+        let var = |name: &str| Var {
+            name: name.into(),
+            ty: crate::VarType::Float,
+            init: Some(ParamValue::Float(1.5)),
+            description: String::new(),
+            retain: false,
+            service: false,
+        };
+        p.add_var(var("t")).unwrap();
+        assert_eq!(
+            p.add_var(var("t")),
+            Err(EditError::DuplicateVar("t".into()))
+        );
+        assert!(p.add_var(var(" t")).is_err());
+        let r = p.add_var_block("t", false, POS).unwrap();
+        let w = p.add_var_block("t", true, POS).unwrap();
+        assert_eq!((r.as_str(), w.as_str()), ("t_r1", "t_w1"));
+        assert!(p.add_var_block("nope", false, POS).is_err());
+
+        p.update_var("t", var("temp")).unwrap();
+        assert!(p.logic.blocks.iter().all(|b| b.var_name() == Some("temp")));
+        let mut bad = var("temp");
+        bad.ty = crate::VarType::Bool;
+        assert_eq!(
+            p.update_var("temp", bad),
+            Err(EditError::BadInit("temp".into()))
+        );
+
+        p.remove_var("temp").unwrap();
+        assert!(p.logic.vars.is_empty() && p.logic.blocks.is_empty());
+    }
+
+    #[test]
+    fn var_block_side_decides_access() {
+        let lib = library();
+        let mut p = project();
+        p.add_var(Var {
+            name: "on".into(),
+            ty: crate::VarType::Bool,
+            init: None,
+            description: String::new(),
+            retain: false,
+            service: false,
+        })
+        .unwrap();
+        let src = p.add_block(&lib, "src", POS).unwrap();
+        let sink = p.add_block(&lib, "sink", POS).unwrap();
+        let tag = p.add_var_block("on", false, POS).unwrap();
+        // Link into the reader turns it into a writer.
+        p.connect(&lib, PortRef::new(&src, "out"), PortRef::new(&tag, "in"))
+            .unwrap();
+        assert_eq!(p.logic.block(&tag).unwrap().kind, VAR_SET);
+        // Now the output side is taken by the write.
+        assert_eq!(
+            p.connect(&lib, PortRef::new(&tag, "out"), PortRef::new(&sink, "in")),
+            Err(EditError::VarBothSides(tag.clone()))
+        );
+        p.disconnect(&PortRef::new(&tag, "in"));
+        p.connect(&lib, PortRef::new(&tag, "out"), PortRef::new(&sink, "in"))
+            .unwrap();
+        assert_eq!(p.logic.block(&tag).unwrap().kind, VAR_GET);
+    }
+
+    #[test]
+    fn service_var_block_is_one_directional() {
+        let lib = library();
+        let mut p = project();
+        p.add_var(Var {
+            name: "svc".into(),
+            ty: crate::VarType::Bool,
+            init: None,
+            description: String::new(),
+            retain: false,
+            service: true,
+        })
+        .unwrap();
+        let src = p.add_block(&lib, "src", POS).unwrap();
+        let sink = p.add_block(&lib, "sink", POS).unwrap();
+        let bound = p.add_block(&lib, "src", POS).unwrap();
+        p.bind(&bound, "out", Some("svc")).unwrap();
+        let tag = p.add_var_block("svc", false, POS).unwrap();
+        assert_eq!(
+            p.connect(&lib, PortRef::new(&src, "out"), PortRef::new(&tag, "in")),
+            Err(EditError::VarFixed(tag.clone()))
+        );
+        p.connect(&lib, PortRef::new(&tag, "out"), PortRef::new(&sink, "in"))
+            .unwrap();
+        assert_eq!(p.logic.block(&tag).unwrap().kind, VAR_GET);
+    }
+
+    #[test]
+    fn write_enable_per_block() {
+        let lib = library();
+        let mut p = project();
+        p.add_var(Var {
+            name: "on".into(),
+            ty: crate::VarType::Bool,
+            init: None,
+            description: String::new(),
+            retain: false,
+            service: false,
+        })
+        .unwrap();
+        let tag = p.add_var_block("on", false, POS).unwrap();
+        let other = p.add_var_block("on", false, POS).unwrap();
+        let inputs = |p: &Project, id: &str| {
+            let b = p.logic.block(id).unwrap();
+            lib.resolve(&p.logic, b).unwrap().def.inputs.len()
+        };
+        p.set_var_write_enable(&lib, &tag, true).unwrap();
+        assert_eq!(p.logic.block(&tag).unwrap().kind, VAR_SET);
+        assert_eq!(inputs(&p, &tag), 2);
+        assert_eq!(p.logic.block(&other).unwrap().kind, VAR_GET);
+        p.set_var_write_enable(&lib, &tag, false).unwrap();
+        assert_eq!(inputs(&p, &tag), 1);
+    }
+
+    #[test]
+    fn params() {
+        let lib = library();
+        let mut p = project();
+        let s = p.add_block(&lib, "sink", POS).unwrap();
+        p.set_param(&lib, &s, "pin", Some(ParamValue::Int(4)))
+            .unwrap();
+        assert_eq!(p.logic.blocks[0].params["pin"], ParamValue::Int(4));
+        assert!(p
+            .set_param(&lib, &s, "pin", Some(ParamValue::Bool(true)))
+            .is_err());
+        assert!(p.set_param(&lib, &s, "speed", None).is_err());
+        p.set_param(&lib, &s, "pin", None).unwrap();
+        assert!(p.logic.blocks[0].params.is_empty());
+    }
+
+    #[test]
+    fn copy_paste_fragment() {
+        let lib = library();
+        let mut p = project();
+        let a = p.add_block(&lib, "src", POS).unwrap();
+        let b = p
+            .add_block(&lib, "sink", BlockPos { x: 100.0, ..POS })
+            .unwrap();
+        p.connect(&lib, PortRef::new(&a, "out"), PortRef::new(&b, "in"))
+            .unwrap();
+        let frag = p.copy_fragment(&[a.clone(), b.clone()]);
+        let text = frag.to_clipboard();
+        assert_eq!(Fragment::from_clipboard(&text), Some(frag.clone()));
+        assert!(Fragment::from_clipboard("{}").is_none());
+
+        let at = BlockPos {
+            sheet: 2,
+            x: 40.0,
+            y: 60.0,
+        };
+        let ids = p.paste_fragment(&lib, &frag, at).unwrap();
+        assert_eq!(ids, ["src_2", "sink_2"]);
+        assert_eq!(p.logic.links.len(), 2);
+        assert_eq!(p.layout.blocks["sink_2"].x, 140.0);
+        assert_eq!(p.layout.blocks["sink_2"].sheet, 2);
+
+        // Into another project, keeping ids.
+        let mut q = project();
+        assert_eq!(q.paste_fragment(&lib, &frag, POS).unwrap(), [a, b]);
+    }
+
+    #[test]
+    fn expander_commands() {
+        use crate::ExpanderChip;
+        let lib = expander_library();
+        let mut p = project();
+        p.add_expander(Expander::new("relays", ExpanderChip::Pcf8574, 0x20))
+            .unwrap();
+        // the same id, a clashing address, a wrong address
+        for bad in [
+            Expander::new("relays", ExpanderChip::Pcf8574, 0x21),
+            Expander::new("other", ExpanderChip::Pcf8575, 0x20),
+            Expander::new("far", ExpanderChip::Pcf8574, 0x50),
+        ] {
+            assert!(p.add_expander(bad).is_err());
+        }
+        let a = p.add_block(&lib, "dout", POS).unwrap();
+        let b = p.add_block(&lib, "dout", POS).unwrap();
+        p.set_block_expander(&lib, &a, Some(("relays", 3))).unwrap();
+        assert_eq!(
+            p.logic.block(&a).unwrap().expander.as_deref(),
+            Some("relays")
+        );
+        assert_eq!(p.logic.block(&a).unwrap().params["pin"], ParamValue::Int(3));
+        // taken, out of range, unknown, unsupported type
+        assert!(matches!(
+            p.set_block_expander(&lib, &b, Some(("relays", 3))),
+            Err(EditError::ExpanderPinBusy { .. })
+        ));
+        assert!(matches!(
+            p.set_block_expander(&lib, &b, Some(("relays", 8))),
+            Err(EditError::ExpanderPinRange { .. })
+        ));
+        assert!(matches!(
+            p.set_block_expander(&lib, &b, Some(("nope", 1))),
+            Err(EditError::NoExpander(_))
+        ));
+        let sink = p.add_block(&lib, "sink", POS).unwrap();
+        assert!(matches!(
+            p.set_block_expander(&lib, &sink, Some(("relays", 1))),
+            Err(EditError::ExpanderUnsupported(_))
+        ));
+        // a block may re-take its own pin
+        p.set_block_expander(&lib, &a, Some(("relays", 3))).unwrap();
+
+        // rename follows, removal is refused while a block stands on the chip
+        let mut renamed = p.logic.expander("relays").unwrap().clone();
+        renamed.id = "lamps".into();
+        p.update_expander("relays", renamed).unwrap();
+        assert_eq!(
+            p.logic.block(&a).unwrap().expander.as_deref(),
+            Some("lamps")
+        );
+        assert!(matches!(
+            p.remove_expander("lamps"),
+            Err(EditError::ExpanderBusy { .. })
+        ));
+        // taking the block off clears the chip pin number
+        p.set_block_expander(&lib, &a, None).unwrap();
+        assert_eq!(p.logic.block(&a).unwrap().expander, None);
+        assert!(!p.logic.block(&a).unwrap().params.contains_key("pin"));
+        p.remove_expander("lamps").unwrap();
+        assert!(p.logic.expanders.is_empty());
+    }
+}

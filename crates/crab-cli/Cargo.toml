@@ -1,0 +1,19 @@
+[package]
+name = "crab-cli"
+description = "Command line of CrabLogic: check / gen / build / upload"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "crablogic"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+crab-build = { path = "../crab-build" }
+crab-codegen = { path = "../crab-codegen" }
+crab-core = { path = "../crab-core" }
+crab-pdf = { path = "../crab-pdf" }
+crab-debug = { path = "../crab-debug", features = ["serial"] }
+crab-sim = { path = "../crab-sim" }
+serialport = { version = "4", default-features = false }

@@ -3,13 +3,13 @@
 ## Цель
 Закончить перенос ([шаг 4](../builtin-rust-blocks-4/spec.md)): `wifi`, `ethernet`, `mqtt`, `mqtt_publish`,
 `mqtt_subscribe`, `ntp` и все блоки `web_*` (`web_ui`, `web_net`, 15 виджетов) выдают C++ из Rust-типов
-`flp-blocks`; шаблонов `esp32.cpp.tmpl` у встроенных блоков не остаётся.
+`crab-blocks`; шаблонов `esp32.cpp.tmpl` у встроенных блоков не остаётся.
 
 ## Критерии готовности
 - У этих блоков нет шаблонов; скетчи `examples/` и снимки не изменились побайтно.
-- Побайтное сравнение со старым выводом на проектах со всеми виджетами, `system=true`, подменой `flpNet` (есть `web_net`), MQTT на Wi-Fi и Ethernet.
+- Побайтное сравнение со старым выводом на проектах со всеми виджетами, `system=true`, подменой `crabNet` (есть `web_net`), MQTT на Wi-Fi и Ethernet.
 - `CppCtx` знает привязку параметров (`bound`) и значения-флаги (`flag_code`).
-- Предпросмотр страницы в `flp-web` берёт HTML из кода блока (`flp_blocks::device_page`).
+- Предпросмотр страницы в `crab-web` берёт HTML из кода блока (`crab_blocks::device_page`).
 - Справка, `library/README.md`, новости, архитектура обновлены.
 
 ## Вне задачи

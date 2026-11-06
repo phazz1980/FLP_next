@@ -1,0 +1,16 @@
+[package]
+name = "crab-ai"
+description = "Shared command set for the AI assistant and the MCP server of CrabLogic"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+crab-build = { path = "../crab-build" }
+crab-codegen = { path = "../crab-codegen" }
+crab-core = { path = "../crab-core" }
+crab-pdf = { path = "../crab-pdf" }
+crab-debug = { path = "../crab-debug", features = ["serial"] }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+ureq = { version = "2", features = ["json"] }

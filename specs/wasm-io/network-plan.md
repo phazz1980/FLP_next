@@ -16,10 +16,10 @@
 Адрес текстом модуль получает из IP (op 3, поле 4) через `text` op 11.
 
 ## Затронутые файлы
-- `master.ino`: секция `FLP_NET`, `P_NET`, `h_net`, задача `hardware`.
-- `flp-build/master.rs`: `MasterFeatures.net`, библиотеки из `libs/` передаются и для сети.
-- `flp-codegen/src/wasm/net.rs` (новый): блоки `wifi` и `ntp`; `HW_NET` в `HW_NAMES`.
-- `flp-sim/src/mcu.rs`: заглушка `net` (настройки, поля, время), тест с `compare`.
+- `master.ino`: секция `CRAB_NET`, `P_NET`, `h_net`, задача `hardware`.
+- `crab-build/master.rs`: `MasterFeatures.net`, библиотеки из `libs/` передаются и для сети.
+- `crab-codegen/src/wasm/net.rs` (новый): блоки `wifi` и `ntp`; `HW_NET` в `HW_NAMES`.
+- `crab-sim/src/mcu.rs`: заглушка `net` (настройки, поля, время), тест с `compare`.
 - `examples/net_wasm`, `docs.md` блоков `wifi`/`ntp`, `help/05-build.md`.
 
 ## Риски

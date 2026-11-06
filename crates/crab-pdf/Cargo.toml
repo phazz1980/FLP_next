@@ -1,0 +1,9 @@
+[package]
+name = "crab-pdf"
+description = "Picture of all sheets of an CrabLogic project as PDF"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+crab-core = { path = "../crab-core" }
+thiserror.workspace = true

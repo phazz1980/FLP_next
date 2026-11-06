@@ -2,7 +2,7 @@
 //! The count starts at zero on the scan where the input rises, like the C++ template does.
 #![no_std]
 
-#[link(wasm_import_module = "flp")]
+#[link(wasm_import_module = "crab")]
 extern "C" {
     fn input(i: i32) -> f64;
     fn param(i: i32) -> f64;

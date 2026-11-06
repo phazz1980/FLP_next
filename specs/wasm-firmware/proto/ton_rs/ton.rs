@@ -1,7 +1,7 @@
 //! TON (on-delay timer) as a no_std WASM block: input 0 = in, param 0 = time (ms), output 0 = out.
 #![no_std]
 
-#[link(wasm_import_module = "flp")]
+#[link(wasm_import_module = "crab")]
 extern "C" {
     fn input(i: i32) -> f64;
     fn param(i: i32) -> f64;

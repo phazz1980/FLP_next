@@ -1,6 +1,6 @@
 /target
 # Per-project build cache (persistent build folder of arduino-cli)
-.flp/
+.crab/
 
 # Bundled Arduino libraries (FLProg_Network, Modbus...), kept locally
 /Flprog_Network/
@@ -10,3 +10,4 @@
 
 # Local zig compiler for block simulation
 /tools/
+.flp/

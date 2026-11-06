@@ -1,11 +1,11 @@
-﻿# Release build of FLP_next and assembly of the distribution folder and archive.
+﻿# Release build of CrabLogic and assembly of the distribution folder and archive.
 # Usage: build.cmd (double-click) or `powershell -File scripts\build-dist.ps1 [-NoZip]`.
 param([switch]$NoZip, [switch]$WithCore)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$dist = Join-Path $root 'dist\FLP_next'
-$zip = Join-Path $root 'dist\FLP_next.zip'
+$dist = Join-Path $root 'dist\CrabLogic'
+$zip = Join-Path $root 'dist\CrabLogic.zip'
 $bins = 'crablogic-editor.exe', 'crablogic-mcp.exe', 'crablogic-web.exe', 'crablogic.exe', 'crablogic-pdf.exe'
 
 # The editor running from dist is closed before the build and started again afterwards.
@@ -87,7 +87,7 @@ if ($running) {
     }
 }
 
-Write-Host '== Сборка папки dist\FLP_next ==' -ForegroundColor Cyan
+Write-Host '== Сборка папки dist\CrabLogic ==' -ForegroundColor Cyan
 New-Item -ItemType Directory -Force $dist | Out-Null
 foreach ($bin in $bins) {
     Copy-Item (Join-Path $root "target\release\$bin") $dist -Force
@@ -103,12 +103,12 @@ foreach ($dir in 'library', 'examples', 'libs') {
         Write-Host "Пропуск: нет папки $dir" -ForegroundColor Yellow
         continue
     }
-    # .flp holds per-project arduino-cli build caches: hundreds of MB, not for distribution.
-    & robocopy $src $dst /MIR /XD .flp /NFL /NDL /NJH /NJS /NP | Out-Null
+    # .crab holds per-project arduino-cli build caches: hundreds of MB, not for distribution.
+    & robocopy $src $dst /MIR /XD .crab /NFL /NDL /NJH /NJS /NP | Out-Null
     # robocopy: codes below 8 mean success.
     if ($LASTEXITCODE -ge 8) { Fail "не удалось скопировать $dir (robocopy $LASTEXITCODE)." }
     # Excluded dirs are also kept from purging, so drop ones left from earlier copies.
-    Get-ChildItem $dst -Recurse -Directory -Force -Filter .flp | Remove-Item -Recurse -Force
+    Get-ChildItem $dst -Recurse -Directory -Force -Filter .crab | Remove-Item -Recurse -Force
 }
 # -WithCore: the ESP32 core goes into esp32core (arduino-cli data folder) so builds work offline.
 if ($WithCore) {
@@ -119,7 +119,7 @@ if ($WithCore) {
     & robocopy $data (Join-Path $dist 'esp32core') /MIR /XD staging tmp /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { Fail "не удалось скопировать ядро (robocopy $LASTEXITCODE)." }
 }
-# arduino-cli is shipped next to the editor (flp-build looks for it beside the exe first).
+# arduino-cli is shipped next to the editor (crab-build looks for it beside the exe first).
 $cli = Get-Command arduino-cli.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
 if (-not $cli) {
     $pf = Join-Path $env:ProgramFiles 'Arduino CLIrduino-cli.exe'
@@ -133,7 +133,7 @@ if ($cli) {
 Copy-Item (Join-Path $PSScriptRoot 'dist-README.txt') (Join-Path $dist 'README.txt') -Force
 
 if (-not $NoZip) {
-    Write-Host '== Архив dist\FLP_next.zip ==' -ForegroundColor Cyan
+    Write-Host '== Архив dist\CrabLogic.zip ==' -ForegroundColor Cyan
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     if (Test-Path $zip) { Remove-Item $zip -Force }
     [System.IO.Compression.ZipFile]::CreateFromDirectory(

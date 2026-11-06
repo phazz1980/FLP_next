@@ -13,32 +13,32 @@
 //   swap <name>      reload the module from LittleFS      list      stats      log      del <name>
 #include <LittleFS.h>
 #include <esp_crc.h>
-// Drivers are compiled in only when the project needs them (FLP_SENSORS, FLP_PCF defined by the editor).
-#ifdef FLP_PCF
+// Drivers are compiled in only when the project needs them (CRAB_SENSORS, CRAB_PCF defined by the editor).
+#ifdef CRAB_PCF
 #include <Wire.h>
 #endif
-#ifdef FLP_SENSORS
+#ifdef CRAB_SENSORS
 #include <DHT.h>
 #include <DallasTemperature.h>
 #include <OneWire.h>
 #endif
 #include <wasm3.h>
 #include <m3_env.h>
-#ifdef FLP_MODBUS
+#ifdef CRAB_MODBUS
 // After wasm3: the Modbus library redefines names the sensor libraries use.
 #include "flprogUart.h"
 #include "flprogModbusRTU.h"
 #endif
-#ifdef FLP_NET
+#ifdef CRAB_NET
 #include "flprogNetwork.h"
-#ifdef FLP_MODBUS
+#ifdef CRAB_MODBUS
 #include "flprogModbusTCP.h"
 #endif
-#ifdef FLP_WEB
+#ifdef CRAB_WEB
 #include "flprogWebServer.h"
 #include <esp_mac.h>
 #include <Preferences.h>
-#ifdef FLP_WIFI
+#ifdef CRAB_WIFI
 #include <WiFi.h>
 #endif
 #endif
@@ -59,11 +59,11 @@ static const int kJournal = 24;
 enum { P_GPIO_READ = 1, P_GPIO_WRITE = 2, P_ADC = 4, P_PWM = 8, P_MILLIS = 16, P_SENSOR = 32,
        P_PCF_READ = 64, P_PCF_WRITE = 128, P_MODBUS = 256, P_UART = 512, P_TEXT = 1024, P_NET = 2048 };
 
-#if defined(FLP_SENSORS) || defined(FLP_PCF) || defined(FLP_MODBUS) || defined(FLP_NET)
-#define FLP_HWTASK 1
+#if defined(CRAB_SENSORS) || defined(CRAB_PCF) || defined(CRAB_MODBUS) || defined(CRAB_NET)
+#define CRAB_HWTASK 1
 #endif
 
-#ifdef FLP_SENSORS
+#ifdef CRAB_SENSORS
 // ---- sensors: one task polls them (a read blocks for milliseconds), modules take the last values ----
 enum { SENSOR_DS18B20 = 0, SENSOR_DHT22 = 1 };
 struct Sensor {
@@ -83,11 +83,11 @@ struct Sensor {
 static const int kMaxSensors = 8;
 static Sensor g_sensors[kMaxSensors];
 #endif
-#ifdef FLP_HWTASK
+#ifdef CRAB_HWTASK
 static SemaphoreHandle_t g_sensorLock;
 #endif
 
-#ifdef FLP_PCF
+#ifdef CRAB_PCF
 
 // ---- PCF8574 expanders on I2C: the same task talks to them, modules take the last byte / hand over a new one ----
 struct Pcf {
@@ -169,11 +169,11 @@ static bool inMem(IM3Runtime rt, int32_t ptr, int32_t len) {
 }
 
 // Typed access to the slots: the module asks for `_i` or `_f`, the bits stay as they are.
-#define FLP_SLOT_GET(fn, field, T, conv)   m3ApiRawFunction(fn) {     m3ApiReturnType(T);     m3ApiGetArg(int32_t, i);     m3ApiReturn((i >= 0 && i < 8) ? conv(slotOf(_ctx)->field[i]) : (T)0);   }
-FLP_SLOT_GET(h_input_i, inputs, int32_t, intOf)
-FLP_SLOT_GET(h_input_f, inputs, float, floatOf)
-FLP_SLOT_GET(h_param_i, params, int32_t, intOf)
-FLP_SLOT_GET(h_param_f, params, float, floatOf)
+#define CRAB_SLOT_GET(fn, field, T, conv)   m3ApiRawFunction(fn) {     m3ApiReturnType(T);     m3ApiGetArg(int32_t, i);     m3ApiReturn((i >= 0 && i < 8) ? conv(slotOf(_ctx)->field[i]) : (T)0);   }
+CRAB_SLOT_GET(h_input_i, inputs, int32_t, intOf)
+CRAB_SLOT_GET(h_input_f, inputs, float, floatOf)
+CRAB_SLOT_GET(h_param_i, params, int32_t, intOf)
+CRAB_SLOT_GET(h_param_f, params, float, floatOf)
 // The module reports the output and gets back the value to use: the forced one while forced.
 m3ApiRawFunction(h_output_i) {
   m3ApiReturnType(int32_t);
@@ -309,7 +309,7 @@ m3ApiRawFunction(h_millis) {
   m3ApiReturn((int32_t)millis());
 }
 
-#ifdef FLP_SENSORS
+#ifdef CRAB_SENSORS
 // ---- sensor access ----
 // key = kind | index << 4 | pin << 8
 static Sensor *sensorFor(int32_t key, uint32_t period) {
@@ -369,34 +369,34 @@ static void sensorPoll(Sensor &s, uint32_t now) {
 }
 
 #endif
-#ifdef FLP_PCF
+#ifdef CRAB_PCF
 static void pcfPoll(Pcf &c, uint32_t now);
 #endif
-#ifdef FLP_MODBUS
+#ifdef CRAB_MODBUS
 static void modbusPoll();
 #endif
-#ifdef FLP_NET
+#ifdef CRAB_NET
 static void netPoll();
 #endif
 
-#ifdef FLP_HWTASK
+#ifdef CRAB_HWTASK
 static void hwTask(void *) {
   for (;;) {
     uint32_t now = millis();
-#ifdef FLP_SENSORS
+#ifdef CRAB_SENSORS
     for (auto &s : g_sensors) {
       if (s.used) sensorPoll(s, now);
     }
 #endif
-#ifdef FLP_PCF
+#ifdef CRAB_PCF
     for (auto &c : g_pcf) {
       if (c.used) pcfPoll(c, now);
     }
 #endif
-#ifdef FLP_MODBUS
+#ifdef CRAB_MODBUS
     modbusPoll();
 #endif
-#ifdef FLP_NET
+#ifdef CRAB_NET
     netPoll();
 #endif
     vTaskDelay(pdMS_TO_TICKS(20));
@@ -404,7 +404,7 @@ static void hwTask(void *) {
 }
 #endif
 
-#ifdef FLP_SENSORS
+#ifdef CRAB_SENSORS
 m3ApiRawFunction(h_sensor_read) {
   m3ApiReturnType(float);
   m3ApiGetArg(int32_t, key);
@@ -417,7 +417,7 @@ m3ApiRawFunction(h_sensor_read) {
 }
 #endif
 
-#ifdef FLP_PCF
+#ifdef CRAB_PCF
 // ---- PCF8574 access ----
 static Pcf *pcfFor(int32_t key, bool writer, uint32_t period, uint8_t first) {
   Pcf *found = nullptr;
@@ -496,14 +496,14 @@ m3ApiRawFunction(h_pcf_write) {
 }
 #endif
 
-#ifdef FLP_MODBUS
+#ifdef CRAB_MODBUS
 // ---- Modbus RTU: the master task runs the protocol, modules read and write the tables ----
 // One call does it all: modbus(op, a, b, c, d); floats travel as their bits.
 //   op 0 setting: a = code, b = value; code 0 starts a new setting list, code 63 applies it (once per role)
 //   op 1 read:   a = slave address (master), b = table | kind << 4 | master << 8, c = register
 //   op 2 write:  as read, d = value
 //   op 3 status: a >= 0 slave of the master answers (1/0), a < 0 last error of our slave
-// Roles 3 (TCP master) and 4 (TCP slave) ride on a network interface and need FLP_NET; bit 9 of b in
+// Roles 3 (TCP master) and 4 (TCP slave) ride on a network interface and need CRAB_NET; bit 9 of b in
 // read/write/status marks a call to the TCP master (its server is always index 0, a = Unit ID).
 // TCP settings: 1 interface (0 Wi-Fi, 1 Ethernet), 2 port, 3 server IP (IPAddress bits, master only),
 // the rest as for RTU. The objects are created by modbusTcpPoll() once the interface is ready.
@@ -514,7 +514,7 @@ static FlprogUartExecutor g_mbUart;
 static ModbusMasterRTU *g_mbMaster = nullptr;
 static ModbusSlaveRTU *g_mbSlave = nullptr;
 static int32_t g_mb[64];
-#ifdef FLP_NET
+#ifdef CRAB_NET
 static ModbusMasterTCP *g_mbTcpMaster = nullptr;
 static ModbusSlaveTCP *g_mbTcpSlave = nullptr;
 static bool g_mbTcpWanted = false;  // settings of a TCP role are in g_mb, waiting for the network
@@ -525,7 +525,7 @@ static const uint8_t kMbTables[4] = {FLPROG_HOLDING_REGISTR, FLPROG_INPUT_REGIST
 #define MB_SETUP(o)   do {     (o)->setSpeedUart(g_mb[2]);     (o)->setParityUart(g_mb[3]);     if (g_mb[4] >= 0) (o)->setPinRxUart(g_mb[4]);     if (g_mb[5] >= 0) (o)->setPinTxUart(g_mb[5]);     if (g_mb[6] >= 0) (o)->setPinPeDe(g_mb[6]);   } while (0)
 
 static void modbusCommit() {
-#ifdef FLP_NET
+#ifdef CRAB_NET
   if ((g_mb[0] == 3 && !g_mbTcpMaster) || (g_mb[0] == 4 && !g_mbTcpSlave)) g_mbTcpWanted = true;
 #endif
   if (g_mb[0] == 1 && !g_mbMaster) {
@@ -556,7 +556,7 @@ static void modbusCommit() {
   }
 }
 
-#ifdef FLP_NET
+#ifdef CRAB_NET
 static void modbusTcpPoll();
 #endif
 
@@ -564,7 +564,7 @@ static void modbusPoll() {
   xSemaphoreTake(g_sensorLock, portMAX_DELAY);
   if (g_mbMaster) g_mbMaster->pool();
   if (g_mbSlave) g_mbSlave->pool();
-#ifdef FLP_NET
+#ifdef CRAB_NET
   modbusTcpPoll();
   if (g_mbTcpMaster) g_mbTcpMaster->pool();
   if (g_mbTcpSlave) g_mbTcpSlave->pool();
@@ -584,7 +584,7 @@ m3ApiRawFunction(h_modbus) {
   uint8_t table = kMbTables[b & 3];
   int kind = b >> 4 & 15;
   bool master = b >> 8 & 1;
-#ifdef FLP_NET
+#ifdef CRAB_NET
   bool tcp = b >> 9 & 1;
 #else
   bool tcp = false;
@@ -594,7 +594,7 @@ m3ApiRawFunction(h_modbus) {
     if (a == 63) modbusCommit();
     else if (a >= 0 && a < 63) g_mb[a] = b;
   } else if (op == 1) {
-#ifdef FLP_NET
+#ifdef CRAB_NET
     if (tcp && g_mbTcpMaster) {
       if (kind == 1) { float f = g_mbTcpMaster->readFloat(0, a, table, c); memcpy(&r, &f, 4); }
       else if (kind == 2) r = g_mbTcpMaster->readBool(0, a, table, c);
@@ -617,7 +617,7 @@ m3ApiRawFunction(h_modbus) {
   } else if (op == 2) {
     float f;
     memcpy(&f, &d, 4);
-#ifdef FLP_NET
+#ifdef CRAB_NET
     if (tcp && g_mbTcpMaster) {
       if (kind == 1) g_mbTcpMaster->saveFloat(0, a, f, table, c);
       else if (kind == 2) g_mbTcpMaster->saveBool(0, a, d != 0, table, c);
@@ -638,7 +638,7 @@ m3ApiRawFunction(h_modbus) {
       else g_mbSlave->saveInteger((int16_t)d, table, c);
     }
   } else if (op == 3) {
-#ifdef FLP_NET
+#ifdef CRAB_NET
     if (tcp && a >= 0) r = g_mbTcpMaster && g_mbTcpMaster->slaveStatus(0, a, false) ? 1 : 0;
     else if (tcp) r = g_mbTcpSlave ? g_mbTcpSlave->getLastError() : 0;
     else
@@ -651,7 +651,7 @@ m3ApiRawFunction(h_modbus) {
 }
 #endif
 
-#ifdef FLP_TEXT
+#ifdef CRAB_TEXT
 // ---- text operations over the module memory ----
 // text(op, out, cap, a, alen, b, blen); a string is (ptr, len), `cur` is where an append continues.
 //  1 append a to out at cur=b             2 append float (bits in a, alen decimals) at cur=b
@@ -775,7 +775,7 @@ m3ApiRawFunction(h_text) {
 }
 #endif
 
-#ifdef FLP_UART
+#ifdef CRAB_UART
 // ---- UART bytes of ports 1 and 2 (port 0 is the console of the master's own protocol) ----
 // uart(op, port, a, b):
 //   op 0 setting: a = code, b = value; code 0 starts the list, 63 starts the port (once)
@@ -841,10 +841,10 @@ m3ApiRawFunction(h_uart) {
 }
 #endif
 
-#ifdef FLP_NET
+#ifdef CRAB_NET
 // ---- Wi-Fi, Ethernet and NTP (FLProg_Network): modules ask, the hardware task does the work ----
 // net(op, a, b, c, d); modules only write requests and read the last snapshot, the task owns the interfaces.
-// FLP_WIFI and FLP_ETH say which interfaces the master carries.
+// CRAB_WIFI and CRAB_ETH say which interfaces the master carries.
 //   op 0 number: a = code (1 dhcp, 2 NTP period ms, 3 NTP interface 0 Wi-Fi / 1 Ethernet, 63 Wi-Fi settings are complete,
 //        64 start NTP), b = value
 //   op 1 text setting: a = code (1 ssid, 2 password, 3 ip, 4 gateway, 5 subnet, 6 ap ssid, 7 ap password, 8 NTP server),
@@ -857,7 +857,7 @@ m3ApiRawFunction(h_uart) {
 //   op 6 Ethernet number: a = code (1 dhcp, 2 sck, 3 miso, 4 mosi, 5 cs, 6 last MAC byte, 63 settings are complete), b = value
 //   op 7 Ethernet text: a = code (1 ip, 2 gateway, 3 subnet), b = pointer, c = length
 //   op 8 Ethernet: a = field (0 ready, 1 address as a number)
-//   MQTT (FLP_MQTT, ops 9..16; the client works on the interface chosen by code 3):
+//   MQTT (CRAB_MQTT, ops 9..16; the client works on the interface chosen by code 3):
 //   op 9 number: a = code (1 port, 2 keep-alive s, 3 network 0 Wi-Fi / 1 Ethernet, 4 max subscriptions, 63 settings are complete), b = value
 //   op 10 text setting: a = code (1 broker, 2 client id, 3 user, 4 password), b = pointer, c = length
 //   op 11 read: a = field (0 connected, 1 error)
@@ -865,7 +865,7 @@ m3ApiRawFunction(h_uart) {
 //   op 14 subscribe: a, b filter (pointer, length); returns the slot (the same for equal filters of any module), -1 when full
 //   op 15 slot text: a = slot, b = pointer, c = capacity; returns the length
 //   op 16 slot counter: a = slot; grows with every message that matched the filter
-//   Web page (FLP_WEB, ops 17..22; the page and its server are the master's, the module gives layout and values):
+//   Web page (CRAB_WEB, ops 17..22; the page and its server are the master's, the module gives layout and values):
 //   op 17 setup: a = 1 layout JSON (b, c pointer, length), 2 widget table (b pointer, c count; 16 bytes each: kind 0 number / 1 text shown /
 //         2 text input / 3 secret text input, rw, dec, reserved, lo, hi, initial as f32), 3 interfaces (b: 1 Wi-Fi, 2 Ethernet, 3 both),
 //         4 password (b, c), 5 network form defaults (b, c: ten lines ssid, password, dhcp, ip, gateway, subnet, ap ssid, ap password, mode, ap delay; d widget), 63 setup complete; interfaces mask also has bit 4 = the «Система» page
@@ -874,10 +874,10 @@ m3ApiRawFunction(h_uart) {
 //   op 23 network form: a = 0..9 field as text (b pointer, c capacity; returns length), 10 saved flag (cleared), 11 DHCP, 12 mode
 //   op 21 number written by the page: a = widget; returns f32 bits;  op 22 text written by the page: a = widget, b = pointer, c = capacity; returns the length
 // SPI pins, cs and MAC are taken when the Ethernet interface is created (first start); changing them needs a reset.
-#ifdef FLP_WIFI
+#ifdef CRAB_WIFI
 static FLProgOnBoardWifiInterface g_wifi;
 #endif
-#ifdef FLP_ETH
+#ifdef CRAB_ETH
 static FLProgWiznetInterface *g_eth = nullptr;
 #endif
 static FLProgNetworkNtp g_ntp;
@@ -901,7 +901,7 @@ struct NetSettings {
 };
 static NetSettings g_net;
 
-#ifdef FLP_WEB
+#ifdef CRAB_WEB
 // Settings of the web page network form (web_net): they replace the ones the Wi-Fi and Ethernet blocks gave.
 // Fields: ssid, password, dhcp, ip, gateway, subnet, ap ssid, ap password, mode, ap delay.
 static String g_wnf[10];
@@ -945,12 +945,12 @@ static void netAddress(FLProgNetworkInterface &net, int32_t dhcp, const char *ip
   }
 }
 
-#ifdef FLP_WIFI
+#ifdef CRAB_WIFI
 static void wifiApply() {
   const char *ssid = g_net.text[0], *pass = g_net.text[1], *ip = g_net.text[2], *gw = g_net.text[3], *sn = g_net.text[4];
   const char *apSsid = g_net.text[5], *apPass = g_net.text[6];
   int32_t dhcp = g_net.dhcp;
-#ifdef FLP_WEB
+#ifdef CRAB_WEB
   if (g_wnOn) {
     ssid = g_wnf[0].c_str(); pass = g_wnf[1].c_str(); dhcp = g_wnf[2] != "0";
     ip = g_wnf[3].c_str(); gw = g_wnf[4].c_str(); sn = g_wnf[5].c_str();
@@ -964,7 +964,7 @@ static void wifiApply() {
   g_wifi.setApPassword(apPass);
 }
 
-#ifdef FLP_WEB
+#ifdef CRAB_WEB
 // Radio use chosen on the page: 0 client, 1 access point, 2 both, 3 client and the access point only without a connection.
 static uint8_t wnWant() {
   int m = g_wnf[8].toInt();
@@ -990,7 +990,7 @@ static void wifiPoll() {
   NetSettings &n = g_net;
   if (!n.complete) return;
   uint32_t h = netHashOf(n.text, 8, n.dhcp);
-#ifdef FLP_WEB
+#ifdef CRAB_WEB
   if (g_wnOn) h ^= g_wnSig;
 #endif
   if (h != n.applied) {
@@ -1001,7 +1001,7 @@ static void wifiPoll() {
     n.appliedOnce = true;
   }
   uint8_t want = (uint8_t)(n.want & 3);
-#ifdef FLP_WEB
+#ifdef CRAB_WEB
   if (g_wnOn) want = wnWant();
 #endif
   if (want != n.state) {
@@ -1018,7 +1018,7 @@ static void wifiPoll() {
 }
 #endif
 
-#ifdef FLP_ETH
+#ifdef CRAB_ETH
 static void ethPoll() {
   NetSettings &n = g_net;
   if (!n.ethComplete) return;
@@ -1030,7 +1030,7 @@ static void ethPoll() {
   uint32_t h = netHashOf(n.ethText, 3, n.ethNum[1]);
   int32_t dhcp = n.ethNum[1];
   const char *ip = n.ethText[0], *gw = n.ethText[1], *sn = n.ethText[2];
-#ifdef FLP_WEB
+#ifdef CRAB_WEB
   if (g_wnOn) {
     h ^= g_wnSig;
     dhcp = g_wnf[2] != "0"; ip = g_wnf[3].c_str(); gw = g_wnf[4].c_str(); sn = g_wnf[5].c_str();
@@ -1046,15 +1046,15 @@ static void ethPoll() {
 }
 #endif
 
-#if defined(FLP_MODBUS) && defined(FLP_NET)
+#if defined(CRAB_MODBUS) && defined(CRAB_NET)
 // Creates the Modbus TCP master or slave once the chosen interface is up (called under g_sensorLock).
 static void modbusTcpPoll() {
   if (!g_mbTcpWanted) return;
   FLProgAbstractTcpInterface *iface = nullptr;
-#ifdef FLP_WIFI
+#ifdef CRAB_WIFI
   if (g_mb[1] == 0 && g_net.complete) iface = &g_wifi;
 #endif
-#ifdef FLP_ETH
+#ifdef CRAB_ETH
   if (g_mb[1] == 1 && g_eth) iface = g_eth;
 #endif
   if (!iface) return;
@@ -1088,7 +1088,7 @@ static void modbusTcpPoll() {
 }
 #endif
 
-#ifdef FLP_MQTT
+#ifdef CRAB_MQTT
 // ---- MQTT client: one per board, on the interface chosen by the module (ops 9..16 of net) ----
 // Modules only queue publications, register filters and read the last message of a filter; the hardware task owns the client.
 struct MqttSlot {
@@ -1155,7 +1155,7 @@ static void mqttApply() {
   if (g_mqttText[1][0]) g_mqtt.setClientId(g_mqttText[1]);
   else {
     char cid[24];
-    snprintf(cid, sizeof(cid), "flp-%08lx", (unsigned long)ESP.getEfuseMac());
+    snprintf(cid, sizeof(cid), "crab-%08lx", (unsigned long)ESP.getEfuseMac());
     g_mqtt.setClientId(cid);
   }
   g_mqtt.setKeepAlive((uint16_t)g_mqttNum[2]);
@@ -1165,10 +1165,10 @@ static void mqttPoll() {
   if (!g_mqttComplete) return;
   if (!g_mqttBegun) {
     FLProgNetworkInterface *iface = nullptr;
-#ifdef FLP_WIFI
+#ifdef CRAB_WIFI
     if (g_mqttNum[3] == 0 && g_net.complete) iface = &g_wifi;
 #endif
-#ifdef FLP_ETH
+#ifdef CRAB_ETH
     if (g_mqttNum[3] == 1 && g_eth) iface = g_eth;
 #endif
     if (!iface) return;
@@ -1225,9 +1225,9 @@ static int32_t mqttSubscribe(const char *filter) {
 }
 #endif
 
-#ifdef FLP_WEB
+#ifdef CRAB_WEB
 // ---- Web page: one per board, served by the master from the registry the module fills (ops 17..22 of net) ----
-// The page (flp_html, put in front of the sketch by the build) is the same as in a C++ sketch; the module gives the
+// The page (crab_html, put in front of the sketch by the build) is the same as in a C++ sketch; the module gives the
 // layout JSON, a table of the widgets and then the values of every widget each step.
 struct WebItem {
   uint8_t kind;  // 0 number, 1 text shown, 2 text input, 3 secret text input, 4 chart
@@ -1277,7 +1277,7 @@ static uint32_t webHash(const char *s) {
 static void webPageSave() {
   if (!g_webLayout) return;
   uint32_t h = webHash(g_webLayout);
-  g_webPrefs.begin("flpweb", false);
+  g_webPrefs.begin("crabweb", false);
   if (g_webPrefs.getUInt("hash", 0) != h || !g_webPrefs.isKey("n")) {
     size_t len = strlen(g_webLayout);
     int parts = (int)((len + 3899) / 3900);
@@ -1293,7 +1293,7 @@ static void webPageSave() {
 }
 static void webPageLoad() {
   if (g_webLayout) return;
-  g_webPrefs.begin("flpweb", true);
+  g_webPrefs.begin("crabweb", true);
   size_t len = g_webPrefs.getUInt("n", 0);
   if (len > 0 && len < 8192) {
     char *b = (char *)malloc(len + 1);
@@ -1316,11 +1316,11 @@ static void webPageLoad() {
 }
 static void webPage(FLProgNetworkHttpServer *server) {
   if (!g_webLayout || strlen(g_webLayout) < 12) {
-    server->send(200, "text/html; charset=utf-8", "<!DOCTYPE html><meta charset=\"utf-8\"><title>FLP</title><p>Страница не загружена");
+    server->send(200, "text/html; charset=utf-8", "<!DOCTYPE html><meta charset=\"utf-8\"><title>CRAB</title><p>Страница не загружена");
     return;
   }
-  if (!server->sendStreamProgmem(200, "text/html; charset=utf-8", flp_html, strlen(flp_html))) {
-    server->write((const uint8_t *)flp_html, strlen(flp_html));
+  if (!server->sendStreamProgmem(200, "text/html; charset=utf-8", crab_html, strlen(crab_html))) {
+    server->write((const uint8_t *)crab_html, strlen(crab_html));
   }
 }
 static void webLayout(FLProgNetworkHttpServer *server) {
@@ -1408,7 +1408,7 @@ static void wnLoad(const String &t, int item) {
     if (t[i] == '\n') { init[k++] = cur; cur = ""; } else cur += t[i];
   }
   if (k < 10) init[k] = cur;
-  g_wnPrefs.begin("flp", false);
+  g_wnPrefs.begin("crab", false);
   uint32_t sig = 2166136261UL;
   for (int j = 0; j < 10; j++) {
     for (size_t n = 0; n < init[j].length(); n++) sig = (sig ^ (uint8_t)init[j][n]) * 16777619UL;
@@ -1469,7 +1469,7 @@ static void webNet(FLProgNetworkHttpServer *server) {
 static void webScan(FLProgNetworkHttpServer *server) {
   if (!webAllowed(server)) return;
   String o;
-#ifdef FLP_WIFI
+#ifdef CRAB_WIFI
   int n = WiFi.scanComplete();
   if (n == WIFI_SCAN_FAILED) {
     if (WiFi.getMode() == WIFI_MODE_NULL) WiFi.mode(WIFI_STA);
@@ -1501,10 +1501,10 @@ static void webInfo(FLProgNetworkHttpServer *server) {
   snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", m[0], m[1], m[2], m[3], m[4], m[5]);
   uint32_t ip = 0;
   int rssi = 0;
-#ifdef FLP_WIFI
+#ifdef CRAB_WIFI
   if (g_net.complete) { ip = g_net.ip; rssi = g_wifi.rssi(); }
 #endif
-#ifdef FLP_ETH
+#ifdef CRAB_ETH
   if (!ip && g_eth) ip = (uint32_t)g_eth->localIP();
 #endif
   String o = "{\"ip\":\"";
@@ -1543,10 +1543,10 @@ static void webPoll() {
   if (!g_webComplete || g_webBegun) return;
   webPageLoad();
   FLProgNetworkInterface *iface = nullptr;
-#ifdef FLP_WIFI
+#ifdef CRAB_WIFI
   if ((g_webMask & 1) && g_net.complete) iface = &g_wifi;
 #endif
-#ifdef FLP_ETH
+#ifdef CRAB_ETH
   if (!iface && (g_webMask & 2) && g_eth) iface = g_eth;
 #endif
   if (!iface) return;
@@ -1563,7 +1563,7 @@ static void webPoll() {
     g_web.addHandler("/ui/net", webNet);
     g_web.addHandler("/ui/scan", webScan);
   }
-#if defined(FLP_WIFI) && defined(FLP_ETH)
+#if defined(CRAB_WIFI) && defined(CRAB_ETH)
   if (iface == &g_wifi && (g_webMask & 2) && g_eth) g_web.addSharedListener(*g_eth);
 #endif
 }
@@ -1571,18 +1571,18 @@ static void webPoll() {
 
 static void netPoll() {
   NetSettings &n = g_net;
-#ifdef FLP_WIFI
+#ifdef CRAB_WIFI
   wifiPoll();
 #endif
-#ifdef FLP_ETH
+#ifdef CRAB_ETH
   ethPoll();
 #endif
   if (n.ntpAsked && !n.ntpOn) {
     FLProgNetworkInterface *iface = nullptr;
-#ifdef FLP_WIFI
+#ifdef CRAB_WIFI
     if (n.ntpIface == 0 && n.complete) iface = &g_wifi;
 #endif
-#ifdef FLP_ETH
+#ifdef CRAB_ETH
     if (n.ntpIface == 1 && g_eth) iface = g_eth;
 #endif
     if (iface) {
@@ -1604,10 +1604,10 @@ static void netPoll() {
       n.syncAge = (uint32_t)(now - g_ntp.lastSyncMillis()) / 1000;
     }
   }
-#ifdef FLP_MQTT
+#ifdef CRAB_MQTT
   mqttPoll();
 #endif
-#ifdef FLP_WEB
+#ifdef CRAB_WEB
   webPoll();
 #endif
 }
@@ -1673,7 +1673,7 @@ m3ApiRawFunction(h_net) {
     }
   } else if (op == 8) {
     r = a == 0 ? n.ethReady : a == 1 ? (int32_t)n.ethIp : 0;
-#ifdef FLP_MQTT
+#ifdef CRAB_MQTT
   } else if (op == 9) {
     if (a >= 1 && a <= 4) g_mqttNum[a] = b;
     else if (a == 63) g_mqttComplete = true;
@@ -1722,7 +1722,7 @@ m3ApiRawFunction(h_net) {
   } else if (op == 16) {
     r = (a >= 0 && a < g_mqttSlotCount) ? (int32_t)g_mqttSlots[a].seq : 0;
 #endif
-#ifdef FLP_WEB
+#ifdef CRAB_WEB
   } else if (op == 17) {
     if (a == 1 && c > 0 && c < 8192 && inMem(runtime, b, c)) {
       // The layout JSON; the buffer is reused when the module is loaded again.
@@ -1841,7 +1841,7 @@ m3ApiRawFunction(h_net) {
 #endif
 
 static void linkAll(Slot &s, IM3Module m) {
-  auto L = [&](const char *n, const char *sig, M3RawCall f) { m3_LinkRawFunctionEx(m, "flp", n, sig, f, &s); };
+  auto L = [&](const char *n, const char *sig, M3RawCall f) { m3_LinkRawFunctionEx(m, "crab", n, sig, f, &s); };
   L("input_i", "i(i)", h_input_i);
   L("input_f", "f(i)", h_input_f);
   L("param_i", "i(i)", h_param_i);
@@ -1860,23 +1860,23 @@ static void linkAll(Slot &s, IM3Module m) {
   if (s.perms & P_ADC) L("adc_read", "i(i)", h_adc_read);
   if (s.perms & P_PWM) L("pwm_write", "v(ii)", h_pwm_write);
   if (s.perms & P_MILLIS) L("millis", "i()", h_millis);
-#ifdef FLP_SENSORS
+#ifdef CRAB_SENSORS
   if (s.perms & P_SENSOR) L("sensor_read", "f(iii)", h_sensor_read);
 #endif
-#ifdef FLP_PCF
+#ifdef CRAB_PCF
   if (s.perms & P_PCF_READ) L("pcf_read", "i(iii)", h_pcf_read);
   if (s.perms & P_PCF_WRITE) L("pcf_write", "i(ii)", h_pcf_write);
 #endif
-#ifdef FLP_MODBUS
+#ifdef CRAB_MODBUS
   if (s.perms & P_MODBUS) L("modbus", "i(iiiii)", h_modbus);
 #endif
-#ifdef FLP_UART
+#ifdef CRAB_UART
   if (s.perms & P_UART) L("uart", "i(iiii)", h_uart);
 #endif
-#ifdef FLP_TEXT
+#ifdef CRAB_TEXT
   if (s.perms & P_TEXT) L("text", "i(iiiiiii)", h_text);
 #endif
-#ifdef FLP_NET
+#ifdef CRAB_NET
   if (s.perms & P_NET) L("net", "i(iiiii)", h_net);
 #endif
 }
@@ -2216,10 +2216,10 @@ static void cmdLine(String line) {
       if (s.used)
         Serial.printf("%s %s steps=%u restarts=%u out0=%08x crc=%08x\n", s.name, s.task ? "run" : "stop", (unsigned)s.steps, (unsigned)s.restarts, (unsigned)s.outputs[0], (unsigned)(s.wasm ? esp_crc32_le(0, s.wasm, s.wasmLen) : 0));
     uint32_t ip = 0;
-#ifdef FLP_WIFI
+#ifdef CRAB_WIFI
     if (g_net.complete) ip = g_net.ip;
 #endif
-#ifdef FLP_ETH
+#ifdef CRAB_ETH
     if (!ip && g_eth) ip = (uint32_t)g_eth->localIP();
 #endif
     // The editor shows the address of the board in its status bar.
@@ -2256,7 +2256,7 @@ void setup() {
   Serial.begin(115200);
   Serial.setTimeout(200);
   g_mgmt = xSemaphoreCreateMutex();
-#ifdef FLP_HWTASK
+#ifdef CRAB_HWTASK
   g_sensorLock = xSemaphoreCreateMutex();
   xTaskCreate(hwTask, "hardware", 4096, nullptr, 1, nullptr);
 #endif

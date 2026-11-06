@@ -5,9 +5,9 @@ extern "C" {
 
 static double g_in[1], g_param[1], g_out[1];
 
-extern "C" F64 i3_flp5_input(wasmModuleInstance*, U32 i) { return g_in[i]; }
-extern "C" F64 i3_flp5_param(wasmModuleInstance*, U32 i) { return g_param[i]; }
-extern "C" void i3_flp6_output(wasmModuleInstance*, U32 i, F64 v) { g_out[i] = v; }
+extern "C" F64 i4_crab5_input(wasmModuleInstance*, U32 i) { return g_in[i]; }
+extern "C" F64 i4_crab5_param(wasmModuleInstance*, U32 i) { return g_param[i]; }
+extern "C" void i4_crab6_output(wasmModuleInstance*, U32 i, F64 v) { g_out[i] = v; }
 
 static m5_blockInstance ton;
 

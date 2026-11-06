@@ -134,7 +134,7 @@ name = "ap_ssid"
 type = "string"
 runtime = true
 label = "SSID точки"
-default = "FLP_ESP32"
+default = "CRAB_ESP32"
 when = "wifi_mode != 0"
 show = "value"
 description = "Имя своей точки доступа"

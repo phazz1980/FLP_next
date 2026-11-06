@@ -5,5 +5,5 @@
 - [x] Генерация: тип входа `same`, замена значения по умолчанию нулём.
 - [x] Блоки `switch`, `mux`, `dms` и их описания; README библиотеки.
 - [x] Редактор и отладка: новый тип в списках.
-- [x] Пример `examples/switch_types` и снимок; `flp build` собирает прошивку.
+- [x] Пример `examples/switch_types` и снимок; `crablogic build` собирает прошивку.
 - [x] Старые снимки (`math_switch`, `math_more`, selftest) не изменились.

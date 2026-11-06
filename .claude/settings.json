@@ -2,8 +2,8 @@
   "permissions": {
     "deny": [
       "Read(./target/**)",
-      "Read(./.flp/**)",
-      "Read(./**/.flp/**)"
+      "Read(./.crab/**)",
+      "Read(./**/.crab/**)"
     ]
   }
 }

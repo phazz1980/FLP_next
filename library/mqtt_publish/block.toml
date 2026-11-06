@@ -29,7 +29,7 @@ name = "topic"
 label = "топик"
 type = "string"
 runtime = true
-default = "flp/value"
+default = "crab/value"
 description = "Топик, например home/kitchen/temperature"
 
 [[param]]

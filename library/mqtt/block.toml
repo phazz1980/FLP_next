@@ -57,7 +57,7 @@ name = "client_id"
 type = "string"
 runtime = true
 default = ""
-description = "Идентификатор клиента; пусто — flp-<номер чипа>. Должен быть уникален на брокере"
+description = "Идентификатор клиента; пусто — crab-<номер чипа>. Должен быть уникален на брокере"
 
 [[param]]
 name = "user"

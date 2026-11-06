@@ -5,7 +5,7 @@
 - `AUTH_REQ` 0x17 (хост → плата, пусто): плата отвечает `AUTH_CHALLENGE` 0x07 — случайный nonce 16 байт.
 - `AUTH` 0x18 (хост → плата): HMAC-SHA256(K, nonce), 32 байта. Верно → сессия открыта до сброса или
   потери связи (3 с тишины от хоста), ответ `AUTH_OK` 0x08; неверно → `AUTH_FAIL` 0x09 и пауза 1 с.
-- K = PBKDF2-HMAC-SHA256(пароль, соль, 100k) — тот же ключ, что в `flp_core::protect`; соль берётся из
+- K = PBKDF2-HMAC-SHA256(пароль, соль, 100k) — тот же ключ, что в `crab_core::protect`; соль берётся из
   заголовка копии проекта (`CRB1|salt…`), одна на проект. Пароль в открытом виде не передаётся.
 - Прошивка хранит K в флеше (рядом с копией проекта) и проверяет HMAC через mbedtls (есть в ядре esp32).
   Подбор по дампу прошивки принят как риск.
@@ -13,11 +13,11 @@
 - Без пароля в проекте: флаг сброшен, поведение как в v3.
 
 ## Затронутые крейты
-- `flp-core::protect`: публичная функция `derive_key(password, salt)`.
-- `flp-codegen::debug`: массив K, nonce из `esp_random()`, шлюз перед `flp_dbg_command` и циклом отправки.
-- `flp-debug`: `protocol` (кадры, VERSION=4), `session` (вход после HELLO, пароль в `Session::start`), `pull`.
-- `flp-cli`: `--password` у `monitor` и `upload --debug`; `pull` уже умеет.
-- `flp-editor`: запрос пароля при подключении к плате (поле в окне отладки), запоминание на сессию.
+- `crab-core::protect`: публичная функция `derive_key(password, salt)`.
+- `crab-codegen::debug`: массив K, nonce из `esp_random()`, шлюз перед `crab_dbg_command` и циклом отправки.
+- `crab-debug`: `protocol` (кадры, VERSION=4), `session` (вход после HELLO, пароль в `Session::start`), `pull`.
+- `crab-cli`: `--password` у `monitor` и `upload --debug`; `pull` уже умеет.
+- `crab-editor`: запрос пароля при подключении к плате (поле в окне отладки), запоминание на сессию.
 - MCP: `read_live_values` берёт пароль из проекта открытого редактора.
 - Справка `help/06-debug.md`, архитектура.
 

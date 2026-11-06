@@ -1,0 +1,17 @@
+[package]
+name = "crab-sim"
+version.workspace = true
+edition.workspace = true
+description = "Runs WASM block modules (wasmi) to simulate a block on the PC"
+
+[dependencies]
+crab-core = { path = "../crab-core" }
+crab-blocks = { path = "../crab-blocks" }
+wasmi = "2.0.0"
+serde.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+wat = "1.263.0"
+crab-build = { path = "../crab-build" }
+crab-codegen = { path = "../crab-codegen" }

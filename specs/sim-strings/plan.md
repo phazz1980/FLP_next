@@ -1,9 +1,9 @@
 # План: строки в симуляторе
 
-- `flp-sim/schema.rs`: у узла параллельные текстовые массивы (`texts_in`, `texts_out`, `param_texts`);
+- `crab-sim/schema.rs`: у узла параллельные текстовые массивы (`texts_in`, `texts_out`, `param_texts`);
   источник `Source::Text`; связь переносит текст с выхода на вход; `output_text`, `set_output_text`.
-- `flp-sim/builtin.rs`: `Ctx` получает `texts` и `param_texts`; у `Behavior` второй метод `step_text`
+- `crab-sim/builtin.rs`: `Ctx` получает `texts` и `param_texts`; у `Behavior` второй метод `step_text`
   (по умолчанию пустой), текстовые блоки реализуют его и пишут числовые выходы через `out`.
-- `flp-editor`: `SimState::output` не отдаёт значение строкового порта; `text_output` для подписей на связях
+- `crab-editor`: `SimState::output` не отдаёт значение строкового порта; `text_output` для подписей на связях
   (уже есть путь для отладки); меню ручного выхода — поле текста для строковых портов.
 - Справка: `help/` страница про симуляцию; список блоков.

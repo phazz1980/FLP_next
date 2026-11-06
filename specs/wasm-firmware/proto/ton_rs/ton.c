@@ -23,7 +23,7 @@ void f4(wasmModuleInstance* instance, U32 l0) {
   {
     {
       si0 = 0U;
-      sd0 = i3_flp5_input(instance, si0);
+      sd0 = i4_crab5_input(instance, si0);
       sd1 = f64_reinterpret_i64(W2C2_LL(0x0000000000000000U));
       si0 = sd0 != sd1;
       if (si0) {
@@ -47,7 +47,7 @@ void f4(wasmModuleInstance* instance, U32 l0) {
     sd1 = f64_reinterpret_i64(W2C2_LL(0x0000000000000000U));
     sd2 = l1;
     si3 = 0U;
-    sd3 = i3_flp5_param(instance, si3);
+    sd3 = i4_crab5_param(instance, si3);
     si2 = sd2 >= sd3;
     sd0 = si2 ? sd0 : sd1;
     l1 = sd0;
@@ -55,7 +55,7 @@ void f4(wasmModuleInstance* instance, U32 l0) {
   L1:;
   si0 = 0U;
   sd1 = l1;
-  i3_flp6_output(instance, si0, sd1);
+  i4_crab6_output(instance, si0, sd1);
   L0:;
 }
 

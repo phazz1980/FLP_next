@@ -2,7 +2,7 @@
 
 ## Цель
 Продолжить перенос ([шаг 3](../builtin-rust-blocks-3/spec.md)): у блоков `uart_config`, `uart_read`, `uart_send`
-и `modbus_*` (7 блоков) нет `esp32.cpp.tmpl`, C++ выдаёт Rust-тип из `flp-blocks`.
+и `modbus_*` (7 блоков) нет `esp32.cpp.tmpl`, C++ выдаёт Rust-тип из `crab-blocks`.
 
 ## Критерии готовности
 - У этих 10 блоков нет шаблонов; скетчи `examples/` и снимки не изменились побайтно.

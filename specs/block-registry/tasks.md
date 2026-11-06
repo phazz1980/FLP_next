@@ -2,7 +2,7 @@
 
 Предусловие: закончена и закоммичена работа по `specs/block-packs/`.
 
-- [ ] 1. `PackInfo`: поля `id`, `format`, `requires`; чтение/запись `pack.toml`. Проверка: тест roundtrip в `flp-core`.
+- [ ] 1. `PackInfo`: поля `id`, `format`, `requires`; чтение/запись `pack.toml`. Проверка: тест roundtrip в `crab-core`.
 - [ ] 2. `from_files` отклоняет неизвестный `format`. Проверка: тест с набором `format = 99`.
 - [ ] 3. `registry.rs`: `Index::parse`, битый индекс даёт ошибку. Проверка: тесты на корректный, пустой и неполный индекс.
 - [ ] 4. `verify_sha256`. Проверка: тест на верный и подменённый файл.

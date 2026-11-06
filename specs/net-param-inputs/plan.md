@@ -1,10 +1,10 @@
 # План: параметры сетевых блоков как входы
 
 ## Как
-- `flp-core/library.rs`: `param_input_type` — text при `runtime = true` даёт вход-строку.
+- `crab-core/library.rs`: `param_input_type` — text при `runtime = true` даёт вход-строку.
 - `library/{wifi,ethernet,mqtt}/block.toml`: `runtime = true` у SSID, пароля, адресов, брокера, логина.
-- `flp-codegen/arduino.rs`: выражение входа подставляется в `param`; привязанные входы попадают в `cpp.bound`.
-- `flp-blocks/net.rs`, `network.rs`: при привязанных параметрах генерируется хеш настроек (FNV) и
+- `crab-codegen/arduino.rs`: выражение входа подставляется в `param`; привязанные входы попадают в `cpp.bound`.
+- `crab-blocks/net.rs`, `network.rs`: при привязанных параметрах генерируется хеш настроек (FNV) и
   переприменение при его смене: Wi-Fi/Ethernet — повторное подключение, MQTT — `disconnect`, настройки, `connect`.
 - Редактор: колонка «Вход» в свойствах блока (`dialogs.rs`).
 - Формат: `param_in = [...]` в `logic.toml`, без изменений формата.

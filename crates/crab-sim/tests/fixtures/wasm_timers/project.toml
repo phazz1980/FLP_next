@@ -1,0 +1,6 @@
+[project]
+name = "wasm_timers"
+description = "Таймеры и память для сверки модуля WASM с crab-sim"
+
+[board]
+fqbn = "esp32:esp32:esp32"

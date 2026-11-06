@@ -1,7 +1,7 @@
 # MQTT в модулях: план
 
 Тот же приём, что у сети: клиентом владеет мастер (`FLProgNetworkMqttClient`, задача `hardware`), модуль пишет
-запросы и читает последний снимок через импорт `net` (права `net`). Новый флаг мастера `FLP_MQTT` (тянет `FLP_NET`).
+запросы и читает последний снимок через импорт `net` (права `net`). Новый флаг мастера `CRAB_MQTT` (тянет `CRAB_NET`).
 
 ## ABI: операции net 9–16
 - op 9 числа клиента: a — код (1 порт, 2 keepalive, 3 сеть 0 Wi-Fi / 1 Ethernet, 4 `max_subscriptions`, 63 настройки готовы), b — значение.
@@ -13,8 +13,8 @@
 - op 16 счётчик слота: a — слот; растёт с каждым принятым сообщением (модуль сравнивает со своим, отсюда `received` на один шаг).
 
 ## Мастер
-- `FLP_MQTT`: клиент создаётся, когда готов выбранный интерфейс; настройки применяются при смене хеша (как Wi-Fi).
-- Колбэк приёма сопоставляет топик со всеми фильтрами (`flp_mqtt_match`) и кладёт текст (до 128 байт) и счётчик в слоты.
+- `CRAB_MQTT`: клиент создаётся, когда готов выбранный интерфейс; настройки применяются при смене хеша (как Wi-Fi).
+- Колбэк приёма сопоставляет топик со всеми фильтрами (`crab_mqtt_match`) и кладёт текст (до 128 байт) и счётчик в слоты.
 - Слоты живут, пока работает мастер; повторная заливка модуля с теми же фильтрами берёт те же слоты.
 
 ## Блоки
@@ -22,7 +22,7 @@
 - Генератор модуля (`wasm/mqtt.rs`): `mqtt` (настройка один раз, `connected`, `error`), `mqtt_publish` (триггеры: фронт `en`, изменение с `deadband`, период; значение в текст как `num_to_text`; `sent`), `mqtt_subscribe` (подписка один раз, разбор в string/int/float/bool теми же операциями текста, `received`).
 
 ## Файлы
-`library/mqtt*/block.toml` и `docs.md`; `crates/flp-blocks/src/network.rs`; `crates/flp-codegen/src/wasm/mqtt.rs`, `wasm.rs`; `crates/flp-sim/src/mcu.rs` (заглушка op 9–16, свои сообщения и счётчики); `crates/flp-build/src/master.rs` (`FLP_MQTT`); `master.ino`; `examples/mqtt_wasm`; `help/05-build.md`.
+`library/mqtt*/block.toml` и `docs.md`; `crates/crab-blocks/src/network.rs`; `crates/crab-codegen/src/wasm/mqtt.rs`, `wasm.rs`; `crates/crab-sim/src/mcu.rs` (заглушка op 9–16, свои сообщения и счётчики); `crates/crab-build/src/master.rs` (`CRAB_MQTT`); `master.ino`; `examples/mqtt_wasm`; `help/05-build.md`.
 
 ## Риски
 - Строка из входа `topic` меняется на лету: подписка при смене — новая (старая остаётся, пока не вытеснена лимитом).

@@ -42,7 +42,7 @@ name = "topic"
 label = "топик"
 type = "string"
 runtime = true
-default = "flp/command"
+default = "crab/command"
 description = "Топик или шаблон: + — один уровень, # — весь остаток"
 
 [[param]]

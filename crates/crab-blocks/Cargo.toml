@@ -1,0 +1,8 @@
+[package]
+name = "crab-blocks"
+version.workspace = true
+edition.workspace = true
+description = "Built-in hardware-free blocks written in Rust: simulation step and firmware code"
+
+[dependencies]
+crab-core = { path = "../crab-core" }

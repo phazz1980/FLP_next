@@ -1,10 +1,10 @@
 # Веб в модулях: план
 
 ## Затронуто
-- `specs/wasm-on-mcu/proto/master/master.ino`: секция `FLP_WEB` — реестр виджетов (как `FlpUiItem` в скетче), обработчики `/`, `/ui/layout`, `/ui/state`, `/ui/set` на `FLProgWebServer`; операции `net` 17–22.
-- `crates/flp-build/src/master.rs`: признак `web`; страница (`flp_blocks::device_page()`) подставляется в мастер как `PROGMEM`-константа при сборке, чтобы не дублировать HTML в `master.ino`.
-- `crates/flp-codegen/src/wasm/web.rs` (новый): `web_ui` и виджеты — регистрация при старте, значения каждый шаг.
-- `crates/flp-sim/src/mcu.rs`: заглушка операций + тест.
+- `specs/wasm-on-mcu/proto/master/master.ino`: секция `CRAB_WEB` — реестр виджетов (как `CrabUiItem` в скетче), обработчики `/`, `/ui/layout`, `/ui/state`, `/ui/set` на `FLProgWebServer`; операции `net` 17–22.
+- `crates/crab-build/src/master.rs`: признак `web`; страница (`crab_blocks::device_page()`) подставляется в мастер как `PROGMEM`-константа при сборке, чтобы не дублировать HTML в `master.ino`.
+- `crates/crab-codegen/src/wasm/web.rs` (новый): `web_ui` и виджеты — регистрация при старте, значения каждый шаг.
+- `crates/crab-sim/src/mcu.rs`: заглушка операций + тест.
 - `examples/web_wasm`, `help/05-build.md`, `docs.md` виджетов.
 
 ## Операции `net` (черновик)

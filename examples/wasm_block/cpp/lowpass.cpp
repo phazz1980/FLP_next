@@ -1,12 +1,12 @@
 // Simulation module of the `lowpass` block in C++: exponential smoothing.
-// No standard library, no WASI: only the imports of the "flp" module.
-#define FLP(name) __attribute__((import_module("flp"), import_name(#name)))
+// No standard library, no WASI: only the imports of the "crab" module.
+#define CRAB(name) __attribute__((import_module("crab"), import_name(#name)))
 #define EXPORT(name) __attribute__((export_name(#name)))
 
 extern "C" {
-FLP(input) double input(int index);
-FLP(param) double param(int index);
-FLP(output) void output(int index, double value);
+CRAB(input) double input(int index);
+CRAB(param) double param(int index);
+CRAB(output) void output(int index, double value);
 
 static double y = 0.0;
 

@@ -1,0 +1,913 @@
+//! `crablogic` — command line of CrabLogic.
+
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use clap::{Parser, Subcommand};
+use crab_build::{ArduinoCli, BuildMode, CompileOptions, Compiled};
+use crab_codegen::{ArduinoCpp, Backend, GenError, Program};
+use crab_core::{check_project, Diagnostic, Library, LocalValues, Project, Severity};
+
+/// Exit code when the schema has errors.
+const EXIT_SCHEMA_ERRORS: u8 = 1;
+/// Exit code when the project or library cannot be loaded.
+const EXIT_LOAD_FAILED: u8 = 2;
+/// Exit code when code generation fails for another reason (templates, files).
+const EXIT_GEN_FAILED: u8 = 3;
+/// Exit code when arduino-cli fails to build or upload.
+const EXIT_BUILD_FAILED: u8 = 4;
+
+#[derive(Parser)]
+#[command(
+    name = "crablogic",
+    version,
+    about = "CrabLogic: визуальное программирование микроконтроллеров"
+)]
+struct Cli {
+    /// Папка библиотеки блоков (по умолчанию ищется `library/` рядом с проектом
+    /// или программой; можно задать переменной CRAB_LIBRARY)
+    #[arg(long, global = true, env = "CRAB_LIBRARY")]
+    library: Option<PathBuf>,
+
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Проверить схему проекта
+    Check {
+        /// Файл проекта .crab (или папка с ним)
+        project: PathBuf,
+    },
+    /// Сгенерировать скетч Arduino в .crab/<проект>/sketch/sketch.ino рядом с проектом
+    Gen {
+        /// Файл проекта .crab (или папка с ним)
+        project: PathBuf,
+        /// Вывести скетч в консоль вместо записи в файл
+        #[arg(long)]
+        stdout: bool,
+        /// Встроить модуль онлайн-отладки
+        #[arg(long)]
+        debug: bool,
+        /// Язык комментариев в скетче: ru или en (по умолчанию из project.toml)
+        #[arg(long)]
+        lang: Option<String>,
+    },
+    /// Сгенерировать скетч и собрать прошивку через arduino-cli
+    Build {
+        /// Файл проекта .crab (или папка с ним)
+        project: PathBuf,
+        /// Отладочная сборка: модуль онлайн-отладки, без сильной оптимизации
+        #[arg(long)]
+        debug: bool,
+        /// Собрать заново, даже если прошивка уже собрана из того же скетча
+        #[arg(long)]
+        force: bool,
+    },
+    /// Показывать живые значения с платы (прошивка собрана с --debug)
+    Monitor {
+        /// Файл проекта .crab (или папка с ним)
+        project: PathBuf,
+        /// Порт платы, например COM3 (по умолчанию из настроек проекта)
+        #[arg(long, short)]
+        port: Option<String>,
+    },
+    /// Напечатать хеш проекта (логика и настройки, без координат): по нему редактор сверяет файл с платой
+    Hash {
+        /// Файл проекта .crab (или папка с ним)
+        project: PathBuf,
+    },
+    /// Прочитать проект из прошивки на плате (нужна отладочная прошивка) и сохранить в файл .crab
+    Pull {
+        /// Куда сохранить проект (файл .crab)
+        output: PathBuf,
+        /// Порт платы, например COM3
+        #[arg(long, short)]
+        port: String,
+        /// Пароль проекта, если он был задан
+        #[arg(long)]
+        password: Option<String>,
+        /// Заменить файл, если он уже есть
+        #[arg(long)]
+        force: bool,
+    },
+    /// Собрать прошивку и залить её на плату
+    Upload {
+        /// Файл проекта .crab (или папка с ним)
+        project: PathBuf,
+        /// Порт платы, например COM3 (по умолчанию из настроек проекта или единственный найденный)
+        #[arg(long, short)]
+        port: Option<String>,
+        /// Отладочная сборка: модуль онлайн-отладки, без сильной оптимизации
+        #[arg(long)]
+        debug: bool,
+        /// Собрать заново, даже если прошивка уже собрана из того же скетча
+        #[arg(long)]
+        force: bool,
+    },
+    /// Собрать листы схемы как WASM-модули (.crab/<проект>/wasm/<лист>/) и при желании залить на плату
+    GenWasm {
+        /// Файл проекта .crab (или папка с ним)
+        project: PathBuf,
+        /// Только этот лист (по умолчанию все листы с блоками)
+        #[arg(long)]
+        sheet: Option<u32>,
+        /// Модули сообщают значения всех выходов блоков (для отладки)
+        #[arg(long)]
+        watch: bool,
+        /// Залить модули на плату с мастер-прошивкой
+        #[arg(long)]
+        upload: bool,
+        /// Порт платы, например COM3 (по умолчанию единственный найденный)
+        #[arg(long, short)]
+        port: Option<String>,
+    },
+    /// Залить один WASM-модуль на плату с мастер-прошивкой (без сброса выходов и соседних модулей)
+    UploadWasm {
+        /// Файл модуля .wasm; рядом может лежать module.toml с именем и правами
+        file: PathBuf,
+        /// Имя модуля на плате (по умолчанию из module.toml или имя файла)
+        #[arg(long)]
+        name: Option<String>,
+        /// Права на железо через запятую, например gpio_write,millis (заменяют module.toml)
+        #[arg(long, value_delimiter = ',')]
+        allow: Option<Vec<String>>,
+        /// Порт платы, например COM3 (по умолчанию единственный найденный)
+        #[arg(long, short)]
+        port: Option<String>,
+    },
+    /// Наборы пользовательских блоков: список, экспорт и импорт файлом .crabblocks
+    Block {
+        #[command(subcommand)]
+        action: BlockAction,
+    },
+    /// Перевести проект из старого формата (папка с project.toml, logic.toml,
+    /// layout.toml) в один файл <папка>/<папка>.crab; старые файлы не удаляются
+    Convert {
+        /// Папка проекта в старом формате
+        project: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum BlockAction {
+    /// Показать наборы и блоки пользовательской библиотеки
+    List,
+    /// Сохранить набор блоков в файл
+    Export {
+        /// Имя набора (папка в `user_library/`), например `Мои блоки`
+        pack: String,
+        /// Куда сохранить (по умолчанию `<набор>.crabblocks` в текущей папке)
+        file: Option<PathBuf>,
+    },
+    /// Добавить набор из файла в пользовательскую библиотеку
+    Import {
+        /// Файл .crabblocks
+        file: PathBuf,
+        /// Заменить установленный набор, даже если он не старше
+        #[arg(long)]
+        replace: bool,
+    },
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Check { project } => run_check(&project, cli.library.as_deref()),
+        Command::Gen {
+            project,
+            stdout,
+            debug,
+            lang,
+        } => run_gen(&project, cli.library.as_deref(), stdout, debug, lang),
+        Command::Build {
+            project,
+            debug,
+            force,
+        } => run_build(&project, cli.library.as_deref(), debug, force, None),
+        Command::Upload {
+            project,
+            port,
+            debug,
+            force,
+        } => run_build(&project, cli.library.as_deref(), debug, force, Some(port)),
+        Command::Monitor { project, port } => run_monitor(&project, cli.library.as_deref(), port),
+        Command::Hash { project } => match Project::load(&project)
+            .map_err(|e| e.to_string())
+            .and_then(|p| p.content_hash().map_err(|e| e.to_string()))
+        {
+            Ok(hash) => {
+                println!("{}", crab_core::hash_hex(&hash));
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("ошибка: {e}");
+                ExitCode::from(EXIT_LOAD_FAILED)
+            }
+        },
+        Command::Pull {
+            output,
+            port,
+            password,
+            force,
+        } => run_pull(
+            &output,
+            &port,
+            password.as_deref().unwrap_or(""),
+            force,
+            cli.library.as_deref(),
+        ),
+        Command::UploadWasm {
+            file,
+            name,
+            allow,
+            port,
+        } => run_upload_wasm(&file, name, allow, port),
+        Command::GenWasm {
+            project,
+            sheet,
+            watch,
+            upload,
+            port,
+        } => run_gen_wasm(&project, cli.library.as_deref(), sheet, watch, upload, port),
+        Command::Block { action } => run_block(action, cli.library.as_deref()),
+        Command::Convert { project } => run_convert(&project, cli.library.as_deref()),
+    }
+}
+
+fn run_block(action: BlockAction, library: Option<&Path>) -> ExitCode {
+    use crab_core::pack::{self, PackImport};
+    let here = Path::new(".");
+    let Some(dir) = library
+        .map(Path::to_path_buf)
+        .or_else(|| find_library(here))
+    else {
+        eprintln!(
+            "ошибка: не найдена папка библиотеки блоков `library/`; укажите её через --library"
+        );
+        return ExitCode::FAILURE;
+    };
+    let lib = match Library::load_with_user(&dir) {
+        Ok((lib, _)) => lib,
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let user = crab_core::user_library_dir(&dir);
+    let result = match action {
+        BlockAction::List => {
+            for (folder, info) in pack::list(&user) {
+                println!("{folder} · версия {} · {}", info.version, info.description);
+                for block in lib.iter().filter(|b| lib.is_user(&b.def.info.kind)) {
+                    if block.dir.starts_with(user.join(&folder)) {
+                        println!("  {} — {}", block.def.info.kind, block.def.info.name);
+                    }
+                }
+            }
+            Ok(())
+        }
+        BlockAction::Export { pack: name, file } => {
+            let file = file.unwrap_or_else(|| PathBuf::from(format!("{name}.{}", pack::EXTENSION)));
+            pack::export_pack(&user, &name, &file)
+                .map(|()| println!("набор «{name}» сохранён: {}", file.display()))
+        }
+        BlockAction::Import { file, replace } => pack::read_pack_file(&file).and_then(|inc| {
+            if let PackImport::NotNewer(have) = inc.status(&user) {
+                if !replace {
+                    return Err(format!(
+                        "набор «{}» уже есть (версия {have}, в файле {}); добавьте --replace, чтобы заменить",
+                        inc.info.name, inc.info.version
+                    ));
+                }
+            }
+            inc.install(&user, &lib).map(|_| {
+                println!(
+                    "набор «{}» (версия {}) добавлен; блоков: {}",
+                    inc.info.name,
+                    inc.info.version,
+                    inc.kinds().len()
+                )
+            })
+        }),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_convert(dir: &Path, library: Option<&Path>) -> ExitCode {
+    let result = Project::load(dir).and_then(|p| {
+        if p.path.exists() {
+            println!("Проект уже в одном файле: {}", p.path.display());
+            return Ok(());
+        }
+        // Without the library the archive is written without the PDF of sheets.
+        let warning = match load_library(dir, library) {
+            Some(lib) => crab_pdf::save_project(&p, &lib)?,
+            None => p.save().map(|()| None)?,
+        };
+        println!("Записан {}", p.path.display());
+        if let Some(w) = warning {
+            println!("предупреждение: {w}");
+        }
+        Ok(())
+    });
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            ExitCode::from(EXIT_LOAD_FAILED)
+        }
+    }
+}
+
+fn run_check(project_dir: &Path, library: Option<&Path>) -> ExitCode {
+    let (project, lib) = match load(project_dir, library) {
+        Ok(loaded) => loaded,
+        Err(code) => return code,
+    };
+
+    let report = check_project(&project, &lib);
+    print_diagnostics(&report.diagnostics);
+
+    let errors = report.errors().count();
+    if errors > 0 {
+        eprintln!("Проверка {}: ошибок — {errors}", project_dir.display());
+        return ExitCode::from(EXIT_SCHEMA_ERRORS);
+    }
+    let order: Vec<&str> = report
+        .order
+        .iter()
+        .map(|&i| project.logic.blocks[i].id.as_str())
+        .collect();
+    println!("Проверка {}: ошибок нет", project_dir.display());
+    println!("Порядок выполнения: {}", order.join(" → "));
+    if !report.feedback.is_empty() {
+        let links: Vec<String> = report
+            .feedback
+            .iter()
+            .map(|&i| {
+                let l = &project.logic.links[i];
+                format!("{} → {}", l.from, l.to)
+            })
+            .collect();
+        println!(
+            "Обратные связи (значение с прошлого цикла): {}",
+            links.join(", ")
+        );
+    }
+    ExitCode::SUCCESS
+}
+
+fn run_gen(
+    project_dir: &Path,
+    library: Option<&Path>,
+    stdout: bool,
+    debug: bool,
+    lang: Option<String>,
+) -> ExitCode {
+    let (mut project, lib) = match load(project_dir, library) {
+        Ok(loaded) => loaded,
+        Err(code) => return code,
+    };
+    if let Some(lang) = lang {
+        if !["ru", "en"].contains(&lang.as_str()) {
+            eprintln!("Язык комментариев «{lang}» не поддерживается: допустимы ru и en");
+            return ExitCode::FAILURE;
+        }
+        project.config.project.comment_lang = lang;
+    }
+    let code = match generate(&project, &lib, debug) {
+        Ok((code, ..)) => code,
+        Err(exit) => return exit,
+    };
+    if stdout {
+        print!("{code}");
+        return ExitCode::SUCCESS;
+    }
+    match write_sketch(&project, &code) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(exit) => exit,
+    }
+}
+
+/// Generates, writes and compiles the sketch; with `upload = Some(port)` also uploads it.
+fn run_build(
+    project_dir: &Path,
+    library: Option<&Path>,
+    debug: bool,
+    force: bool,
+    upload: Option<Option<String>>,
+) -> ExitCode {
+    let (project, lib) = match load(project_dir, library) {
+        Ok(loaded) => loaded,
+        Err(code) => return code,
+    };
+    let (libraries, attached) = match generate(&project, &lib, debug) {
+        Ok((code, libraries, attached)) => match write_sketch(&project, &code) {
+            Ok(()) => (libraries, attached),
+            Err(exit) => return exit,
+        },
+        Err(exit) => return exit,
+    };
+    let build_failed = |e: crab_build::BuildError| {
+        eprintln!("ошибка: {e}");
+        ExitCode::from(EXIT_BUILD_FAILED)
+    };
+    let cli = match ArduinoCli::locate() {
+        Ok(cli) => cli,
+        Err(e) => return build_failed(e),
+    };
+    let board = &project.config.board;
+    let opts = CompileOptions {
+        mode: if debug {
+            BuildMode::Debug
+        } else {
+            BuildMode::Release
+        },
+        force,
+        libraries: attached,
+        ..Default::default()
+    };
+    let mut print = |line: &str| println!("{line}");
+
+    let required: Vec<&str> = libraries.iter().map(String::as_str).collect();
+    match cli.ensure_libraries(&required, &mut print) {
+        Ok(installed) if !installed.is_empty() => {
+            println!("Установлены библиотеки: {}", installed.join(", "));
+        }
+        Ok(_) => {}
+        Err(e) => return build_failed(e),
+    }
+    println!("Сборка для {}...", board.fqbn);
+    if let Some(reason) = cli.cli_reason(&project.work_dir(), board, &opts) {
+        println!("Сборка через arduino-cli: {reason}");
+    }
+    match cli.compile(&project.work_dir(), board, &opts, &mut print) {
+        Ok(Compiled::UpToDate) => println!("Прошивка уже собрана, скетч не менялся"),
+        Ok(Compiled::Direct) => {
+            println!("Прямая сборка: изменился только скетч, arduino-cli не запускался")
+        }
+        Ok(Compiled::Built) => {}
+        Err(e) => return build_failed(e),
+    }
+    let Some(port) = upload else {
+        println!(
+            "Сборка готова: {}",
+            crab_build::build_dir(&project.work_dir()).display()
+        );
+        return ExitCode::SUCCESS;
+    };
+    let port = match cli.choose_port(port.as_deref(), board) {
+        Ok(port) => port,
+        Err(e) => return build_failed(e),
+    };
+    println!("Заливка на {port}...");
+    if let Err(e) = cli.upload(&project.work_dir(), board, &port, &mut print) {
+        return build_failed(e);
+    }
+    println!("Прошивка залита на {port}");
+    ExitCode::SUCCESS
+}
+
+/// Uploads one `.wasm` module to the master firmware over serial.
+fn run_upload_wasm(
+    file: &Path,
+    name: Option<String>,
+    allow: Option<Vec<String>>,
+    port: Option<String>,
+) -> ExitCode {
+    let failed = |message: String| {
+        eprintln!("ошибка: {message}");
+        ExitCode::from(EXIT_BUILD_FAILED)
+    };
+    let wasm = match std::fs::read(file) {
+        Ok(bytes) => bytes,
+        Err(e) => return failed(format!("не прочитан {}: {e}", file.display())),
+    };
+    let manifest_path = file.with_file_name("module.toml");
+    let manifest = match std::fs::read_to_string(&manifest_path) {
+        Ok(text) => match crab_sim::mcu::Manifest::parse(&text) {
+            Ok(manifest) => Some(manifest),
+            Err(e) => return failed(e),
+        },
+        Err(_) => None,
+    };
+    let name = name
+        .or_else(|| {
+            manifest
+                .as_ref()
+                .map(|m| m.name.clone())
+                .filter(|n| !n.is_empty())
+        })
+        .or_else(|| file.file_stem().map(|s| s.to_string_lossy().into_owned()))
+        .unwrap_or_default();
+    let allow = allow.unwrap_or_else(|| manifest.map(|m| m.allow).unwrap_or_default());
+    push_module(&name, &wasm, &allow, port)
+}
+
+/// Sends one module to the master firmware over serial.
+fn push_module(name: &str, wasm: &[u8], allow: &[String], port: Option<String>) -> ExitCode {
+    let failed = |message: String| {
+        eprintln!("ошибка: {message}");
+        ExitCode::from(EXIT_BUILD_FAILED)
+    };
+    let port = match port {
+        Some(port) => port,
+        None => match ArduinoCli::locate()
+            .and_then(|cli| cli.serial_ports())
+            .and_then(|ports| crab_build::auto_port(&ports))
+        {
+            Ok(port) => port,
+            Err(e) => return failed(e.to_string()),
+        },
+    };
+    let mut serial = match serialport::new(&port, 115_200)
+        .timeout(std::time::Duration::from_millis(200))
+        .open()
+    {
+        Ok(serial) => serial,
+        Err(e) => return failed(format!("порт {port} не открыт: {e}")),
+    };
+    // Release DTR/RTS so opening the port does not reset the board.
+    let _ = serial.write_data_terminal_ready(false);
+    let _ = serial.write_request_to_send(false);
+    if let Err(e) =
+        crab_build::mcu_module::wait_for_master(&mut serial, std::time::Duration::from_secs(8))
+    {
+        return failed(e.to_string());
+    }
+    println!("Модуль «{name}» ({} байт) -> {port}...", wasm.len());
+    match crab_build::mcu_module::upload_module(&mut serial, name, wasm, allow) {
+        Ok(done) => {
+            match done.swap_us {
+                Some(us) => println!("Модуль «{name}» залит и запущен (замена {} мс)", us / 1000),
+                None => println!("Модуль «{name}» залит и запущен"),
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => failed(e.to_string()),
+    }
+}
+
+/// Builds the sheets of the project as WASM modules into `.crab/<project>/wasm/<name>/`
+/// (`<name>.wasm` + `module.toml`); with `upload` also sends them to the board.
+fn run_gen_wasm(
+    project_dir: &Path,
+    library: Option<&Path>,
+    sheet: Option<u32>,
+    watch: bool,
+    upload: bool,
+    port: Option<String>,
+) -> ExitCode {
+    let (project, lib) = match load(project_dir, library) {
+        Ok(loaded) => loaded,
+        Err(code) => return code,
+    };
+    let project = crab_codegen::prepare(&project, &lib);
+    let program = match Program::build(&project, &lib) {
+        Ok(program) => program,
+        Err(GenError::Schema(diagnostics)) => {
+            print_diagnostics(&diagnostics);
+            eprintln!("Генерация отменена: в схеме есть ошибки (подробнее — crablogic check)");
+            return ExitCode::from(EXIT_SCHEMA_ERRORS);
+        }
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            return ExitCode::from(EXIT_GEN_FAILED);
+        }
+    };
+    let sheets = sheet.map_or_else(|| program.sheets(), |n| vec![n]);
+    let mut modules = Vec::new();
+    for n in sheets {
+        match program.wasm_module_with(n, watch) {
+            Ok(module) => modules.push(module),
+            Err(e) => {
+                eprintln!("ошибка: лист {n}: {e}");
+                return ExitCode::from(EXIT_GEN_FAILED);
+            }
+        }
+    }
+    let mut allows = Vec::new();
+    for module in &modules {
+        let dir = project.work_dir().join("wasm").join(&module.name);
+        let written = std::fs::create_dir_all(&dir)
+            .and_then(|()| std::fs::write(dir.join(format!("{}.wasm", module.name)), &module.wasm))
+            .and_then(|()| std::fs::write(dir.join("module.toml"), &module.manifest));
+        if let Err(e) = written {
+            eprintln!("ошибка: не записан {}: {e}", dir.display());
+            return ExitCode::from(EXIT_GEN_FAILED);
+        }
+        println!(
+            "Модуль «{}»: {} байт -> {}",
+            module.name,
+            module.wasm.len(),
+            dir.display()
+        );
+        allows.push(
+            crab_sim::mcu::Manifest::parse(&module.manifest)
+                .map(|m| m.allow)
+                .unwrap_or_default(),
+        );
+    }
+    if upload {
+        for (module, allow) in modules.iter().zip(&allows) {
+            let code = push_module(&module.name, &module.wasm, allow, port.clone());
+            if code != ExitCode::SUCCESS {
+                return code;
+            }
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// Generates the sketch, printing schema errors. Also returns the Arduino libraries it needs.
+fn generate(
+    project: &Project,
+    lib: &Library,
+    debug: bool,
+) -> Result<(String, Vec<String>, Vec<PathBuf>), ExitCode> {
+    let backend = ArduinoCpp { debug };
+    // Blocks written as WASM modules need their C translation next to the module.
+    if let Some(w2c2) = crab_build::wasm_c::find_w2c2(None) {
+        for problem in crab_build::wasm_c::translate_library(&w2c2, lib) {
+            eprintln!("предупреждение: {problem}");
+        }
+    }
+    // Wi-Fi passwords and other `local` values are kept by the program, not in the file.
+    let store = LocalValues::open_default().unwrap_or_else(|e| {
+        eprintln!("предупреждение: {e}");
+        LocalValues::default()
+    });
+    let source = project;
+    let project = &project.with_local(lib, &store);
+    let result = Program::build(project, lib).and_then(|program| {
+        let code = backend.generate(&program)?;
+        let code = crab_codegen::embed_project(&code, source)?;
+        let libraries = program.libraries().into_iter().map(String::from).collect();
+        Ok((code, libraries, program.attached_libraries()))
+    });
+    match result {
+        Ok(generated) => Ok(generated),
+        Err(GenError::Schema(diagnostics)) => {
+            print_diagnostics(&diagnostics);
+            eprintln!("Генерация отменена: в схеме есть ошибки (подробнее — crablogic check)");
+            Err(ExitCode::from(EXIT_SCHEMA_ERRORS))
+        }
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            Err(ExitCode::from(EXIT_GEN_FAILED))
+        }
+    }
+}
+
+fn write_sketch(project: &Project, code: &str) -> Result<(), ExitCode> {
+    match crab_codegen::write_sketch(&project.work_dir(), code) {
+        Ok((path, true)) => println!("Скетч записан: {}", path.display()),
+        Ok((path, false)) => println!("Скетч не изменился: {}", path.display()),
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            return Err(ExitCode::from(EXIT_GEN_FAILED));
+        }
+    }
+    Ok(())
+}
+
+/// Prints live values every half second until Ctrl+C.
+/// Reads the project out of the board's flash and saves it as `output`.
+fn run_pull(
+    output: &Path,
+    port: &str,
+    password: &str,
+    force: bool,
+    library: Option<&Path>,
+) -> ExitCode {
+    if output.exists() && !force {
+        eprintln!(
+            "ошибка: файл {} уже есть; укажите --force, чтобы заменить его",
+            output.display()
+        );
+        return ExitCode::FAILURE;
+    }
+    let mut transport = match crab_debug::transport::serial(port)() {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("ошибка: не удалось открыть порт {port}: {e}");
+            return ExitCode::from(EXIT_BUILD_FAILED);
+        }
+    };
+    println!("Чтение проекта с платы ({port})...");
+    let pulled = match crab_debug::read_project(transport.as_mut(), password, |got, total| {
+        eprint!("\r{got} из {total} байт");
+    }) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("\nошибка: {e}");
+            return ExitCode::from(EXIT_BUILD_FAILED);
+        }
+    };
+    eprintln!();
+    let archive = match crab_core::protect::open(&pulled.data, password) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let project = match Project::from_archive_bytes(&archive, output) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            return ExitCode::from(EXIT_LOAD_FAILED);
+        }
+    };
+    if let Err(e) = project.save() {
+        eprintln!("ошибка: {e}");
+        return ExitCode::from(EXIT_LOAD_FAILED);
+    }
+    println!("Проект сохранён: {}", output.display());
+    // The firmware must have been built from this very schema.
+    if let (Some(fp), Some(lib)) = (pulled.fingerprint, load_library(output, library)) {
+        let project = project.without_disabled();
+        match Program::build(&project, &lib) {
+            Ok(program) => {
+                let same = crab_codegen::debug::debug_table(&program).fingerprint() == fp;
+                if same {
+                    println!("Отпечаток схемы совпадает с прошивкой.");
+                } else {
+                    println!("Внимание: отпечаток схемы не совпадает с прошивкой.");
+                }
+            }
+            Err(e) => eprintln!("предупреждение: отпечаток не проверен: {e}"),
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+fn run_monitor(project_dir: &Path, library: Option<&Path>, port: Option<String>) -> ExitCode {
+    let (project, lib) = match load(project_dir, library) {
+        Ok(loaded) => loaded,
+        Err(code) => return code,
+    };
+    let project = project.without_disabled();
+    let program = match Program::build(&project, &lib) {
+        Ok(p) => p,
+        Err(GenError::Schema(d)) => {
+            print_diagnostics(&d);
+            return ExitCode::from(EXIT_SCHEMA_ERRORS);
+        }
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            return ExitCode::from(EXIT_GEN_FAILED);
+        }
+    };
+    let Some(port) = port.or_else(|| project.config.board.port.clone()) else {
+        eprintln!(
+            "ошибка: укажите порт через --port или в файле проекта ([board] port = \"COM3\")"
+        );
+        return ExitCode::from(EXIT_BUILD_FAILED);
+    };
+    let table = crab_codegen::debug::debug_table(&program);
+    let names: Vec<String> = table
+        .entries
+        .iter()
+        .map(|e| match &e.source {
+            crab_debug::Source::Output(p) => p.to_string(),
+            crab_debug::Source::Var(v) => format!("${v}"),
+        })
+        .collect();
+    let session = crab_debug::Session::start_with(
+        table,
+        crab_debug::transport::serial(&port),
+        project.config.project.password.clone(),
+        || {},
+    );
+    let mine = project.content_hash().ok();
+    let mut reported = None;
+    println!("Монитор {port}, Ctrl+C — выход");
+    let mut printed_console = 0;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let live = session.snapshot();
+        for line in live.console_after(printed_console) {
+            println!("> {line}");
+        }
+        printed_console = live.console_total;
+        let values: Vec<String> = names
+            .iter()
+            .zip(&live.values)
+            .zip(&live.forced)
+            .map(|((name, v), f)| {
+                let v = v.map_or("—".to_owned(), |v| v.to_string());
+                let mark = if f.is_some() { " (F)" } else { "" };
+                format!("{name}={v}{mark}")
+            })
+            .collect();
+        println!("[{}] {}", live.status, values.join("  "));
+        if live.project_hash != reported {
+            reported = live.project_hash;
+            if let Some(on_board) = reported {
+                if Some(on_board) == mine {
+                    println!("  проект совпадает с платой");
+                } else {
+                    println!(
+                        "  проект на плате отличается от этого файла (хеш {})",
+                        crab_core::hash_hex(&on_board)
+                    );
+                }
+            }
+        }
+        if let Some(st) = &live.stats {
+            println!(
+                "  цикл: логика {} мкс (макс {}, средн. {}), период макс {} мкс, сканов {}, куча {} Б",
+                st.last_us, st.max_us, st.avg_us, st.period_max_us, st.cycles, st.free_heap
+            );
+        }
+    }
+}
+
+fn print_diagnostics(diagnostics: &[Diagnostic]) {
+    for d in diagnostics {
+        match d.severity {
+            Severity::Error => eprintln!("{d}"),
+            Severity::Warning => println!("{d}"),
+        }
+    }
+}
+
+/// Loads the project and the block library, printing errors.
+fn load(project_dir: &Path, library: Option<&Path>) -> Result<(Project, Library), ExitCode> {
+    let project = Project::load(project_dir).map_err(|e| {
+        eprintln!("ошибка: {e}");
+        ExitCode::from(EXIT_LOAD_FAILED)
+    })?;
+    let lib = load_library(project_dir, library).ok_or(ExitCode::from(EXIT_LOAD_FAILED))?;
+    Ok((project, lib))
+}
+
+/// Loads the block library; library problems are printed as warnings.
+fn load_library(project_dir: &Path, explicit: Option<&Path>) -> Option<Library> {
+    let Some(dir) = explicit
+        .map(Path::to_path_buf)
+        .or_else(|| find_library(project_dir))
+    else {
+        eprintln!(
+            "ошибка: не найдена папка библиотеки блоков `library/`; укажите её через --library"
+        );
+        return None;
+    };
+    // User blocks packed into the project file but missing here are restored first;
+    // a project folder (old format) may bring a board of its own.
+    if crab_core::project::is_project_file(project_dir) || project_dir.is_dir() {
+        if let Ok((mut lib, _)) = Library::load_with_user(&dir) {
+            let user = crab_core::user_library_dir(&dir);
+            let boards = crab_core::packed::unpack_missing_boards(project_dir, &user, &lib);
+            if !boards.is_empty() {
+                println!("из проекта добавлена плата: {}", boards.join(", "));
+                if let Ok((reloaded, _)) = Library::load_with_user(&dir) {
+                    lib = reloaded;
+                }
+            }
+            let written = crab_core::packed::unpack_missing_blocks(project_dir, &user, &lib);
+            if !written.is_empty() {
+                println!("из проекта добавлены блоки: {}", written.join(", "));
+            }
+        }
+    }
+    match Library::load_with_user(&dir) {
+        Ok((lib, errors)) => {
+            for e in errors {
+                println!("предупреждение: блок пропущен: {e}");
+            }
+            Some(lib)
+        }
+        Err(e) => {
+            eprintln!("ошибка: {e}");
+            None
+        }
+    }
+}
+
+/// Looks for `library/` in the project folder and its parents, then next to the executable.
+fn find_library(project_dir: &Path) -> Option<PathBuf> {
+    let project_dir = std::path::absolute(project_dir).ok();
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    [project_dir, exe_dir]
+        .into_iter()
+        .flatten()
+        .flat_map(|start| {
+            start
+                .ancestors()
+                .map(|a| a.join("library"))
+                .collect::<Vec<_>>()
+        })
+        .find(|dir| dir.is_dir())
+}

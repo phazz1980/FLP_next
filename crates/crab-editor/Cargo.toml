@@ -1,0 +1,36 @@
+[package]
+name = "crab-editor"
+description = "Graphical FBD editor of CrabLogic"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "crablogic-editor"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+eframe = { version = "0.37", features = ["persistence"] }
+crab-ai = { path = "../crab-ai" }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+crab-build = { path = "../crab-build" }
+crab-codegen = { path = "../crab-codegen" }
+crab-core = { path = "../crab-core" }
+crab-pdf = { path = "../crab-pdf" }
+crab-sim = { path = "../crab-sim" }
+serialport = { version = "4", default-features = false }
+crab-mcp = { path = "../crab-mcp" }
+crab-debug = { path = "../crab-debug", features = ["serial"] }
+rfd = "0.17"
+ureq = { version = "2", features = ["json"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+egui_extras = { version = "0.37", default-features = false, features = ["image", "file"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+
+[build-dependencies]
+embed-resource = "3"

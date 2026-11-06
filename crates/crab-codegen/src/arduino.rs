@@ -1,0 +1,1480 @@
+//! Arduino C++ backend: renders block templates `esp32.cpp.tmpl` into a sketch.
+
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
+use std::path::PathBuf;
+
+use crab_core::ident::c_ident;
+use crab_core::library::{FirmwareSource, ESP32_CPP_TEMPLATE};
+use crab_core::uart::{UartAccess, UartConfig};
+use crab_core::value::parse_duration_ms;
+use crab_core::vars::VAR_SET;
+use crab_core::{ParamKind, ParamValue, PortRef, SignalType};
+use minijinja::value::ValueKind;
+use minijinja::{context, AutoEscape, Environment, UndefinedBehavior, Value};
+
+pub mod simsrc;
+mod wasm;
+
+use crate::tasks::Tasks;
+use crate::{Backend, GenError, Instance, Program, Source};
+
+/// Arduino C++ for ESP32, built by arduino-cli.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ArduinoCpp {
+    /// Embed the online debugging module.
+    pub debug: bool,
+}
+
+impl ArduinoCpp {
+    pub const RELEASE: Self = Self { debug: false };
+    pub const DEBUG: Self = Self { debug: true };
+}
+
+impl Backend for ArduinoCpp {
+    fn template_file(&self) -> &'static str {
+        ESP32_CPP_TEMPLATE
+    }
+
+    fn generate(&self, program: &Program) -> Result<String, GenError> {
+        if program
+            .project
+            .logic
+            .blocks
+            .iter()
+            .any(|b| crab_core::project::is_web_kind(&b.kind))
+        {
+            return Err(GenError::WebNeedsWasm);
+        }
+        let env = environment();
+        let tasks = Tasks::new(program)?;
+        let mut rendered = Vec::with_capacity(program.blocks.len());
+        for inst in &program.blocks {
+            let sections = match inst.block.tag.as_deref() {
+                Some(tag) if !inst.outputs.is_empty() => input_copy(program, &tasks, inst, tag),
+                // A copy of an output writes the pin in its turn; the tag sets it up.
+                Some(_) => Sections {
+                    looped: render_block(&env, program, &tasks, inst, self.debug)?.looped,
+                    ..Default::default()
+                },
+                None => render_block(&env, program, &tasks, inst, self.debug)?,
+            };
+            rendered.push((inst, sections));
+        }
+        Ok(assemble(program, &tasks, &rendered, self.debug))
+    }
+}
+
+const NL: char = char::from_u32(10).unwrap();
+
+fn environment() -> Environment<'static> {
+    let mut env = Environment::new();
+    env.set_auto_escape_callback(|_| AutoEscape::None);
+    env.set_undefined_behavior(UndefinedBehavior::Strict);
+    env.set_trim_blocks(true);
+    env
+}
+
+/// Code of one block split into sketch sections.
+#[derive(Debug, Default, PartialEq)]
+struct Sections {
+    /// `// @defines`: macros placed before the includes (library settings).
+    defines: String,
+    global: String,
+    setup: String,
+    looped: String,
+    functions: String,
+    /// `// @global once`, `// @setup once`, `// @functions once`: shared by all
+    /// instances of the block type (and by other types with the same text); the
+    /// same text goes into the sketch once.
+    once_global: String,
+    once_setup: String,
+    once_functions: String,
+    /// `#include` lines written by hand in the global and function sections: they are
+    /// moved up to the other includes, before any declaration.
+    includes: Vec<String>,
+}
+
+impl From<crab_blocks::CppParts> for Sections {
+    fn from(p: crab_blocks::CppParts) -> Self {
+        Self {
+            defines: p.defines,
+            global: p.global,
+            setup: p.setup,
+            looped: p.looped,
+            functions: p.functions,
+            once_global: p.once_global,
+            once_setup: p.once_setup,
+            once_functions: p.once_functions,
+            includes: p.includes,
+        }
+    }
+}
+
+/// What a Rust block gets while generating: the maps built for templates, as plain strings.
+fn cpp_ctx(
+    id: &str,
+    input: &BTreeMap<&str, String>,
+    input_type: &BTreeMap<&str, &str>,
+    output: &BTreeMap<&str, &str>,
+    param: &BTreeMap<&str, Value>,
+    bound_inputs: &BTreeMap<&str, (ParamKind, String)>,
+    value: &BTreeMap<&str, Value>,
+) -> crab_blocks::CppCtx {
+    use crab_blocks::Raw;
+    let text = |v: &Value| match v.kind() {
+        ValueKind::Bool => v.is_true().to_string(),
+        _ => v.as_str().map_or_else(|| v.to_string(), str::to_owned),
+    };
+    crab_blocks::CppCtx {
+        id: id.to_owned(),
+        input: input
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), v.clone()))
+            .collect(),
+        input_type: input_type
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect(),
+        output: output
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect(),
+        param: param
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), text(v)))
+            .collect(),
+        param_bound: bound_inputs.keys().map(|k| (*k).to_owned()).collect(),
+        expander: None,
+        uart: None,
+        bound: Default::default(),
+        flag_code: Default::default(),
+        value: value
+            .iter()
+            .map(|(k, v)| {
+                let raw = match v.kind() {
+                    ValueKind::Bool => Raw::Bool(v.is_true()),
+                    ValueKind::String => Raw::Text(text(v)),
+                    _ => i64::try_from(v.clone()).map_or_else(
+                        |_| Raw::Float(f64::try_from(v.clone()).unwrap_or(0.0)),
+                        Raw::Int,
+                    ),
+                };
+                ((*k).to_owned(), raw)
+            })
+            .collect(),
+    }
+}
+
+const SECTION_LIST: &str = "// @defines, // @global, // @setup, // @loop, // @functions";
+
+/// A copy of an input reads nothing itself: it takes the values of its tag, which
+/// runs before it.
+fn input_copy(program: &Program, tasks: &Tasks, inst: &Instance, tag: &str) -> Sections {
+    let source = program.blocks.iter().find(|b| b.block.id == tag);
+    let mut looped = String::new();
+    for (port, &s) in &inst.outputs {
+        let Some(&from) = source.and_then(|b| b.outputs.get(port)) else {
+            continue;
+        };
+        let _ = writeln!(
+            looped,
+            "{} = {};",
+            program.signals[s].name,
+            tasks.read_name(program, inst, from)
+        );
+    }
+    Sections {
+        looped,
+        ..Default::default()
+    }
+}
+
+fn render_block(
+    env: &Environment,
+    program: &Program,
+    tasks: &Tasks,
+    inst: &Instance,
+    debug: bool,
+) -> Result<Sections, GenError> {
+    let kind = &inst.block.kind;
+    // Built-in blocks have no folder; errors then point at the type name.
+    let path = inst
+        .lib
+        .template_path(ESP32_CPP_TEMPLATE)
+        .unwrap_or_else(|| PathBuf::from(format!("{kind}/{ESP32_CPP_TEMPLATE}")));
+    // A block without a template runs from its WASM module, translated to C.
+    let from = inst.lib.firmware_source();
+    // A template in the library folder wins over the Rust code of a built-in block.
+    let builtin = match from {
+        FirmwareSource::Template => None,
+        _ => crab_blocks::get(inst.lib.def.info.code_of.as_deref().unwrap_or(kind)),
+    };
+    let module = builtin.is_none() && from == FirmwareSource::Module;
+    let mut source = if module || builtin.is_some() {
+        String::new()
+    } else {
+        inst.lib
+            .template(ESP32_CPP_TEMPLATE)
+            .ok_or_else(|| GenError::MissingTemplate {
+                kind: kind.clone(),
+                file: ESP32_CPP_TEMPLATE,
+            })?
+            .map_err(|source| GenError::Io {
+                path: path.clone(),
+                source,
+            })?
+    };
+
+    let input: BTreeMap<&str, String> = inst
+        .inputs
+        .iter()
+        .map(|(&port, i)| {
+            let expr = match &i.source {
+                Source::Signal { index, invert } => {
+                    let signal = &program.signals[*index];
+                    let name = tasks.read_name(program, inst, *index);
+                    if *invert {
+                        format!("!{name}")
+                    } else if signal.ty == i.ty {
+                        name
+                    } else {
+                        format!("({}){name}", cpp_type(i.ty))
+                    }
+                }
+                Source::Default(value) => constant_literal(i.ty, value),
+                Source::Var(name) => crab_core::vars::storage_name(name),
+            };
+            let expr = if inst.block.inverted_inputs.contains(port) {
+                format!("!({expr})")
+            } else {
+                expr
+            };
+            (port, expr)
+        })
+        .collect();
+    let output: BTreeMap<&str, &str> = inst
+        .outputs
+        .iter()
+        .map(|(&port, &s)| (port, program.signals[s].name.as_str()))
+        .collect();
+    let mut param: BTreeMap<&str, Value> = BTreeMap::new();
+    let mut value = BTreeMap::new();
+    for (&name, v) in &inst.params {
+        let kind = inst.lib.def.param(name).expect("param from def").kind;
+        let literal = match inst.param_vars.get(name) {
+            // A text parameter is used as `const char *` in the templates.
+            Some(var) if kind == ParamKind::Text => {
+                Value::from(format!("{}.c_str()", crab_core::vars::storage_name(var)))
+            }
+            Some(var) => Value::from(crab_core::vars::storage_name(var)),
+            None => param_value(kind, v),
+        };
+        param.insert(name, literal);
+        value.insert(name, raw_value(kind, v));
+    }
+
+    // Parameters turned into inputs: the template gets the expression of the input,
+    // evaluated on every scan. A template that decides something while generating
+    // (`value.<name>`) cannot follow a value that is only known at run time.
+    let mut bound_inputs = BTreeMap::new();
+    for name in &inst.block.param_in {
+        let Some(expr) = input.get(name.as_str()) else {
+            continue;
+        };
+        let Some((&pname, _)) = inst.params.get_key_value(name.as_str()) else {
+            continue;
+        };
+        let kind = inst.lib.def.param(pname).expect("param from def").kind;
+        if source.contains(&format!("value.{pname}"))
+            || source.contains(&format!("value[\"{pname}\"]"))
+        {
+            return Err(GenError::ParamInputUnsupported {
+                block: inst.block.id.clone(),
+                param: pname.to_owned(),
+            });
+        }
+        source = strip_literal_suffix(&source, pname);
+        bound_inputs.insert(pname, (kind, expr.clone()));
+    }
+    for (&pname, (kind, expr)) in &bound_inputs {
+        let expr = match kind {
+            ParamKind::Duration => format!("(uint32_t)({expr})"),
+            _ => format!("({expr})"),
+        };
+        param.insert(pname, Value::from(expr));
+    }
+
+    let name = format!("{kind}/{ESP32_CPP_TEMPLATE}");
+    // Storage of the variable a `var_get` / `var_set` block accesses.
+    let var = inst.block.var_name().map(crab_core::vars::storage_name);
+    let id = c_ident(&inst.block.id);
+    let uart = uart_of(program, inst).map(|(u, _)| uart_value(&u, debug));
+    // Real types of the inputs: for `any` ports, the type of what feeds them.
+    let input_type: BTreeMap<&str, &str> = inst
+        .inputs
+        .iter()
+        .map(|(&port, i)| (port, i.ty.name()))
+        .collect();
+    // Parameters taken from variables: templates build their code in and switch it at run time.
+    let bound: BTreeMap<&str, bool> = inst
+        .lib
+        .def
+        .params
+        .iter()
+        .map(|p| {
+            (
+                p.name.as_str(),
+                inst.param_vars.contains_key(p.name.as_str()),
+            )
+        })
+        .collect();
+    // Boolean parameters as C++ expressions: a variable or `true` / `false`.
+    let flag: BTreeMap<&str, String> = inst
+        .params
+        .iter()
+        .filter_map(|(&n, v)| {
+            let ParamValue::Bool(b) = v else { return None };
+            let text = match inst.param_vars.get(n) {
+                Some(var) => crab_core::vars::storage_name(var),
+                None => b.to_string(),
+            };
+            Some((n, text))
+        })
+        .collect();
+    // With a network settings widget on the page, Wi-Fi and Ethernet take their address
+    // settings from it (saved in flash) instead of the block's own parameters.
+    let mut param = param;
+    let mut bound = bound;
+    let mut flag = flag;
+    for (&pname, (_, expr)) in &bound_inputs {
+        if flag.contains_key(pname) {
+            flag.insert(pname, format!("({expr})"));
+        }
+    }
+    let mut value = value;
+    let mut input = input;
+    if kind == "web_net" {
+        // The defaults of the form are the settings made in the editor on the Wi-Fi and
+        // Ethernet blocks: the page starts from them after every flash.
+        const INHERIT: [(&str, &str); 8] = [
+            ("init_ssid", "ssid"),
+            ("init_password", "password"),
+            ("init_dhcp", "dhcp"),
+            ("init_ip", "ip"),
+            ("init_gateway", "gateway"),
+            ("init_subnet", "subnet"),
+            ("init_ap_ssid", "ap_ssid"),
+            ("init_ap_password", "ap_password"),
+        ];
+        for (init, from) in INHERIT {
+            let found = ["wifi", "ethernet"].iter().find_map(|k| {
+                program
+                    .blocks
+                    .iter()
+                    .filter(|b| b.block.kind == *k && !b.param_vars.contains_key(from))
+                    .find_map(|b| Some((b, b.params.get(from)?, b.lib.def.param(from)?.kind)))
+            });
+            let Some((_, v, pk)) = found else { continue };
+            if matches!(v, ParamValue::Text(s) if s.is_empty()) {
+                continue;
+            }
+            param.insert(init, param_value(pk, v));
+            value.insert(init, raw_value(pk, v));
+        }
+        let mode = program
+            .blocks
+            .iter()
+            .filter(|b| b.block.kind == "wifi")
+            .find_map(|b| match b.params.get("wifi_mode") {
+                Some(ParamValue::Int(m)) if (0..=2).contains(m) => Some(*m),
+                _ => None,
+            });
+        if let Some(m) = mode {
+            value.insert("init_mode", Value::from(m));
+            param.insert("init_mode", Value::from(m.to_string()));
+        }
+    }
+    if matches!(kind.as_str(), "wifi" | "ethernet")
+        && program.blocks.iter().any(|b| b.block.kind == "web_net")
+    {
+        const FIELDS: [(&str, usize); 8] = [
+            ("ssid", 0),
+            ("password", 1),
+            ("dhcp", 2),
+            ("ip", 3),
+            ("gateway", 4),
+            ("subnet", 5),
+            ("ap_ssid", 6),
+            ("ap_password", 7),
+        ];
+        for (name, i) in FIELDS {
+            let Some(key) = bound.keys().find(|k| **k == name).copied() else {
+                continue;
+            };
+            bound.insert(key, true);
+            if name == "dhcp" {
+                flag.insert(key, format!("(crabNet.f[{i}] != \"0\")"));
+            } else {
+                param.insert(key, Value::from(format!("crabNet.f[{i}].c_str()")));
+            }
+        }
+        if kind == "wifi" {
+            // The mode is chosen on the page, so the block is built as "set by the mode input".
+            value.insert("wifi_mode", Value::from(3));
+            input.insert("mode", "crabNet.eff".to_owned());
+        }
+    }
+    // Pin word names of the expander the block stands on, `none` otherwise.
+    let expander = match inst.block.expander.as_deref() {
+        Some(name) => {
+            let (input, output) = crate::expander::state_names(name);
+            context! { input, output }
+        }
+        None => Value::from(()),
+    };
+    let mut sections = if let Some(block) = builtin {
+        let mut cpp = cpp_ctx(
+            &id,
+            &input,
+            &input_type,
+            &output,
+            &param,
+            &bound_inputs,
+            &value,
+        );
+        cpp.expander = inst
+            .block
+            .expander
+            .as_deref()
+            .map(crate::expander::state_names);
+        cpp.uart = uart_of(program, inst).map(|(u, _)| uart_ctx(&u, debug));
+        cpp.bound = bound
+            .iter()
+            .filter(|(_, b)| **b)
+            .map(|(n, _)| (*n).to_owned())
+            .chain(bound_inputs.keys().map(|n| (*n).to_owned()))
+            .collect();
+        cpp.flag_code = flag
+            .iter()
+            .map(|(n, c)| ((*n).to_owned(), c.clone()))
+            .collect();
+        Sections::from(block.emit_cpp(&cpp))
+    } else if module {
+        wasm::sections(program, inst, &input, &param)?
+    } else {
+        let ctx = context! {
+            id, input, input_type, output, param, value, bound, flag, var, uart, expander
+        };
+        let text = env
+            .render_named_str(&name, &source, ctx)
+            .map_err(|source| GenError::Render {
+                block: inst.block.id.clone(),
+                source,
+            })?;
+        split_sections(&text).map_err(|message| GenError::BadTemplate { path, message })?
+    };
+    // Outputs bound to variables are copied right after the block.
+    for (port, var) in &inst.output_vars {
+        if let Some(name) = output.get(port) {
+            if !sections.looped.is_empty() && !sections.looped.ends_with(NL) {
+                sections.looped.push(NL);
+            }
+            sections.looped.push_str(&format!(
+                "{} = {name};{NL}",
+                crab_core::vars::storage_name(var)
+            ));
+        }
+    }
+    Ok(sections)
+}
+
+/// UART of a block with `[block.uart]`, with its settings (checked to exist).
+pub(crate) fn uart_of(program: &Program, inst: &Instance) -> Option<(UartConfig, UartAccess)> {
+    let uart = inst.lib.def.info.uart.as_ref()?;
+    let Some(ParamValue::Int(n)) = inst.params.get(uart.param.as_str()) else {
+        return None;
+    };
+    let config = crab_core::uart::config_of(&program.uarts, crab_core::uart::port_number(*n))?;
+    Some((config, uart.access))
+}
+
+/// UART of a block for a Rust block: the same values as `{{ uart.* }}` in templates.
+fn uart_ctx(u: &UartConfig, debug: bool) -> crab_blocks::UartCtx {
+    crab_blocks::UartCtx {
+        number: u.number,
+        serial: u.serial(),
+        input: if u.number == crab_core::uart::USB && debug {
+            "crab_dbg_input".to_owned()
+        } else {
+            u.serial()
+        },
+        speed: u.speed,
+        config: u.arduino_config(),
+        parity: u.parity_code(),
+        rx: u.rx,
+        tx: u.tx,
+        de: u.de,
+        rx_buffer: u.rx_buffer,
+    }
+}
+
+/// `{{ uart.* }}` in templates: ready C++ values of the block's UART.
+/// `input` is what readers take bytes from: the port itself, or in debug
+/// firmware for USB the console input of the debugging module.
+fn uart_value(u: &UartConfig, debug: bool) -> Value {
+    let input = if u.number == crab_core::uart::USB && debug {
+        "crab_dbg_input".to_owned()
+    } else {
+        u.serial()
+    };
+    context! {
+        number => u.number,
+        serial => u.serial(),
+        input,
+        speed => u.speed,
+        config => u.arduino_config(),
+        parity => u.parity_code(),
+        rx => u.rx,
+        tx => u.tx,
+        de => u.de,
+        rx_buffer => u.rx_buffer,
+    }
+}
+
+/// Setup of the UARTs that blocks share (all but `exclusive`, whose library
+/// sets the port up itself). USB is started here only if nothing else does.
+fn uart_setup(program: &Program, serial_started: bool) -> Vec<String> {
+    let lang = program.lang();
+    let uarts: Vec<(UartConfig, UartAccess)> = program
+        .blocks
+        .iter()
+        .filter_map(|inst| uart_of(program, inst))
+        .collect();
+    // A port owned by a library (Modbus RTU) is opened by that library.
+    let owned = |n: u8| {
+        uarts
+            .iter()
+            .any(|(u, a)| u.number == n && *a == UartAccess::Exclusive)
+    };
+    let mut used: Vec<UartConfig> = Vec::new();
+    for (u, _) in &uarts {
+        if !owned(u.number) && used.iter().all(|o| o.number != u.number) {
+            used.push(u.clone());
+        }
+    }
+    // USB first, then the UARTs in order.
+    used.sort_by_key(|u| (u.number != crab_core::uart::USB, u.number));
+    let mut lines = Vec::new();
+    for u in used {
+        if u.number == crab_core::uart::USB {
+            if !serial_started {
+                lines.push(crate::locf!(
+                    lang,
+                    "// USB: {} бод",
+                    "// USB: {} baud",
+                    u.speed
+                ));
+                lines.push(format!("Serial.begin({});", u.speed));
+            }
+            continue;
+        }
+        let serial = u.serial();
+        let pin = |p: i64| {
+            if p >= 0 {
+                format!("GPIO{p}")
+            } else {
+                lang.pick("по умолчанию", "default").into()
+            }
+        };
+        lines.push(crate::locf!(
+            lang,
+            "// UART{}: {} бод, {}, RX {}, TX {}",
+            "// UART{}: {} baud, {}, RX {}, TX {}",
+            u.number,
+            u.speed,
+            u.format.trim().to_ascii_uppercase(),
+            pin(u.rx),
+            pin(u.tx)
+        ));
+        lines.push(format!("{serial}.setRxBufferSize({});", u.rx_buffer));
+        lines.push(format!(
+            "{serial}.begin({}, {}, {}, {});",
+            u.speed,
+            u.arduino_config(),
+            u.rx,
+            u.tx
+        ));
+        if u.de >= 0 {
+            lines.push(format!(
+                "{serial}.setPins(-1, -1, -1, {});  // DE/RE RS-485",
+                u.de
+            ));
+            lines.push(format!("{serial}.setMode(UART_MODE_RS485_HALF_DUPLEX);"));
+        }
+    }
+    lines
+}
+
+/// Parameter as seen by templates: bools stay bools for `{% if %}`,
+/// everything else is a ready C++ literal.
+fn param_value(kind: ParamKind, value: &ParamValue) -> Value {
+    match (kind, value) {
+        (_, ParamValue::Bool(b)) => Value::from(*b),
+        (ParamKind::Float, ParamValue::Int(v)) => Value::from(float_literal(*v as f64)),
+        (_, ParamValue::Int(v)) => Value::from(v.to_string()),
+        (_, ParamValue::Float(v)) => Value::from(float_literal(*v)),
+        (ParamKind::Duration, ParamValue::Text(s)) => {
+            let ms = parse_duration_ms(s).expect("duration checked");
+            Value::from(ms.to_string())
+        }
+        (_, ParamValue::Text(s)) => Value::from(string_literal(s)),
+    }
+}
+
+/// Removes the `U` / `UL` suffix after `{{ param.<name> }}`: it makes sense for a
+/// literal only, an input expression already has its type.
+fn strip_literal_suffix(source: &str, name: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut rest = source;
+    while let Some(start) = rest.find("{{") {
+        let Some(len) = rest[start..].find("}}") else {
+            break;
+        };
+        let end = start + len + 2;
+        out.push_str(&rest[..end]);
+        let inner = rest[start + 2..end - 2].trim();
+        rest = &rest[end..];
+        if inner == format!("param.{name}") {
+            rest = rest
+                .strip_prefix("UL")
+                .or_else(|| rest.strip_prefix('U'))
+                .unwrap_or(rest);
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Parameter as a plain value for comparisons in templates (`{% if value.on > value.off %}`);
+/// durations are milliseconds.
+fn raw_value(kind: ParamKind, value: &ParamValue) -> Value {
+    match value {
+        ParamValue::Bool(b) => Value::from(*b),
+        ParamValue::Int(v) => Value::from(*v),
+        ParamValue::Float(v) => Value::from(*v),
+        ParamValue::Text(s) if kind == ParamKind::Duration => {
+            Value::from(parse_duration_ms(s).expect("duration checked"))
+        }
+        ParamValue::Text(s) => Value::from(s.as_str()),
+    }
+}
+
+/// Literal for the default value of an unconnected input.
+fn constant_literal(ty: SignalType, value: &ParamValue) -> String {
+    match (ty, value) {
+        (_, ParamValue::Bool(b)) => b.to_string(),
+        (SignalType::Float, ParamValue::Int(v)) => float_literal(*v as f64),
+        (_, ParamValue::Int(v)) => v.to_string(),
+        (_, ParamValue::Float(v)) => float_literal(*v),
+        (_, ParamValue::Text(s)) => format!("String({})", string_literal(s)),
+    }
+}
+
+/// Bytes reserved for every string signal and variable at startup.
+const STRING_RESERVE: usize = 32;
+
+/// Longest text each signal can hold, when the generator can tell: `None` for other types
+/// and for texts that depend on run-time values.
+fn static_lengths(program: &Program) -> Vec<Option<usize>> {
+    let mut known: Vec<Option<usize>> = vec![None; program.signals.len()];
+    for inst in &program.blocks {
+        let Some(&out) = inst.outputs.get("out") else {
+            continue;
+        };
+        if program.signals[out].ty != SignalType::String {
+            continue;
+        }
+        let text = |name: &str| match inst.params.get(name) {
+            Some(ParamValue::Text(t)) if !inst.param_vars.contains_key(name) => Some(t.len()),
+            _ => None,
+        };
+        let input = |port: &str| match &inst.inputs.get(port)?.source {
+            Source::Signal { index, .. } => known[*index],
+            Source::Default(ParamValue::Text(t)) => Some(t.len()),
+            _ => None,
+        };
+        let int_param = |name: &str| match inst.params.get(name) {
+            Some(ParamValue::Int(v)) => usize::try_from(*v).ok(),
+            _ => None,
+        };
+        known[out] = match inst.block.kind.as_str() {
+            "text_const" => text("value"),
+            "text_concat" => (|| {
+                const PORTS: &str = "abcdefghijklmnop";
+                let count = int_param("count")?.clamp(2, 16);
+                let mut total = text("separator")? * (count - 1);
+                for port in PORTS.chars().take(count) {
+                    total += input(&port.to_string())?;
+                }
+                Some(total)
+            })(),
+            // Sign, digits, the point and decimals of a usual number (8 integer digits for a float);
+            // a rarer longer one grows the buffer once.
+            "num_to_text" => (|| {
+                let digits = match inst.inputs.get("in")?.ty {
+                    SignalType::Float => 10 + int_param("decimals")?,
+                    _ => 11,
+                };
+                Some(text("prefix")? + digits + text("suffix")?)
+            })(),
+            _ => None,
+        };
+    }
+    known
+}
+
+pub(crate) fn cpp_type(ty: SignalType) -> &'static str {
+    match ty {
+        SignalType::Bool => "bool",
+        SignalType::Int => "int32_t",
+        SignalType::Float => "float",
+        SignalType::String => "String",
+        SignalType::Any | SignalType::Number | SignalType::Same => {
+            unreachable!("an any input gets the type of its source")
+        }
+    }
+}
+
+pub(crate) fn zero(ty: SignalType) -> &'static str {
+    match ty {
+        SignalType::Bool => "false",
+        SignalType::Int => "0",
+        SignalType::Float => "0.0f",
+        SignalType::String => "String()",
+        SignalType::Any | SignalType::Number | SignalType::Same => {
+            unreachable!("an any input gets the type of its source")
+        }
+    }
+}
+
+/// `float` literal; `f` suffix avoids slow double math on ESP32.
+fn float_literal(v: f64) -> String {
+    if v.is_nan() {
+        "NAN".into()
+    } else if v.is_infinite() {
+        if v > 0.0 { "INFINITY" } else { "-INFINITY" }.into()
+    } else {
+        // Debug formatting always has `.` or an exponent: `2.0`, `1e20`.
+        format!("{v:?}f")
+    }
+}
+
+fn string_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Splits rendered template text by section markers: `// @global`, `// @setup`,
+/// `// @loop`, `// @functions`, and `once` variants of all but `loop`.
+fn split_sections(text: &str) -> Result<Sections, String> {
+    let mut sections = Sections::default();
+    let mut current: Option<&mut String> = None;
+    for line in text.lines() {
+        let marker = line.trim();
+        if let Some(name) = marker.strip_prefix("// @") {
+            let words: Vec<&str> = name.split_whitespace().collect();
+            current = Some(match words.as_slice() {
+                ["defines"] => &mut sections.defines,
+                ["global"] => &mut sections.global,
+                ["setup"] => &mut sections.setup,
+                ["loop"] => &mut sections.looped,
+                ["functions"] => &mut sections.functions,
+                ["global", "once"] => &mut sections.once_global,
+                ["setup", "once"] => &mut sections.once_setup,
+                ["functions", "once"] => &mut sections.once_functions,
+                ["loop", "once"] => {
+                    return Err("раздела «// @loop once» нет: код цикла выполняется \
+                                для каждого блока в порядке схемы"
+                        .to_owned())
+                }
+                _ => {
+                    return Err(format!(
+                        "неизвестный раздел «{marker}»: допустимы {SECTION_LIST}, \
+                         к любому, кроме loop, можно добавить «once»"
+                    ))
+                }
+            });
+            continue;
+        }
+        match current.as_deref_mut() {
+            Some(buf) => {
+                buf.push_str(line.trim_end());
+                buf.push('\n');
+            }
+            None if marker.is_empty() => {}
+            None => {
+                return Err(format!(
+                    "код до первого раздела ({SECTION_LIST}): «{marker}»"
+                ))
+            }
+        }
+    }
+    for s in [
+        &mut sections.global,
+        &mut sections.functions,
+        &mut sections.once_global,
+        &mut sections.once_functions,
+    ] {
+        let (includes, rest): (Vec<&str>, Vec<&str>) = s
+            .lines()
+            .partition(|l| l.trim_start().starts_with("#include"));
+        if !includes.is_empty() {
+            sections
+                .includes
+                .extend(includes.iter().map(|l| l.trim().to_owned()));
+            *s = rest.join("\n");
+        }
+    }
+    for s in [
+        &mut sections.defines,
+        &mut sections.global,
+        &mut sections.setup,
+        &mut sections.looped,
+        &mut sections.functions,
+        &mut sections.once_global,
+        &mut sections.once_setup,
+        &mut sections.once_functions,
+    ] {
+        let trimmed = s.trim_matches('\n').to_owned();
+        *s = trimmed;
+    }
+    Ok(sections)
+}
+
+fn assemble(
+    program: &Program,
+    tasks: &Tasks,
+    rendered: &[(&Instance, Sections)],
+    debug: bool,
+) -> String {
+    let lang = program.lang();
+    let mut out = String::new();
+    let order: Vec<&str> = program.blocks.iter().map(|b| b.block.id.as_str()).collect();
+    let _ = writeln!(
+        out,
+        "{}",
+        crate::locf!(
+            lang,
+            "// Сгенерировано CrabLogic из проекта «{}». Ручные правки будут перезаписаны.",
+            "// Generated by CrabLogic from the project \"{}\". Manual edits will be overwritten.",
+            program.project.config.project.name
+        )
+    );
+    let _ = writeln!(
+        out,
+        "{}",
+        crate::locf!(
+            lang,
+            "// Порядок выполнения: {}",
+            "// Execution order: {}",
+            order.join(" → ")
+        )
+    );
+    let defines: Vec<&str> = rendered
+        .iter()
+        .map(|(_, sec)| sec.defines.as_str())
+        .filter(|d| !d.is_empty())
+        .collect();
+    if !defines.is_empty() {
+        out.push('\n');
+        for d in defines {
+            let _ = writeln!(out, "{d}");
+        }
+    }
+    out.push_str("\n#include <Arduino.h>\n");
+    let mut included = vec!["#include <Arduino.h>".to_owned()];
+    for header in program.includes() {
+        let line = format!("#include <{header}>");
+        let _ = writeln!(out, "{line}");
+        included.push(line);
+    }
+    if let Some(header) = crate::expander::header(program) {
+        let line = format!("#include <{header}>");
+        if !included.contains(&line) {
+            let _ = writeln!(out, "{line}");
+            included.push(line);
+        }
+    }
+    // Includes typed by hand in a block template go here, ahead of all declarations.
+    for (_, sec) in rendered {
+        for line in &sec.includes {
+            if !included.contains(line) {
+                let _ = writeln!(out, "{line}");
+                included.push(line.clone());
+            }
+        }
+    }
+    if tasks.any() {
+        out.push_str("#include <freertos/FreeRTOS.h>\n#include <freertos/semphr.h>\n#include <freertos/task.h>\n");
+    }
+
+    if !program.signals.is_empty() {
+        out.push_str(lang.pick("\n// Выходы блоков\n", "\n// Block outputs\n"));
+        for s in &program.signals {
+            let _ = writeln!(out, "{} {} = {};", cpp_type(s.ty), s.name, zero(s.ty));
+        }
+    }
+
+    if tasks.any() {
+        out.push_str(lang.pick(
+            "\n// Обмен сигналами между основной и фоновой задачами\nSemaphoreHandle_t crab_bg_lock;\n",
+            "\n// Signal exchange between the main and background tasks\nSemaphoreHandle_t crab_bg_lock;\n",
+        ));
+        for line in tasks.globals(program) {
+            let _ = writeln!(out, "{line}");
+        }
+    }
+
+    let gate_globals = tasks.gate_globals(lang);
+    if !gate_globals.is_empty() {
+        out.push_str(lang.pick(
+            "\n// Периоды фоновых плат\n",
+            "\n// Periods of background sheets\n",
+        ));
+        for line in gate_globals {
+            let _ = writeln!(out, "{line}");
+        }
+    }
+
+    let vars = &program.project.logic.vars;
+    if !vars.is_empty() {
+        out.push_str(lang.pick("\n// Переменные\n", "\n// Variables\n"));
+        for v in vars {
+            let init = v.init.as_ref().map_or_else(
+                || zero(v.ty.signal()).to_owned(),
+                |i| constant_literal(v.ty.signal(), i),
+            );
+            let _ = writeln!(
+                out,
+                "{} {} = {};",
+                v.ty.cpp(),
+                crab_core::vars::storage_name(&v.name),
+                init
+            );
+        }
+    }
+    out.push_str(&crate::retain::globals(vars, lang));
+    out.push_str(&crate::expander::globals(program));
+
+    if wasm::uses_modules(program) {
+        let _ = writeln!(out, "\n{}", wasm::runtime());
+    }
+    for (kind, code) in shared(rendered, |s| &s.once_global) {
+        let _ = writeln!(out, "\n{}\n{code}", shared_comment(kind, lang));
+    }
+    for (inst, sec) in rendered {
+        if !sec.global.is_empty() {
+            let _ = writeln!(out, "\n{}\n{}", block_comment(inst), sec.global);
+        }
+    }
+
+    // Functions go before setup() and loop(), so no prototypes are needed.
+    for (kind, code) in shared(rendered, |s| &s.once_functions) {
+        let _ = writeln!(out, "\n{}\n{code}", shared_comment(kind, lang));
+    }
+    for (inst, sec) in rendered {
+        if !sec.functions.is_empty() {
+            let _ = writeln!(out, "\n{}\n{}", block_comment(inst), sec.functions);
+        }
+    }
+
+    // The `cycle_report` block turns the cycle time measurement on in normal firmware.
+    let report_interval = program
+        .blocks
+        .iter()
+        .find(|i| i.block.kind == "cycle_report")
+        .map(|i| match i.params.get("interval") {
+            Some(ParamValue::Int(ms)) => u32::try_from(*ms).unwrap_or(5000),
+            Some(ParamValue::Text(s)) => {
+                parse_duration_ms(s).map_or(5000, |ms| u32::try_from(ms).unwrap_or(u32::MAX))
+            }
+            _ => 5000,
+        });
+    let stats = debug || report_interval.is_some();
+    let looped = rendered
+        .iter()
+        .filter(|(inst, sec)| !sec.looped.is_empty() && !tasks.is_background(inst))
+        .map(|(inst, _)| *inst);
+    let sheets = crate::stats::measured_sheets(program, looped);
+    if stats {
+        out.push_str(&crate::stats::runtime(&sheets, tasks.any(), lang));
+        if let (false, Some(interval_ms)) = (debug, report_interval) {
+            out.push_str(&crate::stats::text_report(interval_ms, tasks.any(), lang));
+        }
+    }
+    let table = debug.then(|| crate::debug::debug_table(program));
+    // Console input is compiled in only for a block reading USB.
+    let text_in = program.blocks.iter().any(
+        |inst| matches!(uart_of(program, inst), Some((u, UartAccess::Read)) if u.number == crab_core::uart::USB),
+    );
+    if let Some(table) = &table {
+        out.push_str(&crate::debug::runtime(table, text_in, tasks.any(), lang));
+    }
+    // Forcing: after each block, its forced outputs (and a written variable) win.
+    let forces = |inst: &Instance| -> Vec<String> {
+        let Some(table) = &table else {
+            return Vec::new();
+        };
+        let mut lines: Vec<String> = inst
+            .outputs
+            .keys()
+            .filter_map(|&port| table.output_index(&PortRef::new(&inst.block.id, port)))
+            .map(|i| format!("crab_dbg_force({i});"))
+            .collect();
+        if inst.block.kind == VAR_SET {
+            if let Some(i) = inst.block.var_name().and_then(|v| table.var_index(v)) {
+                lines.push(format!("crab_dbg_force({i});"));
+            }
+        }
+        lines
+    };
+
+    // Cycle time: a mark where execution moves to blocks of another sheet.
+    let mut marks: BTreeMap<&str, usize> = BTreeMap::new();
+    if stats {
+        let mut current = None;
+        for (inst, sec) in rendered {
+            if tasks.is_background(inst) || (sec.looped.is_empty() && forces(inst).is_empty()) {
+                continue;
+            }
+            let sheet = crate::stats::sheet_of(program, inst);
+            let k = sheets.iter().position(|&s| s == sheet);
+            if let Some(k) = k.filter(|_| k != current) {
+                marks.insert(&inst.block.id, k);
+                current = Some(k);
+            }
+        }
+    }
+    let mark = |inst: &Instance| -> Vec<String> {
+        marks
+            .get(inst.block.id.as_str())
+            .map(|&k| {
+                vec![crate::locf!(
+                    lang,
+                    "crab_st_sheet({k});  // лист {}",
+                    "crab_st_sheet({k});  // sheet {}",
+                    sheets[k]
+                )]
+            })
+            .unwrap_or_default()
+    };
+
+    // Housekeeping that may leave the main loop: reporting and saving touch no
+    // strings and no console input, so the background task can own them.
+    let text_vars = vars.iter().any(|v| v.ty.signal() == SignalType::String);
+    let bg_report = tasks.any() && !text_in && table.as_ref().is_none_or(|t| t.texts.is_empty());
+    let bg_save = tasks.any() && !text_vars;
+    let save = crate::retain::save(vars, lang);
+    let report = if debug {
+        Some("crab_dbg_loop();")
+    } else if stats {
+        Some("crab_st_report();")
+    } else {
+        None
+    };
+    // Without a background task the reporting gets a task of its own on core 0, so
+    // USB traffic never delays the cycle (same restrictions as for `bg_report`).
+    let report_task = report.filter(|_| {
+        !tasks.any()
+            && tasks.threaded()
+            && !text_in
+            && table.as_ref().is_none_or(|t| t.texts.is_empty())
+    });
+    let lock = |lines: Vec<String>| -> Vec<String> {
+        if lines.is_empty() {
+            return lines;
+        }
+        let mut wrapped = vec!["xSemaphoreTake(crab_bg_lock, portMAX_DELAY);".to_owned()];
+        wrapped.extend(lines);
+        wrapped.push("xSemaphoreGive(crab_bg_lock);".to_owned());
+        wrapped
+    };
+    if tasks.any() {
+        out.push_str(lang.pick(
+            "\n// Фоновая задача: ядро 0, блоки плат с признаком «фоновая задача»\nvoid crab_bg_task(void *) {\n  for (;;) {\n",
+            "\n// Background task: core 0, blocks of sheets marked \"background task\"\nvoid crab_bg_task(void *) {\n  for (;;) {\n",
+        ));
+        let mut body = String::new();
+        if stats {
+            body.push_str(
+                "crab_st_bg_begin();
+
+",
+            );
+        }
+        let take = lock(tasks.take(program, true));
+        let started = !take.is_empty();
+        push_indented(&mut body, take.into_iter());
+        push_function_body(
+            &mut body,
+            rendered,
+            started,
+            |s| &s.looped,
+            &|_| Vec::new(),
+            &forces,
+            &|inst| tasks.is_background(inst),
+            &|_| None,
+        );
+        let publish = lock(tasks.publish(program, true));
+        if !publish.is_empty() {
+            body.push('\n');
+            push_indented(&mut body, publish.into_iter());
+        }
+        if bg_save && !save.is_empty() {
+            body.push('\n');
+            push_indented(&mut body, save.iter().cloned());
+        }
+        if stats {
+            body.push_str(
+                "
+crab_st_bg_end();
+",
+            );
+        }
+        if bg_report {
+            if let Some(call) = report {
+                let _ = writeln!(body, "\n  {call}");
+            }
+        }
+        body.push_str("\n  vTaskDelay(1);\n");
+        for line in body.lines() {
+            if line.is_empty() {
+                out.push('\n');
+            } else {
+                let _ = writeln!(out, "  {line}");
+            }
+        }
+        out.push_str("  }\n}\n");
+    }
+
+    if let Some(call) = report_task {
+        let comment = lang.pick(
+            "Отчёт по USB: ядро 0, отдельно от основного цикла",
+            "USB report: core 0, separate from the main loop",
+        );
+        let _ = write!(
+            out,
+            "\n// {comment}\nvoid crab_report_task(void *) {{\n  for (;;) {{\n    {call}\n    vTaskDelay(1);\n  }}\n}}\n"
+        );
+    }
+
+    out.push_str("\nvoid setup() {\n");
+    if tasks.any() {
+        out.push_str("  crab_bg_lock = xSemaphoreCreateMutex();\n\n");
+    }
+    if debug {
+        out.push_str("  crab_dbg_setup();\n\n");
+    } else if stats {
+        let _ = writeln!(out, "  Serial.begin({});\n", crab_debug::transport::BAUD);
+    }
+    let uarts = uart_setup(program, debug || stats);
+    if !uarts.is_empty() {
+        push_indented(&mut out, uarts.into_iter());
+        out.push('\n');
+    }
+    // String storage is reserved up front: fewer heap reallocations in the loop. Where the
+    // length is known while generating (constants, concatenation of known parts), exactly that.
+    let known = static_lengths(program);
+    let strings: Vec<(String, usize)> = program
+        .signals
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.ty == SignalType::String)
+        .map(|(i, s)| (s.name.clone(), known[i].unwrap_or(STRING_RESERVE)))
+        .chain(
+            vars.iter()
+                .filter(|v| v.ty.signal() == SignalType::String)
+                .map(|v| (crab_core::vars::storage_name(&v.name), STRING_RESERVE)),
+        )
+        .collect();
+    if !strings.is_empty() {
+        out.push_str(lang.pick(
+            "  // Память под строки заранее: меньше дробления кучи.\n",
+            "  // Reserve memory for strings up front: less heap fragmentation.\n",
+        ));
+        for (name, len) in &strings {
+            let _ = writeln!(out, "  {name}.reserve({len});");
+        }
+        out.push('\n');
+    }
+    // Retained variables are restored before any block uses them.
+    let restore = crate::retain::setup(vars, lang);
+    let after_restore = !restore.is_empty();
+    push_indented(&mut out, restore.into_iter());
+    let once_setup = shared(rendered, |s| &s.once_setup);
+    for (i, (kind, code)) in once_setup.iter().enumerate() {
+        if i > 0 || after_restore {
+            out.push('\n');
+        }
+        let _ = writeln!(out, "  {}", shared_comment(kind, lang));
+        push_indented(&mut out, code.lines().map(str::to_owned));
+    }
+    let expander_setup = crate::expander::setup(program);
+    if !expander_setup.is_empty() {
+        if after_restore || !once_setup.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(lang.pick(
+            "  // Расширители: шина и первая запись\n",
+            "  // Expanders: bus and the first write\n",
+        ));
+        push_indented(&mut out, expander_setup.iter().cloned());
+    }
+    let after_shared = after_restore || !once_setup.is_empty() || !expander_setup.is_empty();
+    let none = |_: &Instance| Vec::new();
+    push_function_body(
+        &mut out,
+        rendered,
+        after_shared,
+        |s| &s.setup,
+        &none,
+        &none,
+        &|_| true,
+        &|_| None,
+    );
+    if tasks.any() {
+        let comment = lang.pick(
+            "Фоновая задача стартует после настройки всех блоков",
+            "The background task starts after all blocks are set up",
+        );
+        let _ = writeln!(
+            out,
+            "\n  // {comment}\n  xTaskCreatePinnedToCore(crab_bg_task, \"crab_bg\", 10240, nullptr, 1, nullptr, 0);"
+        );
+    }
+    if report_task.is_some() {
+        let comment = lang.pick(
+            "Отчёт стартует после настройки всех блоков",
+            "The report starts after all blocks are set up",
+        );
+        let _ = writeln!(
+            out,
+            "\n  // {comment}\n  xTaskCreatePinnedToCore(crab_report_task, \"crab_report\", 8192, nullptr, 1, nullptr, 0);"
+        );
+    }
+    out.push_str("}\n\nvoid loop() {\n");
+    if stats {
+        out.push_str("  crab_st_begin();\n\n");
+    }
+    if let Some(table) = &table {
+        let vars: Vec<String> = (0..table.entries.len())
+            .filter(|&i| matches!(table.entries[i].source, crab_debug::Source::Var(_)))
+            .map(|i| format!("crab_dbg_force({i});"))
+            .collect();
+        if !vars.is_empty() {
+            let _ = writeln!(out, "  // Forced variables\n  {}\n", vars.join(" "));
+        }
+    }
+    let mut take = crate::expander::poll(program);
+    let prologue = tasks.gate_prologue(lang);
+    if !prologue.is_empty() {
+        if !take.is_empty() {
+            take.push(String::new());
+        }
+        take.extend(prologue);
+        take.push(String::new());
+    }
+    take.extend(lock(tasks.take(program, false)));
+    let started = !take.is_empty();
+    push_indented(&mut out, take.into_iter());
+    push_function_body(
+        &mut out,
+        rendered,
+        started,
+        |s| &s.looped,
+        &mark,
+        &forces,
+        &|inst| !tasks.is_background(inst),
+        &|inst| tasks.gate(program, inst),
+    );
+    let flush = crate::expander::flush(program);
+    if !flush.is_empty() {
+        out.push('\n');
+        push_indented(&mut out, flush.into_iter());
+    }
+    let publish = lock(tasks.publish(program, false));
+    if !publish.is_empty() {
+        out.push('\n');
+        push_indented(&mut out, publish.into_iter());
+    }
+    if !(bg_save || save.is_empty()) {
+        out.push('\n');
+        push_indented(&mut out, save.into_iter());
+    }
+    if table.is_some() {
+        out.push_str("\n  crab_img_snapshot();\n");
+    }
+    if stats {
+        out.push_str("\n  crab_st_end();\n");
+    }
+    if !bg_report && report_task.is_none() {
+        if let Some(call) = report {
+            let _ = writeln!(out, "  {call}");
+        }
+    }
+    out.push_str("}\n");
+    out
+}
+
+/// Writes the code of each block into a function body; `after` means the body
+/// already has code, so the first block is separated by a blank line too.
+/// `before` and `extra` add lines in front of and after the block code;
+/// `only` selects the blocks; `gate` names a flag that the code of a block runs under.
+#[allow(clippy::too_many_arguments)]
+fn push_function_body(
+    out: &mut String,
+    rendered: &[(&Instance, Sections)],
+    after: bool,
+    section: fn(&Sections) -> &String,
+    before: &dyn Fn(&Instance) -> Vec<String>,
+    extra: &dyn Fn(&Instance) -> Vec<String>,
+    only: &dyn Fn(&Instance) -> bool,
+    gate: &dyn Fn(&Instance) -> Option<String>,
+) {
+    let mut first = !after;
+    for (inst, sec) in rendered {
+        if !only(inst) {
+            continue;
+        }
+        let code = section(sec);
+        let extra = extra(inst);
+        if code.is_empty() && extra.is_empty() {
+            continue;
+        }
+        if !first {
+            out.push('\n');
+        }
+        first = false;
+        for line in before(inst) {
+            let _ = writeln!(out, "  {line}");
+        }
+        let _ = writeln!(out, "  {}", block_comment(inst));
+        match gate(inst).filter(|_| !code.is_empty()) {
+            Some(run) => {
+                let _ = writeln!(out, "  if ({run}) {{");
+                for line in code.lines() {
+                    if line.is_empty() {
+                        out.push('\n');
+                    } else {
+                        let _ = writeln!(out, "    {line}");
+                    }
+                }
+                out.push_str("  }\n");
+                push_indented(out, extra.into_iter());
+            }
+            None => push_indented(out, code.lines().map(str::to_owned).chain(extra)),
+        }
+    }
+}
+
+fn push_indented(out: &mut String, lines: impl Iterator<Item = String>) {
+    for line in lines {
+        if line.is_empty() {
+            out.push('\n');
+        } else {
+            let _ = writeln!(out, "  {line}");
+        }
+    }
+}
+
+/// Non-empty `once` sections, without repeats of the same text (from one block type
+/// or from several: chips on one I²C bus start `Wire` with the same call), in order
+/// of first use. The block type is the one that came first.
+fn shared<'a>(
+    rendered: &'a [(&Instance, Sections)],
+    section: fn(&Sections) -> &String,
+) -> Vec<(&'a str, &'a str)> {
+    let mut out: Vec<(&str, &str)> = Vec::new();
+    for (inst, sec) in rendered {
+        let text = section(sec).as_str();
+        if !text.is_empty() && !out.iter().any(|(_, seen)| *seen == text) {
+            out.push((inst.block.kind.as_str(), text));
+        }
+    }
+    out
+}
+
+fn shared_comment(kind: &str, lang: crate::Lang) -> String {
+    crate::locf!(lang, "// {kind}: общий код", "// {kind}: shared code")
+}
+
+fn block_comment(inst: &Instance) -> String {
+    format!("// {}: {}", inst.block.id, inst.block.kind)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sections() {
+        let s = split_sections("\n// @global\nint x;\n\n// @loop\nx++;\n  y();  \n").unwrap();
+        assert_eq!(s.global, "int x;");
+        assert_eq!(s.setup, "");
+        assert_eq!(s.looped, "x++;\n  y();");
+        assert!(split_sections("x++;\n// @loop\n").is_err());
+        assert!(split_sections("// @init\n").is_err());
+    }
+
+    #[test]
+    fn functions_and_once_sections() {
+        let s = split_sections(
+            "// @global once\nOneWire bus(4);\n// @functions\nint f() { return 1; }\n\
+             // @setup  once\nbus.begin();\n// @functions once\nvoid g() {}\n",
+        )
+        .unwrap();
+        assert_eq!(s.once_global, "OneWire bus(4);");
+        assert_eq!(s.functions, "int f() { return 1; }");
+        assert_eq!(s.once_setup, "bus.begin();");
+        assert_eq!(s.once_functions, "void g() {}");
+        assert!(split_sections("// @loop once\nx++;\n").is_err());
+        assert!(split_sections("// @global twice\n").is_err());
+    }
+
+    #[test]
+    fn hand_written_includes_move_out_of_sections() {
+        let s = split_sections(
+            "// @global\n#include <Adafruit_ADS1X16.h>\nint x;\n// @functions once\n\
+             #include <Wire.h>\nvoid g() {}\n// @loop\ny();\n",
+        )
+        .unwrap();
+        assert_eq!(s.global, "int x;");
+        assert_eq!(s.once_functions, "void g() {}");
+        assert_eq!(
+            s.includes,
+            ["#include <Adafruit_ADS1X16.h>", "#include <Wire.h>"]
+        );
+    }
+
+    #[test]
+    fn literals() {
+        assert_eq!(float_literal(2.0), "2.0f");
+        assert_eq!(float_literal(0.1), "0.1f");
+        assert_eq!(float_literal(1e20), "1e20f");
+        assert_eq!(float_literal(f64::NEG_INFINITY), "-INFINITY");
+        assert_eq!(string_literal("a\"b\\c\n"), r#""a\"b\\c\n""#);
+    }
+}

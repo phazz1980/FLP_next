@@ -1,4 +1,4 @@
-# Same script for the PC (flp-sim test) and the board (compare.ps1).
+# Same script for the PC (crab-sim test) and the board (compare.ps1).
 # reset   param|in <index> <i|f> <value>   tick <steps> <dt_ms>   out (first 4 outputs as 32-bit hex)
 # The letter is the value type: i = int/bool (i32), f = float (f32).
 reset

@@ -1,0 +1,21 @@
+[package]
+name = "crab-mcp"
+description = "MCP server of CrabLogic: the AI command set over stdio"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "crab_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "crablogic-mcp"
+path = "src/main.rs"
+
+[dependencies]
+crab-ai = { path = "../crab-ai" }
+crab-build = { path = "../crab-build" }
+crab-codegen = { path = "../crab-codegen" }
+crab-core = { path = "../crab-core" }
+crab-debug = { path = "../crab-debug", features = ["serial"] }
+serde_json.workspace = true

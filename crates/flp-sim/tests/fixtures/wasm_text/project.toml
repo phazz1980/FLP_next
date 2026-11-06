@@ -1,6 +1,0 @@
-[project]
-name = "wasm_text"
-description = "Строки для сверки модуля WASM с flp-sim"
-
-[board]
-fqbn = "esp32:esp32:esp32"

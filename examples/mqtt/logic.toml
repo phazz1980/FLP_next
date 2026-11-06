@@ -1,5 +1,5 @@
-# MQTT через Wi-Fi: flp/temp — температура (по изменению), flp/button — кнопка (по изменению),
-# flp/led (1/0, on/off) — включает светодиод.
+# MQTT через Wi-Fi: crab/temp — температура (по изменению), crab/button — кнопка (по изменению),
+# crab/led (1/0, on/off) — включает светодиод.
 # Публикации и подписка заданы в панели слева (раздел MQTT); значения идут через переменные,
 # привязки лежат в [block.bind].
 
@@ -34,7 +34,7 @@ pin = 4
 [[block]]
 id = "temp_pub"
 type = "mqtt_publish"
-topic = "flp/temp"
+topic = "crab/temp"
 trigger = 1
 deadband = 0.2
 decimals = 1
@@ -52,7 +52,7 @@ inverted = true
 [[block]]
 id = "button_pub"
 type = "mqtt_publish"
-topic = "flp/button"
+topic = "crab/button"
 retain = true
 trigger = 1
 
@@ -62,7 +62,7 @@ value = "Кнопка"
 [[block]]
 id = "led_sub"
 type = "mqtt_subscribe"
-topic = "flp/led"
+topic = "crab/led"
 kind = "bool"
 
 [block.bind]

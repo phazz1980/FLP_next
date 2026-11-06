@@ -8,7 +8,7 @@
 Нет списка — функции берутся из таблицы чипа (как сейчас). Список есть — только он, но не шире чипа
 (`validate` ругается по-русски: «у GPIO34 нет функции pwm у ESP32»).
 
-**flp-core.**
+**crab-core.**
 - `pins.rs`: `PinFunction {Din, Dout, Pwm, Adc, Dac}` (serde — `din`…`dac`, `label()` по-русски);
   у `PinInfo` поле `functions` — набор, считается по чипу (`din` везде, кроме флеш-пинов; `dout`/`pwm`
   — не на `input_only`; `adc` — если есть АЦП; `dac` — GPIO25/26 у ESP32); `fits(mode)` смотрит в набор.
@@ -17,7 +17,7 @@
 - `boards.rs`: `BoardPin.functions: Option<Vec<PinFunction>>`; проверка; `layout()` передаёт функции.
 - `check.rs`: сообщение «вывод GPIOn не умеет …» по режиму (АЦП / ШИМ / выход / вход).
 
-**flp-editor.**
+**crab-editor.**
 - `blockedit.rs`: режимы в списках — «ШИМ», «ЦАП».
 - `boardedit.rs`: таблица стартует пустой (`Form::new_board` без строк); `PinRow` = GPIO + название +
   заметка + «занят» + набор функций; кнопка «+ Вывод» (выпадающий список ещё не добавленных GPIO),
@@ -35,11 +35,11 @@
 (`DeviceDef::expander()` — пока PCF8574 по `kind = pcf8574_out/pcf8574_in`). `BoardDef::validate` проверяет
 устройство, номер вывода, функции, повторы.
 
-**flp-core.** `pins.rs`: `BoardExpander {title, expander, pins}`, `BoardExpanderPin`, `fits(pin, mode)`;
+**crab-core.** `pins.rs`: `BoardExpander {title, expander, pins}`, `BoardExpanderPin`, `fits(pin, mode)`;
 `BoardLayout::{expanders, expander_for}`. `check.rs`: `check_board_expanders` — блок на расширителе, совпадающем
 с расширителем платы, должен стоять на выведенном выводе с нужной функцией.
 
-**flp-editor.** `dialogs.rs`: у входа и выхода один список выводов (`pin_rows` → `PinRow`/`PinChoice`): GPIO,
+**crab-editor.** `dialogs.rs`: у входа и выхода один список выводов (`pin_rows` → `PinRow`/`PinChoice`): GPIO,
 выводы расширителей проекта и выводы расширителей платы, которых в проекте ещё нет. Выбор строки задаёт
 `PinSource` и вывод; для расширителя платы заводится `d.pending` из шаблона (`board_expander`) под свободным
 id, форма «Новый расширитель» для него скрыта. У платы без таблицы выводов остаётся прежняя пара «источник +

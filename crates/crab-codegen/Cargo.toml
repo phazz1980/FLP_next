@@ -1,0 +1,16 @@
+[package]
+name = "crab-codegen"
+description = "Firmware code generation from CrabLogic schemas"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+crab-blocks = { path = "../crab-blocks" }
+crab-core = { path = "../crab-core" }
+crab-debug = { path = "../crab-debug" }
+minijinja = { version = "2", features = ["unicode"] }
+thiserror.workspace = true
+wasm-encoder = "0.263.0"
+
+[dev-dependencies]
+toml.workspace = true

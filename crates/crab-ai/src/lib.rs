@@ -1,0 +1,869 @@
+//! One command set for the AI: the chat in the editor and the MCP server both
+//! call [`call`] with tools described by [`tools`], so the logic is written once.
+//!
+//! A [`Context`] gives the commands access to the project: the MCP server works
+//! on the project folder and saves after each edit, the editor works on the open
+//! document with undo.
+
+pub mod agent;
+pub mod folder;
+pub mod openai;
+pub mod provider;
+
+use std::fs;
+
+use crab_codegen::{ArduinoCpp, Backend, Program};
+use crab_core::expander::taken_pins;
+use crab_core::library::{BLOCK_FILE, DOCS_FILE, ESP32_CPP_TEMPLATE};
+use crab_core::pins::{pin_uses, BoardLayout};
+use crab_core::{
+    check_project, BlockPos, Expander, ExpanderChip, Library, LibraryBlock, LocalValues,
+    ParamValue, PortRef, Project, Severity, Var, VarType,
+};
+use serde_json::{json, Map, Value};
+
+/// Access to the project for the commands.
+pub trait Context {
+    fn project(&self) -> &Project;
+    fn library(&self) -> &Library;
+    /// Folder of user blocks, where new block types are written (`user_library/`).
+    fn library_dir(&self) -> std::path::PathBuf;
+    /// Applies an edit (one undo step in the editor; saved to disk by the MCP server).
+    fn edit(
+        &mut self,
+        edit: &mut dyn FnMut(&mut Project) -> Result<(), String>,
+    ) -> Result<(), String>;
+    /// Generates, builds and optionally uploads the firmware; returns a short report.
+    fn build(&mut self, upload: bool, port: Option<String>, debug: bool) -> Result<String, String>;
+    /// Latest values from the board: (name, value, forced).
+    fn live_values(&mut self) -> Result<Vec<(String, String, bool)>, String>;
+    /// Called after a new block type was written to the library.
+    fn reload_library(&mut self) -> Result<(), String>;
+}
+
+/// A tool as offered to the model: name, description (Russian) and JSON schema.
+#[derive(Debug, Clone)]
+pub struct Tool {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub input_schema: Value,
+}
+
+pub fn tools() -> Vec<Tool> {
+    let id = json!({"type": "string", "description": "id блока"});
+    let port = json!({"type": "string", "description": "порт в виде «блок.порт»"});
+    vec![
+        Tool {
+            name: "get_schema",
+            description: "Прочитать схему проекта: переменные, блоки с параметрами, связи, платы, занятые и свободные выводы (pins) и результат проверки.",
+            input_schema: json!({"type": "object", "properties": {}}),
+        },
+        Tool {
+            name: "list_block_types",
+            description: "Типы блоков библиотеки. Без фильтра — короткий список (тип, название, группа, описание); с фильтром по словам — ещё входы, выходы и параметры найденных блоков.",
+            input_schema: json!({"type": "object", "properties": {
+                "filter": {"type": "string", "description": "слова для поиска в названии и описании"}
+            }}),
+        },
+        Tool {
+            name: "get_block_type",
+            description: "Полное описание типа блока, включая документацию docs.md и шаблон кода.",
+            input_schema: json!({"type": "object", "properties": {
+                "type": {"type": "string"}
+            }, "required": ["type"]}),
+        },
+        Tool {
+            name: "add_block",
+            description: "Добавить блок. Без id он придумывается сам; без координат блок ставится на свободное место платы.",
+            input_schema: json!({"type": "object", "properties": {
+                "type": {"type": "string", "description": "тип блока из библиотеки"},
+                "id": {"type": "string", "description": "понятный id: буквы (можно русские), цифры, _; без пробелов и точек"},
+                "params": {"type": "object", "description": "значения параметров"},
+                "sheet": {"type": "integer", "description": "номер платы, по умолчанию 1"},
+                "x": {"type": "number"}, "y": {"type": "number"}
+            }, "required": ["type"]}),
+        },
+        Tool {
+            name: "remove_block",
+            description: "Удалить блок вместе с его связями.",
+            input_schema: json!({"type": "object", "properties": {"id": id}, "required": ["id"]}),
+        },
+        Tool {
+            name: "move_block",
+            description: "Передвинуть блок на схеме (координаты и плата нужны только редактору).",
+            input_schema: json!({"type": "object", "properties": {
+                "id": id, "x": {"type": "number"}, "y": {"type": "number"},
+                "sheet": {"type": "integer", "description": "номер платы, по умолчанию прежний"}
+            }, "required": ["id", "x", "y"]}),
+        },
+        Tool {
+            name: "rename_block",
+            description: "Переименовать блок; связи обновятся.",
+            input_schema: json!({"type": "object", "properties": {
+                "id": id, "new_id": {"type": "string"}
+            }, "required": ["id", "new_id"]}),
+        },
+        Tool {
+            name: "set_params",
+            description: "Задать параметры блока. null возвращает значение по умолчанию. Время — строкой: \"500ms\", \"5s\", \"2m\".",
+            input_schema: json!({"type": "object", "properties": {
+                "id": id, "params": {"type": "object"}
+            }, "required": ["id", "params"]}),
+        },
+        Tool {
+            name: "connect",
+            description: "Соединить выход одного блока со входом другого. Связь в занятый вход заменяет старую.",
+            input_schema: json!({"type": "object", "properties": {
+                "from": port, "to": port
+            }, "required": ["from", "to"]}),
+        },
+        Tool {
+            name: "disconnect",
+            description: "Убрать связь, ведущую во вход.",
+            input_schema: json!({"type": "object", "properties": {"to": port}, "required": ["to"]}),
+        },
+        Tool {
+            name: "set_input_const",
+            description: "Поставить на вход константу вместо связи (связь во вход убирается) или убрать константу (value = null). Тип значения — как у входа: true/false, целое, число, строка.",
+            input_schema: json!({"type": "object", "properties": {
+                "input": port,
+                "value": {"description": "значение константы; null убирает её"}
+            }, "required": ["input", "value"]}),
+        },
+        Tool {
+            name: "bind",
+            description: "Привязать порт или параметр блока (текст, целое, число) к переменной проекта без блоков на листе: вход читает переменную, выход пишет в неё, параметр берётся из неё. variable = null снимает привязку. Так настраивают служебные блоки Wi-Fi/Ethernet.",
+            input_schema: json!({"type": "object", "properties": {
+                "block": {"type": "string", "description": "id блока"},
+                "name": {"type": "string", "description": "имя порта или параметра"},
+                "variable": {"description": "имя переменной; null снимает привязку"}
+            }, "required": ["block", "name", "variable"]}),
+        },
+        Tool {
+            name: "set_param_input",
+            description: "Сделать параметр блока (целое, число, время) входом: значение приходит по связи и читается на каждом скане, а число параметра становится значением входа, пока он не подключён. on = false возвращает обычный параметр и убирает связи этого входа. Параметры, которые нужны при генерации кода (размер, шина, вывод), входами не бывают. Вход называется так же, как параметр; время приходит в миллисекундах.",
+            input_schema: json!({"type": "object", "properties": {
+                "block": {"type": "string", "description": "id блока"},
+                "param": {"type": "string", "description": "имя параметра"},
+                "on": {"type": "boolean", "description": "false возвращает параметр; по умолчанию true"}
+            }, "required": ["block", "param"]}),
+        },
+        Tool {
+            name: "invert_port",
+            description: "Инвертировать логический (bool) вход или выход блока (на схеме это кружок инверсии). Инверсию выхода видят все его связи.",
+            input_schema: json!({"type": "object", "properties": {
+                "port": port,
+                "output": {"type": "boolean", "description": "true — выход, false — вход"},
+                "on": {"type": "boolean", "description": "false снимает инверсию; по умолчанию true"}
+            }, "required": ["port", "output"]}),
+        },
+        Tool {
+            name: "set_variable",
+            description: "Создать или изменить переменную (тег). Переменную, которую никто не записывает, можно использовать как уставку.",
+            input_schema: json!({"type": "object", "properties": {
+                "name": {"type": "string"},
+                "type": {"type": "string", "description": "тип Arduino: bool, char, byte, short, word, int, unsigned int, long, unsigned long, long long, unsigned long long, int8_t…uint64_t, float, double, String"},
+                "init": {"description": "начальное значение"},
+                "description": {"type": "string"},
+                "retain": {"type": "boolean", "description": "сохранять во флеш (EEPROM): восстанавливается после перезагрузки"},
+                "rename_to": {"type": "string"}
+            }, "required": ["name", "type"]}),
+        },
+        Tool {
+            name: "remove_variable",
+            description: "Удалить переменную вместе с блоками чтения и записи.",
+            input_schema: json!({"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
+        },
+        Tool {
+            name: "set_expander",
+            description: "Создать или изменить расширитель портов PCF по I²C (PCF8574, PCF8574A, PCF8575). Потом цифровой вход или выход ставят на его вывод командой place_on_expander. Не указанные поля при изменении остаются прежними.",
+            input_schema: json!({"type": "object", "properties": {
+                "id": {"type": "string", "description": "имя расширителя, например relays"},
+                "chip": {"type": "string", "enum": ["pcf8574", "pcf8574a", "pcf8575"], "description": "микросхема: 8, 8 и 16 выводов"},
+                "address": {"type": "integer", "description": "адрес I²C: 32–39 (0x20–0x27) у pcf8574 и pcf8575, 56–63 (0x38–0x3F) у pcf8574a; по умолчанию первый"},
+                "sda": {"type": "integer", "description": "вывод SDA; вместе с scl, иначе -1 — шина платы по умолчанию"},
+                "scl": {"type": "integer"},
+                "period": {"type": "string", "description": "период опроса входов, по умолчанию \"20ms\""},
+                "rename_to": {"type": "string", "description": "новое имя; блоки на расширителе переедут вместе с ним"}
+            }, "required": ["id"]}),
+        },
+        Tool {
+            name: "remove_expander",
+            description: "Удалить расширитель. Пока на нём стоят блоки, удаление отклоняется.",
+            input_schema: json!({"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}),
+        },
+        Tool {
+            name: "place_on_expander",
+            description: "Поставить цифровой вход или выход (digital_in, digital_out) на вывод расширителя вместо GPIO платы. expander = null возвращает блок на GPIO: параметр pin очищается, его надо задать заново (set_params). Занятые выводы смотрите в поле expanders ответа get_schema.",
+            input_schema: json!({"type": "object", "properties": {
+                "block": {"type": "string", "description": "id блока"},
+                "expander": {"description": "имя расширителя; null — снять с расширителя"},
+                "pin": {"type": "integer", "description": "номер вывода микросхемы: 0 для P0"}
+            }, "required": ["block", "expander"]}),
+        },
+        Tool {
+            name: "add_variable_block",
+            description: "Поставить на плату блок чтения (var_get, выход out) или записи (var_set, вход in) переменной.",
+            input_schema: json!({"type": "object", "properties": {
+                "var": {"type": "string"},
+                "write": {"type": "boolean"},
+                "sheet": {"type": "integer"}
+            }, "required": ["var", "write"]}),
+        },
+        Tool {
+            name: "check",
+            description: "Проверить схему: ошибки, предупреждения и порядок выполнения.",
+            input_schema: json!({"type": "object", "properties": {}}),
+        },
+        Tool {
+            name: "generate",
+            description: "Сгенерировать скетч Arduino C++ и вернуть его текст.",
+            input_schema: json!({"type": "object", "properties": {
+                "debug": {"type": "boolean", "description": "с модулем онлайн-отладки"}
+            }}),
+        },
+        Tool {
+            name: "build",
+            description: "Собрать прошивку через arduino-cli. Может занять минуту.",
+            input_schema: json!({"type": "object", "properties": {"debug": {"type": "boolean"}}}),
+        },
+        Tool {
+            name: "upload",
+            description: "Собрать и залить прошивку на плату.",
+            input_schema: json!({"type": "object", "properties": {
+                "port": {"type": "string", "description": "например COM3"},
+                "debug": {"type": "boolean", "description": "с модулем онлайн-отладки"}
+            }}),
+        },
+        Tool {
+            name: "read_live_values",
+            description: "Живые значения выходов блоков и переменных с платы (нужна отладочная прошивка).",
+            input_schema: json!({"type": "object", "properties": {}}),
+        },
+        Tool {
+            name: "create_block_type",
+            description: "Создать новый пользовательский тип блока (папка user_library/): block.toml, шаблон esp32.cpp.tmpl и docs.md. Встроенные блоки менять нельзя. Поле group задаёт раздел и папки библиотеки через «/», например «Насосы/Управление». Формат — как у существующих блоков (см. get_block_type).",
+            input_schema: json!({"type": "object", "properties": {
+                "type": {"type": "string"},
+                "block_toml": {"type": "string"},
+                "template": {"type": "string"},
+                "docs": {"type": "string"}
+            }, "required": ["type", "block_toml", "template"]}),
+        },
+    ]
+}
+
+/// Runs one tool. Errors are user-facing text the model can act on.
+pub fn call(ctx: &mut dyn Context, name: &str, args: &Value) -> Result<Value, String> {
+    let empty = Map::new();
+    let args = args.as_object().unwrap_or(&empty);
+    let s = |key: &str| -> Result<String, String> {
+        args.get(key)
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| format!("нужен строковый аргумент «{key}»"))
+    };
+    let port = |key: &str| -> Result<PortRef, String> {
+        s(key)?
+            .parse()
+            .map_err(|e: crab_core::PortRefError| e.to_string())
+    };
+    let lib = ctx.library().clone();
+    match name {
+        "get_schema" => {
+            let p = ctx.project();
+            Ok(json!({
+                "project": p.config.project.name,
+                "board": p.config.board.fqbn,
+                "logic": p.logic,
+                "sheets": p.layout.sheets,
+                "placement": p.layout.blocks,
+                "view": block_view(p, &lib),
+                "pins": pins(p, &lib),
+                "expanders": expanders(p, &lib),
+                "check": report(p, &lib),
+            }))
+        }
+        "list_block_types" => {
+            let filter = args
+                .get("filter")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_lowercase();
+            let list: Vec<Value> = lib
+                .iter()
+                .filter(|b| {
+                    let i = &b.def.info;
+                    filter.is_empty()
+                        || filter.split_whitespace().any(|w| {
+                            format!("{} {} {} {}", i.kind, i.name, i.group, i.description)
+                                .to_lowercase()
+                                .contains(w)
+                        })
+                })
+                .map(|b| {
+                    if filter.is_empty() {
+                        // Whole library: names only, ports via get_block_type or a filter.
+                        let i = &b.def.info;
+                        json!({"type": i.kind, "name": i.name, "group": i.group, "description": i.description})
+                    } else {
+                        block_summary(b)
+                    }
+                })
+                .collect();
+            Ok(json!(list))
+        }
+        "get_block_type" => {
+            let kind = s("type")?;
+            let b = lib
+                .get(&kind)
+                .ok_or_else(|| format!("нет типа блока «{kind}»"))?;
+            let mut v = block_summary(b);
+            let docs = b.docs_path().and_then(|p| fs::read_to_string(p).ok());
+            let template = b
+                .template(ESP32_CPP_TEMPLATE)
+                .and_then(Result::ok)
+                // Built-in blocks without a template are written in Rust.
+                .or_else(|| crab_codegen::builtin_cpp_preview(&b.def));
+            v["docs"] = json!(docs);
+            v["template"] = json!(template);
+            Ok(v)
+        }
+        "add_block" => {
+            let kind = s("type")?;
+            let wanted = args.get("id").and_then(Value::as_str).map(str::to_owned);
+            let params = params_arg(args.get("params"))?;
+            let sheet = args.get("sheet").and_then(Value::as_u64).unwrap_or(1) as u32;
+            let xy = (
+                args.get("x").and_then(Value::as_f64),
+                args.get("y").and_then(Value::as_f64),
+            );
+            let mut new_id = String::new();
+            ctx.edit(&mut |p| {
+                let pos = match xy {
+                    (Some(x), Some(y)) => BlockPos {
+                        sheet,
+                        x: x as f32,
+                        y: y as f32,
+                    },
+                    _ => p.free_position(sheet),
+                };
+                let mut id = p.add_block(&lib, &kind, pos).map_err(|e| e.to_string())?;
+                if let Some(w) = &wanted {
+                    p.rename_block(&id, w).map_err(|e| e.to_string())?;
+                    id = w.clone();
+                }
+                // A widget of the web page lives in the left panel until it is dragged out.
+                if p.is_widget(&id) {
+                    p.layout.blocks.remove(&id);
+                }
+                for (name, value) in &params {
+                    p.set_param(&lib, &id, name, value.clone())
+                        .map_err(|e| e.to_string())?;
+                }
+                new_id = id;
+                Ok(())
+            })?;
+            Ok(json!({"id": new_id, "check": report(ctx.project(), &lib)}))
+        }
+        "remove_block" => {
+            let id = s("id")?;
+            ctx.edit(&mut |p| {
+                p.remove_block(&id).map_err(|e| e.to_string())?;
+                p.release_unused_services(&lib).map_err(|e| e.to_string())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "move_block" => {
+            let id = s("id")?;
+            let x = args
+                .get("x")
+                .and_then(Value::as_f64)
+                .ok_or("нужен числовой x")? as f32;
+            let y = args
+                .get("y")
+                .and_then(Value::as_f64)
+                .ok_or("нужен числовой y")? as f32;
+            let sheet = args.get("sheet").and_then(Value::as_u64).map(|n| n as u32);
+            ctx.edit(&mut |p| {
+                if !p.logic.blocks.iter().any(|b| b.id == id) {
+                    return Err(format!("нет блока «{id}»"));
+                }
+                let old = p.layout.blocks.get(&id).map_or(1, |b| b.sheet);
+                p.layout.blocks.insert(
+                    id.clone(),
+                    BlockPos {
+                        sheet: sheet.unwrap_or(old),
+                        x,
+                        y,
+                    },
+                );
+                Ok(())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "rename_block" => {
+            let (id, new_id) = (s("id")?, s("new_id")?);
+            ctx.edit(&mut |p| p.rename_block(&id, &new_id).map_err(|e| e.to_string()))?;
+            Ok(ok(ctx, &lib))
+        }
+        "set_params" => {
+            let id = s("id")?;
+            let params = params_arg(args.get("params"))?;
+            ctx.edit(&mut |p| {
+                for (name, value) in &params {
+                    p.set_param(&lib, &id, name, value.clone())
+                        .map_err(|e| e.to_string())?;
+                }
+                Ok(())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "connect" => {
+            let (from, to) = (port("from")?, port("to")?);
+            ctx.edit(&mut |p| {
+                p.connect(&lib, from.clone(), to.clone())
+                    .map_err(|e| e.to_string())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "disconnect" => {
+            let to = port("to")?;
+            ctx.edit(&mut |p| {
+                if p.disconnect(&to) {
+                    Ok(())
+                } else {
+                    Err(format!("во вход {to} ничего не подано"))
+                }
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "set_input_const" => {
+            let input = port("input")?;
+            let value = match args.get("value") {
+                None => return Err("нужен аргумент «value» (null убирает константу)".to_owned()),
+                Some(Value::Null) => None,
+                Some(v) => Some(
+                    serde_json::from_value::<ParamValue>(v.clone())
+                        .map_err(|e| format!("value: {e}"))?,
+                ),
+            };
+            ctx.edit(&mut |p| {
+                p.set_input_const(&lib, &input, value.clone())
+                    .map_err(|e| e.to_string())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "bind" => {
+            let text = |key: &str| {
+                args.get(key)
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .ok_or_else(|| format!("нужен аргумент «{key}»"))
+            };
+            let (block, name) = (text("block")?, text("name")?);
+            let var = match args.get("variable") {
+                Some(Value::Null) => None,
+                Some(Value::String(v)) => Some(v.clone()),
+                _ => return Err("нужен аргумент «variable» (null снимает привязку)".to_owned()),
+            };
+            ctx.edit(&mut |p| {
+                p.bind(&block, &name, var.as_deref())
+                    .map_err(|e| e.to_string())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "set_param_input" => {
+            let (block, param) = (s("block")?, s("param")?);
+            let on = args.get("on").and_then(Value::as_bool).unwrap_or(true);
+            ctx.edit(&mut |p| {
+                p.set_param_input(&lib, &block, &param, on)
+                    .map_err(|e| e.to_string())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "invert_port" => {
+            let target = port("port")?;
+            let output = args
+                .get("output")
+                .and_then(Value::as_bool)
+                .ok_or("нужен аргумент «output»: true — выход, false — вход")?;
+            let on = args.get("on").and_then(Value::as_bool).unwrap_or(true);
+            ctx.edit(&mut |p| {
+                p.set_port_inverted(&lib, &target, output, on)
+                    .map_err(|e| e.to_string())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "set_variable" => {
+            let name = s("name")?;
+            let ty: VarType = serde_json::from_value(args.get("type").cloned().unwrap_or_default())
+                .map_err(|_| {
+                    "type: тип Arduino (bool, byte, int, long, float, double, String…)".to_owned()
+                })?;
+            let init = match args.get("init") {
+                None | Some(Value::Null) => None,
+                Some(v) => Some(
+                    serde_json::from_value::<ParamValue>(v.clone()).map_err(|e| e.to_string())?,
+                ),
+            };
+            let var = Var {
+                name: args
+                    .get("rename_to")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&name)
+                    .to_owned(),
+                ty,
+                init,
+                description: args
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned(),
+                retain: args.get("retain").and_then(Value::as_bool).unwrap_or(false),
+                service: false,
+            };
+            let retain = args.get("retain").and_then(Value::as_bool);
+            ctx.edit(&mut |p| {
+                let result = if let Some(old) = p.logic.var(&name) {
+                    // Omitted `retain` keeps the current setting.
+                    let var = Var {
+                        retain: retain.unwrap_or(old.retain),
+                        service: old.service,
+                        ..var.clone()
+                    };
+                    p.update_var(&name, var)
+                } else {
+                    p.add_var(var.clone())
+                };
+                result.map_err(|e| e.to_string())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "remove_variable" => {
+            let name = s("name")?;
+            ctx.edit(&mut |p| p.remove_var(&name).map_err(|e| e.to_string()))?;
+            Ok(ok(ctx, &lib))
+        }
+        "set_expander" => {
+            let id = s("id")?;
+            let old = ctx.project().logic.expander(&id).cloned();
+            let chip = match args.get("chip") {
+                None | Some(Value::Null) => None,
+                Some(v) => Some(
+                    serde_json::from_value::<ExpanderChip>(v.clone())
+                        .map_err(|_| "chip: pcf8574, pcf8574a или pcf8575".to_owned())?,
+                ),
+            };
+            let int = |key: &str| args.get(key).and_then(Value::as_i64);
+            let mut e = match &old {
+                Some(e) => e.clone(),
+                None => {
+                    let chip = chip.unwrap_or_default();
+                    Expander::new(&id, chip, Expander::default_address(chip))
+                }
+            };
+            if let Some(chip) = chip.filter(|c| *c != e.chip) {
+                e.chip = chip;
+                if !chip.addresses().contains(&e.address) {
+                    e.address = Expander::default_address(chip);
+                }
+            }
+            if let Some(a) = int("address") {
+                e.address = u8::try_from(a).map_err(|_| "address: число 32–63".to_owned())?;
+            }
+            if let Some(v) = int("sda") {
+                e.sda = v;
+            }
+            if let Some(v) = int("scl") {
+                e.scl = v;
+            }
+            if let Some(period) = args.get("period").and_then(Value::as_str) {
+                e.period = period.to_owned();
+            }
+            if let (Some(_), Some(name)) = (&old, args.get("rename_to").and_then(Value::as_str)) {
+                e.id = name.to_owned();
+            }
+            ctx.edit(&mut |p| {
+                match &old {
+                    Some(_) => p.update_expander(&id, e.clone()),
+                    None => p.add_expander(e.clone()),
+                }
+                .map_err(|e| e.to_string())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "remove_expander" => {
+            let id = s("id")?;
+            ctx.edit(&mut |p| p.remove_expander(&id).map_err(|e| e.to_string()))?;
+            Ok(ok(ctx, &lib))
+        }
+        "place_on_expander" => {
+            let block = s("block")?;
+            let target = match args.get("expander") {
+                Some(Value::Null) => None,
+                Some(Value::String(name)) => {
+                    let pin = args
+                        .get("pin")
+                        .and_then(Value::as_i64)
+                        .ok_or("нужен аргумент «pin»: номер вывода расширителя")?;
+                    Some((name.clone(), pin))
+                }
+                _ => {
+                    return Err("нужен аргумент «expander» (null снимает с расширителя)".to_owned())
+                }
+            };
+            ctx.edit(&mut |p| {
+                let target = target.as_ref().map(|(name, pin)| (name.as_str(), *pin));
+                p.set_block_expander(&lib, &block, target)
+                    .map_err(|e| e.to_string())
+            })?;
+            Ok(ok(ctx, &lib))
+        }
+        "add_variable_block" => {
+            let var = s("var")?;
+            let write = args.get("write").and_then(Value::as_bool).unwrap_or(false);
+            let sheet = args.get("sheet").and_then(Value::as_u64).unwrap_or(1) as u32;
+            let mut new_id = String::new();
+            ctx.edit(&mut |p| {
+                let pos = p.free_position(sheet);
+                new_id = p
+                    .add_var_block(&var, write, pos)
+                    .map_err(|e| e.to_string())?;
+                Ok(())
+            })?;
+            Ok(json!({"id": new_id, "check": report(ctx.project(), &lib)}))
+        }
+        "check" => Ok(report(ctx.project(), &lib)),
+        "generate" => {
+            let debug = args.get("debug").and_then(Value::as_bool).unwrap_or(false);
+            let store = LocalValues::open_default().map_err(|e| e.to_string())?;
+            let project = ctx.project().with_local(&lib, &store);
+            let program = Program::build(&project, &lib).map_err(|e| e.to_string())?;
+            let code = ArduinoCpp { debug }
+                .generate(&program)
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"sketch": code}))
+        }
+        "build" => {
+            let debug = args.get("debug").and_then(Value::as_bool).unwrap_or(false);
+            Ok(json!({"result": ctx.build(false, None, debug)?}))
+        }
+        "upload" => {
+            let debug = args.get("debug").and_then(Value::as_bool).unwrap_or(false);
+            let port = args.get("port").and_then(Value::as_str).map(str::to_owned);
+            Ok(json!({"result": ctx.build(true, port, debug)?}))
+        }
+        "read_live_values" => {
+            let values: Vec<Value> = ctx
+                .live_values()?
+                .into_iter()
+                .map(
+                    |(name, value, forced)| json!({"name": name, "value": value, "forced": forced}),
+                )
+                .collect();
+            Ok(json!(values))
+        }
+        "create_block_type" => {
+            let kind = s("type")?;
+            create_block_type(
+                ctx,
+                &kind,
+                &s("block_toml")?,
+                &s("template")?,
+                args.get("docs").and_then(Value::as_str),
+            )?;
+            Ok(json!({"created": kind}))
+        }
+        other => Err(format!("неизвестная команда «{other}»")),
+    }
+}
+
+fn ok(ctx: &dyn Context, lib: &Library) -> Value {
+    json!({"ok": true, "check": report(ctx.project(), lib)})
+}
+
+/// Pins taken by blocks and, for a known chip, the free ones with their notes.
+/// Expanders of the project with the pins other blocks hold, for the model to pick a free one.
+fn expanders(project: &Project, lib: &Library) -> Value {
+    let list: Vec<Value> = project
+        .logic
+        .expanders
+        .iter()
+        .map(|e| {
+            let taken: Vec<Value> = taken_pins(&project.logic, lib, &e.id, None)
+                .into_iter()
+                .map(|(pin, block)| json!({"pin": pin, "block": block}))
+                .collect();
+            json!({
+                "id": e.id,
+                "chip": e.chip.name(),
+                "address": e.address,
+                "pins": e.chip.pins(),
+                "taken": taken,
+            })
+        })
+        .collect();
+    json!(list)
+}
+
+fn pins(project: &Project, lib: &Library) -> Value {
+    let uses = pin_uses(&project.logic, lib);
+    let used: Vec<Value> = uses
+        .iter()
+        .map(|u| json!({"gpio": u.gpio, "block": u.block, "param": u.param}))
+        .collect();
+    let Some(layout) = BoardLayout::of_board(&project.config.board, lib.boards()) else {
+        return json!({"used": used});
+    };
+    let free: Vec<Value> = layout
+        .pins()
+        .iter()
+        .filter(|p| !p.flash && !uses.iter().any(|u| u.gpio == p.gpio))
+        .map(|p| {
+            let mut pin = json!({"gpio": p.gpio, "notes": p.notes()});
+            // A user board names its pins ("A1", "RS485 RX"): the model should use them.
+            if !p.label.is_empty() {
+                pin["label"] = json!(p.label);
+            }
+            pin
+        })
+        .collect();
+    json!({"chip": layout.name(), "used": used, "free": free})
+}
+
+/// Check result in a compact form for the model: `errors` and `warnings` are
+/// lists of `{kind, message}`, `kind` being the stable id of the problem class.
+pub fn report(project: &Project, lib: &Library) -> Value {
+    // Secrets kept outside the project take part in the check, as in generation.
+    let project = &match LocalValues::open_default() {
+        Ok(store) => project.with_local(lib, &store),
+        Err(_) => project.clone(),
+    };
+    let r = check_project(project, lib);
+    let list = |sev: Severity| -> Vec<Value> {
+        r.diagnostics
+            .iter()
+            .filter(|d| d.severity == sev)
+            .map(|d| json!({"kind": d.kind.id(), "message": d.message}))
+            .collect()
+    };
+    let order: Vec<&str> = if r.has_errors() {
+        Vec::new()
+    } else {
+        r.order
+            .iter()
+            .map(|&i| project.logic.blocks[i].id.as_str())
+            .collect()
+    };
+    json!({"errors": list(Severity::Error), "warnings": list(Severity::Warning), "order": order})
+}
+
+/// Ports and parameters that are present on each block instance (conditions
+/// `when` evaluated), for drawing the block: id → {inputs, outputs, params}.
+fn block_view(p: &Project, lib: &Library) -> Value {
+    let mut view = serde_json::Map::new();
+    for b in &p.logic.blocks {
+        let Some(def) = lib.get(&b.kind).map(|l| &l.def) else {
+            continue;
+        };
+        let port = |d: &crab_core::PortDef| json!({"name": d.name, "label": d.label, "type": d.ty, "default": d.default});
+        view.insert(
+            b.id.clone(),
+            json!({
+                "inputs": def.active_inputs(&b.params).map(port).collect::<Vec<_>>(),
+                "outputs": def.active_outputs(&b.params).map(port).collect::<Vec<_>>(),
+                "params": def.active_params(&b.params).map(|d| &d.name).collect::<Vec<_>>(),
+            }),
+        );
+    }
+    Value::Object(view)
+}
+
+fn block_summary(b: &LibraryBlock) -> Value {
+    let d = &b.def;
+    let ports = |ps: &Vec<crab_core::PortDef>| -> Vec<Value> {
+        ps.iter()
+            .map(|p| json!({"name": p.name, "label": p.label, "type": p.ty, "default": p.default, "description": p.description}))
+            .collect()
+    };
+    json!({
+        "type": d.info.kind,
+        "name": d.info.name,
+        "group": d.info.group,
+        "description": d.info.description,
+        "inputs": ports(&d.inputs),
+        "outputs": ports(&d.outputs),
+        "params": d.params.iter().map(|p| json!({
+            "name": p.name, "label": p.label, "kind": p.kind, "default": p.default,
+            "min": p.min, "max": p.max, "description": p.description, "choices": p.choices
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// `{"pin": 4, "time": "5s", "b": null}` → parameter edits (`None` = default).
+fn params_arg(v: Option<&Value>) -> Result<Vec<(String, Option<ParamValue>)>, String> {
+    let Some(v) = v else { return Ok(Vec::new()) };
+    let obj = v.as_object().ok_or("params должен быть объектом")?;
+    obj.iter()
+        .map(|(k, v)| {
+            let value = if v.is_null() {
+                None
+            } else {
+                Some(
+                    serde_json::from_value::<ParamValue>(v.clone())
+                        .map_err(|e| format!("{k}: {e}"))?,
+                )
+            };
+            Ok((k.clone(), value))
+        })
+        .collect()
+}
+
+fn create_block_type(
+    ctx: &mut dyn Context,
+    kind: &str,
+    block_toml: &str,
+    template: &str,
+    docs: Option<&str>,
+) -> Result<(), String> {
+    let lib_dir = ctx.library_dir();
+    if !crab_core::ident::is_valid_ident(kind) {
+        return Err(format!("недопустимое имя типа «{kind}»"));
+    }
+    if ctx.library().is_builtin(kind) {
+        return Err(format!(
+            "тип «{kind}» занят встроенным блоком, встроенные блоки менять нельзя; выберите другое имя"
+        ));
+    }
+    if ctx.library().is_user(kind) {
+        return Err(format!("тип «{kind}» уже есть; выберите другое имя"));
+    }
+    // Validate in memory first, so a broken block never lands in the library.
+    let def: crab_core::BlockDef =
+        toml::from_str(block_toml).map_err(|e| format!("block.toml: {e}"))?;
+    def.validate(kind).map_err(|e| format!("block.toml: {e}"))?;
+    // The group becomes the section and folders of the user library
+    // (`Насосы/Управление`); an unusable group puts the block in the root.
+    let parts: Vec<&str> = def.info.group.split('/').map(str::trim).collect();
+    let folder = if parts
+        .iter()
+        .all(|p| crab_core::library::is_valid_folder_name(p))
+    {
+        parts.iter().fold(lib_dir.clone(), |d, p| d.join(p))
+    } else {
+        lib_dir.clone()
+    };
+    let dir = folder.join(kind);
+    if dir.exists() {
+        return Err(format!("тип «{kind}» уже есть; выберите другое имя"));
+    }
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let write = |file: &str, text: &str| fs::write(dir.join(file), text).map_err(|e| e.to_string());
+    write(BLOCK_FILE, block_toml)?;
+    write(ESP32_CPP_TEMPLATE, template)?;
+    if let Some(docs) = docs {
+        write(DOCS_FILE, docs)?;
+    }
+    ctx.reload_library()
+}

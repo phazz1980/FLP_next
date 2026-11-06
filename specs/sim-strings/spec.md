@@ -10,7 +10,7 @@
 3. Строковый выход блока с железом (MQTT, Wi-Fi) задаётся руками: правый щелчок → поле ввода текста.
 
 ## Критерии готовности
-- Встроенные блоки строк считаются в `flp-sim`: `text_const`, `text_concat`, `text_length`, `num_to_text`,
+- Встроенные блоки строк считаются в `crab-sim`: `text_const`, `text_concat`, `text_length`, `num_to_text`,
   `text_compare`, `text_to_num`, `text_substring`, `text_find`, `text_char`, `text_add_char`.
 - Константа строкового входа и параметр-строка (`text_const.value`) доходят до блока.
 - На листах у строковой связи показан текст (как в отладке), а не `0`.

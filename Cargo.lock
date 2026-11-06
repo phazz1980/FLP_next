@@ -1099,6 +1099,191 @@ dependencies = [
 ]
 
 [[package]]
+name = "crab-ai"
+version = "1.3.0"
+dependencies = [
+ "crab-build",
+ "crab-codegen",
+ "crab-core",
+ "crab-debug",
+ "crab-pdf",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+ "ureq",
+]
+
+[[package]]
+name = "crab-blocks"
+version = "1.3.0"
+dependencies = [
+ "crab-core",
+]
+
+[[package]]
+name = "crab-build"
+version = "1.3.0"
+dependencies = [
+ "crab-blocks",
+ "crab-codegen",
+ "crab-core",
+ "serde",
+ "serde_json",
+ "sevenz-rust",
+ "sha2",
+ "thiserror 2.0.21",
+ "ureq",
+ "wasmparser 0.263.0",
+ "zip",
+]
+
+[[package]]
+name = "crab-cli"
+version = "1.3.0"
+dependencies = [
+ "clap",
+ "crab-build",
+ "crab-codegen",
+ "crab-core",
+ "crab-debug",
+ "crab-pdf",
+ "crab-sim",
+ "serialport",
+]
+
+[[package]]
+name = "crab-codegen"
+version = "1.3.0"
+dependencies = [
+ "crab-blocks",
+ "crab-core",
+ "crab-debug",
+ "minijinja",
+ "thiserror 2.0.21",
+ "toml 0.8.23",
+ "wasm-encoder",
+]
+
+[[package]]
+name = "crab-core"
+version = "1.3.0"
+dependencies = [
+ "chacha20poly1305",
+ "getrandom 0.2.17",
+ "hmac",
+ "minijinja",
+ "pbkdf2",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.21",
+ "toml 0.8.23",
+ "zip",
+]
+
+[[package]]
+name = "crab-debug"
+version = "1.3.0"
+dependencies = [
+ "crab-core",
+ "serialport",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "crab-demo"
+version = "1.3.0"
+dependencies = [
+ "crab-codegen",
+ "crab-core",
+ "crab-sim",
+ "eframe",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "crab-editor"
+version = "1.3.0"
+dependencies = [
+ "chrono",
+ "crab-ai",
+ "crab-build",
+ "crab-codegen",
+ "crab-core",
+ "crab-debug",
+ "crab-mcp",
+ "crab-pdf",
+ "crab-sim",
+ "eframe",
+ "egui_extras",
+ "embed-resource",
+ "image",
+ "rfd",
+ "serde",
+ "serde_json",
+ "serialport",
+ "toml 0.8.23",
+ "ureq",
+ "winreg 0.55.0",
+ "zip",
+]
+
+[[package]]
+name = "crab-mcp"
+version = "1.3.0"
+dependencies = [
+ "crab-ai",
+ "crab-build",
+ "crab-codegen",
+ "crab-core",
+ "crab-debug",
+ "serde_json",
+]
+
+[[package]]
+name = "crab-pdf"
+version = "1.3.0"
+dependencies = [
+ "crab-core",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "crab-pdf-render"
+version = "1.3.0"
+dependencies = [
+ "crab-core",
+ "crab-pdf",
+ "typst-embed",
+]
+
+[[package]]
+name = "crab-sim"
+version = "1.3.0"
+dependencies = [
+ "crab-blocks",
+ "crab-build",
+ "crab-codegen",
+ "crab-core",
+ "serde",
+ "toml 0.8.23",
+ "wasmi 2.0.0",
+ "wat",
+]
+
+[[package]]
+name = "crab-web"
+version = "1.3.0"
+dependencies = [
+ "crab-ai",
+ "crab-blocks",
+ "serde_json",
+]
+
+[[package]]
 name = "crc"
 version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1744,191 +1929,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
 dependencies = [
  "num-traits",
-]
-
-[[package]]
-name = "flp-ai"
-version = "1.3.0"
-dependencies = [
- "flp-build",
- "flp-codegen",
- "flp-core",
- "flp-debug",
- "flp-pdf",
- "serde",
- "serde_json",
- "toml 0.8.23",
- "ureq",
-]
-
-[[package]]
-name = "flp-blocks"
-version = "1.3.0"
-dependencies = [
- "flp-core",
-]
-
-[[package]]
-name = "flp-build"
-version = "1.3.0"
-dependencies = [
- "flp-blocks",
- "flp-codegen",
- "flp-core",
- "serde",
- "serde_json",
- "sevenz-rust",
- "sha2",
- "thiserror 2.0.21",
- "ureq",
- "wasmparser 0.263.0",
- "zip",
-]
-
-[[package]]
-name = "flp-cli"
-version = "1.3.0"
-dependencies = [
- "clap",
- "flp-build",
- "flp-codegen",
- "flp-core",
- "flp-debug",
- "flp-pdf",
- "flp-sim",
- "serialport",
-]
-
-[[package]]
-name = "flp-codegen"
-version = "1.3.0"
-dependencies = [
- "flp-blocks",
- "flp-core",
- "flp-debug",
- "minijinja",
- "thiserror 2.0.21",
- "toml 0.8.23",
- "wasm-encoder",
-]
-
-[[package]]
-name = "flp-core"
-version = "1.3.0"
-dependencies = [
- "chacha20poly1305",
- "getrandom 0.2.17",
- "hmac",
- "minijinja",
- "pbkdf2",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.21",
- "toml 0.8.23",
- "zip",
-]
-
-[[package]]
-name = "flp-debug"
-version = "1.3.0"
-dependencies = [
- "flp-core",
- "serialport",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "flp-demo"
-version = "1.3.0"
-dependencies = [
- "eframe",
- "flp-codegen",
- "flp-core",
- "flp-sim",
- "js-sys",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
-name = "flp-editor"
-version = "1.3.0"
-dependencies = [
- "chrono",
- "eframe",
- "egui_extras",
- "embed-resource",
- "flp-ai",
- "flp-build",
- "flp-codegen",
- "flp-core",
- "flp-debug",
- "flp-mcp",
- "flp-pdf",
- "flp-sim",
- "image",
- "rfd",
- "serde",
- "serde_json",
- "serialport",
- "toml 0.8.23",
- "ureq",
- "winreg 0.55.0",
- "zip",
-]
-
-[[package]]
-name = "flp-mcp"
-version = "1.3.0"
-dependencies = [
- "flp-ai",
- "flp-build",
- "flp-codegen",
- "flp-core",
- "flp-debug",
- "serde_json",
-]
-
-[[package]]
-name = "flp-pdf"
-version = "1.3.0"
-dependencies = [
- "flp-core",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "flp-pdf-render"
-version = "1.3.0"
-dependencies = [
- "flp-core",
- "flp-pdf",
- "typst-embed",
-]
-
-[[package]]
-name = "flp-sim"
-version = "1.3.0"
-dependencies = [
- "flp-blocks",
- "flp-build",
- "flp-codegen",
- "flp-core",
- "serde",
- "toml 0.8.23",
- "wasmi 2.0.0",
- "wat",
-]
-
-[[package]]
-name = "flp-web"
-version = "1.3.0"
-dependencies = [
- "flp-ai",
- "flp-blocks",
- "serde_json",
 ]
 
 [[package]]

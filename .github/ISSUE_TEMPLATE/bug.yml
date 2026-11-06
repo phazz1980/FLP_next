@@ -5,7 +5,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Версия FLP_next
+      label: Версия CrabLogic
       description: Меню «Справка» вверху
     validations:
       required: true
@@ -32,4 +32,4 @@ body:
       render: text
   - type: markdown
     attributes:
-      value: Файл проекта `.flpn` можно приложить к issue перетаскиванием.
+      value: Файл проекта `.crab` можно приложить к issue перетаскиванием.

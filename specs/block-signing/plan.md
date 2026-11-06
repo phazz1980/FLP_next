@@ -1,16 +1,16 @@
 # Подпись наборов блоков — план
 
 ## Границы
-`flp-core` работает с байтами и не знает ни про DPAPI, ни про сеть: подписывает, проверяет, решает состояние доверия. Хранение закрытого ключа (DPAPI) и загрузка списка авторов — в редакторе.
+`crab-core` работает с байтами и не знает ни про DPAPI, ни про сеть: подписывает, проверяет, решает состояние доверия. Хранение закрытого ключа (DPAPI) и загрузка списка авторов — в редакторе.
 
 ## Формат
-- В `.flpblocks` добавляется файл `signature.toml`: `author` (`id`), `key_id`, `algorithm = "ed25519"`, `signature` (base64).
+- В `.crabblocks` добавляется файл `signature.toml`: `author` (`id`), `key_id`, `algorithm = "ed25519"`, `signature` (base64).
 - Что подписывается: sha256 от канонической склейки всех файлов набора кроме `signature.toml` (имена по возрастанию, затем содержимое); `pack.toml` входит в общий хеш.
 - В `pack.toml` поле `author` должно совпадать с `author` в подписи, иначе набор отклоняется.
 - Список авторов: `authors/<id>.toml` в репозитории каталога: `id`, `contacts`, `keys = [{ key_id, public, revoked = false, revoked_at }]`. Локальная копия лежит в `user_library`, ручные добавления отдельным файлом `trusted.toml`.
 - Правило каталога: `id` набора начинается с `author/`, публиковать под этим автором может только держатель его ключа (проверяется при приёме pull request'а; позже Action).
 
-## flp-core
+## crab-core
 Новый модуль `sign.rs`:
 - `generate_keypair() -> (SecretKey, PublicKey)`, `key_id(public)`.
 - `sign_pack(files, secret, author) -> signature.toml`.

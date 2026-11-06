@@ -1,6 +1,6 @@
 # План
 
-1. **Права**: `perms` в `master.ino` шире 8 бит; `HARDWARE` в `flp-sim/src/mcu.rs`; новые типы импортов в `wasm.rs::finish`.
+1. **Права**: `perms` в `master.ino` шире 8 бит; `HARDWARE` в `crab-sim/src/mcu.rs`; новые типы импортов в `wasm.rs::finish`.
 2. **Modbus/UART числа**: мастер держит UART-порты и таблицу Modbus-запросов (задача, как датчики);
    импорты `uart_cfg`, `uart_rx_byte`, `uart_tx_byte`, `modbus_cfg`, `modbus_read`, `modbus_write`.
 3. **Строки**: тип `Ty::S` (смещение+длина) в `wasm.rs`, сегмент данных для констант, куча-арена на шаг;

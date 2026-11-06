@@ -3,7 +3,7 @@
 
 #![no_std]
 
-#[link(wasm_import_module = "flp")]
+#[link(wasm_import_module = "crab")]
 extern "C" {
     fn input(index: i32) -> f64;
     fn param(index: i32) -> f64;

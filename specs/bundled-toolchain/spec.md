@@ -6,7 +6,7 @@
 
 ## Сценарии
 1. В архиве `arduino-cli.exe` лежит в корне программы; ядро ESP32 — в папке `esp32core` рядом (если положено при сборке архива).
-2. `arduino-cli` ищется: `FLP_ARDUINO_CLI` → корень программы → `PATH` → `Program Files\Arduino CLI`.
+2. `arduino-cli` ищется: `CRAB_ARDUINO_CLI` → корень программы → `PATH` → `Program Files\Arduino CLI`.
 3. Ядро ищется: папка `esp32core` → системная папка данных arduino-cli (`%LOCALAPPDATA%\Arduino15`).
 4. Нет `arduino-cli` — при запуске окно с предложением скачать фиксированную версию (1.5.1) в корень программы
    и сразу докачать ядро ESP32 (3.3.12) в `esp32core`.

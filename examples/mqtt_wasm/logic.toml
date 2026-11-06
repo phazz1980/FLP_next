@@ -1,5 +1,5 @@
 # MQTT в модуле WASM: клиентом занимается мастер. Светодиод включается сообщением 1/0 в топик
-# flp/led, а принятое число отправляется обратно в flp/echo (при каждом изменении).
+# crab/led, а принятое число отправляется обратно в crab/echo (при каждом изменении).
 
 [[block]]
 id = "wifi"
@@ -17,13 +17,13 @@ max_subscriptions = 2
 [[block]]
 id = "sub"
 type = "mqtt_subscribe"
-topic = "flp/led"
+topic = "crab/led"
 kind = "int"
 
 [[block]]
 id = "echo"
 type = "mqtt_publish"
-topic = "flp/echo"
+topic = "crab/echo"
 trigger = 1
 
 [[block]]

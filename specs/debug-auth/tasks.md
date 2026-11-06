@@ -1,9 +1,9 @@
 # Задачи: пароль на отладку
 
-- [x] 1. `flp-core::protect`: `derive_key`, соль из заголовка копии. Тест: ключ совпадает с тем, что открывает копию.
-- [x] 2. `flp-debug::protocol`: кадры AUTH_REQ/CHALLENGE/AUTH/OK/FAIL, флаг в HELLO, VERSION=4. Тест кодирования.
-- [x] 3. `flp-codegen::debug`: шлюз, nonce, проверка HMAC, K в флеше. Снимок `blink_protected.debug.ino`, снимки без пароля не меняются.
-- [x] 4. `flp-debug::session`/`pull`: вход после HELLO, состояния «нужен пароль»/«неверный пароль». Тест на эмуляторе платы.
+- [x] 1. `crab-core::protect`: `derive_key`, соль из заголовка копии. Тест: ключ совпадает с тем, что открывает копию.
+- [x] 2. `crab-debug::protocol`: кадры AUTH_REQ/CHALLENGE/AUTH/OK/FAIL, флаг в HELLO, VERSION=4. Тест кодирования.
+- [x] 3. `crab-codegen::debug`: шлюз, nonce, проверка HMAC, K в флеше. Снимок `blink_protected.debug.ino`, снимки без пароля не меняются.
+- [x] 4. `crab-debug::session`/`pull`: вход после HELLO, состояния «нужен пароль»/«неверный пароль». Тест на эмуляторе платы.
 - [x] 5. CLI: `monitor`/`pull` берут пароль проекта (`pull --password`); отдельного `--password` у `monitor` нет; ошибки на русском.
 - [x] 6. Редактор: поле «Пароль отладки» в строке состояния при «нужен пароль» (не проверено вручную в окне).
 - [x] 7. MCP: `read_live_values` с паролем проекта.

@@ -1,4 +1,4 @@
-// Prototype: wasm3 on ESP32, blink module via flp.gpio_write / flp.millis.
+// Prototype: wasm3 on ESP32, blink module via crab.gpio_write / crab.millis.
 // Prints RAM per module, step time, hot-swap time and heap fragmentation.
 #include <wasm3.h>
 #include <m3_env.h>
@@ -37,8 +37,8 @@ struct Slot {
     IM3Module mod;
     if (m3_ParseModule(env, &mod, blink_wasm, blink_wasm_len)) return false;
     if (m3_LoadModule(rt, mod)) return false;
-    m3_LinkRawFunction(mod, "flp", "gpio_write", "v(ii)", &m3_gpio_write);
-    m3_LinkRawFunction(mod, "flp", "millis", "i()", &m3_millis);
+    m3_LinkRawFunction(mod, "crab", "gpio_write", "v(ii)", &m3_gpio_write);
+    m3_LinkRawFunction(mod, "crab", "millis", "i()", &m3_millis);
     return !m3_FindFunction(&step, rt, "step");
   }
   void unload() {

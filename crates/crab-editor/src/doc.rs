@@ -1,0 +1,230 @@
+//! Open project with undo/redo and the latest check report.
+
+use std::path::Path;
+
+use crab_core::project::is_web_kind;
+use crab_core::{check_project, BlockPos, Layout, Library, Logic, ParamKind, Project, Report};
+
+/// State that undo/redo restores.
+#[derive(Clone)]
+struct Snapshot {
+    logic: Logic,
+    layout: Layout,
+}
+
+pub struct Doc {
+    pub project: Project,
+    /// Unsaved changes.
+    pub dirty: bool,
+    /// Bumped on every change of the project; background precompilation compares it.
+    pub revision: u64,
+    /// Check result for the current schema, refreshed after every edit.
+    pub report: Report,
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
+    /// Key of the last edit: consecutive edits with the same key (dragging a block,
+    /// typing a value) form one undo step.
+    last_key: Option<String>,
+}
+
+const UNDO_LIMIT: usize = 200;
+
+impl Doc {
+    pub fn open(path: &Path, lib: &Library) -> crab_core::Result<Self> {
+        let mut project = Project::load(path)?;
+        place_unplaced(&mut project, lib);
+        let report = check_project(&project, lib);
+        Ok(Self {
+            project,
+            dirty: false,
+            revision: 0,
+            report,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            last_key: None,
+        })
+    }
+
+    pub fn recheck(&mut self, lib: &Library) {
+        self.report = check_project(&self.project, lib);
+    }
+
+    /// Applies an edit as one undo step. `key` merges consecutive edits of the same
+    /// thing; `None` always starts a new step. A failed edit leaves no trace.
+    pub fn edit<T, E>(
+        &mut self,
+        lib: &Library,
+        key: Option<String>,
+        f: impl FnOnce(&mut Project) -> Result<T, E>,
+    ) -> Result<T, E> {
+        let before = self.snapshot();
+        let merge = key.is_some() && key == self.last_key;
+        match f(&mut self.project) {
+            Ok(value) => {
+                self.project.logic.sync_tags();
+                if !merge {
+                    self.undo.push(before);
+                    if self.undo.len() > UNDO_LIMIT {
+                        self.undo.remove(0);
+                    }
+                }
+                self.redo.clear();
+                self.last_key = key;
+                self.dirty = true;
+                self.revision += 1;
+                self.recheck(lib);
+                Ok(value)
+            }
+            Err(e) => {
+                self.restore(before);
+                Err(e)
+            }
+        }
+    }
+
+    /// Takes the web page (the `web_*` blocks) from `other`, the project as another program
+    /// (the web constructor) saved it, and keeps everything else as it is in the editor.
+    pub fn adopt_web(&mut self, other: &Project, lib: &Library) {
+        let _ = self.edit::<(), ()>(lib, None, |p| {
+            p.logic.blocks.retain(|b| !is_web_kind(&b.kind));
+            p.logic.blocks.extend(
+                other
+                    .logic
+                    .blocks
+                    .iter()
+                    .filter(|b| is_web_kind(&b.kind))
+                    .cloned(),
+            );
+            Ok(())
+        });
+    }
+
+    /// Ends merging of consecutive edits (e.g. when a drag is released).
+    pub fn end_edit(&mut self) {
+        self.last_key = None;
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    pub fn undo(&mut self, lib: &Library) {
+        if let Some(s) = self.undo.pop() {
+            self.redo.push(self.snapshot());
+            self.restore(s);
+            self.after_history(lib);
+        }
+    }
+
+    pub fn redo(&mut self, lib: &Library) {
+        if let Some(s) = self.redo.pop() {
+            self.undo.push(self.snapshot());
+            self.restore(s);
+            self.after_history(lib);
+        }
+    }
+
+    /// Saves the project archive with the PDF of all sheets; returns a warning
+    /// if the PDF could not be made.
+    pub fn save(&mut self, lib: &Library) -> crab_core::Result<Option<String>> {
+        let warning = crab_pdf::save_project(&self.project, lib)?;
+        self.dirty = false;
+        Ok(warning)
+    }
+
+    fn after_history(&mut self, lib: &Library) {
+        self.last_key = None;
+        self.dirty = true;
+        self.revision += 1;
+        self.recheck(lib);
+    }
+
+    fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            logic: self.project.logic.clone(),
+            layout: self.project.layout.clone(),
+        }
+    }
+
+    fn restore(&mut self, s: Snapshot) {
+        self.project.logic = s.logic;
+        self.project.layout = s.layout;
+    }
+}
+
+/// Gives positions to blocks that have none (schemas written by hand or by AI):
+/// a grid on sheet 1 below the placed blocks. Inputs and outputs (blocks with a pin)
+/// stay in the project tree until they are dragged onto a sheet, like variables.
+fn place_unplaced(project: &mut Project, lib: &Library) {
+    let layout = &mut project.layout;
+    let bottom = layout
+        .blocks
+        .values()
+        .filter(|p| p.sheet == 1)
+        .map(|p| p.y)
+        .fold(0.0_f32, f32::max);
+    let missing: Vec<String> = project
+        .logic
+        .blocks
+        .iter()
+        .filter(|b| !layout.blocks.contains_key(&b.id))
+        // A web widget waits in the project tree; the page designer made it, not the sheet.
+        .filter(|b| !(is_web_kind(&b.kind) && b.kind != "web_ui"))
+        .filter(|b| {
+            let tag = lib
+                .resolve(&project.logic, b)
+                .is_some_and(|r| r.def.params.iter().any(|p| p.kind == ParamKind::Pin));
+            !tag
+        })
+        .map(|b| b.id.clone())
+        .collect();
+    for (i, id) in missing.into_iter().enumerate() {
+        let (col, row) = (i % 5, i / 5);
+        layout.blocks.insert(
+            id,
+            BlockPos {
+                sheet: 1,
+                x: 40.0 + 200.0 * col as f32,
+                y: bottom + 160.0 + 140.0 * row as f32,
+            },
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inputs_and_outputs_stay_in_the_tree_until_dragged() {
+        let (lib, _) =
+            Library::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../library")).unwrap();
+        let mut project =
+            Project::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/pump")).unwrap();
+        let pins: Vec<String> = project
+            .logic
+            .blocks
+            .iter()
+            .filter(|b| {
+                lib.resolve(&project.logic, b)
+                    .is_some_and(|r| r.def.params.iter().any(|p| p.kind == ParamKind::Pin))
+            })
+            .map(|b| b.id.clone())
+            .collect();
+        assert!(!pins.is_empty());
+        project.layout.blocks.clear();
+        place_unplaced(&mut project, &lib);
+        for b in &project.logic.blocks {
+            assert_eq!(
+                project.layout.blocks.contains_key(&b.id),
+                !pins.contains(&b.id),
+                "block {}",
+                b.id
+            );
+        }
+    }
+}

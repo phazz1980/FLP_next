@@ -19,11 +19,11 @@ typedef struct m5_blockInstance {
   wasmMemory* m0;
 } m5_blockInstance;
 
-  F64 i3_flp5_input(wasmModuleInstance*, U32);
+  F64 i4_crab5_input(wasmModuleInstance*, U32);
 
-  F64 i3_flp5_param(wasmModuleInstance*, U32);
+  F64 i4_crab5_param(wasmModuleInstance*, U32);
 
-  void i3_flp6_output(wasmModuleInstance*, U32, F64);
+  void i4_crab6_output(wasmModuleInstance*, U32, F64);
 
 void f3(wasmModuleInstance*);
 

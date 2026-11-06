@@ -8,7 +8,7 @@ Xtensa-S3 и RISC-V-C3 докачиваются по желанию.
 ## Что есть сейчас
 - Чипы в программе: `esp32`, `esp32s3`, `esp32c3` (+ Super Mini); список плат — `BOARDS`, `BOARD_MODELS`,
   пользовательские платы (`boardcfg.rs`, меню «▾» у поля FQBN).
-- Ядро ищется в `esp32core` рядом с .exe, затем в `%LOCALAPPDATA%\Arduino15` (`flp-build`, `has_core`).
+- Ядро ищется в `esp32core` рядом с .exe, затем в `%LOCALAPPDATA%\Arduino15` (`crab-build`, `has_core`).
 - Готовые пакеты на странице релиза v1.2.0: toolchain-esp32 (ESP32), addon-s2s3 (S2/S3), addon-riscv (C3/C5/C6/H2/P4).
 
 ## Сценарии
@@ -31,4 +31,4 @@ Xtensa-S3 и RISC-V-C3 докачиваются по желанию.
 ## Ответы
 1. Качаем готовые пакеты с релиза GitHub (.7z), распаковка встроенная (крейт sevenz-rust), проверка SHA-256.
 2. Классический ESP32 — базовый пакет `toolchain-esp32` (arduino-cli и ядро); сборка ESP32 без ядра по-прежнему может поставить его через arduino-cli.
-3. Пакеты по чипам: `core-esp32s3`, `core-esp32c3` (компилятор RISC-V и libs C3). Для ручной установки на релизе есть ещё `core-esp32s2` и `core-riscv-extra` (C5/C6/H2/P4), программа их не качает.
+3. Пакеты по чипам: `core-esp32s2` (добавлен позже, 23 МБ), `core-esp32s3`, `core-esp32c3` (компилятор RISC-V и libs C3). Для ручной установки на релизе есть ещё `core-riscv-extra` (C5/C6/H2/P4), программа его не качает.
