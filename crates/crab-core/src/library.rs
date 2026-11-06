@@ -819,6 +819,28 @@ impl LibraryBlock {
         self.template_path(DOCS_FILE)
     }
 
+    /// The native part `native.cpp` (C++ built into the master), if the block has one.
+    pub fn native_path(&self) -> Option<PathBuf> {
+        self.template_path(crate::native::NATIVE_FILE)
+    }
+
+    /// Reads and checks `native.cpp`; `None` when the block has no native part.
+    pub fn native_part(&self) -> Result<Option<crate::native::NativePart>> {
+        let Some(path) = self.native_path() else {
+            return Ok(None);
+        };
+        let source = fs::read_to_string(&path).map_err(|source| Error::Read {
+            path: path.clone(),
+            source,
+        })?;
+        crate::native::parse_native(&source, &self.def)
+            .map(Some)
+            .map_err(|errors| Error::InvalidNative {
+                message: crate::native::join_errors(&errors),
+                path,
+            })
+    }
+
     /// The simulation module `block.wasm`, if the block has one.
     pub fn wasm_path(&self) -> Option<PathBuf> {
         self.template_path(WASM_FILE)
@@ -843,11 +865,14 @@ impl LibraryBlock {
         let folder = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();
         def.validate(folder)
             .map_err(|message| Error::InvalidBlockDef { path, message })?;
-        Ok(Self {
+        let block = Self {
             def,
             dir: dir.to_owned(),
             inline_templates: BTreeMap::new(),
-        })
+        };
+        // A broken native part keeps the block out of the library, like a broken block.toml.
+        block.native_part()?;
+        Ok(block)
     }
 }
 
@@ -1554,6 +1579,52 @@ group = \"G\"
         fs::remove_dir_all(&user).unwrap();
         let (lib, errors) = Library::load_with_user(&builtin).unwrap();
         assert!(errors.is_empty() && lib.len() == 1);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn native_part_is_loaded_and_checked() {
+        let root = std::env::temp_dir().join(format!("crab_native_part_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let block = |kind: &str| {
+            def(&format!(
+                "[block]
+type = \"{kind}\"
+name = \"N\"
+group = \"G\"
+
+[[output]]
+name = \"t\"
+type = \"float\"
+"
+            ))
+        };
+        save_block(&root, &block("good"), "", "").unwrap();
+        save_block(&root, &block("bad"), "", "").unwrap();
+        save_block(&root, &block("plain"), "", "").unwrap();
+        fs::write(
+            root.join("good").join(crate::native::NATIVE_FILE),
+            "// crab:native libs=\"Wire\"\n// crab:sim t=1.5\nCRAB_STEP(State& s, In in, Out& out) {}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("bad").join(crate::native::NATIVE_FILE),
+            "// crab:sim x=1\n",
+        )
+        .unwrap();
+
+        let (lib, errors) = Library::load(&root).unwrap();
+        let part = lib.get("good").unwrap().native_part().unwrap().unwrap();
+        assert_eq!(part.libs, ["Wire"]);
+        assert!(lib.get("plain").unwrap().native_part().unwrap().is_none());
+        // A broken native part keeps the block out of the library, with a Russian message.
+        assert!(lib.get("bad").is_none());
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let text = errors[0].to_string();
+        assert!(
+            text.contains("нативная часть") && text.contains("CRAB_STEP"),
+            "{text}"
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 

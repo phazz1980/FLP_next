@@ -16,6 +16,7 @@ pub mod library;
 pub mod local;
 pub mod logic;
 pub mod modbus_tags;
+pub mod native;
 pub mod pack;
 pub mod packed;
 pub mod pins;

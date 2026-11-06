@@ -47,6 +47,9 @@ pub enum Error {
     #[error("неверное описание блока {}: {}", .path.display(), .message)]
     InvalidBlockDef { path: PathBuf, message: String },
 
+    #[error("неверная нативная часть блока {}: {}", .path.display(), .message)]
+    InvalidNative { path: PathBuf, message: String },
+
     #[error("неверное описание платы {}: {}", .path.display(), .message)]
     InvalidBoard { path: PathBuf, message: String },
 
