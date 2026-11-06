@@ -14,6 +14,8 @@ use crab_core::{
 };
 use eframe::egui::{self, Color32, Id, RichText, ScrollArea, TextEdit, Ui};
 
+use crab_core::native_wizard::{LibraryWizard, WizType};
+
 use crate::app::{EditorApp, LogLevel};
 use crate::dialogs::{type_name, value_text};
 use crate::pictures::Pictures;
@@ -226,6 +228,10 @@ struct Form {
     template: String,
     /// `native.cpp`: C++ built into the master firmware; empty when the block has none.
     native: String,
+    /// Wizard fields when `native` was made by the wizard and not edited by hand.
+    wizard: Option<LibraryWizard>,
+    /// The wizard as last applied to the rows of the form.
+    synced: Option<LibraryWizard>,
     docs: String,
     /// Arduino libraries and the example attached to the block.
     attach: Attach,
@@ -366,6 +372,8 @@ impl Form {
             params: Vec::new(),
             template: NEW_TEMPLATE.into(),
             native: String::new(),
+            wizard: None,
+            synced: None,
             docs: String::new(),
             attach: Attach::default(),
         }
@@ -404,6 +412,8 @@ impl Form {
             outputs: def.outputs.iter().map(PortRow::from_def).collect(),
             params: def.params.iter().map(ParamRow::from_def).collect(),
             template,
+            wizard: LibraryWizard::parse(&native),
+            synced: LibraryWizard::parse(&native),
             native,
             docs,
             attach: Attach::from_dir(&block.dir),
@@ -680,6 +690,8 @@ pub struct BlockEditor {
     sim_build: SimBuild,
     /// Test build of the master with the native part, on the "Код C++ для платы" tab.
     native_build: NativeBuild,
+    /// Step of the native-part wizard being shown (0-based).
+    wizard_step: usize,
     generated: Option<Generated>,
     /// Closing with unsaved changes: asking what to do.
     confirm_close: bool,
@@ -744,6 +756,7 @@ impl BlockEditor {
             trial: Default::default(),
             sim_build: SimBuild::default(),
             native_build: NativeBuild::default(),
+            wizard_step: 0,
             generated: None,
             confirm_close: false,
             maximized: false,
@@ -2124,6 +2137,158 @@ fn apply_template(
     f.native = fill.source;
 }
 
+/// Steps of the wizard for the native part. Returns `true` when the generated code (step 6 and
+/// no mistakes) or the plain text editor (after "Править код") should be shown below.
+fn wizard_part(ui: &mut Ui, ed: &mut BlockEditor, pal: &Palette) -> bool {
+    let editable = !ed.read_only;
+    ui.horizontal(|ui| {
+        ui.weak(crate::i18n::tr(
+            "Код делается мастером из полей; руками его править не нужно.",
+        ));
+        if ui
+            .add_enabled(editable, egui::Button::new(crate::i18n::tr("Править код")))
+            .on_hover_text(crate::i18n::tr(
+                "Перейти к тексту C++. Из текста вернуться в мастер нельзя",
+            ))
+            .clicked()
+        {
+            ed.form.wizard = None;
+            ed.form.synced = None;
+        }
+    });
+    let Some(w) = ed.form.wizard.as_mut() else {
+        return true;
+    };
+    let mut changed = false;
+    let step = &mut ed.wizard_step;
+    ui.add_enabled_ui(editable, |ui| {
+        changed = crate::nativewizard::wizard_ui(ui, w, step, pal);
+    });
+    if changed {
+        sync_wizard(&mut ed.form);
+    }
+    if ed.wizard_step < 5 {
+        return false;
+    }
+    let errors = ed
+        .form
+        .wizard
+        .as_ref()
+        .map(LibraryWizard::validate)
+        .unwrap_or_default();
+    for e in &errors {
+        ui.colored_label(pal.error, e);
+    }
+    errors.is_empty()
+}
+
+/// Makes the wizard's parameters, inputs and outputs rows of the form and writes `native`.
+/// Does nothing while the wizard has mistakes: the rows stay as of the last good state.
+fn sync_wizard(f: &mut Form) {
+    let Some(new) = f.wizard.clone() else { return };
+    if !new.validate().is_empty() {
+        return;
+    }
+    let old = f.synced.take();
+    let names = |w: Option<&LibraryWizard>| -> [Vec<String>; 3] {
+        let Some(w) = w else {
+            return Default::default();
+        };
+        let mut inputs: Vec<String> = Vec::new();
+        for a in &w.actions {
+            let n = a.input.trim().to_owned();
+            if !inputs.contains(&n) {
+                inputs.push(n);
+            }
+        }
+        [
+            w.params.iter().map(|p| p.name.trim().to_owned()).collect(),
+            inputs,
+            w.outputs.iter().map(|o| o.name.trim().to_owned()).collect(),
+        ]
+    };
+    let [old_params, old_inputs, old_outputs] = names(old.as_ref());
+    let [new_params, new_inputs, new_outputs] = names(Some(&new));
+    let kind = |t: WizType| match t {
+        WizType::Pin => ParamKind::Pin,
+        WizType::Int => ParamKind::Int,
+        WizType::Float => ParamKind::Float,
+        WizType::Bool => ParamKind::Bool,
+    };
+    sync_rows(
+        &mut f.params,
+        &old_params,
+        &new_params,
+        |r| r.name.trim().to_owned(),
+        |r, n| r.name = n.to_owned(),
+        |r, i| r.kind = kind(new.params[i].ty),
+        ParamRow::new,
+    );
+    sync_rows(
+        &mut f.inputs,
+        &old_inputs,
+        &new_inputs,
+        |r| r.name.trim().to_owned(),
+        |r, n| r.name = n.to_owned(),
+        |r, _| r.ty = SignalType::Bool,
+        |n| {
+            let mut r = PortRow::new(n);
+            r.default = "false".to_owned();
+            r
+        },
+    );
+    sync_rows(
+        &mut f.outputs,
+        &old_outputs,
+        &new_outputs,
+        |r| r.name.trim().to_owned(),
+        |r, n| r.name = n.to_owned(),
+        |r, i| {
+            r.ty = match new.outputs[i].ty {
+                WizType::Bool => SignalType::Bool,
+                WizType::Float => SignalType::Float,
+                _ => SignalType::Int,
+            }
+        },
+        PortRow::new,
+    );
+    f.native = new.generate();
+    f.synced = Some(new);
+}
+
+/// Brings `rows` to the names in `new`: the row that had `old[i]` is renamed to `new[i]`
+/// (keeping its caption and the rest), a missing one is made, one that is gone is removed.
+fn sync_rows<R>(
+    rows: &mut Vec<R>,
+    old: &[String],
+    new: &[String],
+    name: impl Fn(&R) -> String,
+    set_name: impl Fn(&mut R, &str),
+    update: impl Fn(&mut R, usize),
+    make: impl Fn(&str) -> R,
+) {
+    for (i, n) in new.iter().enumerate() {
+        let found = old
+            .get(i)
+            .and_then(|o| rows.iter().position(|r| name(r) == *o))
+            .or_else(|| rows.iter().position(|r| name(r) == *n));
+        let at = match found {
+            Some(at) => at,
+            None => {
+                rows.push(make(n));
+                rows.len() - 1
+            }
+        };
+        set_name(&mut rows[at], n);
+        update(&mut rows[at], i);
+    }
+    for o in old.iter().skip(new.len()) {
+        if !new.contains(o) {
+            rows.retain(|r| name(r) != *o);
+        }
+    }
+}
+
 /// Background build of the master with the native part of the block being edited.
 #[derive(Default)]
 struct NativeBuild {
@@ -2203,6 +2368,7 @@ fn native_tab(
     pal: &Palette,
 ) {
     let editable = !ed.read_only;
+    let mut wizard = ed.form.wizard.is_some();
     ui.weak(crate::i18n::tr(
         "Код на C++ для датчика, шины или библиотеки Arduino. Он входит в мастер-прошивку платы и \
          выдаёт данные в схему; логику строят блоки схемы. Менять этот код = заново прошить мастер.",
@@ -2210,9 +2376,13 @@ fn native_tab(
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
         let empty = ed.form.native.trim().is_empty();
-        ui.add_enabled_ui(editable && empty, |ui| {
+        ui.add_enabled_ui(editable && empty && !wizard, |ui| {
             ui.menu_button(crate::i18n::tr("Создать по шаблону"), |ui| {
-                for t in crab_core::native::NativeTemplate::ALL {
+                // The wizard replaces the bare library skeleton.
+                for t in crab_core::native::NativeTemplate::ALL
+                    .into_iter()
+                    .filter(|t| *t != crab_core::native::NativeTemplate::ArduinoLib)
+                {
                     let usable = t == crab_core::native::NativeTemplate::Empty || def.is_ok();
                     let hint = if usable {
                         ""
@@ -2228,19 +2398,38 @@ fn native_tab(
                         ui.close();
                     }
                 }
+                if ui
+                    .button(crate::i18n::tr("Библиотека Arduino (мастер)"))
+                    .on_hover_text(crate::i18n::tr(
+                        "Пошагово: библиотека, объект, выходы, действия; код соберётся сам",
+                    ))
+                    .clicked()
+                {
+                    ed.form.wizard = Some(LibraryWizard::default());
+                    ed.form.synced = None;
+                    ed.wizard_step = 0;
+                    ui.close();
+                }
             });
         })
         .response
         .on_hover_text(crate::i18n::tr(
             "Готовый код для I²C, 1-Wire или библиотеки Arduino; недостающие параметры и выходы добавятся в блок",
         ));
-        if editable {
+        if editable && !wizard {
             ui.label(crate::i18n::tr("Вставить:"));
         }
     });
+    if wizard {
+        let show_code = wizard_part(ui, ed, pal);
+        wizard = ed.form.wizard.is_some();
+        if wizard && !show_code {
+            return;
+        }
+    }
     let id = Id::unique("block_native");
     let mut insert = None;
-    if editable {
+    if editable && !wizard {
         ui.horizontal_wrapped(|ui| {
             let names = ed
                 .form
@@ -2272,7 +2461,7 @@ fn native_tab(
     }
     let mut layouter = crate::cpphl::layouter(true);
     let mut read_only_text = ed.form.native.as_str();
-    if editable {
+    if editable && !wizard {
         TextEdit::multiline(&mut ed.form.native)
             .id(id)
             .code_editor()
@@ -2697,6 +2886,20 @@ fn save(app: &mut EditorApp, ed: &mut BlockEditor, def: &Result<BlockDef, String
             }
         }
     }
+    // The wizard with mistakes cannot be saved: its code would not match the fields.
+    if let Some(w) = &ed.form.wizard {
+        let errors = w.validate();
+        if !errors.is_empty() {
+            app.info(
+                LogLevel::Error,
+                crate::i18n::msg(
+                    "Блок не сохранён: мастер кода C++ для платы не закончен ({0})",
+                    &[&errors.join("; ")],
+                ),
+            );
+            return false;
+        }
+    }
     // A native part that does not parse never lands in the library.
     if !ed.form.native.trim().is_empty() {
         if let Err(errors) = crab_core::native::parse_native(&ed.form.native, def) {
@@ -2886,6 +3089,82 @@ min = 0
         assert_eq!(form.inputs[0].label, "Коэффициент");
         assert_eq!(form.to_def(), Ok(def));
         assert_eq!(form.template, "// @loop\n");
+    }
+
+    fn hx_wizard() -> LibraryWizard {
+        use crab_core::native_wizard::{WizAction, WizArg, WizOutput, WizParam};
+        LibraryWizard {
+            lib: "GyverHX711".into(),
+            header: "GyverHX711.h".into(),
+            class: "GyverHX711".into(),
+            params: vec![
+                WizParam {
+                    name: "data".into(),
+                    ty: WizType::Pin,
+                },
+                WizParam {
+                    name: "clock".into(),
+                    ty: WizType::Pin,
+                },
+            ],
+            args: vec![WizArg::Param("data".into()), WizArg::Param("clock".into())],
+            init: vec![],
+            outputs: vec![WizOutput {
+                name: "value".into(),
+                ty: WizType::Int,
+                expr: "read()".into(),
+                when: "available()".into(),
+            }],
+            actions: vec![WizAction {
+                input: "tare".into(),
+                call: "tare()".into(),
+            }],
+        }
+    }
+
+    #[test]
+    fn the_wizard_makes_and_renames_rows() {
+        let mut form = Form::new_block("hx".into(), String::new());
+        form.inputs.clear();
+        form.outputs.clear();
+        form.wizard = Some(hx_wizard());
+        sync_wizard(&mut form);
+        let names = |f: &Form| {
+            (
+                f.params.iter().map(|r| r.name.clone()).collect::<Vec<_>>(),
+                f.inputs.iter().map(|r| r.name.clone()).collect::<Vec<_>>(),
+                f.outputs.iter().map(|r| r.name.clone()).collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(
+            names(&form),
+            (
+                vec!["data".to_owned(), "clock".to_owned()],
+                vec!["tare".to_owned()],
+                vec!["value".to_owned()]
+            )
+        );
+        assert_eq!(form.params[0].kind, ParamKind::Pin);
+        let def = form.to_def().unwrap();
+        crab_core::native::parse_native(&form.native, &def).unwrap();
+        assert_eq!(LibraryWizard::parse(&form.native), form.wizard);
+
+        // A caption written on the "Порты" tab survives a rename in the wizard.
+        form.outputs[0].label = "Вес".into();
+        let w = form.wizard.as_mut().unwrap();
+        w.outputs[0].name = "weight".into();
+        w.params.pop();
+        w.args.pop();
+        sync_wizard(&mut form);
+        assert_eq!(form.outputs[0].name, "weight");
+        assert_eq!(form.outputs[0].label, "Вес");
+        assert_eq!(form.params.len(), 1);
+
+        // A wizard with a mistake leaves the rows and the code alone.
+        let before = (form.params.clone(), form.native.clone());
+        form.wizard.as_mut().unwrap().class = String::new();
+        sync_wizard(&mut form);
+        assert_eq!((form.params.clone(), form.native.clone()), before);
     }
 
     #[test]

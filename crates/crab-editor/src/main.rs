@@ -29,6 +29,7 @@ mod i18n;
 mod job;
 mod markdown;
 mod mcp_host;
+mod nativewizard;
 mod netpanel;
 mod panels;
 mod pictures;
