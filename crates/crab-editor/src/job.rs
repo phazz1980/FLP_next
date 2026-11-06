@@ -498,8 +498,20 @@ fn upload_master(
     );
     let started = std::time::Instant::now();
     let mut errors = 0;
+    let mut tools_hinted = false;
     let build = cli
         .compile_master(&project.work_dir(), board, &features, false, &mut |l| {
+            // arduino-cli leaves `{runtime.tools.X.path}` unexpanded when the core wants a tool
+            // version that is not on disk (two cores of different versions, a half-unpacked pack).
+            if !tools_hinted && l.contains("{runtime.tools.") {
+                tools_hinted = true;
+                out(
+                    LogLevel::Error,
+                    crate::i18n::tr(
+                        "Ядро и его инструменты разных версий или распакованы не полностью: удалите папку esp32core рядом с программой (и пакеты esp32 в Arduino15, если они есть) и скачайте ядро заново через «Файл → Ядра ESP32...»",
+                    ),
+                );
+            }
             match crab_build::classify(l) {
                 OutputLine::Stage(s) | OutputLine::Size(s) | OutputLine::Context(s) => {
                     out(LogLevel::Info, &s)
