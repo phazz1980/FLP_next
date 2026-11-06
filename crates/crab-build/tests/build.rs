@@ -128,3 +128,68 @@ fn master_with_native_blocks_compiles() {
     let errors: Vec<&String> = log.iter().filter(|l| l.contains("error")).collect();
     assert!(result.is_ok(), "{:?}\n{errors:?}", result.as_ref().err());
 }
+
+#[test]
+#[ignore = "needs arduino-cli with esp32:esp32 and the OneWire / DallasTemperature libraries"]
+fn master_with_template_blocks_compiles() {
+    use crab_build::native::NativeBlock;
+    use crab_core::native::{fill_template, NativeTemplate};
+    let root = std::env::temp_dir().join("crab_native_template_test");
+    let _ = std::fs::remove_dir_all(&root);
+    let mut natives = Vec::new();
+    for (kind, template) in [
+        ("tpl_i2c", NativeTemplate::I2c),
+        ("tpl_wire", NativeTemplate::OneWire),
+    ] {
+        let mut def: crab_core::BlockDef = toml::from_str(&format!(
+            "[block]
+type = \"{kind}\"
+name = \"Шаблон\"
+group = \"Тест\"
+
+[[output]]
+name = \"value\"
+type = \"float\"
+
+[[output]]
+name = \"ok\"
+type = \"bool\"
+"
+        ))
+        .unwrap();
+        let fill = fill_template(template, &def);
+        for p in &fill.params {
+            let ty = if p.kind == crab_core::ParamKind::Pin {
+                "pin"
+            } else {
+                "int"
+            };
+            def.params.push(
+                toml::from_str(&format!(
+                    "name = \"{}\"
+type = \"{ty}\"",
+                    p.name
+                ))
+                .unwrap(),
+            );
+        }
+        natives.push(NativeBlock::from_parts(&def, &fill.source, 1).unwrap());
+    }
+    let cli = ArduinoCli::locate().unwrap();
+    let project = Project::load(repo_path("examples/pump")).unwrap();
+    let features = crab_build::MasterFeatures {
+        natives,
+        ..Default::default()
+    };
+    let mut log = Vec::new();
+    let result = cli.compile_master(&root, &project.config.board, &features, true, &mut |line| {
+        log.push(line.to_owned())
+    });
+    let errors: Vec<&String> = log.iter().filter(|l| l.contains("error")).collect();
+    assert!(
+        result.is_ok(),
+        "{:?}
+{errors:?}",
+        result.as_ref().err()
+    );
+}

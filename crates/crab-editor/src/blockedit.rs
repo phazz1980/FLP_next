@@ -2094,6 +2094,36 @@ fn native_skeleton(f: &Form) -> String {
     text
 }
 
+/// Writes the template into the form: the missing parameters and outputs the template needs are
+/// added as rows, the code goes into `native`.
+fn apply_template(
+    f: &mut Form,
+    template: crab_core::native::NativeTemplate,
+    def: Option<&BlockDef>,
+) {
+    use crab_core::native::NativeTemplate;
+    let Some(def) = def.filter(|_| template != NativeTemplate::Empty) else {
+        f.native = native_skeleton(f);
+        return;
+    };
+    let fill = crab_core::native::fill_template(template, def);
+    for o in &fill.outputs {
+        let mut row = PortRow::new(o.name);
+        row.ty = o.ty;
+        row.label = o.label.to_owned();
+        f.outputs.push(row);
+    }
+    for p in &fill.params {
+        let mut row = ParamRow::new(p.name);
+        row.kind = p.kind;
+        row.default = p.default.to_owned();
+        row.label = p.label.to_owned();
+        row.shared = p.shared;
+        f.params.push(row);
+    }
+    f.native = fill.source;
+}
+
 /// Background build of the master with the native part of the block being edited.
 #[derive(Default)]
 struct NativeBuild {
@@ -2179,18 +2209,31 @@ fn native_tab(
     ));
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
-        if ui
-            .add_enabled(
-                editable && ed.form.native.trim().is_empty(),
-                egui::Button::new(crate::i18n::tr("Создать заготовку")),
-            )
-            .on_hover_text(crate::i18n::tr(
-                "Заготовка с входами, выходами и параметрами блока",
-            ))
-            .clicked()
-        {
-            ed.form.native = native_skeleton(&ed.form);
-        }
+        let empty = ed.form.native.trim().is_empty();
+        ui.add_enabled_ui(editable && empty, |ui| {
+            ui.menu_button(crate::i18n::tr("Создать по шаблону"), |ui| {
+                for t in crab_core::native::NativeTemplate::ALL {
+                    let usable = t == crab_core::native::NativeTemplate::Empty || def.is_ok();
+                    let hint = if usable {
+                        ""
+                    } else {
+                        "Сначала исправьте ошибки на других вкладках"
+                    };
+                    if ui
+                        .add_enabled(usable, egui::Button::new(crate::i18n::tr(t.title())))
+                        .on_disabled_hover_text(crate::i18n::tr(hint))
+                        .clicked()
+                    {
+                        apply_template(&mut ed.form, t, def.as_ref().ok());
+                        ui.close();
+                    }
+                }
+            });
+        })
+        .response
+        .on_hover_text(crate::i18n::tr(
+            "Готовый код для I²C, 1-Wire или библиотеки Arduino; недостающие параметры и выходы добавятся в блок",
+        ));
         if editable {
             ui.label(crate::i18n::tr("Вставить:"));
         }

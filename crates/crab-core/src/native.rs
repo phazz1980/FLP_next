@@ -364,6 +364,254 @@ fn check_sim(
     }
 }
 
+/// Ready-made `native.cpp` for the usual ways a sensor is connected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeTemplate {
+    /// Only the shape: `State`, `CRAB_INIT`, `CRAB_STEP` with the ports of the block.
+    Empty,
+    /// A chip on I²C (`Wire`): reads registers at the address given by a parameter.
+    I2c,
+    /// A sensor on one pin through a library (DS18B20 on 1-Wire).
+    OneWire,
+    /// Any Arduino library: the library name goes into `libs`.
+    ArduinoLib,
+}
+
+impl NativeTemplate {
+    pub const ALL: [NativeTemplate; 4] = [
+        NativeTemplate::Empty,
+        NativeTemplate::I2c,
+        NativeTemplate::OneWire,
+        NativeTemplate::ArduinoLib,
+    ];
+
+    /// Name in the list, in Russian.
+    pub fn title(self) -> &'static str {
+        match self {
+            NativeTemplate::Empty => "Пустая заготовка",
+            NativeTemplate::I2c => "Датчик на I²C",
+            NativeTemplate::OneWire => "Датчик на 1-Wire (DS18B20)",
+            NativeTemplate::ArduinoLib => "Библиотека Arduino",
+        }
+    }
+}
+
+/// A parameter the template needs and the block does not have yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateParam {
+    pub name: &'static str,
+    pub kind: ParamKind,
+    pub default: &'static str,
+    pub label: &'static str,
+    /// A pin used by several blocks (a bus).
+    pub shared: bool,
+}
+
+/// An output the template needs and the block does not have yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateOutput {
+    pub name: &'static str,
+    pub ty: SignalType,
+    pub label: &'static str,
+}
+
+/// What a template adds to the block and the text of `native.cpp`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateFill {
+    pub params: Vec<TemplateParam>,
+    pub outputs: Vec<TemplateOutput>,
+    pub source: String,
+}
+
+/// Fills `template` for the block `def`: the ports and parameters it has are used, the missing
+/// ones the template needs are named in the result.
+pub fn fill_template(template: NativeTemplate, def: &BlockDef) -> TemplateFill {
+    let mut params = Vec::new();
+    let mut outputs = Vec::new();
+    // Outputs: a number and a flag; a block that has outputs keeps them.
+    let mut number = def
+        .outputs
+        .iter()
+        .find(|o| matches!(o.ty, SignalType::Float | SignalType::Int))
+        .map(|o| o.name.clone());
+    let mut flag = def
+        .outputs
+        .iter()
+        .find(|o| o.ty == SignalType::Bool)
+        .map(|o| o.name.clone());
+    if template != NativeTemplate::Empty && def.outputs.is_empty() {
+        let (n, f) = if template == NativeTemplate::OneWire {
+            ("temperature", "ok")
+        } else {
+            ("value", "ok")
+        };
+        outputs.push(TemplateOutput {
+            name: n,
+            ty: SignalType::Float,
+            label: if template == NativeTemplate::OneWire {
+                "Температура, °C"
+            } else {
+                "Значение"
+            },
+        });
+        outputs.push(TemplateOutput {
+            name: f,
+            ty: SignalType::Bool,
+            label: "Чтение удалось",
+        });
+        number = Some(n.to_owned());
+        flag = Some(f.to_owned());
+    }
+    let set = |name: &Option<String>, value: &str| match name {
+        Some(n) => format!("  out.{n} = {value};\n"),
+        None => String::new(),
+    };
+    let source = match template {
+        NativeTemplate::Empty => {
+            let mut text = String::from(
+                "// crab:native\n// Библиотеки Arduino: libs=\"Имя библиотеки, Другая\"; ресурсы (пин, шина, адрес): i2c=0x76\n// Значения для симуляции на компьютере: // crab:sim <выход>=<значение>\n",
+            );
+            for p in &def.inputs {
+                text.push_str(&format!("// вход:    in.{}\n", p.name));
+            }
+            for p in &def.outputs {
+                text.push_str(&format!("// выход:   out.{}\n", p.name));
+            }
+            for p in &def.params {
+                text.push_str(&format!(
+                    "// параметр: p.{}  (только в CRAB_INIT)\n",
+                    p.name
+                ));
+            }
+            text.push_str("\nstruct State {\n  int32_t counter;\n};\n\n");
+            if !def.params.is_empty() {
+                text.push_str("CRAB_INIT(State& s, Params p) {\n  // Один раз и при смене параметров: настройка датчика.\n}\n\n");
+            }
+            text.push_str("CRAB_STEP(State& s, In in, Out& out) {\n  // Каждый цикл: прочитать датчик и записать выходы.\n");
+            for p in &def.outputs {
+                text.push_str(&format!("  // out.{} = ...;\n", p.name));
+            }
+            text.push_str("}\n");
+            text
+        }
+        NativeTemplate::I2c => {
+            let address = def
+                .params
+                .iter()
+                .find(|p| p.name == "address" && p.kind == ParamKind::Int)
+                .map(|p| p.name.clone());
+            if address.is_none() {
+                params.push(TemplateParam {
+                    name: "address",
+                    kind: ParamKind::Int,
+                    default: "118",
+                    label: "Адрес на шине I²C",
+                    shared: false,
+                });
+            }
+            format!(
+                "// crab:native\n// crab:sim{sim}\n\
+#include <Wire.h>\n\n\
+// Данные одного блока: адрес берётся из параметра один раз, в CRAB_INIT.\n\
+struct State {{\n  uint8_t address;\n}};\n\n\
+// Читает count байт, начиная с регистра reg. Возвращает false, если датчик не ответил.\n\
+static bool readRegister(uint8_t address, uint8_t reg, uint8_t* data, uint8_t count) {{\n\
+  Wire.beginTransmission(address);\n  Wire.write(reg);\n\
+  if (Wire.endTransmission(false) != 0) return false;\n\
+  if (Wire.requestFrom((int)address, (int)count) != count) return false;\n\
+  for (uint8_t i = 0; i < count; i++) data[i] = Wire.read();\n  return true;\n}}\n\n\
+CRAB_INIT(State& s, Params p) {{\n  s.address = (uint8_t)p.address;\n  Wire.begin();\n}}\n\n\
+CRAB_STEP(State& s, In in, Out& out) {{\n\
+  uint8_t data[2];\n\
+  // Номер регистра и размер — из даташита датчика («Register map»).\n\
+  bool ok = readRegister(s.address, 0x00, data, 2);\n\
+  if (ok) {{\n    int16_t raw = (int16_t)((data[0] << 8) | data[1]);\n{value}  }}\n\
+{flag}}}\n",
+                sim = sim_line(&number, &flag),
+                value = indent(&set(&number, "raw * 0.01f"), 2),
+                flag = set(&flag, "ok"),
+            )
+        }
+        NativeTemplate::OneWire => {
+            let pin = def
+                .params
+                .iter()
+                .find(|p| p.kind == ParamKind::Pin)
+                .map(|p| p.name.clone());
+            let pin_name = pin.unwrap_or_else(|| {
+                params.push(TemplateParam {
+                    name: "pin",
+                    kind: ParamKind::Pin,
+                    default: "",
+                    label: "Вывод шины 1-Wire",
+                    shared: true,
+                });
+                "pin".to_owned()
+            });
+            format!(
+                "// crab:native libs=\"OneWire, DallasTemperature\"\n// crab:sim{sim}\n\
+#include <OneWire.h>\n#include <DallasTemperature.h>\n\n\
+// Объекты библиотеки создаются в CRAB_INIT, когда известен вывод шины.\n\
+struct State {{\n  OneWire* wire;\n  DallasTemperature* sensors;\n}};\n\n\
+CRAB_INIT(State& s, Params p) {{\n\
+  delete s.sensors;\n  delete s.wire;\n\
+  s.wire = new OneWire(p.{pin_name});\n  s.sensors = new DallasTemperature(s.wire);\n  s.sensors->begin();\n\
+  s.sensors->setWaitForConversion(false);\n}}\n\n\
+CRAB_STEP(State& s, In in, Out& out) {{\n\
+  float t = s.sensors->getTempCByIndex(0);\n\
+  bool ok = t > -126.0f;\n\
+  s.sensors->requestTemperatures();  // следующее значение будет готово через ~750 мс\n\
+{value}{flag}}}\n",
+                sim = sim_line(&number, &flag),
+                value = match &number {
+                    Some(n) => format!("  if (ok) out.{n} = t;
+"),
+                    None => String::new(),
+                },
+                flag = set(&flag, "ok"),
+            )
+        }
+        NativeTemplate::ArduinoLib => {
+            let mut text = String::from(
+                "// crab:native libs=\"Имя библиотеки\"\n// Имя — так, как его знает менеджер библиотек Arduino (например Adafruit BME280 Library).\n// crab:sim\n// #include <ИмяБиблиотеки.h>\n\n// Объекты библиотеки хранятся в State: у каждого блока свои.\nstruct State {\n  // ИмяКласса dev;\n};\n\n",
+            );
+            if !def.params.is_empty() {
+                text.push_str("CRAB_INIT(State& s, Params p) {\n  // Один раз и при смене параметров: s.dev.begin(...);\n}\n\n");
+            }
+            text.push_str("CRAB_STEP(State& s, In in, Out& out) {\n  // Каждый цикл: прочитать данные библиотекой и записать выходы.\n");
+            for p in &def.outputs {
+                text.push_str(&format!("  // out.{} = ...;\n", p.name));
+            }
+            text.push_str("}\n");
+            text
+        }
+    };
+    TemplateFill {
+        params,
+        outputs,
+        source,
+    }
+}
+
+/// ` name=0 ok=true` for the `// crab:sim` line.
+fn sim_line(number: &Option<String>, flag: &Option<String>) -> String {
+    let mut text = String::new();
+    if let Some(n) = number {
+        text.push_str(&format!(" {n}=0"));
+    }
+    if let Some(f) = flag {
+        text.push_str(&format!(" {f}=true"));
+    }
+    text
+}
+
+/// Every line of `text` indented by `n` more spaces.
+fn indent(text: &str, n: usize) -> String {
+    text.lines()
+        .map(|l| format!("{}{l}\n", " ".repeat(n)))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -501,5 +749,98 @@ type = \"int\"
         let text = join_errors(&e);
         assert!(text.contains("порт «msg» типа string нельзя"), "{text}");
         assert!(text.contains("параметр «ssid» текстовый"), "{text}");
+    }
+
+    /// A block with only a name: the template has to add what it needs.
+    fn bare() -> BlockDef {
+        toml::from_str(
+            "[block]
+type = \"bare\"
+name = \"Голый\"
+group = \"Датчики\"
+",
+        )
+        .unwrap()
+    }
+
+    /// The block with what the template asked for added, the way the editor does it.
+    fn applied(template: NativeTemplate, mut d: BlockDef) -> (BlockDef, TemplateFill) {
+        let fill = fill_template(template, &d);
+        for o in &fill.outputs {
+            d.outputs.push(
+                toml::from_str(
+                    &format!(
+                        "name = \"{}\"
+type = \"{:?}\"",
+                        o.name, o.ty
+                    )
+                    .to_lowercase(),
+                )
+                .unwrap(),
+            );
+        }
+        for p in &fill.params {
+            let kind = match p.kind {
+                ParamKind::Int => "int",
+                ParamKind::Pin => "pin",
+                _ => "float",
+            };
+            d.params.push(
+                toml::from_str(&format!(
+                    "name = \"{}\"
+type = \"{kind}\"",
+                    p.name
+                ))
+                .unwrap(),
+            );
+        }
+        (d, fill)
+    }
+
+    #[test]
+    fn every_template_gives_a_file_that_parses() {
+        for t in NativeTemplate::ALL {
+            for start in [bare(), def("")] {
+                let (d, fill) = applied(t, start);
+                let part = parse_native(&fill.source, &d).unwrap_or_else(|e| {
+                    panic!(
+                        "{t:?}: {}
+{}",
+                        join_errors(&e),
+                        fill.source
+                    )
+                });
+                assert!(part.has_state, "{t:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn i2c_adds_an_address_and_outputs_to_a_bare_block() {
+        let (_, fill) = applied(NativeTemplate::I2c, bare());
+        assert_eq!(fill.params.len(), 1);
+        assert_eq!(fill.params[0].name, "address");
+        assert_eq!(fill.outputs.len(), 2);
+        assert!(fill.source.contains("Wire.requestFrom"));
+        assert!(
+            fill.source.contains("out.value = raw * 0.01f;"),
+            "{}",
+            fill.source
+        );
+    }
+
+    #[test]
+    fn one_wire_reuses_the_pin_and_the_outputs_of_the_block() {
+        let d = def("[[param]]
+name = \"line\"
+type = \"pin\"
+");
+        let (d, fill) = applied(NativeTemplate::OneWire, d);
+        assert!(fill.params.is_empty() && fill.outputs.is_empty());
+        let part = parse_native(&fill.source, &d).unwrap();
+        assert_eq!(part.libs, ["OneWire", "DallasTemperature"]);
+        assert!(fill.source.contains("new OneWire(p.line)"));
+        assert!(fill.source.contains("out.temperature = t"));
+        assert!(fill.source.contains("out.ok = ok"));
     }
 }
