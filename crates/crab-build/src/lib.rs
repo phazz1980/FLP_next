@@ -21,6 +21,7 @@ use serde::Deserialize;
 pub mod cores;
 mod direct;
 mod master;
+pub mod native;
 pub use master::{master_sketch_id, MasterBuild, MasterFeatures};
 pub mod mcu_module;
 mod output;

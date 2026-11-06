@@ -44,6 +44,7 @@
 #endif
 #endif
 
+// @crab-native-glue (the editor puts the native parts of blocks here, after the includes)
 static const int kMaxSlots = 4;
 static const int kMaxOutputs = 128;  // watched signals per module
 // Modules and the watchdog share one core: core 1 where there are two, core 0 on single-core chips (C3).
@@ -57,7 +58,8 @@ static const uint32_t kStepLimitMs = 100;  // watchdog: a longer step means a ha
 static const int kJournal = 24;
 
 enum { P_GPIO_READ = 1, P_GPIO_WRITE = 2, P_ADC = 4, P_PWM = 8, P_MILLIS = 16, P_SENSOR = 32,
-       P_PCF_READ = 64, P_PCF_WRITE = 128, P_MODBUS = 256, P_UART = 512, P_TEXT = 1024, P_NET = 2048 };
+       P_PCF_READ = 64, P_PCF_WRITE = 128, P_MODBUS = 256, P_UART = 512, P_TEXT = 1024, P_NET = 2048,
+       P_NATIVE = 4096 };
 
 #if defined(CRAB_SENSORS) || defined(CRAB_PCF) || defined(CRAB_MODBUS) || defined(CRAB_NET)
 #define CRAB_HWTASK 1
@@ -1840,6 +1842,23 @@ m3ApiRawFunction(h_net) {
 }
 #endif
 
+#ifdef CRAB_NATIVE
+// ---- native parts of blocks (specs/drivers) ----
+// native(kind, inst, in, out): the words at `in` (inputs, then parameters) go to the CRAB_STEP of the block
+// type `kind` (instance `inst`), its outputs come back as words at `out`. The glue is generated into the sketch.
+m3ApiRawFunction(h_native) {
+  m3ApiReturnType(int32_t);
+  m3ApiGetArg(int32_t, kind);
+  m3ApiGetArg(int32_t, inst);
+  m3ApiGetArg(int32_t, inp);
+  m3ApiGetArg(int32_t, outp);
+  int32_t nin = 0, nout = 0;
+  if (!crab_native::words(kind, &nin, &nout)) m3ApiReturn(0);
+  if (!inMem(runtime, inp, nin * 4) || !inMem(runtime, outp, nout * 4)) m3ApiReturn(0);
+  m3ApiReturn(crab_native::call(kind, inst, (const uint8_t *)_mem + inp, (uint8_t *)_mem + outp));
+}
+#endif
+
 static void linkAll(Slot &s, IM3Module m) {
   auto L = [&](const char *n, const char *sig, M3RawCall f) { m3_LinkRawFunctionEx(m, "crab", n, sig, f, &s); };
   L("input_i", "i(i)", h_input_i);
@@ -1879,6 +1898,9 @@ static void linkAll(Slot &s, IM3Module m) {
 #ifdef CRAB_NET
   if (s.perms & P_NET) L("net", "i(iiiii)", h_net);
 #endif
+#ifdef CRAB_NATIVE
+  if (s.perms & P_NATIVE) L("native", "i(iiii)", h_native);
+#endif
 }
 
 // ---- module lifecycle (call with g_mgmt held) ----
@@ -1896,6 +1918,7 @@ static uint16_t parsePerms(const String &a) {
   if (a.indexOf("uart") >= 0) p |= P_UART;
   if (a.indexOf("text") >= 0) p |= P_TEXT;
   if (a.indexOf("net") >= 0) p |= P_NET;
+  if (a.indexOf("native") >= 0) p |= P_NATIVE;
   return p;
 }
 

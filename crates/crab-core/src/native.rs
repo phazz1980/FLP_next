@@ -29,6 +29,8 @@ pub struct NativePart {
     pub sim: BTreeMap<String, ParamValue>,
     /// The file has `CRAB_INIT`.
     pub has_init: bool,
+    /// The file defines its own `struct State` (otherwise the master gives an empty one).
+    pub has_state: bool,
 }
 
 /// A problem found in `native.cpp`; `line` counts from 1, 0 is the file as a whole.
@@ -93,6 +95,9 @@ pub fn parse_native(source: &str, def: &BlockDef) -> Result<NativePart, Vec<Nati
             }
         }
         let code = strip_comments(raw, &mut in_block_comment);
+        if defines_state(&code) {
+            part.has_state = true;
+        }
         if has_call(&code, "CRAB_STEP") {
             if step_line != 0 {
                 errors.push(err(n, "CRAB_STEP объявлена второй раз"));
@@ -252,6 +257,34 @@ fn has_call(code: &str, name: &str) -> bool {
     false
 }
 
+/// Whether `code` starts `struct State` or `class State` (a whole word).
+fn defines_state(code: &str) -> bool {
+    ["struct", "class"].iter().any(|kw| {
+        code.match_indices(kw).any(|(at, _)| {
+            let before_ok = code[..at]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+            let rest = code[at + kw.len()..].trim_start();
+            let named = rest.strip_prefix("State").is_some_and(|tail| {
+                tail.chars()
+                    .next()
+                    .is_none_or(|c| !(c.is_alphanumeric() || c == '_'))
+            });
+            before_ok && code[at + kw.len()..].starts_with(char::is_whitespace) && named
+        })
+    })
+}
+
+/// A name that is a C++ identifier: ports and parameters become struct fields.
+fn is_cpp_ident(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 /// Types that cross into native code: `bool`, `int`, `float` (a pin or a duration is an `int`).
 fn check_interface(def: &BlockDef, errors: &mut Vec<NativeError>) {
     let ports = def
@@ -260,6 +293,12 @@ fn check_interface(def: &BlockDef, errors: &mut Vec<NativeError>) {
         .chain(&def.outputs)
         .map(|p| (&p.name, p.ty));
     for (name, kind) in ports {
+        if !is_cpp_ident(name) {
+            errors.push(err(
+                0,
+                format!("имя порта «{name}» нельзя использовать в нативной части: в C++ оно станет полем структуры, нужны латинские буквы, цифры и _"),
+            ));
+        }
         if !matches!(kind, SignalType::Bool | SignalType::Int | SignalType::Float) {
             errors.push(err(
                 0,
@@ -271,6 +310,15 @@ fn check_interface(def: &BlockDef, errors: &mut Vec<NativeError>) {
         }
     }
     for p in &def.params {
+        if !is_cpp_ident(&p.name) {
+            errors.push(err(
+                0,
+                format!(
+                    "имя параметра «{}» нельзя использовать в нативной части: нужны латинские буквы, цифры и _",
+                    p.name
+                ),
+            ));
+        }
         if p.kind == ParamKind::Text {
             errors.push(err(
                 0,
@@ -416,6 +464,34 @@ CRAB_STEP(State& s, In in, Out& out) { out.ok = true; }
             text.contains("значение «1» не подходит выходу «ok» типа bool"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn state_definition_is_detected() {
+        let with = "struct State { int x; };
+CRAB_STEP(State& s, In in, Out& out) {}
+";
+        assert!(parse_native(with, &def("")).unwrap().has_state);
+        let without = "struct StateX {};
+// struct State
+CRAB_STEP(a) {}
+";
+        assert!(!parse_native(without, &def("")).unwrap().has_state);
+    }
+
+    #[test]
+    fn port_names_must_be_cpp_identifiers() {
+        let d = def("[[input]]
+name = \"темп\"
+type = \"int\"
+");
+        let e = parse_native(
+            "CRAB_STEP(a) {}
+",
+            &d,
+        )
+        .unwrap_err();
+        assert!(join_errors(&e).contains("имя порта «темп»"), "{e:?}");
     }
 
     #[test]

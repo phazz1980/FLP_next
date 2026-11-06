@@ -7,11 +7,13 @@ use std::path::{Path, PathBuf};
 use crate::{board_args, build_dir, check_status, plain_path, ArduinoCli, BuildError};
 use crab_core::BoardConfig;
 
+use crate::native::NativeBlock;
+
 /// The master sketch (wasm3, LittleFS, serial protocol).
 const SKETCH: &str = include_str!("../../../specs/wasm-on-mcu/proto/master/master.ino");
 /// Hardware drivers the master carries. Each one costs flash and RAM, so the master is built
 /// with only those the project's blocks need (`#define CRAB_<NAME>` in front of the sketch).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct MasterFeatures {
     /// DS18B20 and DHT22 (`sensor_read`).
     pub sensors: bool,
@@ -33,6 +35,9 @@ pub struct MasterFeatures {
     pub mqtt: bool,
     /// The web page (`web_ui` and widgets): the master serves the page and the module fills it.
     pub web: bool,
+    /// Native parts of blocks (`native.cpp`, `specs/drivers`), sorted by block type: the position
+    /// is the `kind` a module passes to `crab.native`. See [`crate::native::collect_natives`].
+    pub natives: Vec<NativeBlock>,
 }
 
 impl MasterFeatures {
@@ -100,6 +105,7 @@ impl MasterFeatures {
             (self.eth, "CRAB_ETH"),
             (self.mqtt, "CRAB_MQTT"),
             (self.web, "CRAB_WEB"),
+            (!self.natives.is_empty(), "CRAB_NATIVE"),
         ] {
             if on {
                 text.push_str(&format!(
@@ -111,15 +117,23 @@ impl MasterFeatures {
         text
     }
 
-    fn libraries(&self) -> Vec<&'static str> {
-        let mut libs = vec!["Wasm3"];
+    fn libraries(&self) -> Vec<String> {
+        let mut libs: Vec<String> = vec!["Wasm3".into()];
         if self.sensors {
-            libs.extend([
-                "OneWire",
-                "DallasTemperature",
-                "DHT sensor library",
-                "Adafruit Unified Sensor",
-            ]);
+            libs.extend(
+                [
+                    "OneWire",
+                    "DallasTemperature",
+                    "DHT sensor library",
+                    "Adafruit Unified Sensor",
+                ]
+                .map(String::from),
+            );
+        }
+        for lib in self.natives.iter().flat_map(|n| &n.libs) {
+            if !libs.contains(lib) {
+                libs.push(lib.clone());
+            }
         }
         libs
     }
@@ -143,9 +157,24 @@ fn master_board(board: &BoardConfig) -> BoardConfig {
 /// Partition scheme of the master (see `master_board`).
 const MASTER_PARTITIONS: &str = "no_ota";
 
+/// Where the sketch takes the native parts of blocks: after its includes, so that the
+/// prototypes the Arduino preprocessor makes already know the wasm3 types.
+const NATIVE_MARKER: &str = "// @crab-native-glue";
+
 /// The master sketch with the defines of its drivers in front.
 fn sketch_text(features: &MasterFeatures) -> String {
-    format!("{}{}{SKETCH}", features.defines(), page_text(features))
+    let glue = crate::native::glue(&features.natives);
+    let body = if glue.is_empty() {
+        SKETCH.to_owned()
+    } else {
+        // The whole marker line goes, so the sketch has no trace of it.
+        let marker_line = SKETCH
+            .lines()
+            .find(|l| l.starts_with(NATIVE_MARKER))
+            .expect("master.ino has the native marker");
+        SKETCH.replacen(marker_line, &glue, 1)
+    };
+    format!("{}{}{body}", features.defines(), page_text(features))
 }
 
 /// The web page as a flash constant: the same page a C++ sketch serves, so it is not copied into
@@ -210,7 +239,9 @@ impl ArduinoCli {
         if let Some(core) = self.ensure_core(&board.fqbn, on_line)? {
             on_line(&format!("Установлено ядро {core}"));
         }
-        let installed = self.ensure_libraries(&features.libraries(), on_line)?;
+        let libs = features.libraries();
+        let libs: Vec<&str> = libs.iter().map(String::as_str).collect();
+        let installed = self.ensure_libraries(&libs, on_line)?;
         if !installed.is_empty() {
             on_line(&format!("Установлены библиотеки: {}", installed.join(", ")));
         }
@@ -282,12 +313,13 @@ mod tests {
         assert_eq!(none, MasterFeatures::default());
         assert_eq!(none.defines(), "");
         assert_eq!(none.libraries(), ["Wasm3"]);
+        assert_eq!(none.libraries(), vec!["Wasm3".to_string()]);
         let both = MasterFeatures::of_blocks(["dht22", "pcf8574_out"]);
         assert_eq!(
             both.defines(),
             "#define CRAB_SENSORS 1\n#define CRAB_PCF 1\n"
         );
-        assert!(both.libraries().contains(&"DHT sensor library"));
+        assert!(both.libraries().contains(&"DHT sensor library".to_string()));
         assert_ne!(master_sketch_id(&none), master_sketch_id(&both));
         let modbus = MasterFeatures::of_blocks(["modbus_rtu_slave"]);
         assert_eq!(
@@ -338,6 +370,59 @@ mod tests {
         assert_ne!(master_sketch_id(&net), master_sketch_id(&web));
         assert_ne!(master_sketch_id(&none), master_sketch_id(&net));
         assert!(sketch_text(&both).ends_with(SKETCH));
+    }
+
+    #[test]
+    fn native_parts_go_into_the_master() {
+        use crate::native::{NativeBlock, NativeType};
+        let native = |instances| NativeBlock {
+            kind: "bmp".into(),
+            source: "// crab:native libs=\"Adafruit BMP280\"
+#include <Adafruit_BMP280.h>
+CRAB_STEP(State& s, In in, Out& out) {}
+"
+            .into(),
+            libs: vec!["Adafruit BMP280".into()],
+            has_init: false,
+            has_state: false,
+            inputs: vec![],
+            outputs: vec![("t".into(), NativeType::Float)],
+            params: vec![],
+            instances,
+        };
+        let plain = MasterFeatures::default();
+        let one = MasterFeatures {
+            natives: vec![native(1)],
+            ..Default::default()
+        };
+        let two = MasterFeatures {
+            natives: vec![native(2)],
+            ..Default::default()
+        };
+        assert_eq!(
+            one.defines(),
+            "#define CRAB_NATIVE 1
+"
+        );
+        assert_eq!(plain.defines(), "");
+        assert!(one.libraries().contains(&"Adafruit BMP280".to_string()));
+        let text = sketch_text(&one);
+        assert!(text.starts_with(
+            "#define CRAB_NATIVE 1
+"
+        ));
+        assert!(text.contains("namespace crab_nat_0") && !text.contains(NATIVE_MARKER));
+        // After wasm3 and before the first slot constant, not at the top.
+        let at = text.find("namespace crab_nat_0").unwrap();
+        assert!(text.find("#include <wasm3.h>").unwrap() < at);
+        assert!(at < text.find("static const int kMaxSlots").unwrap());
+        // Another set of natives is another firmware: a board with the old one needs the new master.
+        assert_ne!(master_sketch_id(&plain), master_sketch_id(&one));
+        assert_ne!(master_sketch_id(&one), master_sketch_id(&two));
+        assert_eq!(master_sketch_id(&one), master_sketch_id(&one.clone()));
+        assert!(
+            sketch_text(&plain).ends_with(SKETCH) && !sketch_text(&plain).contains("crab_nat_")
+        );
     }
 
     #[test]
